@@ -43,18 +43,6 @@ LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DEFAULT_API_HOST = "0.0.0.0"
 
 
-def api_bind_host() -> str:
-    """Return the address the API server binds.
-
-    ``main.run_server`` and the Docker image's local-mode command bind this
-    value, and the local-mode guard checks it, so the two cannot disagree.
-
-    Returns:
-        ``API_HOST``, or ``0.0.0.0`` when it is unset.
-    """
-    return os.environ.get("API_HOST", DEFAULT_API_HOST)
-
-
 def legacy_env_name(name: str) -> str:
     """Return the pre-rename ``SKYNET_*`` spelling of an ``APP_*`` variable.
 
@@ -903,6 +891,13 @@ class Settings(BaseSettings):
     default_timeout: float = Field(default=30.0, ge=1.0, description="Standard request timeout in seconds")
 
     host: str = Field(default="0.0.0.0", description="Server bind address")
+    # Read through Settings, not os.environ, so the local-mode guard and the
+    # server bind see the same value: any case, and backend/.env as well.
+    api_host: str = Field(
+        default=DEFAULT_API_HOST,
+        description="Address main.run_server and the local-mode image command bind",
+        validation_alias="API_HOST",
+    )
     port: int = Field(default=8000, ge=1024, le=65535, description="Server port")
     reload: bool = Field(default=False, description="Enable auto-reload on code changes (dev only)")
 
@@ -1488,9 +1483,8 @@ class Settings(BaseSettings):
             raise ValueError("APP_LOCAL_MODE is not allowed on a Railway deployment")
         if self.is_preview_environment:
             raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
-        api_host = api_bind_host()
-        if api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
-            raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {api_host!r}")
+        if self.api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
+            raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {self.api_host!r}")
         return self
 
     @property
@@ -1603,6 +1597,23 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def local_bind_host(config: Settings | None = None) -> str:
+    """Return the address the Docker image binds in local mode.
+
+    The image command calls this instead of reading shell variables, so it
+    sees local mode exactly as ``Settings`` does.
+
+    Args:
+        config: Settings to read; the process settings when omitted.
+
+    Returns:
+        The checked loopback ``API_HOST`` in local mode, or ``""`` when local
+        mode is off and the hosted bind applies.
+    """
+    config = config or settings
+    return config.api_host if config.local_mode else ""
 
 
 def embeddings_schema_enabled() -> bool:

@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from core.config import Settings
+from core.config import Settings, local_bind_host
 from core.models.common import ModelConfig
 
 _ENV_VARS = (
@@ -135,32 +136,62 @@ def test_subscription_model_needs_a_cli() -> None:
 def _dockerfile_bind(env: dict[str, str]) -> str:
     """Run the image's start command with ``exec`` replaced by ``echo``.
 
+    The command still runs the real Python bind helper from this backend.
+
     Args:
-        env: Environment the container would start with.
+        env: Environment the container would start with, without ``PATH``.
 
     Returns:
         The command line the container would run.
     """
-    dockerfile = Path(__file__).resolve().parents[2] / "Dockerfile"
-    cmd = next(line for line in dockerfile.read_text().splitlines() if line.startswith("CMD "))
+    backend = Path(__file__).resolve().parents[2]
+    cmd = next(line for line in (backend / "Dockerfile").read_text().splitlines() if line.startswith("CMD "))
     script = json.loads(cmd.removeprefix("CMD "))[2].replace("exec ", "echo ")
-    return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True, check=True).stdout.strip()
+    path = f"{Path(sys.executable).parent}:/usr/bin:/bin"
+    result = subprocess.run(
+        ["sh", "-c", script], env={"PATH": path, **env}, cwd=backend, capture_output=True, text=True, check=True
+    )
+    return result.stdout.strip()
 
 
 def test_dockerfile_keeps_the_hosted_bind() -> None:
     """Without local mode the image binds every interface, as before."""
-    assert _dockerfile_bind({"PATH": "/usr/bin:/bin", "API_HOST": "127.0.0.1"}) == (
-        "uvicorn main:app --host 0.0.0.0 --port 8000"
-    )
+    assert _dockerfile_bind({"API_HOST": "127.0.0.1"}) == "uvicorn main:app --host 0.0.0.0 --port 8000"
 
 
-@pytest.mark.parametrize("flag", ["APP_LOCAL_MODE", "SKYNET_LOCAL_MODE"])
+@pytest.mark.parametrize("flag", ["APP_LOCAL_MODE", "SKYNET_LOCAL_MODE", "app_local_mode", "Skynet_Local_Mode"])
 def test_dockerfile_binds_the_checked_host_in_local_mode(flag: str) -> None:
-    """In local mode the image binds API_HOST, the address the settings check accepted.
+    """In local mode the image binds API_HOST, read in any case as Settings reads it.
 
     Args:
         flag: Local-mode variable name the container sets.
     """
-    env = {"PATH": "/usr/bin:/bin", flag: "1", "API_HOST": "127.0.0.1", "PORT": "9000"}
+    env = {flag: "1", "api_host": "127.0.0.1", "PORT": "9000"}
 
     assert _dockerfile_bind(env) == "uvicorn main:app --host 127.0.0.1 --port 9000"
+
+
+def test_local_bind_host_reads_the_env_file(tmp_path: Path) -> None:
+    """Local mode and API_HOST set only in backend/.env still give the loopback bind.
+
+    Args:
+        tmp_path: Pytest directory that holds the ``.env`` file.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text("APP_LOCAL_MODE=1\nAPI_HOST=127.0.0.1\n")
+
+    assert local_bind_host(Settings(_env_file=env_file)) == "127.0.0.1"
+    assert local_bind_host(Settings(_env_file=None)) == ""
+
+
+def test_env_file_local_mode_without_a_host_is_refused(tmp_path: Path) -> None:
+    """Local mode from backend/.env with no loopback API_HOST still fails at startup.
+
+    Args:
+        tmp_path: Pytest directory that holds the ``.env`` file.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text("APP_LOCAL_MODE=1\n")
+
+    with pytest.raises(ValidationError, match="loopback"):
+        Settings(_env_file=env_file)

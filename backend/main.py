@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from core.api.app import create_app
 from core.api.observability import configure_logging
-from core.config import api_bind_host
+from core.config import settings
 from core.error_reporting import configure_error_reporting
 from core.registry import ServiceRegistry
 from core.service_gateway.react_compat import configure_native_tool_calling
@@ -52,7 +52,7 @@ app = create_app(registry=registry)
 
 def run_server() -> None:
     """Boot the FastAPI application using Uvicorn, honouring API_HOST / API_PORT."""
-    host = api_bind_host()
+    host = settings.api_host
     port = int(os.getenv("API_PORT", "8000"))
     uvicorn.run("main:app", host=host, port=port, reload=False)
 
