@@ -57,6 +57,8 @@ class I18nKey(StrEnum):
     BILLING_SUBSCRIPTION_CLI_FAILED = 'billing.subscription_cli_failed'
     BILLING_SUBSCRIPTION_RATE_LIMITED = 'billing.subscription_rate_limited'
     BILLING_SUBSCRIPTION_UNMAPPED_MODEL = 'billing.subscription_unmapped_model'
+    BLACKBOX_HOST_AGENT_FAILED = 'blackbox.host_agent_failed'
+    BLACKBOX_HOST_AGENT_RATE_LIMITED = 'blackbox.host_agent_rate_limited'
     BLACKBOX_REPO_TARGET_UNAVAILABLE = 'blackbox.repo_target_unavailable'
     BUDGET_IDEMPOTENCY_REQUIRED = 'budget.idempotency_required'
     CODE_AGENT_SEED_LANE_TIMEOUT = 'code_agent.seed_lane_timeout'

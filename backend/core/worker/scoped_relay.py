@@ -8,6 +8,9 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..billing.model_dispatch import ModelHTTPResult
+from ..config import settings
+
+HOST_AGENT_PATH = "/v1/_host_agent"
 
 
 def model_forwarder(payload: dict[str, Any]) -> Any:
@@ -26,6 +29,8 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             "/v1/chat/completions",
             "/v1/responses",
             "/v1/_budget/state",
+            # Served only by a local-mode gateway; elsewhere the parent answers 404.
+            HOST_AGENT_PATH,
         }
     )
 
@@ -88,7 +93,11 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
         """
         if token not in routes or path not in routes[token][1]:
             raise ValueError("The guest requested an unknown metered model capability.")
-        with httpx.Client(trust_env=False, timeout=630 if path == "/v1/_evaluator" else 600) as client:
+        timeout = 630 if path == "/v1/_evaluator" else 600
+        if path == HOST_AGENT_PATH:
+            # One host CLI turn may run for its whole configured limit.
+            timeout = settings.host_agent_timeout_seconds + 30
+        with httpx.Client(trust_env=False, timeout=timeout) as client:
             response = client.request(
                 "GET" if path.endswith("/_budget/state") else "POST",
                 routes[token][0] + path,

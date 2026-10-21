@@ -38,6 +38,7 @@ from ..billing import (
     payload_uses_token_source,
 )
 from ..billing.budgets import BudgetService
+from ..billing.host_agent import bind_host_agent, failure_message, host_agent_failure
 from ..billing.metering import debit_at_fallback_price
 from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
@@ -900,6 +901,8 @@ class BackgroundWorker:
                             else ()
                         ),
                     )
+                    if settings.local_mode:
+                        bind_host_agent(budget_gateway, settings)
                     checkpoint_tracker.update(sandbox_image=sandbox_image)
                     parent_payload = resolve_execution_credentials(
                         payload_dict,
@@ -1052,6 +1055,11 @@ class BackgroundWorker:
                     execution_budget_snapshot, settlement_error = self._close_budget_gateway(
                         optimization_id, closing_gateway, execution_generation
                     )
+                    host_failure = host_agent_failure(closing_gateway)
+                    if host_failure is not None:
+                        # A capped subscription stops every later turn, so the run
+                        # ends with the cap and its reset time, not a proposer error.
+                        raise OptimizerProcessError(failure_message(host_failure), "HostAgentRateLimited")
                     if settlement_error is not None and subprocess_error is None:
                         raise settlement_error
 

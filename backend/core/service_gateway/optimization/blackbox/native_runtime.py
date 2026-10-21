@@ -1031,6 +1031,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         ),
         GatewayConfig(url=options.gateway.url, api_key=harness_bridge.KEY_TOKEN),
         protected=options.budget_route is not None,
+        host_cli=proposer.host_cli,
+        host_permission=proposer.host_permission,
     )
     input_price, output_price = model_token_costs(options.model)
     # Runs carry no wall-clock cap of their own: the budget and evaluation
