@@ -1,12 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { fetchWithAuthRetry, getProviderKeys } from "@/shared/lib/api";
+import { fetchWithAuthRetry } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { cachedByokCatalog, cachedCatalog, getByokModelCatalog } from "@/shared/lib/model-catalog";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
 import type { CliProvider } from "@/features/billing";
-import { useByokKeys } from "@/features/billing/providers/byok-provider";
+import { peekByokKeys, useByokKeys } from "@/features/billing/providers/byok-provider";
 import type { CatalogModel } from "@/shared/types/api";
 import {
   defaultAgentCli,
@@ -17,6 +17,7 @@ import {
   LOCAL_KEY_PROVIDER,
   localKeyRows,
   localMenuModels,
+  menuKeyVerified,
   resolveLocalAgentModel,
   subscriptionMenuModels,
   type AgentEngine,
@@ -65,16 +66,6 @@ export function peekLocalStatus(): LocalStatus | null {
   return cached?.status ?? null;
 }
 
-/** Whether the saved OpenRouter key is verified; null when the key list cannot load. */
-async function localKeyVerified(): Promise<boolean | null> {
-  try {
-    const { keys } = await getProviderKeys();
-    return keys.some((key) => key.provider === LOCAL_KEY_PROVIDER && key.status === "verified");
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The model id an agent request sends for a role set to run on `cli`: the
  * model the composer chip shows. A subscription pick waits for
@@ -97,7 +88,7 @@ export async function localAgentModel(
   return resolveLocalAgentModel(model, cli, {
     loadStatus: loadLocalStatus,
     peekStatus: peekLocalStatus,
-    keyVerified: localKeyVerified,
+    keyVerified: async () => menuKeyVerified(peekByokKeys()),
     keyCatalog: async () => (await getByokModelCatalog()).models,
     engine,
   });
@@ -120,6 +111,12 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
   const [modelTries, setModelTries] = React.useState(0);
   const [keyTries, setKeyTries] = React.useState(0);
 
+  // A new key, or a list that loaded, starts the next failure's retries at 2 s.
+  React.useEffect(() => setModelTries(0), [stamp]);
+  React.useEffect(() => {
+    if (!failed) setKeyTries(0);
+  }, [failed]);
+
   React.useEffect(() => {
     if (!stamp) return;
     let active = true;
@@ -129,7 +126,8 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
       // A failed load resolves an empty catalog and leaves the cache unset.
       const ok = cachedByokCatalog() !== null;
       setLoaded({ stamp, models: ok ? catalog.models : null });
-      if (!ok) retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));
+      if (ok) setModelTries(0);
+      else retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));
     });
     return () => {
       active = false;

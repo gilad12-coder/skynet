@@ -232,6 +232,23 @@ export function localMenuModels(
   return [...cliModels, ...keyModels];
 }
 
+/**
+ * Whether the saved OpenRouter key is verified in the key list the menu
+ * shows; null while that list loads, failed to load, or is not known yet.
+ * The request reads this same state, so it never sends a key model while the
+ * menu has no key rows and the chip shows the default label.
+ */
+export function menuKeyVerified(
+  state: {
+    loading: boolean;
+    failed: boolean;
+    keys: Array<{ provider: string; status: string }>;
+  } | null,
+): boolean | null {
+  if (!state || state.loading || state.failed) return null;
+  return state.keys.some((key) => key.provider === LOCAL_KEY_PROVIDER && key.status === "verified");
+}
+
 /** Whether `model` is an `openrouter/<vendor>/<model>` id, which runs on a saved key. */
 export function isOpenRouterModelId(model: string | null | undefined): boolean {
   return !!model && /^openrouter\/[^/]+\/[^/]/.test(model);
@@ -242,7 +259,8 @@ export function isOpenRouterModelId(model: string | null | undefined): boolean {
  * shows. A subscription pick resolves on the CLI and waits for nothing else.
  * An OpenRouter pick is sent unchanged unless the app knows there is no
  * verified key. With no pick and no CLI model, the chip shows the key's first
- * model, so the request sends that model.
+ * model, so the request sends that model; while the menu's key list loads or
+ * failed, the chip shows the default label and nothing is sent.
  */
 export async function resolveLocalAgentModel(
   model: string | null,
@@ -250,7 +268,7 @@ export async function resolveLocalAgentModel(
   deps: {
     loadStatus: () => Promise<LocalStatus>;
     peekStatus: () => LocalStatus | null;
-    /** Whether the saved OpenRouter key is verified; null when the key list cannot load. */
+    /** Whether the saved OpenRouter key is verified; null while the menu's key list loads or failed. */
     keyVerified: () => Promise<boolean | null>;
     keyCatalog: () => Promise<CatalogModel[]>;
     /** The agent engine; a role with no CLI runs on it. */

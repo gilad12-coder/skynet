@@ -22,6 +22,7 @@ const {
   localKeyRows,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
+  menuKeyVerified,
   isOpenRouterModelId,
   resolveAgentModel,
   resolveLocalAgentModel,
@@ -778,5 +779,66 @@ test("no pick sends the model the chip shows", async () => {
       localDeps({ loadStatus: () => Promise.reject(new Error("down")) }),
     ),
     null,
+  );
+});
+
+test("no pick sends nothing while the menu's key list loads or failed, as the chip shows", async () => {
+  const verifiedKey = { provider: "openrouter", status: "verified" };
+  const noCli = {
+    loadStatus: async () => status([cli({ path: null, models: [] })]),
+    keyCatalog: async () => [keyRow("openrouter/google/gemini-3-pro")],
+  };
+  const unknown = [
+    { loading: true, failed: false, keys: [] },
+    { loading: false, failed: true, keys: [] },
+    // A save keeps the list failed: the menu still has no key rows.
+    { loading: false, failed: true, keys: [verifiedKey] },
+    // No provider state yet.
+    null,
+  ];
+  for (const keys of unknown) {
+    // The menu has no key rows and no CLI rows: the chip shows "Default".
+    const keyRows = localKeyRows({
+      keysLoading: keys?.loading ?? true,
+      keysFailed: keys?.failed ?? false,
+      stamp: "k1:t1",
+      loaded: null,
+      cached: null,
+    });
+    assert.deepEqual(localMenuModels([], keyRows, null), []);
+    assert.equal(menuKeyVerified(keys), null);
+    assert.equal(
+      await resolveLocalAgentModel(
+        null,
+        "claude",
+        localDeps({ ...noCli, keyVerified: async () => menuKeyVerified(keys) }),
+      ),
+      null,
+    );
+  }
+  // A loaded list decides from the same keys the menu shows.
+  assert.equal(menuKeyVerified({ loading: false, failed: false, keys: [verifiedKey] }), true);
+  assert.equal(
+    menuKeyVerified({
+      loading: false,
+      failed: false,
+      keys: [
+        { provider: "openrouter", status: "invalid" },
+        { provider: "openai", status: "verified" },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    await resolveLocalAgentModel(
+      null,
+      "claude",
+      localDeps({
+        ...noCli,
+        keyVerified: async () =>
+          menuKeyVerified({ loading: false, failed: false, keys: [verifiedKey] }),
+      }),
+    ),
+    "openrouter/google/gemini-3-pro",
   );
 });
