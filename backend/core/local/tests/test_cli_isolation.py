@@ -12,7 +12,29 @@ import pytest
 
 from core.local import cli_isolation
 from core.local.cli_isolation import isolated_cli
-from core.local.cli_probe import STRIPPED_ENV_KEYS
+
+# Written out, so a shortened strip list fails here.
+STRIPPED_LITERALS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "FACTORY_API_KEY",
+    "CODEX_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_BASE_URL",
+    "FACTORY_API_BASE_URL",
+    "FACTORY_API_BASE_URL_EU",
+    "FACTORY_HOME_OVERRIDE",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_MANTLE",
+)
+KEPT = ("CLAUDE_CODE_OAUTH_TOKEN", "PATH")
 
 
 def _user_home(tmp_path: Path) -> Path:
@@ -27,10 +49,10 @@ def _user_home(tmp_path: Path) -> Path:
 def test_keys_are_stripped_and_the_temporary_homes_are_removed(tmp_path: Path) -> None:
     """Drop provider keys, copy only the login, and remove the temporary homes after the call."""
     home = _user_home(tmp_path)
-    base = {"HOME": str(home), "PATH": "/usr/bin", **dict.fromkeys(STRIPPED_ENV_KEYS, "secret")}
+    base = {"HOME": str(home), "PATH": "/usr/bin", **dict.fromkeys(STRIPPED_LITERALS, "secret")}
     with isolated_cli("codex", base_env=base) as isolation:
         codex_home = Path(isolation.env["CODEX_HOME"])
-        assert not set(STRIPPED_ENV_KEYS) & set(isolation.env)
+        assert not set(STRIPPED_LITERALS) & set(isolation.env)
         assert isolation.env["PATH"] == "/usr/bin"
         assert Path(isolation.env["HOME"]) != home
         assert sorted(path.name for path in codex_home.iterdir()) == ["auth.json"]
@@ -156,3 +178,14 @@ def test_the_default_environment_is_this_process(tmp_path: Path, monkeypatch: py
     with isolated_cli("claude") as isolation:
         assert isolation.env["SKYNET_ISOLATION_MARK"] == "1"
         assert isolation.env["HOME"] == os.environ["HOME"]
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex", "droid"])
+@pytest.mark.parametrize("key", STRIPPED_LITERALS)
+def test_every_cli_loses_each_provider_switch(tmp_path: Path, cli: str, key: str) -> None:
+    """Drop each key or switch that moves a CLI off the subscription, and keep the OAuth token and PATH."""
+    base = {"HOME": str(tmp_path), key: "fixture-not-a-key", **{name: f"kept-{name}" for name in KEPT}}
+    with isolated_cli(cli, base_env=base) as isolation:  # type: ignore[arg-type]
+        assert key not in isolation.env
+        for name in KEPT:
+            assert isolation.env[name] == f"kept-{name}"

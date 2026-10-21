@@ -24,9 +24,24 @@ from core.local.cli_catalog import CLI_MODELS, MIN_VERSIONS, CliProvider
 
 CLI_IDS: tuple[CliProvider, ...] = ("codex", "claude")
 
-# Each key makes a CLI bill an API account instead of the user's
-# subscription.
-STRIPPED_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
+# Each key makes a CLI bill an API account, or send calls to another
+# provider or endpoint, instead of the user's subscription.
+STRIPPED_ENV_KEYS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "CODEX_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "FACTORY_API_KEY",
+    "FACTORY_API_BASE_URL",
+    "FACTORY_API_BASE_URL_EU",
+    "FACTORY_HOME_OVERRIDE",
+)
+# CLAUDE_CODE_USE_BEDROCK, _VERTEX, _FOUNDRY and the like move claude to a cloud provider.
+STRIPPED_ENV_PREFIXES = ("CLAUDE_CODE_USE_",)
 
 CLI_LIMITS_FILENAME = "cli_limits.json"
 
@@ -59,13 +74,26 @@ class CliStatus:
     models: list[str]
 
 
-def cli_env() -> dict[str, str]:
-    """Return this process's environment without provider API keys.
+def is_stripped(key: str) -> bool:
+    """Return whether an environment variable must not reach a CLI.
+
+    Args:
+        key: The variable name.
 
     Returns:
-        A copy of ``os.environ`` without the keys in ``STRIPPED_ENV_KEYS``.
+        ``True`` for a name in ``STRIPPED_ENV_KEYS`` or one that starts with
+        a prefix in ``STRIPPED_ENV_PREFIXES``.
     """
-    return {key: value for key, value in os.environ.items() if key not in STRIPPED_ENV_KEYS}
+    return key in STRIPPED_ENV_KEYS or key.startswith(STRIPPED_ENV_PREFIXES)
+
+
+def cli_env() -> dict[str, str]:
+    """Return this process's environment without provider keys and provider switches.
+
+    Returns:
+        A copy of ``os.environ`` without the variables :func:`is_stripped` names.
+    """
+    return {key: value for key, value in os.environ.items() if not is_stripped(key)}
 
 
 def cli_binary(cli: CliProvider, settings: Settings) -> str:

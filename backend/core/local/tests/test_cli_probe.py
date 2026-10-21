@@ -12,7 +12,6 @@ import pytest
 from core.config import Settings
 from core.local import cli_probe
 from core.local.cli_probe import (
-    STRIPPED_ENV_KEYS,
     clear_probe_cache,
     cli_env,
     docker_status,
@@ -21,6 +20,29 @@ from core.local.cli_probe import (
     read_cli_limits,
     write_cli_limit,
 )
+
+# Written out, so a shortened strip list fails here.
+STRIPPED_LITERALS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "FACTORY_API_KEY",
+    "CODEX_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_BASE_URL",
+    "FACTORY_API_BASE_URL",
+    "FACTORY_API_BASE_URL_EU",
+    "FACTORY_HOME_OVERRIDE",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_MANTLE",
+)
+KEPT = ("CLAUDE_CODE_OAUTH_TOKEN", "PATH")
 
 
 @pytest.fixture(autouse=True)
@@ -137,12 +159,28 @@ def test_probe_strips_provider_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         tmp_path: Directory for the fake binary.
         monkeypatch: Pytest fixture used to set the keys.
     """
-    for key in STRIPPED_ENV_KEYS:
+    for key in STRIPPED_LITERALS:
         monkeypatch.setenv(key, "fixture-not-a-key")
     claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out='{"loggedIn": true}')
 
     assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is True
-    assert not set(STRIPPED_ENV_KEYS) & set(cli_env())
+    assert not set(STRIPPED_LITERALS) & set(cli_env())
+
+
+@pytest.mark.parametrize("key", STRIPPED_LITERALS)
+def test_cli_env_strips_each_provider_switch(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop every key or switch that moves a CLI off the subscription, and keep the OAuth token and PATH.
+
+    Args:
+        key: One stripped variable.
+        monkeypatch: Pytest fixture used to set the variables.
+    """
+    monkeypatch.setenv(key, "fixture-not-a-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "fixture-oauth")
+    env = cli_env()
+    assert key not in env
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "fixture-oauth"
+    assert "PATH" in env
 
 
 def test_probe_results_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
