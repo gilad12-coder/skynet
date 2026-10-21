@@ -52,6 +52,28 @@ from .submissions import _default_unified_seed, _materialize_unified_cases
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 AcceptLanguageDep = Annotated[str | None, Header(include_in_schema=False)]
 CONTRACT_CHECK_KEY = "metric.contract"
+# Fixed English texts that setup checks, sandbox images and budget errors emit
+# without a catalog code. Stored evidence keeps them as written, so they are
+# coded and worded here, at response time, for every caller's locale.
+FIXED_MESSAGE_CODES = {
+    "Evaluator loads; scoring waits for the first generated candidate.": "submit.preflight.scorer_ready",
+    "Endpoint validated; its response will be checked with the first generated candidate.": (
+        "submit.preflight.endpoint_ready"
+    ),
+    "Harness readiness verified; candidate execution waits for the first generated candidate.": (
+        "submit.preflight.target_ready"
+    ),
+    "Sandbox usage is awaiting confirmation.": "submit.preflight.sandbox_usage_pending",
+    "Provider or sandbox usage is awaiting final confirmation.": "submit.preflight.usage_pending",
+    "Provider or sandbox usage is still awaiting final confirmation.": "submit.preflight.usage_still_pending",
+    "Previous provider or sandbox usage is awaiting final confirmation.": "submit.preflight.previous_usage_pending",
+    "The spending limit cannot cover setup.": "submit.preflight.budget_setup",
+    "The total budget has no remaining allowance.": "submit.preflight.budget_exhausted",
+    "The account has no available funds.": "submit.preflight.no_funds",
+    "The account has no available funds for additional work.": "submit.preflight.no_funds_more",
+    "The account has no funded wallet.": "submit.preflight.no_wallet",
+    "The account cannot fund the next operation.": "submit.preflight.cannot_fund",
+}
 
 
 def _contract_failure(contract: dict[str, Any], spec: UnifiedRunRequest | None) -> ContractCheckItem | None:
@@ -100,15 +122,55 @@ def _localized_check(
     )
 
 
+def _coded_check(check: WizardPreflightCheck, locale: str) -> WizardPreflightCheck:
+    """Word a check whose message is a known fixed English text in ``locale``.
+
+    Args:
+        check: One setup check as stored.
+        locale: The caller's locale tag.
+
+    Returns:
+        The check with its message in ``locale`` and its code attached, or the
+        check unchanged when it already has a code or its text is not known.
+    """
+    code = FIXED_MESSAGE_CODES.get(check.message or "")
+    if check.message_code is not None or code is None:
+        return check
+    return check.model_copy(update={"message": t_locale(locale, code), "message_code": code, "message_params": {}})
+
+
+def _localized_contract(contract: dict[str, Any], spec: UnifiedRunRequest | None, locale: str) -> dict[str, Any]:
+    """Word the nested contract outcome's coded items in ``locale``.
+
+    Args:
+        contract: The contract outcome under the setup check's ``workflow_result``.
+        spec: The canonical unified spec, used to recover codes an older
+            sandbox image left out; None when it is not known.
+        locale: The caller's locale tag.
+
+    Returns:
+        A new contract outcome in ``locale``, or ``contract`` itself when it
+        does not parse.
+    """
+    try:
+        parsed = ContractCheckResponse.model_validate(contract)
+    except ValidationError:
+        return contract
+    if spec is not None and any(item.message_code is None for item in parsed.checks):
+        parsed = with_message_codes(parsed, static_contract_check(spec))
+    return in_locale(parsed, locale).model_dump(mode="json")
+
+
 def localize_preflight(
     response: WizardPreflightResponse, spec: UnifiedRunRequest | None, locale: str
 ) -> WizardPreflightResponse:
     """Render a setup check's catalog messages in the caller's locale.
 
     The contract check words its failure in the Hebrew base wherever it runs
-    (often a sandbox with no request locale), and the stored evidence is
-    replayed to later callers in any language, so the wording happens here
-    at response time.
+    (often a sandbox with no request locale), other checks store fixed English
+    texts, and the stored evidence is replayed to later callers in any
+    language, so the wording happens here at response time. The stored
+    evidence itself is not changed.
 
     Args:
         response: The setup check result.
@@ -116,23 +178,31 @@ def localize_preflight(
         locale: The caller's locale tag.
 
     Returns:
-        The result with its failed contract check worded in ``locale``.
+        The result with its known messages and nested contract checks worded in ``locale``.
     """
-    contract = (response.workflow_result or {}).get("contract")
-    if not isinstance(contract, dict):
-        return response
-    if not any(check.key == CONTRACT_CHECK_KEY and check.status == "failed" for check in response.checks):
-        return response
-    failure = _contract_failure(contract, spec)
-    if failure is None or failure.message_code is None:
-        return response
-    checks = [
-        _localized_check(check, failure.message_code, failure, locale)
-        if check.key == CONTRACT_CHECK_KEY and check.status == "failed"
-        else check
-        for check in response.checks
-    ]
-    return response.model_copy(update={"checks": checks})
+    update: dict[str, Any] = {"checks": [_coded_check(check, locale) for check in response.checks]}
+    reason = response.pending_reason
+    if reason is not None and reason.message in FIXED_MESSAGE_CODES:
+        update["pending_reason"] = reason.model_copy(
+            update={"message": t_locale(locale, FIXED_MESSAGE_CODES[reason.message])}
+        )
+    workflow = response.workflow_result or {}
+    contract = workflow.get("contract")
+    if isinstance(contract, dict):
+        update["workflow_result"] = {**workflow, "contract": _localized_contract(contract, spec, locale)}
+        failure = (
+            _contract_failure(contract, spec)
+            if any(check.key == CONTRACT_CHECK_KEY and check.status == "failed" for check in response.checks)
+            else None
+        )
+        if failure is not None and failure.message_code is not None:
+            update["checks"] = [
+                _localized_check(check, failure.message_code, failure, locale)
+                if check.key == CONTRACT_CHECK_KEY and check.status == "failed"
+                else check
+                for check in update["checks"]
+            ]
+    return response.model_copy(update=update)
 
 
 def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
@@ -207,6 +277,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             An event stream that never dispatches a second validation attempt.
         """
         events: Queue[dict[str, Any] | None] = Queue()
+        locale = request_locale(request.locale, accept_language)
 
         def phase(value: str) -> None:
             """Queue a public execution phase for this request."""
@@ -221,13 +292,10 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             except HTTPException as error:
                 events.put({"event": "error", "data": {"detail": error.detail}})
             except RequestValidationError:
-                events.put({"event": "error", "data": {"detail": "The setup configuration is invalid."}})
+                events.put({"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.invalid_config")}})
             except Exception:
                 events.put(
-                    {
-                        "event": "error",
-                        "data": {"detail": "Setup validation could not finish. Return to setup and try again."},
-                    }
+                    {"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.could_not_finish")}}
                 )
             finally:
                 progress_observer.reset(token)
@@ -251,35 +319,41 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         )
 
     @router.post("/optimizations/contract-check/static", response_model=ContractCheckResponse)
-    def contract_check_static(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
+    def contract_check_static(
+        request: ContractCheckRequest, user: AuthenticatedUserDep, accept_language: AcceptLanguageDep = None
+    ) -> ContractCheckResponse:
         """Check the workspace code's signatures and metric model without running it.
 
         Args:
             request: The unified spec to check.
             user: Authenticated caller.
+            accept_language: The browser's languages, used when the body names no locale.
 
         Returns:
             The static checks; ``samples`` is always empty.
         """
         enforce_submission_rate(user.username)
-        return in_locale(static_contract_check(request.spec), request.locale)
+        return in_locale(static_contract_check(request.spec), request_locale(request.locale, accept_language))
 
-    def _run_contract_check(request: ContractCheckRequest, user: AuthenticatedUser) -> ContractCheckResponse:
+    def _run_contract_check(
+        request: ContractCheckRequest, user: AuthenticatedUser, locale: str
+    ) -> ContractCheckResponse:
         """Run the sandboxed contract check shared by the plain and streaming routes.
 
         Args:
             request: The unified spec and how many samples to score.
             user: Authenticated owner whose budget pays for the check.
+            locale: The caller's locale tag.
 
         Returns:
-            Every check item and the scored samples, worded in the request's locale.
+            Every check item and the scored samples, worded in ``locale``.
 
         Raises:
             HTTPException: 402 when the spec names no execution budget, or the
                 budget errors ``run_preflight`` raises.
         """
         enforce_submission_rate(user.username)
-        return in_locale(_sandboxed_check(request, user), request.locale)
+        return in_locale(_sandboxed_check(request, user), locale)
 
     def _sandboxed_check(request: ContractCheckRequest, user: AuthenticatedUser) -> ContractCheckResponse:
         """Run the static check, then the sampled one under the spec's budget.
@@ -345,7 +419,9 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         )
 
     @router.post("/optimizations/contract-check", response_model=ContractCheckResponse)
-    def contract_check(request: ContractCheckRequest, user: AuthenticatedUserDep) -> ContractCheckResponse:
+    def contract_check(
+        request: ContractCheckRequest, user: AuthenticatedUserDep, accept_language: AcceptLanguageDep = None
+    ) -> ContractCheckResponse:
         """Run the starting version through the code and metric on a few samples, in the sandbox.
 
         The check runs as an evaluation-scope setup check under the spec's
@@ -356,25 +432,30 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         Args:
             request: The unified spec and how many samples to score.
             user: Authenticated owner whose budget pays for the check.
+            accept_language: The browser's languages, used when the body names no locale.
 
         Returns:
             Every check item and the scored samples.
         """
-        return _run_contract_check(request, user)
+        return _run_contract_check(request, user, request_locale(request.locale, accept_language))
 
     @router.post("/optimizations/contract-check/stream", include_in_schema=False)
-    def contract_check_stream(request: ContractCheckRequest, user: AuthenticatedUserDep) -> StreamingResponse:
+    def contract_check_stream(
+        request: ContractCheckRequest, user: AuthenticatedUserDep, accept_language: AcceptLanguageDep = None
+    ) -> StreamingResponse:
         """Stream the check's real phases, then the same result the plain route returns.
 
         Args:
             request: The unified spec and how many samples to score.
             user: Authenticated owner whose budget pays for the check.
+            accept_language: The browser's languages, used when the body names no locale.
 
         Returns:
             An event stream of ``phase`` and ``terminal`` events, then one
             ``result`` or ``error``.
         """
         events: Queue[dict[str, Any] | None] = Queue()
+        locale = request_locale(request.locale, accept_language)
 
         def phase(value: str) -> None:
             """Queue a public execution phase for this request."""
@@ -389,17 +470,17 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             token = progress_observer.set(phase)
             try:
                 with recording(CheckTerminalRecorder(emit=terminal)):
-                    result = _run_contract_check(request, user)
+                    result = _run_contract_check(request, user, locale)
                 events.put({"event": "result", "data": result.model_dump(mode="json")})
             except HTTPException as error:
                 events.put({"event": "error", "data": {"detail": error.detail}})
             except RequestValidationError:
-                events.put({"event": "error", "data": {"detail": "The setup configuration is invalid."}})
+                events.put({"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.invalid_config")}})
             except Exception:
                 events.put(
                     {
                         "event": "error",
-                        "data": {"detail": "The workspace check could not finish. Try again."},
+                        "data": {"detail": t_locale(locale, "submit.preflight.contract_could_not_finish")},
                     }
                 )
             finally:
