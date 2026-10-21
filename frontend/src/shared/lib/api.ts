@@ -1083,11 +1083,22 @@ export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType
   });
 }
 
-/** Take the queued macOS notifications in the UI locale; each one is handed out once. */
+/**
+ * Lease the queued macOS notifications in the UI locale. A lease that is not
+ * confirmed runs out, and the server hands those notifications out again.
+ */
 export function claimNativeNotifications() {
   return request<{ items: NativeNotification[] }>("/local/notifications/native/claim", {
     method: "POST",
     body: JSON.stringify({ locale: getActiveLocale() }),
+  });
+}
+
+/** Tell the server which claimed macOS notifications the app showed. */
+export function confirmNativeNotifications(ids: string[]) {
+  return request<{ confirmed: number }>("/local/notifications/native/confirm", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
   });
 }
 

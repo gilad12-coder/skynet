@@ -10,7 +10,9 @@ import {
   appendPage,
   cellEditable,
   cellExists,
+  cellShownOn,
   itemLine,
+  localOffChannels,
   localOffReason,
   maybeLocalHost,
   mergeHead,
@@ -160,4 +162,19 @@ test("only loopback pages probe the local-only routes", () => {
   assert.equal(maybeLocalHost("localhost"), true);
   assert.equal(maybeLocalHost("[::1]"), true);
   assert.equal(maybeLocalHost("app.example.com"), false);
+});
+
+test("in the Mac app a channel that is not set up shows off, whatever the saved value", () => {
+  const local = localState({ email: true });
+  assert.equal(cellShownOn(true, "chrome", local), false);
+  assert.equal(cellShownOn(true, "email", local), true);
+  assert.equal(cellShownOn(false, "email", local), false);
+  assert.equal(cellShownOn(true, "inbox", local), true);
+  assert.equal(cellShownOn(true, "slack", null), true);
+});
+
+test("the Mac app lists the channels that are not set up, in column order", () => {
+  assert.deepEqual(localOffChannels(localState({ email: true })), ["chrome", "slack"]);
+  assert.deepEqual(localOffChannels(localState({ email: true, chrome: true, slack: true })), []);
+  assert.deepEqual(localOffChannels(null), []);
 });

@@ -27,6 +27,7 @@ _PATHS = (
     ("get", "/local/notifications/channels"),
     ("patch", "/local/notifications/macos"),
     ("post", "/local/notifications/native/claim"),
+    ("post", "/local/notifications/native/confirm"),
 )
 
 
@@ -103,14 +104,26 @@ def test_channels_report_an_unset_hosted_channel_as_off(harness, local_mode: Non
 def test_channels_report_a_configured_mail_relay_as_available(
     harness, local_mode: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A Mac with its own SMTP relay keeps hosted-style email."""
+    """A Mac with its own SMTP relay keeps hosted-style email for a user with a real address."""
     monkeypatch.setattr(settings, "smtp_host", "127.0.0.1")
     monkeypatch.setattr(settings, "vapid_public_key", "pub")
     monkeypatch.setattr(settings, "vapid_private_key", SecretStr("priv"))
     client, _ = harness
+    client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username="qa@example.com", role="user", groups=()
+    )
     channels = client.get("/local/notifications/channels").json()["channels"]
     assert channels["email"] is True
     assert channels["chrome"] is True
+
+
+def test_channels_report_email_off_for_the_default_local_user(
+    harness, local_mode: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SMTP alone is not enough: the default ``local@skynet.local`` address cannot receive mail."""
+    monkeypatch.setattr(settings, "smtp_host", "127.0.0.1")
+    client, _ = harness
+    assert client.get("/local/notifications/channels").json()["channels"]["email"] is False
 
 
 def test_patch_macos_cells_saves_and_keeps_news_inbox_only(harness, local_mode: None) -> None:
@@ -147,6 +160,14 @@ def test_claim_returns_display_payloads_once(harness, local_mode: None) -> None:
     assert set(item) == {"id", "title", "body", "url", "tag"}
     assert item["url"] == "/optimizations/opt-1"
     assert second == {"items": []}
+    with Session(engine) as session:
+        row = session.get(NotificationModel, item["id"])
+        assert row is not None
+        assert row.deliveries["macos"]["state"] == "claimed"
+
+    confirmed = client.post("/local/notifications/native/confirm", json={"ids": [item["id"]]})
+    assert confirmed.status_code == 200
+    assert confirmed.json() == {"confirmed": 1}
     with Session(engine) as session:
         row = session.get(NotificationModel, item["id"])
         assert row is not None

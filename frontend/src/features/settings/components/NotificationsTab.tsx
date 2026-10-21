@@ -15,9 +15,11 @@ import {
   LOCAL_CHANNELS,
   cellEditable,
   cellExists,
+  cellShownOn,
   channelLive,
   chromeCellAction,
   currentPushSubscription,
+  localOffChannels,
   localOffReason,
   nativePermission,
   pushPermission,
@@ -414,10 +416,13 @@ export function NotificationsTab() {
   const cellProps = (event: NotificationEventType, channel: GridChannel): CellProps => ({
     event,
     channel,
-    checked:
+    checked: cellShownOn(
       channel === "macos"
         ? (local?.macos[event] ?? false)
         : (prefs?.grid[event]?.[channel] ?? false),
+      channel,
+      local,
+    ),
     disabled:
       disabled || (channel === "chrome" && subscribing) || (channel === "slack" && slackConnecting),
     slackReady,
@@ -426,14 +431,17 @@ export function NotificationsTab() {
   });
 
   const permission = pushPermission();
+  // In the Mac app without VAPID keys, push cannot work: say so in place of the turn-on button.
   const chromeState: MessageKey | null =
-    permission === "unsupported"
+    localOffReason("chrome", local) ??
+    (permission === "unsupported"
       ? "notifications.push.unsupported"
       : permission === "denied"
         ? "settings.notifications.chrome.blocked"
         : pushSubscribed
           ? "settings.notifications.chrome.on"
-          : null;
+          : null);
+  const offChannels = localOffChannels(local);
 
   const macosState: MessageKey | null =
     macosPermission === "granted"
@@ -538,6 +546,12 @@ export function NotificationsTab() {
               ))}
             </ul>
           </>
+        )}
+
+        {offChannels.length > 0 && (
+          <p data-local-off className="pt-2 text-xs text-muted-foreground">
+            {`${offChannels.map((c) => msg(CHANNEL_KEYS[c])).join(", ")}: ${msg("notifications.local.not_configured")}`}
+          </p>
         )}
 
         {chromeBlocked && (

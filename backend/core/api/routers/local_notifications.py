@@ -18,7 +18,8 @@ from ...i18n import request_locale
 from ...notifications import slack
 from ...notifications.catalog import CHROME, EMAIL, MACOS, SLACK
 from ...notifications.channels import vapid_public_key
-from ...notifications.native import claim_native
+from ...notifications.comms import mailable, resolve_email
+from ...notifications.native import claim_native, confirm_native
 from ...notifications.preferences import merge_grid
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -55,17 +56,30 @@ class NativeNotificationClaim(BaseModel):
     items: list[NativeNotificationItem] = Field(description="Queued notifications to show, oldest first.")
 
 
-def _channel_states() -> dict[str, bool]:
+class NativeNotificationConfirmRequest(BaseModel):
+    ids: list[str] = Field(max_length=100, description="Ids of claimed notifications the app showed.")
+
+
+class NativeNotificationConfirm(BaseModel):
+    confirmed: int = Field(description="How many deliveries turned sent.")
+
+
+def _channel_states(username: str) -> dict[str, bool]:
     """Report which delivery channels work on this Mac.
 
     A hosted channel works when this Mac has its own setup for it (SMTP,
     VAPID keys, a Slack app); a hosted-account link (SKY-124) does not exist yet.
+    Email also needs an address a relay can deliver to.
+
+    Args:
+        username: The signed-in local user.
 
     Returns:
         Delivery channel -> available, the hosted ones first.
     """
+    address = resolve_email(username)
     return {
-        EMAIL: email_configured(),
+        EMAIL: email_configured() and address is not None and mailable(address),
         CHROME: vapid_public_key() is not None,
         SLACK: slack.slack_configured(),
         MACOS: True,
@@ -92,7 +106,7 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
         job_store: Job-store instance whose ORM engine holds notifications and preferences.
 
     Returns:
-        A router exposing the channel states, the macOS cells and the native claim.
+        A router exposing the channel states, the macOS cells, and the native claim and confirm.
     """
     router = APIRouter(dependencies=[Depends(require_local_mode)])
 
@@ -108,7 +122,7 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
         """
         with Session(job_store.engine) as session:
             row = session.get(NotificationPreferenceModel, user.username)
-            return LocalNotificationChannels(channels=_channel_states(), macos=_macos_cells(row))
+            return LocalNotificationChannels(channels=_channel_states(user.username), macos=_macos_cells(row))
 
     @router.patch("/local/notifications/macos", include_in_schema=False)
     def update_macos_cells(body: MacOSCellsUpdate, user: AuthenticatedUserDep) -> LocalNotificationChannels:
@@ -133,7 +147,7 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
             row.updated_at = datetime.now(UTC)
             session.commit()
             session.refresh(row)
-            return LocalNotificationChannels(channels=_channel_states(), macos=_macos_cells(row))
+            return LocalNotificationChannels(channels=_channel_states(user.username), macos=_macos_cells(row))
 
     @router.post("/local/notifications/native/claim", include_in_schema=False)
     def claim_native_notifications(
@@ -141,7 +155,7 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
         request: NativeNotificationClaimRequest | None = None,
         accept_language: AcceptLanguageDep = None,
     ) -> NativeNotificationClaim:
-        """Hand the Mac app the caller's queued macOS notifications, each once.
+        """Lease the caller's queued macOS notifications to the Mac app.
 
         Args:
             user: The signed-in local user.
@@ -156,5 +170,20 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
         return NativeNotificationClaim(
             items=[NativeNotificationItem(id=i.id, title=i.title, body=i.body, url=i.url, tag=i.tag) for i in items]
         )
+
+    @router.post("/local/notifications/native/confirm", include_in_schema=False)
+    def confirm_native_notifications(
+        body: NativeNotificationConfirmRequest, user: AuthenticatedUserDep
+    ) -> NativeNotificationConfirm:
+        """Mark the claimed notifications the Mac app showed as sent.
+
+        Args:
+            body: The ids the app showed.
+            user: The signed-in local user.
+
+        Returns:
+            How many deliveries turned sent.
+        """
+        return NativeNotificationConfirm(confirmed=confirm_native(job_store.engine, user.username, body.ids))
 
     return router

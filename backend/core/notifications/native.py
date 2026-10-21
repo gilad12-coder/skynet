@@ -1,16 +1,22 @@
-"""Hand queued macOS notifications to the Mac app, each one once.
+"""Hand queued macOS notifications to the Mac app, and keep none in limbo.
 
 :class:`core.notifications.channels.MacOSChannel` marks a delivery
-``queued``. The open Mac app claims the queued deliveries, shows them through
-the system notification center, and the claim marks them ``sent``.
+``queued``. The open Mac app claims queued deliveries; a claim leases them
+(``claimed``) for :data:`CLAIM_LEASE`. The app shows them through the system
+notification center and then confirms them, which marks them ``sent``. A
+claim whose answer never arrives runs out and is handed out again, and a
+repeat shows with the same tag, so it replaces the earlier banner. A delivery
+the app could not show within :data:`CLAIM_WINDOW` (the app was closed, or
+notifications were not allowed) is marked ``expired``; the inbox still has it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -19,10 +25,12 @@ from ..storage.models import NotificationModel
 from .catalog import MACOS
 from .channels import Delivery, push_payload
 
-# Only recent rows can still hold a queued delivery the app has not shown;
-# older ones are stale news (the app was closed), and the inbox still has them.
 CLAIM_WINDOW = timedelta(days=1)
+CLAIM_LEASE = timedelta(seconds=60)
 CLAIM_BATCH = 20
+
+_STATE = NotificationModel.deliveries[(MACOS, "state")].as_string()
+_LEASE = NotificationModel.deliveries[(MACOS, "lease")].as_float()
 
 
 @dataclass(frozen=True)
@@ -36,10 +44,47 @@ class NativeNotification:
     tag: str
 
 
+def _mark(row: NotificationModel, state: dict[str, object]) -> None:
+    """Replace the row's macOS delivery entry.
+
+    Args:
+        row: The notification row, locked by the caller.
+        state: The new ``deliveries["macos"]`` value.
+    """
+    deliveries = dict(row.deliveries or {})
+    deliveries[MACOS] = state
+    row.deliveries = deliveries
+
+
+def _payload(row: NotificationModel, locale: str | None) -> NativeNotification:
+    """Build the display text for one row.
+
+    Args:
+        row: The notification row.
+        locale: The Mac app's UI locale.
+
+    Returns:
+        The notification as the app shows it.
+    """
+    payload = push_payload(
+        Delivery(
+            notification_id=row.id,
+            username=row.username,
+            event_type=row.event_type,
+            optimization_id=row.optimization_id,
+            title=row.title,
+            link=row.link,
+            facts=dict(row.facts or {}),
+        ),
+        locale,
+    )
+    return NativeNotification(id=row.id, **payload)
+
+
 def claim_native(
     engine: Engine, username: str, locale: str | None = None, now: datetime | None = None
 ) -> list[NativeNotification]:
-    """Claim ``username``'s queued macOS deliveries, oldest first.
+    """Lease ``username``'s queued macOS deliveries, oldest first, and expire stale ones.
 
     Args:
         engine: Database engine holding the notifications table.
@@ -53,34 +98,55 @@ def claim_native(
     if not settings.local_mode:
         return []
     now = now or datetime.now(UTC)
-    claimed: list[NativeNotification] = []
+    cutoff = now - CLAIM_WINDOW
+    pending = _STATE.in_(("queued", "claimed"))
+    claimable = or_(_STATE == "queued", and_(_STATE == "claimed", now.timestamp() > _LEASE))
+    with Session(engine) as session:
+        # SKIP LOCKED: a second window's claim, or a writer on one row, never waits on this one.
+        stale = session.scalars(
+            select(NotificationModel)
+            .where(NotificationModel.username == username, NotificationModel.created_at < cutoff, pending)
+            .with_for_update(skip_locked=True)
+        )
+        for row in stale:
+            _mark(row, {"state": "expired", "at": now.isoformat()})
+        rows = session.scalars(
+            select(NotificationModel)
+            .where(NotificationModel.username == username, NotificationModel.created_at >= cutoff, claimable)
+            .order_by(NotificationModel.created_at)
+            .limit(CLAIM_BATCH)
+            .with_for_update(skip_locked=True)
+        ).all()
+        claimed = [_payload(row, locale) for row in rows]
+        for row in rows:
+            _mark(row, {"state": "claimed", "lease": (now + CLAIM_LEASE).timestamp()})
+        session.commit()
+    return claimed
+
+
+def confirm_native(engine: Engine, username: str, ids: Iterable[str], now: datetime | None = None) -> int:
+    """Mark the claimed deliveries the Mac app has shown as ``sent``.
+
+    Args:
+        engine: Database engine holding the notifications table.
+        username: The signed-in local user.
+        ids: Notification ids the app showed.
+        now: Clock override for tests.
+
+    Returns:
+        How many deliveries turned ``sent``; 0 outside local mode.
+    """
+    wanted = list(dict.fromkeys(ids))
+    if not settings.local_mode or not wanted:
+        return 0
+    now = now or datetime.now(UTC)
     with Session(engine) as session:
         rows = session.scalars(
             select(NotificationModel)
-            .where(NotificationModel.username == username, NotificationModel.created_at >= now - CLAIM_WINDOW)
-            .order_by(NotificationModel.created_at)
-            .with_for_update()
-        )
+            .where(NotificationModel.username == username, NotificationModel.id.in_(wanted), _STATE == "claimed")
+            .with_for_update(skip_locked=True)
+        ).all()
         for row in rows:
-            deliveries = dict(row.deliveries or {})
-            if (deliveries.get(MACOS) or {}).get("state") != "queued":
-                continue
-            payload = push_payload(
-                Delivery(
-                    notification_id=row.id,
-                    username=row.username,
-                    event_type=row.event_type,
-                    optimization_id=row.optimization_id,
-                    title=row.title,
-                    link=row.link,
-                    facts=dict(row.facts or {}),
-                ),
-                locale,
-            )
-            claimed.append(NativeNotification(id=row.id, **payload))
-            deliveries[MACOS] = {"state": "sent", "at": now.isoformat()}
-            row.deliveries = deliveries
-            if len(claimed) >= CLAIM_BATCH:
-                break
+            _mark(row, {"state": "sent", "at": now.isoformat()})
         session.commit()
-    return claimed
+    return len(rows)

@@ -59,6 +59,23 @@ export function localOffReason(
 }
 
 /**
+ * Whether a cell shows as on. In the Mac app a channel that is not set up
+ * shows off, but the saved value stays, so it is back on once set up.
+ */
+export function cellShownOn(
+  stored: boolean,
+  channel: GridChannel,
+  local: LocalNotificationChannels | null,
+): boolean {
+  return stored && localOffReason(channel, local) === null;
+}
+
+/** In the Mac app, the columns that are not set up on this Mac, in column order. */
+export function localOffChannels(local: LocalNotificationChannels | null): GridChannel[] {
+  return LOCAL_CHANNELS.filter((channel) => localOffReason(channel, local) !== null);
+}
+
+/**
  * Whether the page may be the Mac app. Local mode binds only to loopback, so
  * a hosted page never probes the local-only routes.
  */

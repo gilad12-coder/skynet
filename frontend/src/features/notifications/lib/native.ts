@@ -26,13 +26,17 @@ export async function requestNativePermission(): Promise<PushPermission> {
   return Notification.requestPermission();
 }
 
-/** Show one claimed notification; a click brings the app forward on its page. */
-export function showNative(item: NativeNotification, open: (url: string) => void): void {
-  if (nativePermission() !== "granted") return;
+/**
+ * Show one claimed notification; a click brings the app forward on its page.
+ * Returns whether it was shown, so only shown ones are confirmed.
+ */
+export function showNative(item: NativeNotification, open: (url: string) => void): boolean {
+  if (nativePermission() !== "granted") return false;
   const notification = new Notification(item.title, { body: item.body, tag: item.tag });
   notification.onclick = () => {
     window.focus();
     open(item.url);
     notification.close();
   };
+  return true;
 }

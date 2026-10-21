@@ -8,7 +8,9 @@ export {
   LOCAL_CHANNELS,
   cellEditable,
   cellExists,
+  cellShownOn,
   channelLive,
+  localOffChannels,
   localOffReason,
   type GridChannel,
 } from "./lib/catalog";

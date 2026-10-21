@@ -26,7 +26,7 @@ from ..i18n import t_locale
 from ..storage.models import PushSubscriptionModel, SlackConnectionModel
 from . import slack
 from .catalog import CHROME, EMAIL, MACOS, SLACK
-from .comms import resolve_email, send_mail
+from .comms import mailable, resolve_email, send_mail
 from .email_render import EVENT_TYPES as EMAIL_EVENT_TYPES
 from .email_render import FRONTEND_URL, render_notification_email
 from .preferences import notification_engine
@@ -104,6 +104,8 @@ class EmailChannel(NotificationChannel):
         """
         address = resolve_email(delivery.username)
         if address is None or delivery.event_type not in EMAIL_EVENT_TYPES:
+            return "unavailable"
+        if settings.local_mode and not mailable(address):
             return "unavailable"
         try:
             facts = {key: value for key, value in delivery.facts.items() if key in _EMAIL_FACT_KEYS}
