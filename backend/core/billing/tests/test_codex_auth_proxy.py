@@ -152,7 +152,9 @@ def _request(
     return connection.getresponse()
 
 
-def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes, *, method: str = "POST") -> bytes:
+def _raw_post(
+    proxy: CodexAuthProxy, framing: bytes, payload: bytes, *, method: str = "POST", lead: bytes = b""
+) -> bytes:
     """Send one request (a POST unless told otherwise) with hand-written body framing and read the answer's head.
 
     Args:
@@ -160,6 +162,7 @@ def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes, *, method: 
         framing: The body-framing header lines, each with its CRLF.
         payload: The bytes after the blank line.
         method: The request method.
+        lead: Header lines, each with its CRLF, put first after the request line.
 
     Returns:
         The bytes up to the end of the answer's headers, or what came before a 5-second silence.
@@ -170,7 +173,9 @@ def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes, *, method: 
         context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
     ):
         secured.sendall(
-            f"{method} /backend-api/codex/responses HTTP/1.1\r\nHost: x\r\n".encode()
+            f"{method} /backend-api/codex/responses HTTP/1.1\r\n".encode()
+            + lead
+            + b"Host: x\r\n"
             + f"Authorization: Bearer {PLACEHOLDER}\r\n".encode()
             + framing
             + b"\r\n"
@@ -326,6 +331,40 @@ def test_folded_header_line_is_refused(fold: bytes, proxy: CodexAuthProxy, upstr
         fold: The continuation line, without its CRLF.
     """
     answer = _raw_post(proxy, b"X-Note: a\r\n" + fold + b"\r\nContent-Length: 5\r\n", b"hello")
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize(
+    ("lead", "framing"),
+    [(b"From x\r\n", b"Content-Length: 5\r\n"), (b"", b"Content-Length: 5\r\nFrom :x\r\n")],
+    ids=["first-line", "last-line"],
+)
+def test_envelope_from_line_is_refused(
+    lead: bytes, framing: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """A "From " line first or last in the header block gets 400 and is not forwarded.
+
+    The stdlib parser takes such a line as a mail envelope line (first) or drops
+    it (last) with no defect, so it is not a valid header line (RFC 9112 5.1).
+
+    Args:
+        lead: The header lines put first.
+        framing: The framing header lines.
+    """
+    answer = _raw_post(proxy, framing, b"hello", lead=lead)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+def test_bare_cr_in_a_header_line_is_refused(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """A CR not followed by LF in the header block gets 400 and is not forwarded, as RFC 9112 2.2 allows.
+
+    The stdlib parser takes a bare CR as a line end, so it could start a framing header.
+    """
+    answer = _raw_post(proxy, b"X-Note: a\rContent-Length: 5\r\n", b"hello")
 
     assert answer.startswith(b"HTTP/1.1 400 ")
     assert upstream.seen == []

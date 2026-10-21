@@ -40,7 +40,7 @@ import tempfile
 import threading
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, BinaryIO
 
 import certifi
 from cryptography import x509
@@ -351,11 +351,53 @@ class _Server(http.server.ThreadingHTTPServer):
                 secured.close()
 
 
+class _HeaderRecorder:
+    """Pass header-line reads through to a stream and keep a copy of the bytes."""
+
+    def __init__(self, stream: BinaryIO) -> None:
+        """Wrap a stream.
+
+        Args:
+            stream: The request stream.
+        """
+        self.stream = stream
+        self.lines: list[bytes] = []
+
+    def readline(self, limit: int = -1) -> bytes:
+        """Read one line and keep a copy.
+
+        Args:
+            limit: The most bytes to read.
+
+        Returns:
+            The line.
+        """
+        line = self.stream.readline(limit)
+        self.lines.append(line)
+        return line
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     """Check one codex request, forward it with the real login, stream the answer."""
 
     protocol_version = "HTTP/1.1"
     server: _Server
+    header_bytes = b""
+
+    def parse_request(self) -> bool:
+        """Parse the request line and headers, and keep the raw header bytes for :meth:`_body`.
+
+        Returns:
+            True when the stdlib parser accepts the request.
+        """
+        stream = self.rfile
+        recorder = _HeaderRecorder(stream)
+        self.rfile = recorder  # type: ignore[assignment]
+        try:
+            return super().parse_request()
+        finally:
+            self.rfile = stream
+            self.header_bytes = b"".join(recorder.lines)
 
     def do_GET(self) -> None:
         """Forward an allowed GET."""
@@ -426,7 +468,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # RFC 9112 5.1 and 5.2: the stdlib parser drops a line with whitespace before
         # its colon (and every line after it) with only a defect, and keeps a folded
         # line inside the value, so a framing header can go missing; refuse both.
-        if self.headers.defects or any("\n" in value for value in self.headers.values()):
+        # The parser also takes a first "From " line as a mail envelope line and drops
+        # a last one, with no defect (RFC 9112 5.1), and splits lines at a bare CR,
+        # which RFC 9112 2.2 lets a recipient refuse.
+        if (
+            self.headers.defects
+            or self.headers.get_unixfrom()
+            or self.headers.get_payload()
+            or b"\r" in self.header_bytes.replace(b"\r\n", b"")
+            or any("\n" in value for value in self.headers.values())
+        ):
             raise ValueError("malformed header line")
         # RFC 9112 6.1 and 6.3: any other coding, chunked with a Content-Length, or
         # more than one Content-Length leaves the body length unclear, so refuse.
