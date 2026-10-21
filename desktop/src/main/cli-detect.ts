@@ -121,7 +121,15 @@ export function childPath(loginPath: string, env: NodeJS.ProcessEnv = process.en
   return fake ? `${fake}:${loginPath}` : loginPath;
 }
 
-/** The same login checks as the backend's `core/local/cli_probe.py` (SKY-111). */
+/**
+ * Login checks modeled on the backend's `core/local/cli_probe.py` (SKY-111).
+ * The backend stays the authority. For codex the desktop reads only the
+ * `codex login status` text and never reads auth.json. The backend also reads
+ * auth.json, so it can still refuse codex after this check passes: ChatGPT mode
+ * with no or empty tokens, the `chatgptAuthTokens` mode, other non-ChatGPT
+ * logins whose text has no "api key", and a login kept in the macOS Keychain
+ * (`cli_auth_credentials_store = keyring` or `auto`), where no auth.json exists.
+ */
 export async function checkLogin(id: CliId, bin: string, run: Runner, env: Record<string, string>): Promise<boolean | null> {
   if (id === "claude") {
     const res = await run(bin, ["auth", "status"], env);
