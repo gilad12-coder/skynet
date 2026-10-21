@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
+from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED, TOKEN_SOURCE_SUBSCRIPTION
 from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.common import ModelConfig
 from ..models.submissions import _OptimizationRequestBase
@@ -61,6 +61,9 @@ def normalize_model_token_sources(
 ) -> tuple[list[ModelConfig], dict[str, str]]:
     """Resolve legacy job-level sources into explicit per-model sources.
 
+    The run-level source becomes ``byok`` or ``subscription`` when every model
+    uses it, and ``managed`` otherwise.
+
     Args:
         payload: Run, Anything, or unified request to normalize in place.
 
@@ -85,9 +88,8 @@ def normalize_model_token_sources(
         if existing is not None and existing != source:
             raise DomainError("submission.validation_failed", status=400)
         sources[model] = source
-    payload.token_source = (
-        TOKEN_SOURCE_BYOK
-        if sources and all(source == TOKEN_SOURCE_BYOK for source in sources.values())
-        else TOKEN_SOURCE_MANAGED
-    )
+    payload.token_source = TOKEN_SOURCE_MANAGED
+    for uniform in (TOKEN_SOURCE_BYOK, TOKEN_SOURCE_SUBSCRIPTION):
+        if sources and all(source == uniform for source in sources.values()):
+            payload.token_source = uniform
     return configs, sources

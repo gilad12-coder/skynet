@@ -34,6 +34,7 @@ from ...billing import (
     cost_ceiling_budget,
     provider_slug_for_model,
 )
+from ...billing.budget_amounts import MAX_CENTS
 from ...billing.budgets import BudgetError, BudgetService
 from ...billing.protected_credentials import ProtectedCredentialVault, protect_execution_credentials
 from ...config import settings
@@ -69,6 +70,8 @@ from ...constants import (
     PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_BYOK,
+    TOKEN_SOURCE_MANAGED,
+    TOKEN_SOURCE_SUBSCRIPTION,
 )
 from ...exceptions import ServiceError
 from ...i18n_keys import I18nKey
@@ -308,7 +311,12 @@ def _ensure_api_budget(
         # A retry reuses the original approved total: the balance it would be
         # recomputed from moves once the first attempt's check reserves spend.
         budget = service.find_by_creation_key(user.username, budget_creation_key)
-        if budget is None:
+        if budget is None and settings.local_mode:
+            # Local mode charges no managed spend or platform fee, so the
+            # budget only records usage and never stops the run.
+            total = payload.max_cost_cents or max(1, min(settings.local_grant_cents, MAX_CENTS))
+            budget = service.create(user.username, total, idempotency_key=budget_creation_key, uncapped=True)
+        elif budget is None:
             spendable = _enforce_balance(job_store, user.username, payload.token_source)
             total = payload.max_cost_cents
             if total is None:
@@ -583,7 +591,8 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
     fleet of funded accounts) cannot run the shared provider float dry. No-op
     when the ceiling is unset (``0``) or the store has no SQL engine. Tripping
     it logs at ERROR, which the alert log handler forwards to operators, so the
-    refusal is never silent.
+    refusal is never silent. Local mode has no shared provider float, so the
+    check is off there.
 
     Args:
         job_store: Job-store instance whose ORM engine backs the billing tables.
@@ -594,7 +603,7 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
             so internal budget figures are not leaked to callers.
     """
     ceiling = settings.global_daily_spend_ceiling_cents
-    if ceiling <= 0:
+    if ceiling <= 0 or settings.local_mode:
         return
     engine = getattr(job_store, "engine", None)
     if engine is None:
@@ -681,6 +690,35 @@ def _cap_cost_ceiling_to_balance(
     budget = cost_ceiling_budget(spendable, token_source)
     current = payload.max_cost_cents
     payload.max_cost_cents = budget if current is None else min(current, budget)
+
+
+def _enforce_local_mode_sources(payload, requested_source: str, model_configs: list[ModelConfig]) -> None:
+    """Keep subscription runs in local mode and managed runs out of it.
+
+    A subscription model or a host-CLI proposer runs on the user's own Mac, so
+    a hosted deployment has no way to serve it. The Mac app has no managed
+    model routing, so a managed model there could never run.
+
+    Args:
+        payload: The submission, read for its proposer's ``host_cli``.
+        requested_source: The run-level ``token_source`` before normalization,
+            which folds ``subscription`` into ``managed``.
+        model_configs: Executable configs with normalized per-model sources.
+
+    Raises:
+        DomainError: 422 ``models.subscription_local_only`` outside local mode;
+            422 ``models.managed_unavailable_local`` in local mode.
+    """
+    sources = {config.token_source for config in model_configs}
+    optimizer = getattr(payload, "optimizer", None)
+    proposer = getattr(payload, "proposer", None) or getattr(optimizer, "proposer", None)
+    host_cli = getattr(proposer, "host_cli", None) is not None
+    if not settings.local_mode:
+        if TOKEN_SOURCE_SUBSCRIPTION in sources or requested_source == TOKEN_SOURCE_SUBSCRIPTION or host_cli:
+            raise DomainError("models.subscription_local_only", status=422)
+        return
+    if TOKEN_SOURCE_MANAGED in sources:
+        raise DomainError("models.managed_unavailable_local", status=422)
 
 
 def _enforce_byok_connections(job_store, username: str, model_configs: list[ModelConfig]) -> None:
@@ -994,10 +1032,13 @@ def submit_unified_payload(
 
     _enforce_submission_admission(job_store, payload.username)
 
+    _requested_source = payload.token_source
     _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-    _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-    if payload.execution_budget_id is None:
-        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+    _enforce_local_mode_sources(payload, _requested_source, _model_configs)
+    if not settings.local_mode:
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
     _enforce_byok_connections(job_store, payload.username, _model_configs)
 
     try:
@@ -1187,10 +1228,13 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         _enforce_submission_admission(job_store, payload.username)
 
+        _requested_source = payload.token_source
         _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-        if payload.execution_budget_id is None:
-            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_local_mode_sources(payload, _requested_source, _model_configs)
+        if not settings.local_mode:
+            _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+            if payload.execution_budget_id is None:
+                _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _model_configs)
 
         _ensure_api_budget(

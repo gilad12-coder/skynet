@@ -102,8 +102,12 @@ def free_grant_cents() -> int:
     """Return the one-time allowance a new account gets in this deployment.
 
     Only a PR preview environment grants credit, so automated checks there can
-    pay for a run; everywhere else it is :data:`FREE_GRANT_CENTS`.
+    pay for a run. The single-user Mac app grants ``local_grant_cents``, because
+    its subscription runs cost nothing here. Everywhere else it is
+    :data:`FREE_GRANT_CENTS`.
     """
+    if settings.local_mode:
+        return settings.local_grant_cents
     return settings.preview_grant_cents if settings.is_preview_environment else FREE_GRANT_CENTS
 
 

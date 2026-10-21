@@ -397,7 +397,10 @@
     "continuous.check_stuck": "הבדיקה נעצרה {attempts} פעמים לפני שהסתיימה, ולכן נסגרה. הבדיקות הבאות ירוצו כרגיל.",
     "continuous.review_ready": "הגרסה החדשה עקפה את הנוכחית על אותם מקרים. היא ממתינה לאישור שלכם.",
     "continuous.review_approved": "אישרתם את הגרסה החדשה. היא הגרסה הנוכחית מעכשיו.",
-    "continuous.review_rejected": "דחיתם את הגרסה החדשה. הגרסה הקודמת נשארת."
+    "continuous.review_rejected": "דחיתם את הגרסה החדשה. הגרסה הקודמת נשארת.",
+    "local.not_available": "התכונה הזו זמינה רק באפליקציית {term.appName} ל-Mac.",
+    "models.subscription_local_only": "מודלים של מנוי ומציעי CLI מקומיים פועלים רק באפליקציית {term.appName} ל-Mac.",
+    "models.managed_unavailable_local": "אפליקציית ה-Mac לא יכולה להשתמש במודלים מנוהלים. בחר/י מודל של מנוי או מפתח ספק משלך."
   },
   "backend": {
     "constants": {

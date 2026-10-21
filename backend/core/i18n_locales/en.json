@@ -397,6 +397,9 @@
     "continuous.check_stuck": "The check stopped {attempts} times before it finished, so it was closed. Later checks run as usual.",
     "continuous.review_ready": "The new candidate beat the current version on the same cases. It waits for your approval.",
     "continuous.review_approved": "You approved the new candidate. It is now the current version.",
-    "continuous.review_rejected": "You rejected the new candidate. The earlier version stays."
+    "continuous.review_rejected": "You rejected the new candidate. The earlier version stays.",
+    "local.not_available": "This feature is available only in the {term.appName} Mac app.",
+    "models.subscription_local_only": "Subscription models and host CLI proposers run only in the {term.appName} Mac app.",
+    "models.managed_unavailable_local": "The Mac app cannot use managed models. Pick a subscription model or your own provider key."
   }
 }
