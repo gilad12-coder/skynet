@@ -12,11 +12,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -79,6 +81,14 @@ if os.environ.get("FAKE_CLI_MODE") == "leak":
     import base64
     token = json.loads((Path(os.environ["CODEX_HOME"]) / "auth.json").read_text())["tokens"]["access_token"]
     leaked = f"{token} {base64.b64encode(token.encode()).decode()} {token.encode().hex()}"
+    print(f"stderr {leaked}", file=sys.stderr)
+    print(json.dumps({"type": "turn.failed", "error": {"message": f"boom {leaked}"}}))
+    sys.exit(1)
+if os.environ.get("FAKE_CLI_MODE") == "leak-wrapped":
+    # base64 wrapped at 76 characters, as base64.encodebytes, openssl base64 and MIME print it.
+    import base64
+    login = (Path(os.environ["CODEX_HOME"]) / "auth.json").read_bytes()
+    leaked = base64.encodebytes(login).decode()
     print(f"stderr {leaked}", file=sys.stderr)
     print(json.dumps({"type": "turn.failed", "error": {"message": f"boom {leaked}"}}))
     sys.exit(1)
@@ -403,6 +413,23 @@ def test_turn_output_hides_the_login_token(local: Settings, guest: Path, monkeyp
     assert "[redacted]" in document["error"]["message"]
     for form in (token, base64.b64encode(token.encode()).decode(), token.encode().hex()):
         assert form not in shown
+
+
+def test_turn_output_hides_a_wrapped_base64_login(
+    local: Settings, guest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Output that holds the login as line-wrapped base64 reaches the guest only as ``[redacted]``."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    monkeypatch.setenv("FAKE_CLI_MODE", "leak-wrapped")
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="codex", permission="workspace_only")
+
+    token = "A" * 32
+    shown = host_agent._LINE_BREAKS.sub("", json.dumps(document))
+    assert document["status"] == "error"
+    assert "[redacted]" in document["error"]["message"]
+    assert not any(form.decode() in shown for form in host_agent._encoded_forms(token))
 
 
 @pytest.mark.parametrize(
@@ -1040,11 +1067,29 @@ def test_result_drops_login_files_and_token_copies(tmp_path: Path) -> None:
         lambda raw: raw.hex().upper().encode(),
         lambda raw: urllib.parse.quote(raw.decode(), safe="").encode(),
         lambda raw: "".join(f"%{byte:02X}" for byte in raw).encode(),
+        # The leading bytes push the token across a line break of the wrapped base64.
+        lambda raw: base64.encodebytes(b"p" * 41 + raw),
+        lambda raw: b"\n".join(base64.b64encode(b"p" * 32 + raw)[i : i + 64] for i in range(0, 200, 64)),
+        lambda raw: base64.encodebytes(b"p" * 40 + raw).replace(b"\n", b"\r\n"),
+        lambda raw: json.dumps({"blob": base64.encodebytes(b"p" * 40 + raw).decode()}).encode(),
     ],
-    ids=["base64", "base64-shift1", "base64-shift2", "base64url", "hex", "hex-upper", "url", "url-all"],
+    ids=[
+        "base64",
+        "base64-shift1",
+        "base64-shift2",
+        "base64url",
+        "hex",
+        "hex-upper",
+        "url",
+        "url-all",
+        "base64-wrapped76",
+        "base64-wrapped64",
+        "base64-mime-crlf",
+        "base64-wrapped-in-json",
+    ],
 )
 def test_result_drops_encoded_token_copies(encode: Callable[[bytes], bytes], tmp_path: Path) -> None:
-    """A token copied as base64, hex or percent-encoding, at any offset, stays out of the archive."""
+    """A token copied as base64 (also line-wrapped), hex or percent-encoding, at any offset, stays out of the archive."""
     workdir = tmp_path / "copy"
     workdir.mkdir()
     secret = "s3cret/token+value=0123456789~"
@@ -1055,6 +1100,54 @@ def test_result_drops_encoded_token_copies(encode: Callable[[bytes], bytes], tmp
         names = set(archive.getnames())
 
     assert names == {"a.txt"}
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        lambda raw: base64.encodebytes(raw).decode(),
+        lambda raw: base64.encodebytes(b"x" + raw).decode().replace("\n", "\r\n"),
+        lambda raw: json.dumps(base64.encodebytes(b"xy" + raw).decode()),
+    ],
+    ids=["wrapped76", "mime-crlf", "json-escaped"],
+)
+def test_redact_hides_line_wrapped_base64(wrapped: Callable[[bytes], str]) -> None:
+    """A token split across base64 lines cannot be cut out, so the whole text becomes ``[redacted]``."""
+    secret = "s3cret/token+value=0123456789~" * 3
+
+    assert host_agent._redact(f"before {wrapped(secret.encode())} after", {secret}) == "[redacted]"
+    assert host_agent._redact("plain output\nwith lines", {secret}) == "plain output\nwith lines"
+
+
+def test_sandbox_check_loads_once_under_concurrent_first_sweeps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two runs' first sweeps that load ``sandbox_check`` together leave a usable two-item cache."""
+    both_inside = threading.Barrier(2, timeout=5)
+
+    def load(_path: str) -> SimpleNamespace:
+        both_inside.wait()
+        return SimpleNamespace(sandbox_check=SimpleNamespace(restype=None))
+
+    fake_ctypes = SimpleNamespace(CDLL=load, c_int=SimpleNamespace(in_dll=lambda _lib, _name: SimpleNamespace(value=1)))
+    monkeypatch.setattr(host_agent, "ctypes", fake_ctypes)
+    monkeypatch.setattr(host_agent, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(host_agent, "_sandbox", [])
+    errors: list[Exception] = []
+
+    def sweep() -> None:
+        try:
+            host_agent._confined_to(set(), "/turn", "/home")
+        except Exception as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=sweep) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert len(host_agent._sandbox) == 2
+    assert host_agent._confined_to(set(), "/turn", "/home") == set()
 
 
 @pytest.mark.parametrize(

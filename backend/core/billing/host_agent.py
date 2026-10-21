@@ -244,6 +244,13 @@ def _safe_link(workdir: Path, path: Path) -> bool:
     return os.path.commonpath([resolved, str(workdir)]) == str(workdir)
 
 
+# Wrapped base64 (openssl base64, MIME, base64.encodebytes) splits a token copy
+# across lines, and JSON output escapes those line breaks as "\n", so a copy is
+# also looked for with both removed.
+_LINE_BREAKS = re.compile(r"\s+|\\[nrt]")
+_LINE_BREAK_BYTES = re.compile(rb"\s+|\\[nrt]")
+
+
 def _encoded_forms(value: str) -> set[bytes]:
     """Return the byte forms in which a file can hold a token: plain, hex, percent and base64.
 
@@ -280,13 +287,18 @@ def _redact(text: str, secret_values: set[str]) -> str:
         secret_values: Token values of the CLI's login.
 
     Returns:
-        The text with every token form replaced by ``[redacted]``.
+        The text with every token form replaced by ``[redacted]``; only ``[redacted]``
+        when a form shows up only after line breaks are removed, since it cannot be
+        cut out of the wrapped lines.
     """
     forms = sorted(
         {form.decode("utf-8", "replace") for value in secret_values for form in _encoded_forms(value)}, key=len
     )
     for form in reversed(forms):
         text = text.replace(form, "[redacted]")
+    joined = _LINE_BREAKS.sub("", text)
+    if any(form in joined for form in forms):
+        return "[redacted]"
     return text
 
 
@@ -298,7 +310,7 @@ def _holds_secret(path: Path, forms: set[bytes]) -> bool:
         forms: The encoded forms of the login's token values.
 
     Returns:
-        True when any form appears in the file's bytes.
+        True when any form appears in the file's bytes, also with line breaks removed.
     """
     if not forms:
         return False
@@ -306,7 +318,8 @@ def _holds_secret(path: Path, forms: set[bytes]) -> bool:
         data = path.read_bytes()
     except OSError:
         return True
-    return any(form in data for form in forms)
+    joined = _LINE_BREAK_BYTES.sub(b"", data)
+    return any(form in data or form in joined for form in forms)
 
 
 def _pack(workdir: Path, secret_values: set[str] | frozenset[str] = frozenset()) -> bytes:
@@ -585,7 +598,9 @@ def _confined_to(pids: set[int], root: str, home: str) -> set[int]:
     if not _sandbox:
         library = ctypes.CDLL("/usr/lib/system/libsystem_sandbox.dylib")
         library.sandbox_check.restype = ctypes.c_int
-        _sandbox.extend([library.sandbox_check, ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value])
+        # Two runs' first sweeps can get here at once; one whole-list assignment
+        # keeps the list at two items, where extend would leave four.
+        _sandbox[:] = [library.sandbox_check, ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value]
     check, no_report = _sandbox
 
     def allowed(pid: int, path: str) -> bool:
