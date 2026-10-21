@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from ...config import settings
 from ...models import (
     InputsInferenceRequest,
     InputsInferenceResponse,
@@ -778,9 +779,23 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             optional assistant message.
 
         Raises:
-            DomainError: 502 when the code agent emits an ``error`` event.
+            DomainError: 502 when the code agent emits an ``error`` event; 422
+                ``models.managed_unavailable_local`` in local mode when the
+                caller has no verified OpenRouter key and no subscription
+                engine.
         """
         await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, None)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username
+        )
+        # Hosted keeps the code agent's own default (settings.code_agent_model);
+        # only the Mac app, which has no managed key, routes the turn here.
+        model = None
+        if byok_config is not None:
+            model = byok_config.name
+        elif settings.local_mode:
+            model = route_menu_model(picked)
         final_signature = req.current_signature
         final_metric = req.current_metric
         assistant_message = ""
@@ -795,7 +810,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             chat_history=[],
             prior_signature=req.current_signature,
             prior_metric=req.current_metric,
+            model=model,
             usage_sink=usage_sink,
+            model_config=byok_config,
         )
         async for event in stream_with_llm_metering(
             source,
@@ -803,6 +820,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Code authoring",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         ):
             name = event["event"]
             data = event["data"]

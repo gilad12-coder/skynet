@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import stat
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -50,6 +50,46 @@ def test_refuses_to_replace_a_damaged_key(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="does not hold a valid BYOK vault key"):
         load_or_create_vault_key(tmp_path)
     assert (tmp_path / VAULT_KEY_FILE).read_text(encoding="ascii") == "not-a-fernet-key"
+
+
+def test_recovers_from_an_empty_key_file(tmp_path: Path) -> None:
+    """Replace an empty key file left by a crash, so the app starts, and keep the new key after that.
+
+    Args:
+        tmp_path: The state directory.
+    """
+    path = tmp_path / VAULT_KEY_FILE
+    path.write_bytes(b"")
+    key = load_or_create_vault_key(tmp_path)
+    Fernet(key.encode("ascii"))
+    assert path.read_text(encoding="ascii") == key
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert load_or_create_vault_key(tmp_path) == key
+    assert sorted(p.name for p in tmp_path.iterdir()) == [VAULT_KEY_FILE, f"{VAULT_KEY_FILE}.lock"]
+
+
+def test_concurrent_starts_after_a_crash_share_one_key(tmp_path: Path) -> None:
+    """Give every concurrent start the same new key when an empty key file is in the way.
+
+    Args:
+        tmp_path: The state directory.
+    """
+    (tmp_path / VAULT_KEY_FILE).write_bytes(b"\n")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        keys = set(pool.map(lambda _: load_or_create_vault_key(tmp_path), range(16)))
+    assert len(keys) == 1
+    assert (tmp_path / VAULT_KEY_FILE).read_text(encoding="ascii") == keys.pop()
+
+
+def test_concurrent_processes_share_one_key(tmp_path: Path) -> None:
+    """Give separate processes, as the API and the worker are, the same key.
+
+    Args:
+        tmp_path: The state directory.
+    """
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        keys = set(pool.map(load_or_create_vault_key, [str(tmp_path)] * 8))
+    assert len(keys) == 1
 
 
 def test_local_settings_load_the_key_and_hosted_settings_do_not(
