@@ -9,7 +9,7 @@ import type {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents } from "@/shared/lib/sse";
-import { fetchWithAuthRetry } from "@/shared/lib/api";
+import { fetchWithAuthRetry, parseErrorMessage } from "@/shared/lib/api";
 
 // Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
@@ -128,7 +128,8 @@ export async function streamReactServeChat(
       }
       case "error":
         handlers.onError(
-          String(data.error ?? msg("auto.features.agent.panel.lib.stream.literal.2")),
+          parseErrorMessage(JSON.stringify(data)) ??
+            msg("auto.features.agent.panel.lib.stream.literal.2"),
         );
         break;
     }

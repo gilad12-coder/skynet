@@ -429,6 +429,6 @@
     "sync.bundle_too_large": "The export file is larger than {max_mb} MB.",
     "sync.export_not_finished": "Only a finished run can be exported. This run is '{status}'.",
     "sync.unsupported_run_type": "Runs of type '{optimization_type}' cannot be exported.",
-    "serve.subscription_model_hosted": "This run used a local subscription model, which works only in the {term.appName} Mac app. To serve it here, pick a managed model or your own provider key (BYOK)."
+    "serve.subscription_model_hosted": "This run used a local subscription model. Serve it in the {term.appName} Mac app, or start a new optimization with a managed model or your own provider key."
   }
 }

@@ -429,6 +429,6 @@
     "sync.bundle_too_large": "O arquivo de exportação tem mais de {max_mb} MB.",
     "sync.export_not_finished": "Só é possível exportar uma execução concluída. Esta execução está '{status}'.",
     "sync.unsupported_run_type": "Execuções do tipo '{optimization_type}' não podem ser exportadas.",
-    "serve.subscription_model_hosted": "Esta execução usou um modelo de assinatura local, que só funciona na app {term.appName} para Mac. Para servi-la aqui, escolha um modelo gerido ou a sua própria chave de fornecedor (BYOK)."
+    "serve.subscription_model_hosted": "Esta execução usou um modelo de assinatura local. Sirva-a na app {term.appName} para Mac ou inicie uma nova otimização com um modelo gerido ou a sua própria chave de fornecedor."
   }
 }

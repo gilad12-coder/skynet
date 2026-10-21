@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Any
 
@@ -10,8 +11,10 @@ import pytest
 from core.api import protected_interaction
 from core.api.auth import AuthenticatedUser
 from core.api.errors import DomainError
+from core.api.routers import serve as serve_router
 from core.billing.operation_pricing import ChargePolicy, operation_quote
 from core.billing.runtime import PaidResult
+from core.i18n_en import t_en
 from core.storage.models import ExecutionBudgetModel, ExecutionOperationModel, JobModel
 
 from .test_protected_submissions import _Gateway, _Harness
@@ -264,3 +267,29 @@ def test_hosted_interaction_refuses_an_imported_subscription_run_before_any_char
     assert state["calls"] == state["bindings"] == []
     assert harness.count(ExecutionBudgetModel) == 0
     assert harness.count(ExecutionOperationModel) == 0
+
+
+def test_stream_error_event_carries_the_translatable_code() -> None:
+    """Give streamed serve and chat errors the same code envelope as HTTP errors."""
+
+    def run(_emit: Any) -> dict[str, Any]:
+        """Refuse the interaction like a hosted subscription-model run."""
+        raise DomainError("serve.subscription_model_hosted", status=409)
+
+    async def collect() -> list[dict[str, Any]]:
+        """Drain the SSE source into a list."""
+        return [event async for event in serve_router._protected_sse(run, final_event="final")]
+
+    events = asyncio.run(collect())
+
+    assert events == [
+        {
+            "event": "error",
+            "data": {
+                "error": t_en("serve.subscription_model_hosted"),
+                "code": "serve.subscription_model_hosted",
+                "params": {},
+            },
+        }
+    ]
+    assert "serve.subscription_model_hosted" not in events[0]["data"]["error"]

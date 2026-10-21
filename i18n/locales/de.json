@@ -429,6 +429,6 @@
     "sync.bundle_too_large": "Die Exportdatei ist größer als {max_mb} MB.",
     "sync.export_not_finished": "Nur ein abgeschlossener Lauf kann exportiert werden. Dieser Lauf ist '{status}'.",
     "sync.unsupported_run_type": "Läufe vom Typ '{optimization_type}' können nicht exportiert werden.",
-    "serve.subscription_model_hosted": "Dieser Lauf hat ein lokales Abo-Modell verwendet, das nur in der {term.appName}-Mac-App funktioniert. Um ihn hier bereitzustellen, wähle ein verwaltetes Modell oder deinen eigenen Anbieterschlüssel (BYOK)."
+    "serve.subscription_model_hosted": "Dieser Lauf hat ein lokales Abo-Modell verwendet. Stelle ihn in der {term.appName}-Mac-App bereit oder starte eine neue Optimierung mit einem verwalteten Modell oder deinem eigenen Anbieterschlüssel."
   }
 }

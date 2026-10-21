@@ -429,6 +429,6 @@
     "sync.bundle_too_large": "导出文件超过 {max_mb} MB。",
     "sync.export_not_finished": "只能导出已完成的运行。此运行状态为 '{status}'。",
     "sync.unsupported_run_type": "无法导出 '{optimization_type}' 类型的运行。",
-    "serve.subscription_model_hosted": "此运行使用了本地订阅模型，该模型只能在 {term.appName} Mac 应用中使用。要在此处提供服务，请选择托管模型或你自己的提供商密钥（BYOK）。"
+    "serve.subscription_model_hosted": "此运行使用了本地订阅模型。请在 {term.appName} Mac 应用中提供服务，或使用托管模型或你自己的提供商密钥开始新的优化。"
   }
 }

@@ -429,6 +429,6 @@
     "sync.bundle_too_large": "エクスポートファイルが {max_mb} MB を超えています。",
     "sync.export_not_finished": "エクスポートできるのは完了した実行のみです。この実行は '{status}' です。",
     "sync.unsupported_run_type": "'{optimization_type}' タイプの実行はエクスポートできません。",
-    "serve.subscription_model_hosted": "この実行はローカルのサブスクリプションモデルを使用しました。このモデルは {term.appName} の Mac アプリでのみ動作します。ここで提供するには、マネージドモデルまたは自分のプロバイダーキー (BYOK) を選んでください。"
+    "serve.subscription_model_hosted": "この実行はローカルのサブスクリプションモデルを使用しました。{term.appName} の Mac アプリで提供するか、マネージドモデルまたは自分のプロバイダーキーで新しい最適化を開始してください。"
   }
 }
