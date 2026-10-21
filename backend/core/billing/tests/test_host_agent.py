@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from core.billing import host_agent
 from core.billing.budgets import BudgetService
+from core.billing.codex_auth_proxy import PLACEHOLDER_ACCOUNT
 from core.billing.host_agent import (
     HOST_AGENT_PATH,
     HOST_AGENT_TOKEN_KEY,
@@ -92,6 +93,15 @@ if os.environ.get("FAKE_CLI_MODE") == "leak-wrapped":
     print(f"stderr {leaked}", file=sys.stderr)
     print(json.dumps({"type": "turn.failed", "error": {"message": f"boom {leaked}"}}))
     sys.exit(1)
+if os.environ.get("FAKE_CLI_MODE") == "steal":
+    # A prompt-injected tool command collects every place a token could be: the login copy, every
+    # file in the codex home, the whole environment and the command line.
+    codex_home = Path(os.environ["CODEX_HOME"])
+    Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
+        "files": {str(path): path.read_text(errors="replace") for path in codex_home.rglob("*") if path.is_file()},
+        "env": dict(os.environ),
+        "argv": sys.argv,
+    }))
 if os.environ.get("FAKE_CLI_MODE") == "expired":
     print(json.dumps({"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized"}}))
     sys.exit(1)
@@ -299,9 +309,12 @@ def test_turn_edits_a_copy_with_stripped_keys(
     assert Path(record["home"]).resolve() == copy.parent / "home"
     if cli == "codex":
         assert Path(record["codex_home"]).resolve() == copy.parent / "codex"
-        assert json.loads(record["login"]) == {
-            "tokens": {"account_id": "account-1", "access_token": "A" * 32, "refresh_token": ""}
-        }
+        login_copy = json.loads(record["login"])
+        assert "A" * 32 not in record["login"]
+        assert login_copy["tokens"]["account_id"] == PLACEHOLDER_ACCOUNT
+        assert login_copy["tokens"]["refresh_token"] == ""
+        assert record["argv"][start + len(isolation) : start + len(isolation) + 4 : 2] == ["-c"] * 2
+        assert any(arg.startswith('openai_base_url="https://127.0.0.1:') for arg in record["argv"])
         assert (tmp_path / "user-codex" / "auth.json").read_bytes() == _login("account-1", "A" * 32)
         assert record["home_files"] == []
     else:
@@ -399,6 +412,33 @@ def test_expired_codex_login_tells_the_user_to_refresh_it(
     assert "401" in document["error"]["message"]
 
 
+def test_turn_tool_cannot_read_any_real_login_value(
+    local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tool command in a codex turn finds no real access, refresh or id token and no account id."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    monkeypatch.setenv("FAKE_CLI_MODE", "steal")
+    real = {
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "id_token": "I" * 48,
+            "access_token": "A" * 48,
+            "refresh_token": "R" * 48,
+            "account_id": "real-account-7f3e9c",
+        },
+    }
+    (tmp_path / "user-codex" / "auth.json").write_text(json.dumps(real))
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="codex", permission="workspace_only")
+
+    assert document["status"] == "ok", document
+    stolen = (tmp_path / "record.json").read_text()
+    assert "auth.json" in stolen
+    for value in real["tokens"].values():
+        assert value not in stolen
+
+
 def test_turn_output_hides_the_login_token(local: Settings, guest: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The transcript and error text that go to the guest hold no copy of the login token."""
     monkeypatch.setenv("FAKE_CLI_NAME", "codex")
@@ -485,12 +525,29 @@ def test_codex_chatgpt_login_runs_without_its_api_key(login: dict, tmp_path: Pat
     turn.mkdir()
     env = {"CODEX_HOME": str(user)}
 
-    host_agent._turn_home("codex", env, turn)
+    proxy = host_agent._turn_home("codex", env, turn)
 
     copy = json.loads((Path(env["CODEX_HOME"]) / "auth.json").read_text())
     assert copy.get("OPENAI_API_KEY") is None
-    assert copy["tokens"] == {"account_id": "a", "access_token": "A" * 32, "refresh_token": ""}
+    assert copy["tokens"]["refresh_token"] == ""
+    assert copy["tokens"]["account_id"] == PLACEHOLDER_ACCOUNT
+    assert "A" * 32 not in json.dumps(copy)
+    assert proxy is not None
     assert json.loads((user / "auth.json").read_text()) == login
+
+
+def test_expired_codex_login_fails_before_the_turn(tmp_path: Path) -> None:
+    """An access token past its expiry fails with the refresh hint; nothing in the turn could renew it."""
+    user = tmp_path / "user-codex"
+    user.mkdir()
+    claims = base64.urlsafe_b64encode(json.dumps({"exp": int(time.time()) - 5}).encode()).decode().rstrip("=")
+    login = {"auth_mode": "chatgpt", "tokens": {"account_id": "a", "access_token": f"e30.{claims}.c2ln"}}
+    (user / "auth.json").write_text(json.dumps(login))
+    turn = tmp_path / "turn"
+    turn.mkdir()
+
+    with pytest.raises(host_agent.HostAgentRequestError, match="expired"):
+        host_agent._turn_home("codex", {"CODEX_HOME": str(user)}, turn)
 
 
 @pytest.mark.parametrize(

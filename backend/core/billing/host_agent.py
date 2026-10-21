@@ -14,7 +14,9 @@ only the token minted for that proposer reaches the capability. Agent config
 in the copy (``.claude/``, ``.codex/``, ``.factory/``, MCP files) is removed
 before the CLI starts, and a ``workspace_only`` turn runs under a macOS
 ``sandbox-exec`` profile that denies reads and writes in the user's home
-except the turn's own directory and the CLI's install paths.
+except the turn's own directory and the CLI's install paths. A codex turn's
+login copy holds only placeholders; its model calls go through a per-turn
+loopback proxy (:mod:`core.billing.codex_auth_proxy`) that adds the real token.
 
 The turn is recorded in the run's budget at zero cost: the user's
 subscription pays, not the wallet.
@@ -58,6 +60,7 @@ from ..local.cli_isolation import CODEX_AUTH_FILE, isolated_cli
 from ..local.cli_probe import cli_binary, codex_subscription_login, read_cli_limits, write_cli_limit
 from ..worker.host_agent_shim import excluded_path
 from .cli_runners import limit_error
+from .codex_auth_proxy import CodexAuthProxy, jwt_claims, placeholder_login, real_account
 from .model_dispatch import ModelHTTPResult
 from .model_gateway import ROUTE_KEY, ModelGateway
 from .operation_pricing import ChargePolicy, operation_quote
@@ -955,23 +958,28 @@ def _login_paths(cli: CliProvider) -> list[str]:
     return [str(Path.home() / "Library" / "Keychains")]
 
 
-def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> None:
+def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> CodexAuthProxy | None:
     """Give the CLI a home inside the turn, so no change it makes reaches the user's.
 
-    Codex gets a copy of its login with an empty refresh token. The turn's
-    tool commands can read and write that copy, so a stolen refresh token
-    would give lasting access, and a changed copy must never go back over
-    the user's login. The access token in the copy expires by itself.
-    Claude Code gets an empty home whose ``Library`` links the real one, so
-    it still finds its Keychain login.
+    The turn's tool commands can read and write the codex login copy and open
+    TCP connections, so the copy holds only placeholders
+    (:func:`placeholder_login`): no real access, refresh or id token, account
+    id or e-mail. The returned proxy holds the real access token outside the
+    turn and puts it on codex's model calls. A changed copy never goes back
+    over the user's login. Claude Code gets an empty home whose ``Library``
+    links the real one, so it still finds its Keychain login.
 
     Args:
         cli: The CLI of the turn.
         env: The CLI's environment from :func:`isolated_cli`; updated in place.
         turn: The turn's folder.
 
+    Returns:
+        For codex, the turn's auth proxy, not yet started; else None.
+
     Raises:
-        HostAgentRequestError: When codex has no ChatGPT subscription login.
+        HostAgentRequestError: When codex has no ChatGPT subscription login,
+            or its access token has already expired.
     """
     home = turn / "home"
     home.mkdir()
@@ -990,19 +998,21 @@ def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> None:
             # cost nothing beyond the subscription.
             raise HostAgentRequestError(CODEX_SUBSCRIPTION_HINT)
         assert isinstance(document, dict)
-        if "OPENAI_API_KEY" in document:
-            # A ChatGPT login can keep an old key beside it; the turn's tools must not read it.
-            document["OPENAI_API_KEY"] = None
-        if "refresh_token" in document["tokens"]:
-            # Codex rejects a login file without the field, so it stays, but empty.
-            document["tokens"]["refresh_token"] = ""
+        access_token = str(document["tokens"]["access_token"])
+        expires = jwt_claims(access_token).get("exp")
+        # Neither the turn nor the proxy has the refresh token, so an expired login cannot recover.
+        if isinstance(expires, int) and expires <= time.time() + 60:
+            raise HostAgentRequestError(CODEX_EXPIRED_HINT)
+        copy, placeholder = placeholder_login(document)
         descriptor = os.open(codex_home / CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w") as handle:
-            json.dump(document, handle)
-    elif cli == "claude":
+            json.dump(copy, handle)
+        return CodexAuthProxy(access_token=access_token, account_id=real_account(document), placeholder=placeholder)
+    if cli == "claude":
         library = Path.home() / "Library"
         if library.is_dir():
             (home / "Library").symlink_to(library)
+    return None
 
 
 def _login_secrets(raw: bytes) -> tuple[str | None, set[str]]:
@@ -1101,17 +1111,25 @@ def run_host_agent(
         strip_agent_config(workdir)
         turn_tmp = turn / "tmp"
         turn_tmp.mkdir()
-        with isolated_cli(cli) as isolation:
+        with isolated_cli(cli) as isolation, contextlib.ExitStack() as turn_services:
             env = dict(isolation.env)
             # Each turn gets its own temp folder; the shared one holds other apps' files.
             # Claude Code ignores TMPDIR and uses /tmp/claude-<uid> unless CLAUDE_CODE_TMPDIR is set.
             env.update({name: str(turn_tmp) for name in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR")})
             login = _read_no_follow(Path(env["CODEX_HOME"]) / CODEX_AUTH_FILE) if cli == "codex" else None
             _, secret_values = _login_secrets(login or b"")
-            _turn_home(cli, env, turn)
+            proxy = _turn_home(cli, env, turn)
+            isolation_args = isolation.args
+            if proxy is not None:
+                turn_services.enter_context(proxy)
+                isolation_args = (*isolation_args, *proxy.config_args())
+                ca_file = turn / "codex-proxy-ca.pem"
+                ca_file.write_bytes(proxy.ca_pem)
+                env["CODEX_CA_CERTIFICATE"] = str(ca_file)
+                secret_values.update(_login_secrets((turn / "codex" / CODEX_AUTH_FILE).read_bytes())[1])
             binary = _command(cli_binary(cli, settings), env)
             argv = host_cli_argv(
-                cli, permission, binary, workdir, _model_arg(cli, str(body.get("model") or "")), isolation.args
+                cli, permission, binary, workdir, _model_arg(cli, str(body.get("model") or "")), isolation_args
             )
             if permission == "workspace_only":
                 argv = confine(
