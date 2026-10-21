@@ -1,0 +1,44 @@
+appId: com.skynetml.desktop
+productName: Skynet
+copyright: Copyright © Skynet maintainers
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# One entry for stage/ because electron-builder always drops a node_modules
+# folder at the root of an extraResources source, and the standalone frontend
+# needs frontend/node_modules.
+extraResources:
+  - from: stage
+    to: .
+    filter: ["**/*", "!uv/**"]
+  - from: stage/uv/${arch}
+    to: uv
+asar: true
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  # "-" is an ad-hoc signature: no Apple Developer ID exists yet. Gatekeeper
+  # quarantines downloaded copies; README.md explains the xattr step.
+  identity: "-"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # The release job turns this on when the Apple secrets exist (.github/workflows/desktop.yml).
+  notarize: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+dmg:
+  sign: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+publish:
+  provider: github
+  owner: gilad12-coder
+  repo: skynet
+  releaseType: draft
