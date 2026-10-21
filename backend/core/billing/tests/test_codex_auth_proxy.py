@@ -561,6 +561,72 @@ def test_models_list_and_account_check_are_forwarded(proxy: CodexAuthProxy, upst
     ]
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/backend-api/codex/responses"),
+        ("GET", "/backend-api/codex/models"),
+        ("GET", "/backend-api/wham/accounts/check"),
+    ],
+)
+def test_forwarded_answer_has_one_date_and_one_server(
+    method: str, path: str, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """RFC 9110 allows one Date and one Server, so the provider's copies do not pass next to the proxy's own.
+
+    Args:
+        method: The request method.
+        path: An allowed path.
+    """
+    upstream.release.set()
+
+    response = _request(proxy, method, path)
+    response.read()
+
+    assert response.status == 200
+    assert len(response.msg.get_all("date") or []) == 1
+    assert len(response.msg.get_all("server") or []) == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/backend-api/codex/responses", b'{"input": "hi"}'),
+        ("GET", "/backend-api/codex/models", b""),
+    ],
+)
+def test_http_1_0_request_gets_505(
+    method: str, path: str, body: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """RFC 9112 6.1 forbids a chunked answer to an HTTP/1.0 client, and the proxy re-frames every body as chunked.
+
+    Args:
+        method: The request method.
+        path: An allowed path.
+        body: The request body.
+    """
+    upstream.release.set()
+    context = ssl.create_default_context(cadata=proxy.ca_pem.decode())
+    framing = f"Content-Length: {len(body)}\r\n".encode() if method == "POST" else b""
+    with (
+        socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as raw,
+        context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
+    ):
+        secured.sendall(
+            f"{method} {path} HTTP/1.0\r\nHost: x\r\nAuthorization: Bearer {PLACEHOLDER}\r\n".encode()
+            + framing
+            + b"\r\n"
+            + body
+        )
+        answer = b""
+        while chunk := secured.recv(65536):
+            answer += chunk
+
+    assert answer.startswith(b"HTTP/1.1 505 ")
+    assert b"chunked" not in answer.lower()
+    assert upstream.seen == []
+
+
 def test_streamed_events_pass_through_as_they_arrive(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
     """The first SSE event reaches codex while the provider still holds back the second."""
     response = _request(proxy, "POST", "/backend-api/codex/responses")

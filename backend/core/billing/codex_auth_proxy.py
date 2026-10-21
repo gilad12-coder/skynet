@@ -92,7 +92,8 @@ _HOP_BY_HOP = frozenset(
 # Codex's own credentials and cookies never pass in either direction: the
 # proxy sets the real ones, and a provider cookie must not reach the turn.
 _DROPPED_REQUEST = _HOP_BY_HOP | {"host", "authorization", "chatgpt-account-id", "cookie"}
-_DROPPED_RESPONSE = _HOP_BY_HOP | {"set-cookie"}
+# Date and Server are single-value fields that send_response already sets.
+_DROPPED_RESPONSE = _HOP_BY_HOP | {"set-cookie", "date", "server"}
 
 
 def _b64url(value: dict[str, Any]) -> str:
@@ -522,6 +523,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self) -> None:
         """Run the checks, then forward the request and stream the response."""
+        if self.request_version != "HTTP/1.1":
+            # Every forwarded body goes out chunked, which RFC 9112 6.1 forbids to an HTTP/1.0 client.
+            self._refuse(505)
+            return
         path = self.path.split("?", 1)[0]
         authorization = (self.headers.get("authorization") or "").encode()
         if not secrets.compare_digest(authorization, self.server.expected):
