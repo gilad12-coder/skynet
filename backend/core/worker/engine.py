@@ -38,7 +38,13 @@ from ..billing import (
     payload_uses_token_source,
 )
 from ..billing.budgets import BudgetService
-from ..billing.host_agent import bind_host_agent, failure_message, host_agent_failure
+from ..billing.host_agent import (
+    attach_host_agent_token,
+    bind_host_agent,
+    failure_message,
+    host_agent_failure,
+    host_proposer,
+)
 from ..billing.metering import debit_at_fallback_price
 from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
@@ -901,8 +907,6 @@ class BackgroundWorker:
                             else ()
                         ),
                     )
-                    if settings.local_mode:
-                        bind_host_agent(budget_gateway, settings)
                     checkpoint_tracker.update(sandbox_image=sandbox_image)
                     parent_payload = resolve_execution_credentials(
                         payload_dict,
@@ -919,6 +923,13 @@ class BackgroundWorker:
                         ),
                         allow_private_tools=settings.discover_allow_private,
                     )
+                    host = host_proposer(payload_dict)
+                    if host is not None:
+                        # The CLI and permission come from the stored run settings,
+                        # never from the guest, and only this run's proposer gets the token.
+                        attach_host_agent_token(
+                            payload_dict, bind_host_agent(budget_gateway, settings, cli=host[0], permission=host[1])
+                        )
                     # The wizard leaves the ceiling unset for a budget without a
                     # limit, while the guest's proposer still plans its spend
                     # against one, so the parent hands it the ledger's allowance.

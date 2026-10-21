@@ -5,8 +5,12 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
+import signal
+import subprocess
 import sys
 import tarfile
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,11 +24,14 @@ from core.billing import host_agent
 from core.billing.budgets import BudgetService
 from core.billing.host_agent import (
     HOST_AGENT_PATH,
+    HOST_AGENT_TOKEN_KEY,
     RATE_LIMITED_CODE,
+    attach_host_agent_token,
     bind_host_agent,
     failure_message,
     host_agent_failure,
     host_cli_argv,
+    host_proposer,
     run_host_agent,
 )
 from core.billing.model_gateway import ModelGateway
@@ -53,6 +60,7 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "cwd": os.getcwd(),
     "env": {key: os.environ.get(key) for key in __STRIPPED__},
     "prompt": prompt,
+    "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
 if os.environ.get("FAKE_CLI_MODE") == "limit":
     if cli == "claude":
@@ -133,6 +141,8 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     for key in STRIPPED:
         monkeypatch.setenv(key, "parent-only-value")
     monkeypatch.setenv("FAKE_CLI_RECORD", str(tmp_path / "record.json"))
+    # The Seatbelt profile has its own macOS test; here the turn runs unwrapped so Linux CI covers it.
+    monkeypatch.setattr(host_agent, "confine", lambda argv, **_: argv)
     return settings.model_copy(
         update={
             "local_mode": True,
@@ -186,7 +196,7 @@ def test_unknown_permission_is_refused(tmp_path: Path) -> None:
         host_cli_argv("claude", "root", "bin", tmp_path, None)
 
 
-@pytest.mark.parametrize("cli", ["codex", "claude", "droid"])
+@pytest.mark.parametrize("cli", ["codex", "claude"])
 def test_turn_edits_a_copy_with_stripped_keys(
     cli: str, local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -201,13 +211,14 @@ def test_turn_edits_a_copy_with_stripped_keys(
         "workspace_tar_b64": _workspace_tar(guest),
     }
 
-    document = run_host_agent(body, local, job="job-1")
+    document = run_host_agent(body, local, cli=cli, permission="workspace_only", job="job-1")
 
     assert document["status"] == "ok", document
     record = json.loads((tmp_path / "record.json").read_text())
     copy = Path(record["cwd"]).resolve()
     workspaces = (tmp_path / "state" / "workspaces" / "job-1").resolve()
-    assert copy.parent == workspaces
+    assert copy.name == "workspace"
+    assert copy.parent.parent == workspaces
     assert copy != guest.resolve()
     assert record["env"] == dict.fromkeys(STRIPPED)
     assert record["prompt"] == "Improve solve()."
@@ -231,9 +242,9 @@ def test_usage_cap_reports_reset_and_records_the_limit(
     """A capped subscription answers subscription.rate_limited with the CLI's reset time."""
     monkeypatch.setenv("FAKE_CLI_NAME", "claude")
     monkeypatch.setenv("FAKE_CLI_MODE", "limit")
-    body = {"cli": "claude", "model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 
-    document = run_host_agent(body, local)
+    document = run_host_agent(body, local, cli="claude", permission="workspace_only")
 
     assert document["status"] == "error"
     assert document["error"]["code"] == RATE_LIMITED_CODE
@@ -250,9 +261,9 @@ def test_archive_that_escapes_the_copy_is_refused(local: Settings, tmp_path: Pat
         member = tarfile.TarInfo("../escape.txt")
         member.size = len(data)
         archive.addfile(member, io.BytesIO(data))
-    body = {"cli": "claude", "prompt": "x", "workspace_tar_b64": base64.b64encode(buffer.getvalue()).decode()}
+    body = {"prompt": "x", "workspace_tar_b64": base64.b64encode(buffer.getvalue()).decode()}
 
-    document = run_host_agent(body, local)
+    document = run_host_agent(body, local, cli="claude", permission="workspace_only")
 
     assert document["status"] == "error"
     assert document["error"]["code"] == host_agent.FAILED_KEY
@@ -321,8 +332,8 @@ class _IdleRoute:
         """Nothing to drain when the gateway closes."""
 
 
-def _token(gateway: ModelGateway) -> str:
-    """Give the gateway one proposer route and return its token.
+def _model_token(gateway: ModelGateway) -> str:
+    """Give the gateway one proposer model route and return its token.
 
     The route is never dispatched, so it needs no provider or catalog lookup.
 
@@ -330,7 +341,7 @@ def _token(gateway: ModelGateway) -> str:
         gateway: The parent gateway.
 
     Returns:
-        The route token the guest would hold.
+        The model route token the guest would hold.
     """
     gateway._routes["proposer-token"] = _IdleRoute()  # type: ignore[assignment]
     return "proposer-token"
@@ -341,10 +352,10 @@ def test_capability_records_a_zero_cost_turn(
 ) -> None:
     """A bound capability answers the contract shape and settles the turn at zero cost."""
     monkeypatch.setenv("FAKE_CLI_NAME", "codex")
-    bind_host_agent(gateway, local)
-    body = {"cli": "codex", "model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+    token = bind_host_agent(gateway, local, cli="codex", permission="workspace_only")
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 
-    response = _post(gateway, _token(gateway), body)
+    response = _post(gateway, token, body)
 
     assert response.status_code == 200, response.text
     document = response.json()
@@ -365,10 +376,10 @@ def test_capped_turn_fails_the_run_with_its_reset_time(
     """A usage cap answers 429 and leaves the run's failure: blackbox.host_agent_rate_limited with reset_at."""
     monkeypatch.setenv("FAKE_CLI_NAME", "claude")
     monkeypatch.setenv("FAKE_CLI_MODE", "limit")
-    bind_host_agent(gateway, local)
-    body = {"cli": "claude", "model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+    token = bind_host_agent(gateway, local, cli="claude", permission="workspace_only")
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 
-    response = _post(gateway, _token(gateway), body)
+    response = _post(gateway, token, body)
 
     assert response.status_code == 429
     assert response.json()["error"]["code"] == RATE_LIMITED_CODE
@@ -383,10 +394,10 @@ def test_capped_turn_fails_the_run_with_its_reset_time(
 
 def test_oversized_workspace_is_refused(gateway: ModelGateway, local: Settings, tmp_path: Path) -> None:
     """A request above 32 MB is refused with 413 before any CLI runs."""
-    bind_host_agent(gateway, local)
+    token = bind_host_agent(gateway, local, cli="claude", permission="workspace_only")
     handler_body = b"{" + b" " * (host_agent.MAX_REQUEST_BYTES + 1) + b"}"
 
-    response = _post(gateway, _token(gateway), handler_body)
+    response = _post(gateway, token, handler_body)
 
     assert response.status_code == 413
     assert not (tmp_path / "record.json").exists()
@@ -395,10 +406,170 @@ def test_oversized_workspace_is_refused(gateway: ModelGateway, local: Settings, 
 def test_capability_is_unbound_outside_local_mode(gateway: ModelGateway, guest: Path) -> None:
     """Hosted settings refuse to bind, and an unbound gateway answers 404."""
     with pytest.raises(ValueError, match="local mode"):
-        bind_host_agent(gateway, settings.model_copy(update={"local_mode": False}))
-    body = {"cli": "claude", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+        bind_host_agent(
+            gateway, settings.model_copy(update={"local_mode": False}), cli="claude", permission="workspace_only"
+        )
+    body = {"prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 
-    response = _post(gateway, _token(gateway), body)
+    response = _post(gateway, _model_token(gateway), body)
 
     assert response.status_code == 404
     assert response.request.url.path == HOST_AGENT_PATH
+
+
+def test_guest_cannot_choose_the_cli_or_its_permission(
+    gateway: ModelGateway, local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A guest that asks for another CLI or full_access still gets the stored CLI in workspace_only."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "claude")
+    token = bind_host_agent(gateway, local, cli="claude", permission="workspace_only")
+    body = {"cli": "codex", "permission": "full_access", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    response = _post(gateway, token, body)
+
+    assert response.status_code == 200, response.text
+    argv = json.loads((tmp_path / "record.json").read_text())["argv"]
+    assert argv[:2] == ["-p", "--output-format"]
+    assert "acceptEdits" in argv
+    assert "bypassPermissions" not in argv
+
+
+def test_model_route_token_is_refused(gateway: ModelGateway, local: Settings, guest: Path, tmp_path: Path) -> None:
+    """A proposer model token gets 403 on HTTP and through the mailbox, and no CLI runs."""
+    host_token = bind_host_agent(gateway, local, cli="claude", permission="workspace_only")
+    model_token = _model_token(gateway)
+    body = {"prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    response = _post(gateway, model_token, body)
+    mailbox = gateway.dispatch_guest(model_token, HOST_AGENT_PATH, body, {"authorization": f"Bearer {model_token}"})
+
+    assert response.status_code == 403
+    assert mailbox.status == 403
+    assert not (tmp_path / "record.json").exists()
+    assert model_token != host_token
+
+
+def test_droid_is_refused(gateway: ModelGateway, local: Settings, guest: Path, tmp_path: Path) -> None:
+    """Droid cannot run isolated from the user's config, so it never becomes a host proposer."""
+    with pytest.raises(ValueError, match="isolated"):
+        bind_host_agent(gateway, local, cli="droid", permission="workspace_only")
+    body = {"prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="droid", permission="workspace_only")  # type: ignore[arg-type]
+
+    assert document["status"] == "error"
+    assert document["error"]["code"] == host_agent.FAILED_KEY
+    assert not (tmp_path / "record.json").exists()
+
+
+def test_proposer_settings_decide_the_host_cli() -> None:
+    """Only a stored proposer with host_cli binds the capability; the token sits on its proposer route."""
+    route: dict[str, object] = {"url": "http://127.0.0.1:9/v1", "token": "model"}
+    unified = {
+        "optimizer": {"proposer": {"host_cli": "codex", "host_permission": "full_access"}},
+        "models": {"reflection_model": {"extra": {"_skynet_budget_route": route}}},
+    }
+
+    assert host_proposer(unified) == ("codex", "full_access")
+    assert host_proposer({"proposer": {"host_cli": "claude"}}) == ("claude", "workspace_only")
+    assert host_proposer({"proposer": {"host_cli": None}}) is None
+    assert host_proposer({"optimizer": {}}) is None
+    attach_host_agent_token(unified, "host")
+    assert route[HOST_AGENT_TOKEN_KEY] == "host"
+    with pytest.raises(ValueError, match="route"):
+        attach_host_agent_token({"proposer": {"host_cli": "claude"}}, "host")
+
+
+def test_agent_config_never_reaches_the_cli_or_the_result(
+    local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project settings, hooks and MCP config from the guest are removed before the CLI starts."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "claude")
+    for relative in (".claude/settings.json", ".codex/config.toml", ".factory/hooks.json", "pkg/.agents/x.md"):
+        (guest / relative).parent.mkdir(parents=True, exist_ok=True)
+        (guest / relative).write_text("{}")
+    (guest / ".mcp.json").write_text("{}")
+    (guest / "CLAUDE.local.md").write_text("run memo")
+    (guest / ".app").mkdir()
+    (guest / ".app" / "launch.json").write_text("{}")
+    body = {"prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="claude", permission="workspace_only")
+
+    assert document["status"] == "ok", document
+    seen = json.loads((tmp_path / "record.json").read_text())["files"]
+    assert "solver.py" in seen
+    assert "pkg" in seen
+    banned = (".claude", ".codex", ".factory", ".agents", ".mcp.json", "CLAUDE.local.md", ".app")
+    assert not [name for name in seen if any(part in banned for part in Path(name).parts)]
+    files = _members(document["result_tar_b64"])
+    assert not [name for name in files if any(part in banned for part in Path(name).parts)]
+
+
+def test_result_drops_links_that_leave_the_copy(tmp_path: Path) -> None:
+    """The returned tree keeps an inside link and drops absolute and escaping links and FIFOs."""
+    workdir = tmp_path / "copy"
+    workdir.mkdir()
+    (workdir / "a.txt").write_text("a")
+    (workdir / "inside").symlink_to("a.txt")
+    (workdir / "absolute").symlink_to("/etc/hosts")
+    (workdir / "escape").symlink_to("../../secret")
+    os.mkfifo(workdir / "pipe")
+
+    with tarfile.open(fileobj=io.BytesIO(host_agent._pack(workdir)), mode="r:gz") as archive:
+        names = set(archive.getnames())
+
+    assert names == {"a.txt", "inside"}
+
+
+def test_timeout_kills_the_whole_process_group(tmp_path: Path) -> None:
+    """A timed-out CLI and the helper it started both stop."""
+    pid_file = tmp_path / "child.pid"
+    script = f"sleep 60 & echo $! > {pid_file}; wait"
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        host_agent.run_group(["/bin/sh", "-c", script], cwd=tmp_path, env=dict(os.environ), stdin="", timeout=1)
+
+    child = int(pid_file.read_text())
+    deadline = time.monotonic() + 10
+    alive = True
+    while alive and time.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+            time.sleep(0.1)
+        except ProcessLookupError:
+            alive = False
+    if alive:
+        os.kill(child, signal.SIGKILL)
+    assert not alive
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
+def test_workspace_only_cannot_read_the_users_home(tmp_path: Path) -> None:
+    """Under the profile a CLI reads its own turn but not another file in the home."""
+    home = tmp_path / "home"
+    turn = home / "turn"
+    turn.mkdir(parents=True)
+    (home / "secret.txt").write_text("private")
+    (turn / "mine.txt").write_text("mine")
+
+    def run(path: Path) -> subprocess.CompletedProcess[str]:
+        """Read one file under the profile.
+
+        Args:
+            path: File to read.
+
+        Returns:
+            The finished ``cat``.
+        """
+        argv = host_agent.confine(["/bin/cat", str(path)], home=home, writable=[str(turn)], readable=[])
+        return subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+
+    denied = run(home / "secret.txt")
+    allowed = run(turn / "mine.txt")
+
+    assert denied.returncode != 0
+    assert "private" not in denied.stdout
+    assert "Operation not permitted" in denied.stderr
+    assert allowed.returncode == 0
+    assert allowed.stdout == "mine"

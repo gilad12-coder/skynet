@@ -448,39 +448,42 @@ def pi_editor_launch(
 
 
 HOST_AGENT_SHIM_FILE = ".app/host-agent/shim.py"
-# Each CLI reads its own instructions file from the copied workspace.
-_HOST_INSTRUCTIONS = {"codex": "AGENTS.md", "claude": "CLAUDE.md", "droid": "AGENTS.md"}
+# Each CLI reads its own instructions file from the copied workspace. Droid
+# cannot run isolated from the user's own config, so it is not offered.
+_HOST_INSTRUCTIONS = {"codex": "AGENTS.md", "claude": "CLAUDE.md"}
 
 
-def host_cli_launch(model: str, gateway: GatewayConfig, host_cli: str, host_permission: str) -> HarnessLaunch:
+def host_cli_launch(model: str, gateway: GatewayConfig, host_cli: str, host_agent_token: str | None) -> HarnessLaunch:
     """Build the launch that hands each proposer turn to a CLI on the user's machine.
 
     The sandbox runs only the stdlib shim; the parent runs the CLI on a copy
-    of the workspace (:mod:`core.billing.host_agent`).
+    of the workspace (:mod:`core.billing.host_agent`). The parent picks the CLI
+    and its permission from the run settings, so the shim sends neither.
 
     Args:
         model: Proposer model id, passed through to the parent.
-        gateway: Gateway URL and key the shim reaches the parent through.
-        host_cli: ``codex``, ``claude`` or ``droid``.
-        host_permission: ``workspace_only`` or ``full_access``.
+        gateway: Gateway URL the shim reaches the parent through.
+        host_cli: ``codex`` or ``claude``.
+        host_agent_token: The token the parent minted for this proposer.
 
     Returns:
         The launch.
 
     Raises:
-        ServiceError: When local mode is off or the CLI is unknown.
+        ServiceError: When local mode is off, the CLI cannot run isolated, or the token is missing.
     """
     if not settings.local_mode:
         raise ServiceError("Host CLI proposers run only in the Mac app.")
     instructions = _HOST_INSTRUCTIONS.get(host_cli)
     if instructions is None:
-        raise ServiceError(f"Unknown host CLI '{host_cli}'.")
+        raise ServiceError(f"The host CLI '{host_cli}' cannot run isolated from your own config.")
+    if not host_agent_token:
+        raise ServiceError("This run has no host proposer token.")
     env = _base_env(model, gateway)
     env.update(
         with_legacy_env(
             {
-                "APP_HOST_CLI": host_cli,
-                "APP_HOST_PERMISSION": host_permission,
+                "APP_HOST_AGENT_TOKEN": host_agent_token,
                 "APP_HOST_AGENT_TIMEOUT": str(settings.host_agent_timeout_seconds),
             }
         )
@@ -534,7 +537,7 @@ def build_launch(
     *,
     protected: bool = False,
     host_cli: str | None = None,
-    host_permission: str = "workspace_only",
+    host_agent_token: str | None = None,
 ) -> HarnessLaunch:
     """Resolve the launch for a job's target: catalog harness or custom command.
 
@@ -547,7 +550,7 @@ def build_launch(
         gateway: Gateway URL and key the harness routes its model calls through.
         protected: Require preinstalled pinned dependencies and the isolated model mailbox.
         host_cli: The user's own CLI that runs each proposer turn, if any.
-        host_permission: How much the host CLI may do outside its copied workspace.
+        host_agent_token: The token the parent minted for that host proposer.
 
     Returns:
         The launch.
@@ -557,7 +560,7 @@ def build_launch(
     """
     model = str(target.model).removeprefix(_OPENROUTER_PREFIX)
     if host_cli is not None:
-        return host_cli_launch(model, gateway, host_cli, host_permission)
+        return host_cli_launch(model, gateway, host_cli, host_agent_token)
     if target.harness == BLACKBOX_HARNESS_CUSTOM:
         run_command = _fill(target.run_command, model, gateway, protected=protected)
         if run_command is None:

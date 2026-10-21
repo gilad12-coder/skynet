@@ -3,8 +3,8 @@
 In local mode a proposer can run on the user's own coding CLI (Codex, Claude
 Code or Droid) instead of inside the sandbox. This shim is the proposer
 command the sandbox runs. It packs the current workspace, sends it to the
-parent's ``/v1/_host_agent`` capability with its route token, and writes the
-tree that comes back over the workspace. The parent runs the CLI in a copy,
+parent's ``/v1/_host_agent`` capability with the token the parent minted for
+this proposer, and writes the tree that comes back over the workspace. The parent runs the CLI in a copy,
 never in the user's own folder.
 
 The sandbox image may not have the backend on its import path, so the
@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import os
+import shutil
 import sys
 import tarfile
 import urllib.error
@@ -32,6 +33,10 @@ MAX_REQUEST_BYTES = 32 * 1024 * 1024
 # Launch-generated config (this shim included) and bridge session state stay
 # in the sandbox; the host CLI never needs them.
 EXCLUDED_TOP_LEVEL = frozenset({".app", ".app-bridge"})
+# Project config the host CLIs load (settings, hooks, MCP servers, skills).
+# It never leaves the sandbox, so guest code cannot run on the Mac through it.
+AGENT_CONFIG_NAMES = frozenset({".claude", ".codex", ".factory", ".agents", ".mcp.json", "CLAUDE.local.md"})
+FAILED_CODE = "blackbox.host_agent_failed"
 RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILURE_PREFIX = "APP_HOST_AGENT_ERROR "
 _TIMEOUT_MARGIN_SECONDS = 120.0
@@ -64,16 +69,17 @@ def endpoint_url() -> str:
     return base.rstrip("/").removesuffix("/v1") + CAPABILITY_PATH
 
 
-def _excluded(relative: Path) -> bool:
-    """Tell whether a workspace path stays out of the shipped archive.
+def excluded_path(relative: Path) -> bool:
+    """Tell whether a workspace path stays out of every host-agent archive.
 
     Args:
         relative: Path relative to the workspace root.
 
     Returns:
-        True for launch config and bridge state.
+        True for launch config, bridge state and any CLI's project config.
     """
-    return bool(relative.parts) and relative.parts[0] in EXCLUDED_TOP_LEVEL
+    parts = relative.parts
+    return bool(parts) and (parts[0] in EXCLUDED_TOP_LEVEL or any(part in AGENT_CONFIG_NAMES for part in parts))
 
 
 def pack_workspace(workspace: Path) -> tuple[bytes, set[str]]:
@@ -90,7 +96,7 @@ def pack_workspace(workspace: Path) -> tuple[bytes, set[str]]:
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         for path in sorted(workspace.rglob("*")):
             relative = path.relative_to(workspace)
-            if _excluded(relative):
+            if excluded_path(relative):
                 continue
             archive.add(path, arcname=relative.as_posix(), recursive=False)
             if path.is_file() and not path.is_symlink():
@@ -98,26 +104,88 @@ def pack_workspace(workspace: Path) -> tuple[bytes, set[str]]:
     return buffer.getvalue(), files
 
 
+class ResultRefusedError(ValueError):
+    """Raised for a returned tree the shim will not write into the workspace."""
+
+
+def _checked_members(workspace: Path, archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    """Validate every returned member before anything is written.
+
+    Args:
+        workspace: Directory the proposer works in.
+        archive: The returned archive.
+
+    Returns:
+        The members to apply, without launch files or agent config.
+
+    Raises:
+        ResultRefusedError: For an absolute or escaping path or link, a hard link,
+            or a FIFO or device.
+    """
+    members = []
+    for member in archive.getmembers():
+        name = member.name.removeprefix("./")
+        if not name or name == ".":
+            continue
+        if excluded_path(Path(name)):
+            continue
+        if Path(name).is_absolute():
+            # data_filter would quietly make it relative; the parent never sends one.
+            raise ResultRefusedError(f"The result has an absolute path: {name}")
+        if member.islnk() or not (member.isreg() or member.isdir() or member.issym()):
+            raise ResultRefusedError(f"The result has a special file: {name}")
+        try:
+            tarfile.data_filter(member, str(workspace))
+        except tarfile.FilterError as error:
+            raise ResultRefusedError(f"The result has an unsafe entry: {error}") from error
+        members.append(member)
+    return members
+
+
+def _remove(path: Path) -> None:
+    """Delete a file, link or directory tree without following links.
+
+    Args:
+        path: Path to remove; a missing path is ignored.
+    """
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        path.unlink()
+
+
 def apply_result(workspace: Path, archive_bytes: bytes, shipped: set[str]) -> None:
     """Write the returned tree over the workspace, including deletions.
+
+    Every member is checked first; a refused result leaves the workspace as it was.
 
     Args:
         workspace: Directory the proposer works in.
         archive_bytes: Gzip tar of the edited copy.
         shipped: Regular files that were sent, so files the CLI deleted are removed here too.
+
+    Raises:
+        ResultRefusedError: When the archive is unreadable or any member is unsafe.
     """
-    with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
-        members = archive.getmembers()
+    try:
+        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")  # noqa: SIM115 - closed by the with below
+    except (tarfile.TarError, OSError, EOFError) as error:
+        raise ResultRefusedError(f"The result archive is invalid: {error}") from error
+    with archive:
+        members = _checked_members(workspace, archive)
         returned = {member.name.removeprefix("./") for member in members}
         for relative in shipped - returned:
-            (workspace / relative).unlink(missing_ok=True)
+            _remove(workspace / relative)
         for member in members:
-            target = workspace / member.name
-            # A file the CLI replaced with a link (or the reverse) must not
-            # make extraction write through the old entry.
-            if target.is_symlink() or (target.exists() and not target.is_dir() and member.isdir()):
-                target.unlink()
-        archive.extractall(workspace, filter="data")
+            target = workspace / member.name.removeprefix("./")
+            # A path the CLI turned into another kind (file, folder or link)
+            # must not make extraction write through the old entry.
+            same_kind = (member.isdir() and target.is_dir() and not target.is_symlink()) or (
+                member.isreg() and target.is_file() and not target.is_symlink()
+            )
+            if os.path.lexists(target) and not same_kind:
+                _remove(target)
+        archive.extractall(workspace, members=members, filter="data")
 
 
 def _post(url: str, token: str, body: bytes, timeout: float) -> tuple[int, dict[str, Any]]:
@@ -176,31 +244,33 @@ def main() -> int:
     prompt_file = _env("APP_PROMPT_FILE")
     prompt = Path(prompt_file).read_text(encoding="utf-8") if prompt_file else ""
     archive, shipped = pack_workspace(workspace)
+    # The parent takes the CLI and its permission from the run settings only.
     body = json.dumps(
         {
-            "cli": _env("APP_HOST_CLI"),
             "model": _env("APP_MODEL"),
             "prompt": prompt,
-            "permission": _env("APP_HOST_PERMISSION", "workspace_only"),
             "workspace_tar_b64": base64.b64encode(archive).decode("ascii"),
         }
     ).encode()
     if len(body) > MAX_REQUEST_BYTES:
         return _fail(
-            "blackbox.host_agent_failed",
+            FAILED_CODE,
             f"The workspace is too large for a host agent turn ({len(body)} bytes, limit {MAX_REQUEST_BYTES}).",
         )
     timeout = float(_env("APP_HOST_AGENT_TIMEOUT", "3600")) + _TIMEOUT_MARGIN_SECONDS
     try:
-        status, document = _post(endpoint_url(), _env("APP_API_KEY"), body, timeout)
+        status, document = _post(endpoint_url(), _env("APP_HOST_AGENT_TOKEN"), body, timeout)
     except (OSError, RuntimeError) as error:
-        return _fail("blackbox.host_agent_failed", f"The host agent could not be reached: {error}")
+        return _fail(FAILED_CODE, f"The host agent could not be reached: {error}")
     error = document.get("error") if isinstance(document.get("error"), dict) else {}
     if status != 200 or document.get("status") != "ok":
-        code = str(error.get("code") or "blackbox.host_agent_failed")
+        code = str(error.get("code") or FAILED_CODE)
         message = str(error.get("message") or document.get("transcript_tail") or f"HTTP {status}")
         return _fail(code, message, error.get("reset_at"))
-    apply_result(workspace, base64.b64decode(document["result_tar_b64"]), shipped)
+    try:
+        apply_result(workspace, base64.b64decode(str(document.get("result_tar_b64") or "")), shipped)
+    except (ResultRefusedError, ValueError) as error:
+        return _fail(FAILED_CODE, f"The host agent's result was refused: {error}")
     usage = document.get("usage") or {}
     print(
         json.dumps(

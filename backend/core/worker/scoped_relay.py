@@ -7,10 +7,9 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..billing.host_agent import HOST_AGENT_PATH, HOST_AGENT_TOKEN_KEY
 from ..billing.model_dispatch import ModelHTTPResult
 from ..config import settings
-
-HOST_AGENT_PATH = "/v1/_host_agent"
 
 
 def model_forwarder(payload: dict[str, Any]) -> Any:
@@ -29,8 +28,6 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             "/v1/chat/completions",
             "/v1/responses",
             "/v1/_budget/state",
-            # Served only by a local-mode gateway; elsewhere the parent answers 404.
-            HOST_AGENT_PATH,
         }
     )
 
@@ -71,6 +68,9 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             register(route, model_paths)
             if isinstance(route, dict):
                 register(route.get("embedding"), frozenset({"/v1/embeddings", "/v1/_budget/state"}))
+                if route.get(HOST_AGENT_TOKEN_KEY):
+                    # Only a host proposer's own token reaches the host agent, and only there.
+                    register({**route, "token": route[HOST_AGENT_TOKEN_KEY]}, frozenset({HOST_AGENT_PATH}))
     register(payload.get("_skynet_target_route"), model_paths)
     register(payload.get("_skynet_tools_route"), frozenset({"/v1/_mcp", "/v1/_budget/state"}))
     register(payload.get("_skynet_packages_route"), frozenset({"/v1/_packages"}))
