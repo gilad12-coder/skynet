@@ -154,3 +154,23 @@ def test_too_deep_bundle_writes_no_row(store: _SchemaJobStore) -> None:
     assert excinfo.value.code == "sync.invalid_bundle"
     with store.engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM jobs")).scalar() == 0
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda b: b["job"]["latest_metrics"].update(optimized_test_metric=float("nan")),
+        lambda b: b["job"].update(message="Fin\x00ished"),
+        lambda b: b["job"]["latest_metrics"].update(note="a\x00b"),
+    ],
+    ids=["nan-metric", "nul-message", "nul-metric-string"],
+)
+def test_values_jsonb_rejects_are_refused_before_the_write(store: _SchemaJobStore, mutate: Any) -> None:
+    """NaN and NUL, which PostgreSQL would reject with a server error, give a sync error and no row."""
+    bundle = _bundle()
+    mutate(bundle)
+    with pytest.raises(run_sync.RunSyncError) as excinfo:
+        run_sync.import_run(store, "bob", json.loads(json.dumps(bundle)))
+    assert excinfo.value.code == "sync.invalid_bundle"
+    with store.engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM jobs")).scalar() == 0

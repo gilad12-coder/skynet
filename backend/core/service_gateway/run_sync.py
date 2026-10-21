@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
@@ -71,25 +72,41 @@ _MAX_MESSAGE_CHARS = 10_000
 # Deep nesting passes json.loads but later breaks Python-side reads and
 # serialization of the caller's run list and detail, so it is refused up front.
 MAX_BUNDLE_DEPTH = 64
+# The worker writes these columns itself on a normal run, so the store does not
+# meter them; an import takes them from the caller, so they are capped and counted.
+# latest_metrics also ships in every row of the run list.
+MAX_JOB_FIELD_BYTES = 64 * 1024
 
 
-def _within_depth(value: Any, limit: int) -> bool:
-    """Report whether ``value`` nests no deeper than ``limit`` containers.
+def _is_storable(value: Any, limit: int) -> bool:
+    """Report whether ``value`` is JSON that PostgreSQL JSONB and text columns accept.
 
-    Walks iteratively, so a hostile depth cannot exhaust the Python stack.
+    Walks iteratively, so a hostile depth cannot exhaust the Python stack. JSONB
+    rejects NaN, Infinity and NUL characters, which ``json.loads`` accepts.
 
     Args:
         value: A decoded JSON value.
         limit: Largest allowed number of nested lists or dicts.
 
     Returns:
-        ``True`` when the deepest container is at most ``limit`` levels down.
+        ``True`` when the deepest container is at most ``limit`` levels down, every
+        float is finite, and no string or key contains a NUL character.
     """
     stack: list[tuple[Any, int]] = [(value, 1)]
     while stack:
         node, depth = stack.pop()
+        if isinstance(node, float):
+            if not math.isfinite(node):
+                return False
+            continue
+        if isinstance(node, str):
+            if "\x00" in node:
+                return False
+            continue
         if isinstance(node, dict):
-            children = node.values()
+            children = list(node.values())
+            if any(not isinstance(key, str) or "\x00" in key for key in node):
+                return False
         elif isinstance(node, list):
             children = node
         else:
@@ -280,7 +297,7 @@ def _decode_program_artifact(artifacts: dict[str, str]) -> dict[str, Any] | None
         artifact = json.loads(base64.b64decode(encoded, validate=True))
     except (binascii.Error, ValueError, RecursionError):
         raise RunSyncError("sync.invalid_bundle", 422) from None
-    if not isinstance(artifact, dict) or not _within_depth(artifact, MAX_BUNDLE_DEPTH):
+    if not isinstance(artifact, dict) or not _is_storable(artifact, MAX_BUNDLE_DEPTH):
         raise RunSyncError("sync.invalid_bundle", 422)
     return {key: value for key, value in artifact.items() if key not in _DROPPED_ARTIFACT_KEYS}
 
@@ -370,18 +387,23 @@ def import_run(job_store, username: str, bundle: dict) -> str:
     Raises:
         RunSyncError: 422 ``sync.unsupported_schema`` for another schema version
             and 422 ``sync.invalid_bundle`` for a malformed or too deeply
-            nested bundle.
+            nested bundle, a value PostgreSQL cannot store, or job metrics or
+            terminal evidence over ``MAX_JOB_FIELD_BYTES``.
     """
     if not isinstance(bundle, dict):
         raise RunSyncError("sync.invalid_bundle", 422)
     if bundle.get("schema") != SCHEMA_VERSION:
         raise RunSyncError("sync.unsupported_schema", 422, schema=str(bundle.get("schema"))[:64])
-    if not _within_depth(bundle, MAX_BUNDLE_DEPTH):
+    if not _is_storable(bundle, MAX_BUNDLE_DEPTH):
         raise RunSyncError("sync.invalid_bundle", 422)
     try:
         parsed = _Bundle.model_validate(bundle)
     except ValidationError:
         raise RunSyncError("sync.invalid_bundle", 422) from None
+    latest_metrics_bytes = json_byte_size(parsed.job.latest_metrics)
+    terminal_evidence_bytes = json_byte_size(parsed.job.terminal_evidence)
+    if max(latest_metrics_bytes, terminal_evidence_bytes) > MAX_JOB_FIELD_BYTES:
+        raise RunSyncError("sync.invalid_bundle", 422)
 
     now = datetime.now(UTC)
     optimization_type = parsed.optimization.optimization_type
@@ -420,7 +442,7 @@ def import_run(job_store, username: str, bundle: dict) -> str:
         result_availability=parsed.job.result_availability,
         terminal_evidence=parsed.job.terminal_evidence,
         accumulated_runtime_seconds=parsed.job.accumulated_runtime_seconds,
-        stored_bytes=json_byte_size(result) + json_byte_size(overview),
+        stored_bytes=json_byte_size(result) + json_byte_size(overview) + latest_metrics_bytes + terminal_evidence_bytes,
     )
     with Session(job_store.engine) as session:
         session.add(job)

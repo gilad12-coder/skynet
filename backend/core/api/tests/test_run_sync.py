@@ -387,3 +387,53 @@ def test_deeply_nested_metrics_are_422(hosted_store: _SQLiteJobStore, bundle: di
     assert resp.status_code == 422
     assert resp.json()["detail"] == t_en("sync.invalid_bundle")
     assert _count(hosted_store, JobModel) == 0
+
+
+@pytest.mark.parametrize("field", ["latest_metrics", "terminal_evidence"])
+def test_oversized_job_field_is_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any], field: str) -> None:
+    """Metrics or terminal evidence over the field cap are refused, so no import can store them uncounted."""
+    bundle["job"][field] = {"blob": "x" * (run_sync.MAX_JOB_FIELD_BYTES + 1)}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
+def test_job_fields_count_toward_storage(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Metrics and terminal evidence within the cap count in the stored size, so the quota sees them."""
+    blob = "x" * (run_sync.MAX_JOB_FIELD_BYTES - 1024)
+    bundle["job"]["latest_metrics"] = {"blob": blob}
+    bundle["job"]["terminal_evidence"] = {"blob": blob}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    used = hosted_store.compute_user_storage(HOSTED_USER.username).total
+    assert used >= 2 * len(blob)
+
+    body_bytes = len(json.dumps(bundle).encode())
+    monkeypatch.setattr(hosted_store, "get_effective_user_storage_quota", lambda username: used + body_bytes - 1)
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 409
+    assert _count(hosted_store, JobModel) == 1
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda b: b["job"]["latest_metrics"].update(optimized_test_metric=float("nan")),
+        lambda b: b["events"][0]["metrics"].update(baseline_test_metric=float("inf")),
+        lambda b: b["job"].update(message="Fin\x00ished"),
+        lambda b: b["job"]["latest_metrics"].update({"bad\x00key": 1}),
+    ],
+    ids=["nan-metric", "infinite-event-metric", "nul-message", "nul-key"],
+)
+def test_values_postgres_cannot_store_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], mutate: Any
+) -> None:
+    """NaN, Infinity and NUL characters are refused before the write, though SQLite would accept them."""
+    mutate(bundle)
+    resp = _client(hosted_store, HOSTED_USER).post("/optimizations/import", content=json.dumps(bundle))
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
