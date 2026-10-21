@@ -1,4 +1,4 @@
-"""Exercise concurrent desktop link refreshes against real PostgreSQL row locks (SKY-124, R782B-1).
+"""Exercise concurrent desktop link refreshes against real PostgreSQL row locks (SKY-124, R782B-1, R782C-1).
 
 SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
 COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
@@ -20,9 +20,10 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session
 
+from core.api.account_data_service import delete_account
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
 from core.api.routers import desktop_link
@@ -38,6 +39,7 @@ pytestmark = pytest.mark.skipif(
 
 REDIRECT = "http://127.0.0.1:54321/local/hosted-link/callback"
 MAC_HOLD_SECONDS = 0.5
+DELETION_HOLD_SECONDS = 0.5
 
 
 class _Store:
@@ -102,6 +104,32 @@ def database() -> Iterator[Engine]:
         admin.dispose()
 
 
+@pytest.fixture
+def full_database() -> Iterator[Engine]:
+    """Create every table in a fresh schema and drop it after.
+
+    Account deletion touches every owned table, so it needs the whole schema.
+    The pgvector types resolve from ``public``, where the extension lives.
+
+    Returns:
+        An engine whose search path is the new schema, then ``public``.
+    """
+    schema = f"desktop_link_test_{uuid4().hex}"
+    admin = create_engine(TEST_DB_URL)
+    with admin.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_engine(TEST_DB_URL, connect_args={"options": f"-csearch_path={schema},public"})
+    try:
+        Base.metadata.create_all(engine)
+        yield engine
+    finally:
+        engine.dispose()
+        with admin.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
+
 def _client(engine: Engine) -> TestClient:
     """Build an app with the desktop link router over ``engine``.
 
@@ -120,6 +148,39 @@ def _client(engine: Engine) -> TestClient:
         username="alice@example.test", role="user", groups=()
     )
     return TestClient(app)
+
+
+def _link_pair(client: TestClient) -> dict[str, Any]:
+    """Authorize a Mac and exchange its code for the first token pair.
+
+    Args:
+        client: Test client.
+
+    Returns:
+        The token endpoint JSON body.
+    """
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    code = client.post(
+        "/desktop/link/authorize",
+        json={
+            "redirect_uri": REDIRECT,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "scope": "identity",
+            "device_name": "Mac",
+        },
+    ).json()["code"]
+    return client.post(
+        "/desktop/link/token",
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": REDIRECT,
+            "client_id": "skynet-desktop",
+        },
+    ).json()
 
 
 def _refresh(client: TestClient, refresh_token: str) -> Any:
@@ -210,3 +271,74 @@ def test_replayed_token_during_a_concurrent_rotation_revokes_the_link(
     with Session(database) as session:
         assert session.get(DesktopLinkModel, pair["link_id"]).revoked_at is not None
     assert _refresh(client, results["mac"].json()["refresh_token"]).status_code == 401
+
+
+def test_account_deletion_during_a_refresh_does_not_deadlock(
+    full_database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Account deletion and a Mac refresh lock link rows and token rows in one order (R782C-1).
+
+    The deletion holds its transaction open after its first desktop link
+    statement. The refresh starts during that hold. Refresh locks the link,
+    then the token. When deletion locked the tokens first, the two
+    transactions waited on each other and PostgreSQL aborted one of them.
+    """
+    monkeypatch.setattr(desktop_link, "_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(desktop_link, "_send_notice", lambda *args: None)
+    client = _client(full_database)
+    pair = _link_pair(client)
+
+    deletion_thread_name = "account-deletion"
+    deletion_holds_lock = threading.Event()
+
+    def hold_after_first_desktop_delete(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        """Hold the deletion transaction open after its first desktop link statement.
+
+        Args:
+            conn: Connection that ran the statement.
+            cursor: DBAPI cursor.
+            statement: SQL text.
+            args: Unused event arguments.
+        """
+        if (
+            threading.current_thread().name == deletion_thread_name
+            and not deletion_holds_lock.is_set()
+            and statement.lstrip().upper().startswith("DELETE FROM DESKTOP_")
+        ):
+            deletion_holds_lock.set()
+            time.sleep(DELETION_HOLD_SECONDS)
+
+    event.listen(full_database, "after_cursor_execute", hold_after_first_desktop_delete)
+    results: dict[str, Any] = {}
+
+    def deletion() -> None:
+        """Delete the account in one transaction, like the account router."""
+        try:
+            with Session(full_database) as session:
+                delete_account(session, "alice@example.test")
+                session.commit()
+            results["deletion"] = "ok"
+        except Exception as exc:  # The deadlock error is the observed result.
+            results["deletion"] = type(exc).__name__
+
+    def mac() -> None:
+        """Refresh the Mac's pair while the deletion holds its first lock."""
+        assert deletion_holds_lock.wait(timeout=5)
+        try:
+            results["mac"] = _refresh(client, pair["refresh_token"]).status_code
+        except Exception as exc:  # The deadlock error is the observed result.
+            results["mac"] = type(exc).__name__
+
+    threads = [threading.Thread(target=deletion, name=deletion_thread_name), threading.Thread(target=mac)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+    finally:
+        event.remove(full_database, "after_cursor_execute", hold_after_first_desktop_delete)
+
+    assert results == {"deletion": "ok", "mac": 401}
+    with Session(full_database) as session:
+        assert session.query(DesktopLinkModel).count() == 0
+        assert session.query(DesktopTokenModel).count() == 0
