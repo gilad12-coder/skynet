@@ -579,9 +579,10 @@ test("the key's menu lists only models the request sends as key models", () => {
     keyMenuModels(catalog).map((m) => m.value),
     ["openrouter/google/gemini-3-pro"],
   );
-  assert.deepEqual(keyMenuModels(catalog, "openrouter/auto").map((m) => m.value), [
-    "openrouter/google/gemini-3-pro",
-  ]);
+  assert.deepEqual(
+    keyMenuModels(catalog, "openrouter/auto").map((m) => m.value),
+    ["openrouter/google/gemini-3-pro"],
+  );
 });
 
 test("the local menu lists the CLI's models, then the key's, and waits only when it must", () => {
