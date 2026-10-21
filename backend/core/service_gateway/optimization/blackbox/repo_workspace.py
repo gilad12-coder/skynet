@@ -40,7 +40,10 @@ _PROBE_OK = "app-network-closed"
 _HASH_TIMEOUT_SECONDS = 300.0
 # Fingerprints every file under the protected paths. It runs with ``-I`` so a
 # module the version drops into the checkout cannot shadow ``hashlib``; links
-# and special files are recorded rather than followed or opened.
+# and special files are recorded rather than followed or opened. Besides the
+# contents it records each file's and folder's inode and change times: any
+# write, rename or link moves the change time, and only root can set it back,
+# so a file rewritten and then restored while the scorer runs still shows.
 _HASH_PROTECTED = r"""
 import hashlib, json, os, sys
 
@@ -55,18 +58,25 @@ def digest(path):
             sha.update(block)
     return sha.hexdigest()
 
-found = {}
+def stamp(path):
+    info = os.lstat(path)
+    return f"{info.st_ino}:{info.st_mtime_ns}:{info.st_ctime_ns}"
+
+found, stamps = {}, {}
 for top in sys.argv[1:]:
     if os.path.isdir(top) and not os.path.islink(top):
         for folder, folders, files in os.walk(top):
             folders[:] = [name for name in folders if name != ".git"]
+            stamps[os.path.normpath(folder)] = stamp(folder)
             linked = [name for name in folders if os.path.islink(os.path.join(folder, name))]
             for name in files + linked:
                 path = os.path.normpath(os.path.join(folder, name))
                 found[path] = digest(path)
+                stamps[path] = stamp(path)
     elif os.path.lexists(top):
         found[os.path.normpath(top)] = digest(top)
-print(json.dumps(found, sort_keys=True))
+        stamps[os.path.normpath(top)] = stamp(top)
+print(json.dumps({"files": found, "stamps": stamps}, sort_keys=True))
 """
 
 
@@ -187,6 +197,7 @@ class RepoWorkspace:
         # Held in the parent, not the box: a version's code can rewrite any
         # copy of the tree inside the box, the prepared one included.
         self._protected_baseline: dict[str, str] = {}
+        self._stamps_before_run: dict[str, str] | None = None
         self._lock = threading.Lock()
 
     @property
@@ -278,9 +289,9 @@ class RepoWorkspace:
             baseline = self._fingerprint(session, PREPARED_DIR)
             if baseline is None:
                 raise RepoSetupError("The repository's protected files could not be fingerprinted.")
-            self._protected_baseline = baseline
+            self._protected_baseline = baseline[0]
 
-    def _fingerprint(self, session: SandboxSession, directory: str) -> dict[str, str] | None:
+    def _fingerprint(self, session: SandboxSession, directory: str) -> tuple[dict[str, str], dict[str, str]] | None:
         """Hash every file under the protected paths of one tree in the box.
 
         Args:
@@ -288,7 +299,8 @@ class RepoWorkspace:
             directory: The tree's folder, relative to the box.
 
         Returns:
-            Repository-relative path to digest, or ``None`` when the hashing
+            Repository-relative path to digest, and path to inode and change
+            times for every file and folder, or ``None`` when the hashing
             command failed or printed something unreadable.
         """
         paths = " ".join(shlex.quote(path) for path in self._protected)
@@ -302,7 +314,11 @@ class RepoWorkspace:
             found = json.loads(result.stdout.strip().splitlines()[-1])
         except (IndexError, ValueError):
             return None
-        return found if isinstance(found, dict) else None
+        if not isinstance(found, dict) or not isinstance(found.get("files"), dict):
+            return None
+        if not isinstance(found.get("stamps"), dict):
+            return None
+        return found["files"], found["stamps"]
 
     def _cut_network(self, session: SandboxSession) -> None:
         """Switch the box offline and confirm it from inside before any version runs.
@@ -340,6 +356,7 @@ class RepoWorkspace:
         if problems:
             return Checkout(path=None, problems=tuple(problems))
         with self._lock:
+            self._stamps_before_run = None
             session = self.session()
             session.write_files({PATCH_FILE: patch})
             applied = session.run(
@@ -349,14 +366,24 @@ class RepoWorkspace:
             )
             if not applied.ok:
                 return Checkout(path=None, problems=(f"The change does not apply cleanly: {_tail(applied)}",))
+            if self._protected:
+                before = self._fingerprint(session, WORK_DIR)
+                if before is None:
+                    return Checkout(
+                        path=None, problems=("The protected files could not be checked before the version ran.",)
+                    )
+                self._stamps_before_run = before[1]
             return Checkout(path=WORK_DIR)
 
     def protected_changes(self) -> tuple[str, ...]:
         """Explain how the version that last ran changed the protected files.
 
         The patch check only sees the files a version names; its code can
-        still write to the judge's files while it runs. Call this after the
-        scorer finishes and before its score is accepted.
+        still write to the judge's files while it runs. Contents are compared
+        with the prepared tree, and inodes and change times with the checkout
+        just before the run, so a write the code undoes before it exits still
+        counts. Call this after the scorer finishes and before its score is
+        accepted.
 
         Returns:
             One reason per protected file added, changed or removed since
@@ -366,13 +393,18 @@ class RepoWorkspace:
             return ()
         with self._lock:
             current = self._fingerprint(self.session(), WORK_DIR)
-        if current is None:
+            before = self._stamps_before_run
+        if current is None or before is None:
             return ("The protected files could not be checked after the version ran.",)
-        changed = sorted(
+        files, stamps = current
+        changed = {
             path
-            for path in set(self._protected_baseline) | set(current)
-            if self._protected_baseline.get(path) != current.get(path)
-        )
+            for path in set(self._protected_baseline) | set(files)
+            if self._protected_baseline.get(path) != files.get(path)
+        } | {path for path in set(before) | set(stamps) if before.get(path) != stamps.get(path)}
+        # A folder's times move whenever an entry in it is added or removed;
+        # name the folder only when no file in it explains the change.
+        changed = sorted(path for path in changed if not any(other.startswith(f"{path}/") for other in changed))
         return tuple(
             f"'{path}' is protected by the repository's optimize.toml ([paths] protected),"
             " and the version's code changed it while it ran."

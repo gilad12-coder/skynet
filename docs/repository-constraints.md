@@ -28,7 +28,7 @@ invariants = ["Keep the reply format unchanged."]
 | Setting | Enforcement |
 | --- | --- |
 | `[paths] editable` | The parent checks every version before it is scored or published. A path outside the approved editable paths fails the setup check. |
-| `[paths] protected` | The parent rejects a version that changes a protected path. The rejection names the path and the rule. `optimize.toml` itself is always protected. |
+| `[paths] protected` | The parent rejects a version that changes a protected path, in its patch or while its code runs. A write that the code undoes before it exits also counts. The rejection names the path and the rule, with secret values hidden. `optimize.toml` itself is always protected. |
 | `[setup] command` | Runs once on the starting commit, with package-registry network and no secrets. The box goes offline before any version runs. |
 | `[instructions]` | Not enforced. The agent reads them in its brief. The scorer decides the score. |
 

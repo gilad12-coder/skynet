@@ -366,6 +366,29 @@ def test_a_source_only_version_whose_code_rewrites_the_labels_is_caught(tmp_path
         space.close()
 
 
+def test_a_protected_file_rewritten_and_restored_while_the_version_runs_is_caught(tmp_path: Path) -> None:
+    """Flag a protected file the version's code rewrites and then restores, and a protected file it adds and removes."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        space.checkout(version)
+        space.session().run(
+            f"cd {WORK_DIR} && saved=$(cat eval/labels.csv) && printf 'a,0\\n' > eval/labels.csv"
+            " && printf '%s\\n' \"$saved\" > eval/labels.csv"
+        )
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
+
+        space.checkout(version)
+        space.session().run(f"cd {WORK_DIR} && touch eval/extra.csv && rm eval/extra.csv")
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval"]
+
+        space.checkout(version)
+        space.session().run(f"cd {WORK_DIR} && cat eval/labels.csv eval/judge.py > /dev/null")
+        assert space.protected_changes() == ()
+    finally:
+        space.close()
+
+
 def test_tampering_with_the_prepared_tree_is_caught_on_the_next_version(tmp_path: Path) -> None:
     """Compare against fingerprints the parent holds, so rewriting the prepared copy in the box does not hide a change."""
     space, archive = _guarded(tmp_path)

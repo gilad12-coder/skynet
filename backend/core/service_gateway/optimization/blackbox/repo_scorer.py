@@ -140,7 +140,8 @@ class RepoScorer:
                 raise RepoScoreError(f"The scorer exceeded its {self._timeout_seconds:g}s timeout.")
             tampered = self._workspace.protected_changes()
             if tampered:
-                raise RepoScoreError(" ".join(tampered))
+                # The version's code names these files and can read the secrets.
+                raise RepoScoreError(redact(" ".join(tampered), secrets))
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
         if text is None:
             output = redact((result.stderr or result.stdout)[-2_000:], secrets)

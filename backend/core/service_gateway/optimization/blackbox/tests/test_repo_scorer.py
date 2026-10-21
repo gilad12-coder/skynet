@@ -152,6 +152,71 @@ def test_a_version_whose_code_rewrites_its_judge_gets_no_score(tmp_path: Path) -
         scorer.close()
 
 
+def _labels_judge(tmp_path: Path, secrets: dict[str, str]) -> tuple[RepoScorer, Path]:
+    """Build a scorer whose judge runs the version's source, then reads the protected labels.
+
+    Args:
+        tmp_path: Scratch folder.
+        secrets: Environment the scorer receives.
+
+    Returns:
+        The scorer and its archive.
+    """
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os, runpy\n"
+        "def score(repo_path):\n"
+        "    runpy.run_path(os.path.join(repo_path, 'src/app.py'))\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'labels read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets=secrets,
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    return scorer, archive
+
+
+def test_a_version_that_restores_its_judge_at_exit_gets_no_score(tmp_path: Path) -> None:
+    """Refuse a version that rewrites the labels for the judge and puts them back when the process exits."""
+    scorer, archive = _labels_judge(tmp_path, {})
+    cheat = (
+        "import atexit\n"
+        "saved = open('eval/labels.csv').read()\n"
+        "open('eval/labels.csv', 'w').write('99')\n"
+        "atexit.register(lambda: open('eval/labels.csv', 'w').write(saved))\n"
+    )
+    try:
+        refused = scorer.dispatch({"candidate": _patch(tmp_path / "cheat", archive, {"src/app.py": cheat})})
+        assert refused.status == 422
+        assert "'eval/labels.csv' is protected" in refused.body.decode()
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+    finally:
+        scorer.close()
+
+
+def test_a_protected_file_named_after_a_secret_is_reported_redacted(tmp_path: Path) -> None:
+    """Hide a secret the version's code writes into a protected file name, as everywhere else."""
+    scorer, archive = _labels_judge(tmp_path, {"API_KEY": "very-secret-value"})
+    leak = "import os\nopen(os.path.join('eval', os.environ['API_KEY']), 'w').close()\n"
+    try:
+        refused = scorer.dispatch({"candidate": _patch(tmp_path / "leak", archive, {"src/app.py": leak})})
+        assert refused.status == 422
+        assert "very-secret-value" not in refused.body.decode()
+        assert "'eval/[secret]' is protected" in refused.body.decode()
+    finally:
+        scorer.close()
+
+
 def test_a_judge_that_imports_its_protected_package_keeps_its_score(tmp_path: Path) -> None:
     """Score a version whose judge imports a protected package, which must not leave bytecode there."""
     archive = _archive(
