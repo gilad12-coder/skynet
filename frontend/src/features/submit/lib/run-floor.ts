@@ -13,6 +13,7 @@
 
 import type { ModelConfig } from "@/shared/types/api";
 import type { TokenSourceMode } from "@/features/billing";
+import type { OptimizerSlice } from "./wizard-v2";
 
 /** Spare room above the boxes' opening holds, in cents. */
 export const RUN_SPARE_CENTS = 100;
@@ -80,4 +81,24 @@ export function aggregateTokenSource(configs: ModelConfig[]): TokenSourceMode {
 /** Whether a model bills to a CLI subscription, so its calls hold no cents. */
 export function isSubscriptionModel(config: ModelConfig): boolean {
   return config.token_source === "subscription";
+}
+
+/**
+ * The models a run calls: the task and reflection models, ShinkaEvolve's
+ * extra reflection models, and the metric model when the metric calls one.
+ * Roles without a model are left out.
+ */
+export function runModels(
+  optimizer: Pick<
+    OptimizerSlice,
+    "choice" | "taskModel" | "reflectionModel" | "extraReflectionModels"
+  >,
+  metricModel: ModelConfig | null,
+): ModelConfig[] {
+  return [
+    optimizer.taskModel,
+    optimizer.reflectionModel,
+    ...(optimizer.choice === "shinka_evolve" ? optimizer.extraReflectionModels : []),
+    metricModel,
+  ].filter((config): config is ModelConfig => Boolean(config?.name.trim()));
 }

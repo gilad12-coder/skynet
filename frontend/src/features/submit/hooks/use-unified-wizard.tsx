@@ -63,6 +63,7 @@ import {
   callHoldKey,
   isSubscriptionModel,
   runFloor as computeRunFloor,
+  runModels,
 } from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
@@ -405,12 +406,7 @@ export function WizardV2Provider({
 
   const metricCallsModel = metricUsesModel(state);
   const metricModel = metricCallsModel ? resolvedMetricModel(state) : null;
-  const submittedModels = [
-    state.optimizer.taskModel,
-    state.optimizer.reflectionModel,
-    ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
-    metricModel,
-  ].filter(hasModel);
+  const submittedModels = runModels(state.optimizer, metricModel);
   // A CLI-subscription model bills to the user's own plan, so it has no
   // server hold to fetch and adds nothing to the floor.
   const pricedModels = submittedModels.filter(

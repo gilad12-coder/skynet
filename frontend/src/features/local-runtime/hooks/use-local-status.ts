@@ -48,14 +48,15 @@ export function peekLocalStatus(): LocalStatus | null {
 
 /**
  * The model id an agent request sends for a role set to run on `cli`. It waits
- * for `/local/status`, since the CLI's models decide the id. Hosted builds, and
- * roles left off, send the composer's choice unchanged.
+ * for `/local/status`, since the CLI's models decide the id. A local role with
+ * no CLI runs on the default CLI, since the local backend has no managed
+ * models. Hosted builds send the composer's choice unchanged.
  */
 export async function localAgentModel(
   model: string | null,
   cli: CliProvider | null,
 ): Promise<string | null> {
-  if (!cli || !isLocalMode()) return model;
+  if (!isLocalMode()) return model;
   return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
 }
 

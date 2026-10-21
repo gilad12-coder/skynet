@@ -3,6 +3,7 @@ import test from "node:test";
 
 const {
   cliState,
+  defaultAgentCli,
   hostCliPatch,
   resolveAgentModel,
   parseSubscriptionModelId,
@@ -154,14 +155,44 @@ test("a failed status request falls back to the last loaded status", async () =>
   );
 });
 
-test("a role left off sends the composer's model and loads nothing", async () => {
-  let loads = 0;
-  const load = async () => {
-    loads += 1;
-    return status([cli()]);
+test("a role with no CLI runs on the first ready CLI, never a managed model", async () => {
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  const loaded = status([cli({ logged_in: false }), codex]);
+  assert.equal(
+    await resolveAgentModel(
+      "openrouter/openai/gpt-5",
+      null,
+      async () => loaded,
+      () => null,
+    ),
+    "subscription/codex/openai/gpt-5",
+  );
+  // No status at all still goes to a CLI, so the request cannot reach OpenRouter.
+  const failing = async () => {
+    throw new Error("local status 503");
   };
-  assert.equal(await resolveAgentModel("openai/gpt-5", null, load, () => null), "openai/gpt-5");
-  assert.equal(loads, 0);
+  assert.equal(
+    await resolveAgentModel("anthropic/claude-opus-4.1", null, failing, () => null),
+    "subscription/claude/anthropic/claude-opus-4.1",
+  );
+});
+
+test("the default agent CLI prefers ready, then installed, then Claude Code", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  const codex = cli({ id: "codex" });
+  const droid = cli({ id: "droid" });
+  assert.equal(defaultAgentCli(status([cli({ path: null }), codex]), now), "codex");
+  // A ready CLI wins over an installed one listed before it.
+  assert.equal(
+    defaultAgentCli(status([cli({ path: null }), { ...droid, logged_in: false }, codex]), now),
+    "codex",
+  );
+  assert.equal(
+    defaultAgentCli(status([cli({ path: null }), { ...droid, logged_in: false }]), now),
+    "droid",
+  );
+  assert.equal(defaultAgentCli(status([cli({ path: null })]), now), "claude");
+  assert.equal(defaultAgentCli(null, now), "claude");
 });
 
 test("the proposer host CLI select starts at workspace only and clears on off", () => {

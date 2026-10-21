@@ -7,6 +7,7 @@ export {
 export {
   CLI_PROVIDERS,
   cliState,
+  defaultAgentCli,
   findCli,
   hostCliPatch,
   isCliProvider,

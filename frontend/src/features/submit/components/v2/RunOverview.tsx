@@ -9,6 +9,7 @@ import {
   Cpu,
   Cube,
   Database,
+  Desktop,
   FileText,
   GitBranch,
   Gauge,
@@ -37,7 +38,9 @@ import { cn } from "@/shared/lib/utils";
 import { readRewardSpec } from "@/shared/lib/reward";
 import type { ModelConfig } from "@/shared/types/api";
 import type { ContractCheckState } from "../../hooks/use-contract-check";
-import type { WizardV2State } from "../../lib/wizard-v2";
+import { aggregateTokenSource, runModels } from "../../lib/run-floor";
+import { metricUsesModel } from "../../lib/scorer-dependencies";
+import { resolvedMetricModel, type WizardV2State } from "../../lib/wizard-v2";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { v2Msg } from "./ArtifactConfirmCard";
 import { optimizerLabel } from "./OptimizerPicker";
@@ -213,6 +216,12 @@ export function RunOverview({
     (m): m is NonNullable<typeof m> => m != null,
   );
   const byok = meta.tokenSource === "byok";
+  // Only the local build offers subscription models; a run on nothing else
+  // bills the user's CLI plans, not the balance.
+  const onSubscription =
+    aggregateTokenSource(
+      runModels(optimizer, metricUsesModel(state) ? resolvedMetricModel(state) : null),
+    ) === "subscription";
   const limit = optimizer.budgetUncapped
     ? msg("submit.budget.uncapped_short" as MessageKey)
     : optimizer.maxCostCents != null
@@ -404,19 +413,29 @@ export function RunOverview({
                         : "submit.basics.privacy.public",
                     )}
                   </Row>
-                  <Row
-                    icon={
-                      byok ? (
-                        <Key className={ICON} aria-hidden />
-                      ) : (
-                        <Coins className={ICON} aria-hidden />
-                      )
-                    }
-                    label={msg("submit.budget.billing_source")}
-                    help={msg(byok ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
-                  >
-                    {msg(byok ? "billing.mode.byok" : "billing.mode.managed")}
-                  </Row>
+                  {onSubscription ? (
+                    <Row
+                      icon={<Desktop className={ICON} aria-hidden />}
+                      label={msg("submit.budget.billing_source")}
+                      help={msg("subscription.budget_note")}
+                    >
+                      {msg("subscription.mode")}
+                    </Row>
+                  ) : (
+                    <Row
+                      icon={
+                        byok ? (
+                          <Key className={ICON} aria-hidden />
+                        ) : (
+                          <Coins className={ICON} aria-hidden />
+                        )
+                      }
+                      label={msg("submit.budget.billing_source")}
+                      help={msg(byok ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
+                    >
+                      {msg(byok ? "billing.mode.byok" : "billing.mode.managed")}
+                    </Row>
+                  )}
                 </>
               )}
               {current === "data" && (

@@ -151,9 +151,25 @@ export function subscriptionAgentModel(
 }
 
 /**
- * The agent model for a role on `cli`, resolved against a loaded status: the
- * CLI's slugs decide what the request sends, so the request waits for the
- * status. A failed load falls back to the last status any caller loaded.
+ * The CLI an agent role runs on when the user picked none. The local build
+ * has no managed models, so every role needs a CLI: the first ready one, else
+ * the first installed one, else Claude Code.
+ */
+export function defaultAgentCli(
+  status: LocalStatus | null | undefined,
+  now: Date = new Date(),
+): CliProvider {
+  const clis = status?.clis ?? [];
+  const ready = clis.find((cli) => cliState(cli, now).kind === "ok");
+  const installed = clis.find((cli) => cli.path);
+  return ready?.id ?? installed?.id ?? "claude";
+}
+
+/**
+ * The agent model for a role, resolved against a loaded status: the CLI's
+ * slugs decide what the request sends, so the request waits for the status.
+ * A role with no CLI runs on `defaultAgentCli`. A failed load falls back to
+ * the last status any caller loaded.
  */
 export async function resolveAgentModel(
   model: string | null,
@@ -161,9 +177,8 @@ export async function resolveAgentModel(
   load: () => Promise<LocalStatus>,
   peek: () => LocalStatus | null,
 ): Promise<string | null> {
-  if (!cli) return model;
   const status = await load().catch(() => peek());
-  return subscriptionAgentModel(model, cli, status);
+  return subscriptionAgentModel(model, cli ?? defaultAgentCli(status), status);
 }
 
 /**

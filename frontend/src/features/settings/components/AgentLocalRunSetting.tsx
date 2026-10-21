@@ -1,7 +1,13 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { CLI_PROVIDERS, cliLabel, isCliProvider } from "@/features/local-runtime";
+import {
+  CLI_PROVIDERS,
+  cliLabel,
+  defaultAgentCli,
+  isCliProvider,
+  useLocalStatus,
+} from "@/features/local-runtime";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ChatCenteredDots, Code, Robot, Tag, Terminal } from "@/shared/ui/icons";
@@ -17,9 +23,6 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { useUserPrefs } from "../hooks/use-user-prefs";
 import { LOCAL_AGENT_ROLES, type LocalAgentRole } from "../lib/prefs";
 
-// Radix Select cannot hold an empty value, so "off" has its own.
-const OFF = "off";
-
 const ROLE_ROWS: Record<
   LocalAgentRole,
   { label: MessageKey; icon: ComponentType<{ className?: string }> }
@@ -31,12 +34,15 @@ const ROLE_ROWS: Record<
 };
 
 /**
- * Local desktop build only: per agent role, run it on one of the user's CLI
- * subscriptions instead of the composer's model.
+ * Local desktop build only: per agent role, the CLI subscription it runs on.
+ * The local backend has no managed models, so there is no "off": a role the
+ * user never set shows the CLI it runs on by default.
  */
 export function AgentLocalRunSetting() {
   const { prefs, setPref } = useUserPrefs();
+  const { status } = useLocalStatus();
   const current = prefs.agentSubscription ?? {};
+  const fallback = defaultAgentCli(status);
 
   return (
     <div className="pt-3">
@@ -54,7 +60,7 @@ export function AgentLocalRunSetting() {
       {LOCAL_AGENT_ROLES.map((role) => {
         const row = ROLE_ROWS[role];
         const stored = current[role];
-        const value = isCliProvider(stored) ? stored : OFF;
+        const value = isCliProvider(stored) ? stored : fallback;
         return (
           <SettingsRow key={role} icon={row.icon} label={msg(row.label)}>
             <Select
@@ -74,7 +80,6 @@ export function AgentLocalRunSetting() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={OFF}>{msg("settings.agent_local.off")}</SelectItem>
                 {CLI_PROVIDERS.map((cli) => (
                   <SelectItem key={cli} value={cli}>
                     {cliLabel(cli)}

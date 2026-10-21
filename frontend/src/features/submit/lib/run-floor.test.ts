@@ -8,6 +8,7 @@ const {
   callHoldKey,
   isSubscriptionModel,
   runFloor,
+  runModels,
   startingLimitCents,
 } = await import("./run-floor.ts");
 
@@ -79,4 +80,28 @@ test("the job is a subscription job when no named model is managed and one runs 
   );
   assert.equal(isSubscriptionModel(model("a", "subscription")), true);
   assert.equal(isSubscriptionModel(model("a", "byok")), false);
+});
+
+test("a run's models are the picked roles, ShinkaEvolve's extras and a calling metric", () => {
+  const task = { name: "subscription/claude/anthropic/claude-haiku-4.5" };
+  const reflection = { name: "openai/gpt-5" };
+  const extra = { name: "openai/gpt-5-mini" };
+  const metric = { name: "anthropic/claude-sonnet-4.5" };
+  const optimizer = {
+    choice: "gepa" as const,
+    taskModel: task,
+    reflectionModel: reflection,
+    extraReflectionModels: [extra],
+  };
+  assert.deepEqual(runModels(optimizer, null), [task, reflection]);
+  assert.deepEqual(runModels({ ...optimizer, choice: "shinka_evolve" }, metric), [
+    task,
+    reflection,
+    extra,
+    metric,
+  ]);
+  assert.deepEqual(
+    runModels({ ...optimizer, taskModel: { name: " " }, reflectionModel: null }, null),
+    [],
+  );
 });
