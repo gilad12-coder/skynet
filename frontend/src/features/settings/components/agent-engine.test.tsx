@@ -13,9 +13,15 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { AgentEngineSelect } = await import("./AgentEngineSetting");
-const { loadAgentEngine, loadLocalStatus, localAgentModel, peekAgentEngine, saveAgentEngine } =
-  await import("@/features/local-runtime");
+const { AgentEngineSelect, EngineChoice } = await import("./AgentEngineSetting");
+const {
+  agentEngineOptions,
+  loadAgentEngine,
+  loadLocalStatus,
+  localAgentModel,
+  peekAgentEngine,
+  saveAgentEngine,
+} = await import("@/features/local-runtime");
 
 const cli = (id: CliStatus["id"], patch: Partial<CliStatus> = {}): CliStatus => ({
   id,
@@ -66,6 +72,52 @@ void describe("AgentEngineSelect", () => {
     assert.match(html, /role="status"/);
     assert.match(html, /subscription\.state\.logged_out/);
     assert.match(html, /<code[^>]*>codex login<\/code>/);
+  });
+});
+
+// Each engine's mark, by the accessible name @lobehub/icons gives it; Droid has
+// no mark there, so its neutral tile has none.
+const BRAND: Record<AgentEngine, RegExp | null> = {
+  codex: /aria-label="Codex"/,
+  claude: /aria-label="Claude Code"/,
+  openrouter: /aria-label="OpenRouter"/,
+  droid: null,
+};
+
+function assertLogo(html: string, engine: AgentEngine) {
+  // The logo is decorative: hidden from assistive tech, so the name stays the label.
+  assert.match(html, new RegExp(`<span aria-hidden="true" data-engine-logo="${engine}"`));
+  const brand = BRAND[engine];
+  if (brand) assert.match(html, brand);
+}
+
+void describe("engine logos", () => {
+  void it("the selected value shows the engine's logo next to its name", () => {
+    for (const engine of ["codex", "claude", "droid"] as const) {
+      const html = render(true, engine, status([cli("codex"), cli("claude"), cli("droid")]));
+      assertLogo(html, engine);
+      assert.match(html, new RegExp(`subscription\\.cli\\.${engine}`));
+    }
+    assertLogo(render(false, "openrouter", null), "openrouter");
+  });
+
+  void it("every menu choice shows its logo, also when it is disabled", () => {
+    setClientLocale("en");
+    const s = status([cli("codex"), cli("claude"), cli("droid", { logged_in: false })]);
+    const options = agentEngineOptions(s, true);
+    assert.deepEqual(
+      options.map((o) => o.engine),
+      ["codex", "claude", "droid", "openrouter"],
+    );
+    for (const option of options) {
+      const html = renderToStaticMarkup(<EngineChoice option={option} status={s} failed={false} />);
+      assertLogo(html, option.engine);
+      if (option.engine === "droid") {
+        assert.equal(option.disabled, true);
+        assert.match(html, /subscription\.state\.logged_out/);
+        assert.match(html, /<code[^>]*>droid<\/code>/);
+      }
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { ClaudeCode, OpenRouter } from "@lobehub/icons";
 import { toast } from "react-toastify";
 import {
   agentEngineOptions,
@@ -20,7 +21,8 @@ import {
 import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
-import { Lightning, Warning } from "@/shared/ui/icons";
+import { HarnessLogo } from "@/shared/ui/harness-logo";
+import { Lightning, Terminal, Warning } from "@/shared/ui/icons";
 import {
   Select,
   SelectContent,
@@ -33,6 +35,56 @@ import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 
 function engineLabel(engine: AgentEngine): string {
   return engine === OPENROUTER_ENGINE ? msg("settings.agent_engine.openrouter") : cliLabel(engine);
+}
+
+const LOGO_SIZE = 16;
+// Select triggers and items resize and tint every bare <svg> below them; an
+// inline size plus a `text-*` class opts the brand glyph out of both rules.
+const GLYPH = { className: "text-inherit", style: { width: LOGO_SIZE, height: LOGO_SIZE } };
+
+/**
+ * The engine's brand mark, decorative next to its name. Droid has no mark in
+ * @lobehub/icons, so it gets a neutral terminal tile.
+ */
+export function EngineLogo({ engine }: { engine: AgentEngine }) {
+  let mark: React.ReactNode;
+  switch (engine) {
+    case OPENROUTER_ENGINE:
+      mark = (
+        <OpenRouter.Avatar
+          size={LOGO_SIZE}
+          iconClassName={GLYPH.className}
+          iconStyle={GLYPH.style}
+        />
+      );
+      break;
+    case "claude":
+      mark = (
+        <ClaudeCode.Avatar
+          size={LOGO_SIZE}
+          iconClassName={GLYPH.className}
+          iconStyle={GLYPH.style}
+        />
+      );
+      break;
+    case "codex":
+      mark = <HarnessLogo harness="codex" size={LOGO_SIZE} />;
+      break;
+    default:
+      mark = (
+        <span
+          className="inline-flex items-center justify-center rounded-full bg-muted text-muted-foreground"
+          style={GLYPH.style}
+        >
+          <Terminal className="size-2.5 text-inherit" />
+        </span>
+      );
+  }
+  return (
+    <span aria-hidden="true" data-engine-logo={engine} dir="ltr" className="inline-flex shrink-0">
+      {mark}
+    </span>
+  );
 }
 
 /** Why a choice is disabled, with the sign-in command for a signed-out CLI. */
@@ -63,6 +115,33 @@ function OptionReason({
         </code>
       )}
     </>
+  );
+}
+
+/** One menu choice: the engine's logo, its name, and why it is disabled. */
+export function EngineChoice({
+  option,
+  status,
+  failed,
+}: {
+  option: AgentEngineOption;
+  status: LocalStatus | null;
+  failed: boolean;
+}) {
+  return (
+    <span className="flex min-w-0 items-start gap-2">
+      <span className="mt-0.5 inline-flex">
+        <EngineLogo engine={option.engine} />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span>{engineLabel(option.engine)}</span>
+        {option.disabled && (
+          <span className="text-xs text-muted-foreground" dir="auto">
+            <OptionReason option={option} status={status} failed={failed} />
+          </span>
+        )}
+      </span>
+    </span>
   );
 }
 
@@ -109,19 +188,15 @@ export function AgentEngineSelect({
             aria-label={msg("settings.agent_engine.label")}
             className={cn(TOUCH_FIELD_SM, "w-full min-w-0 sm:w-auto sm:min-w-[160px]")}
           >
-            <SelectValue>{engineLabel(value)}</SelectValue>
+            <SelectValue>
+              <EngineLogo engine={value} />
+              {engineLabel(value)}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {options.map((option) => (
               <SelectItem key={option.engine} value={option.engine} disabled={option.disabled}>
-                <span className="flex min-w-0 flex-col">
-                  <span>{engineLabel(option.engine)}</span>
-                  {option.disabled && (
-                    <span className="text-xs text-muted-foreground" dir="auto">
-                      <OptionReason option={option} status={status} failed={failed} />
-                    </span>
-                  )}
-                </span>
+                <EngineChoice option={option} status={status} failed={failed} />
               </SelectItem>
             ))}
           </SelectContent>
