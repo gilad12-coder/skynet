@@ -56,6 +56,7 @@ DROPPED_LITERALS = (
     "APP_SECRET_KEY",
     "OPENROUTER_API_KEY",
     "SKYNET_RANDOM_JUNK_7F3A",
+    "FACTORY_EXTRA_CA_CERTS",
 )
 # The allow-list, written out, so a change to it fails here.
 KEPT_LITERALS = (
@@ -83,7 +84,6 @@ KEPT_LITERALS = (
     "SSL_CERT_DIR",
     "NODE_EXTRA_CA_CERTS",
     "CODEX_CA_CERTIFICATE",
-    "FACTORY_EXTRA_CA_CERTS",
     "LC_ALL",
     "LC_CTYPE",
     "XDG_CONFIG_HOME",

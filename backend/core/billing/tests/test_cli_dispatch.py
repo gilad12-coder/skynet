@@ -16,7 +16,7 @@ from core import config
 from core.billing import cli_dispatch
 from core.billing.cli_dispatch import CliDispatcher, local_subscription_route
 from core.billing.operation_pricing import UnpricedOperationError
-from core.billing.tests.test_cli_runners import CLAUDE_SUCCESS, DROID_SUCCESS, calls, fake_cli, local_settings, printing
+from core.billing.tests.test_cli_runners import CLAUDE_SUCCESS, calls, fake_cli, local_settings, printing
 from core.local.cli_probe import read_cli_limits
 
 MODEL = "anthropic/claude-haiku-4.5"
@@ -89,16 +89,14 @@ def test_recorded_cap_skips_the_cli_until_it_resets(tmp_path: Path) -> None:
     assert len(calls(tmp_path, "claude")) == 1
 
 
-def test_capped_cli_falls_back_to_the_next_cli(tmp_path: Path) -> None:
-    """Serve a capped claude call from droid when the fallback order names it."""
+def test_fallback_order_that_names_droid_skips_it(tmp_path: Path) -> None:
+    """Skip droid in a saved fallback order: it is not a runner, so it never starts."""
     fake_cli(tmp_path, "claude", CAPPED)
-    fake_cli(tmp_path, "droid", printing(DROID_SUCCESS))
+    fake_cli(tmp_path, "droid", "raise SystemExit('droid must not run')")
     settings = local_settings(tmp_path, cli_fallback_order="claude,droid")
     result = CliDispatcher(None, "claude", MODEL, "judge", settings).dispatch("/chat/completions", REQUEST)
-    assert result.status == 200
-    assert _body(result)["usage"]["cli_provider"] == "droid"
-    [call] = calls(tmp_path, "droid")
-    assert call["argv"][call["argv"].index("--model") + 1] == "claude-haiku-4-5-20251001"
+    assert result.status == 429
+    assert calls(tmp_path, "droid") == []
 
 
 def test_fallback_skips_a_cli_without_the_model(tmp_path: Path) -> None:

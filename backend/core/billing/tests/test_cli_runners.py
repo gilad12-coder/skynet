@@ -1,4 +1,4 @@
-"""Tests for the claude, codex and droid subscription runners, run against fake CLI scripts."""
+"""Tests for the claude and codex subscription runners, run against fake CLI scripts."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from core.billing import cli_runners
 from core.billing.cli_runners import CliRunError, SubscriptionRateLimitedError, parse_reset_at
 from core.config import Settings, settings
 
-# Sanitized from real CLI runs (claude 2.1.306, codex-cli 0.163.0, droid 0.231.0).
+# Sanitized from real CLI runs (claude 2.1.306, codex-cli 0.163.0).
 CLAUDE_SUCCESS = {
     "type": "result",
     "subtype": "success",
@@ -52,20 +52,6 @@ CODEX_EVENTS = [
         },
     },
 ]
-DROID_SUCCESS = {
-    "type": "result",
-    "subtype": "success",
-    "is_error": False,
-    "duration_ms": 3344,
-    "num_turns": 1,
-    "result": "pong",
-    "usage": {
-        "input_tokens": 13423,
-        "output_tokens": 5,
-        "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-    },
-}
 API_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
 
 
@@ -134,7 +120,6 @@ def local_settings(tmp_path: Path, **overrides: Any) -> Settings:
             "local_state_dir": str(tmp_path / "state"),
             "claude_bin": str(tmp_path / "claude"),
             "codex_bin": str(tmp_path / "codex"),
-            "droid_bin": str(tmp_path / "droid"),
             "cli_fallback_order": "",
             "cli_max_concurrency": 2,
             "cli_call_timeout_seconds": 30.0,
@@ -240,31 +225,6 @@ def test_codex_runs_in_private_homes_and_keeps_a_refreshed_login(
     assert not Path(call["env"]["CODEX_HOME"]).exists()
 
 
-def test_droid_runs_in_a_private_home_with_its_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give droid a temporary HOME with its login copy and a link to the Keychain folder."""
-    user_home = tmp_path / "user"
-    (user_home / ".factory").mkdir(parents=True)
-    (user_home / ".factory" / "auth.v2.loginkeychain").write_bytes(b"sealed-login")
-    (user_home / ".factory" / "AGENTS.md").write_text("personal instructions", encoding="utf-8")
-    (user_home / "Library").mkdir()
-    monkeypatch.setenv("HOME", str(user_home))
-    fake_cli(
-        tmp_path,
-        "droid",
-        "home = os.environ['HOME']\n"
-        "assert open(os.path.join(home, '.factory', 'auth.v2.loginkeychain'), 'rb').read() == b'sealed-login'\n"
-        "assert not os.path.exists(os.path.join(home, '.factory', 'AGENTS.md'))\n"
-        f"assert os.path.realpath(os.path.join(home, 'Library')) == {str((user_home / 'Library').resolve())!r}\n"
-        f"{printing(DROID_SUCCESS)}",
-    )
-    completion = cli_runners.run_droid("claude-haiku-4-5-20251001", "ping", None, local_settings(tmp_path), tmp_path)
-    assert completion.text == "pong"
-    [call] = calls(tmp_path, "droid")
-    assert call["env"]["HOME"] != str(user_home)
-    assert (user_home / "Library").is_dir()
-    assert (user_home / ".factory" / "auth.v2.loginkeychain").read_bytes() == b"sealed-login"
-
-
 def test_claude_keeps_the_real_home_for_its_keychain_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep claude's real HOME, because its Keychain login works only from its own config folder."""
     user_home = tmp_path / "user"
@@ -289,22 +249,9 @@ def test_codex_failed_turn_with_a_limit_is_a_rate_limit(tmp_path: Path) -> None:
     assert caught.value.reset_at == datetime(2030, 1, 1, tzinfo=UTC)
 
 
-def test_droid_reads_the_prompt_file_and_result(tmp_path: Path) -> None:
-    """Pass the prompt as a file without ``--auto`` and read droid's result object."""
-    fake_cli(
-        tmp_path,
-        "droid",
-        f"argv_file = argv[argv.index('-f') + 1]\nassert open(argv_file).read() == 'ping'\n{printing(DROID_SUCCESS)}",
-    )
-    completion = cli_runners.run_droid("claude-haiku-4-5-20251001", "ping", None, local_settings(tmp_path), tmp_path)
-    assert completion.text == "pong"
-    assert (completion.prompt_tokens, completion.completion_tokens, completion.model_ms) == (13423, 5, 3344)
-    [call] = calls(tmp_path, "droid")
-    assert call["argv"][:3] == ["exec", "-o", "json"]
-    assert call["argv"][call["argv"].index("--only-tools") + 1] == "TodoWrite"
-    assert "--disable-builtin-skills" in call["argv"]
-    assert "--auto" not in call["argv"]
-    assert not set(API_KEYS) & set(call["env"])
+def test_only_claude_and_codex_have_runners() -> None:
+    """Keep droid out: it cannot run without the user's hooks, MCP servers, config or rules."""
+    assert set(cli_runners.RUNNERS) == {"claude", "codex"}
 
 
 def test_missing_binary_is_a_final_failure(tmp_path: Path) -> None:
@@ -324,9 +271,11 @@ def test_overloaded_failure_is_transient(tmp_path: Path) -> None:
 
 def test_timeout_is_final(tmp_path: Path) -> None:
     """Stop a CLI at the call timeout, and do not mark it for a retry: it would hang again."""
-    fake_cli(tmp_path, "droid", "time.sleep(10)")
+    fake_cli(tmp_path, "claude", "time.sleep(10)")
     with pytest.raises(CliRunError) as caught:
-        cli_runners.run_droid("glm-5.3", "ping", None, local_settings(tmp_path, cli_call_timeout_seconds=0.5), tmp_path)
+        cli_runners.run_claude(
+            "claude-haiku-4-5", "ping", None, local_settings(tmp_path, cli_call_timeout_seconds=0.5), tmp_path
+        )
     assert not caught.value.transient
 
 

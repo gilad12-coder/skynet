@@ -2,8 +2,8 @@
 
 A :class:`CliDispatcher` stands where an ``OpenRouterDispatcher`` stands in the
 model gateway, so guests keep the OpenAI chat protocol (and native harnesses
-the Anthropic messages protocol) while the answer comes from ``claude``,
-``codex`` or ``droid`` on the user's machine. The wallet
+the Anthropic messages protocol) while the answer comes from ``claude`` or
+``codex`` on the user's machine. The wallet
 records every call at zero cents; ``usage.cost`` carries the model's public
 list price so cost scores stay comparable with hosted runs.
 """

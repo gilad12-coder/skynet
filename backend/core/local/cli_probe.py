@@ -55,7 +55,6 @@ CLI_ENV_KEYS = frozenset(
         "SSL_CERT_DIR",
         "NODE_EXTRA_CA_CERTS",
         "CODEX_CA_CERTIFICATE",
-        "FACTORY_EXTRA_CA_CERTS",
     }
 )
 CLI_ENV_PREFIXES = ("LC_", "XDG_")

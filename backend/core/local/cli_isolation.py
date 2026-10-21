@@ -11,9 +11,9 @@ the subscription login:
 * ``claude``: the real config directory (its macOS Keychain login does not work
   from another one), with flags that load no settings, MCP servers or slash
   commands. Never ``--bare``: it ignores the subscription login.
-* ``droid``: a temporary ``HOME`` with a copy of its login file. On macOS the
-  copy is sealed by the login Keychain, so the temporary ``HOME`` links the real
-  ``~/Library``. Without a login file, droid keeps the real ``HOME``.
+
+Any other CLI is refused. Droid was removed (SKY-144): it has no flag that skips
+the user's hooks, MCP servers, config or rules, and it always keeps one tool on.
 
 A CLI can refresh its login during a call. When the copy changed and the real
 file did not change meanwhile, the copy goes back under a file lock, so the
@@ -58,11 +58,7 @@ CODEX_ARGS = (
 )
 """``codex exec`` flags: no ``config.toml``, no execpolicy rules, no session files, no MCP servers."""
 
-DROID_ARGS = ("--disable-builtin-skills",)
-"""``droid exec`` flags: no Factory skills."""
-
 CODEX_AUTH_FILE = "auth.json"
-DROID_AUTH_FILE = "auth.v2.loginkeychain"
 _LOCK_SUFFIX = ".skynet.lock"
 
 
@@ -187,33 +183,6 @@ def _codex(root: Path, env: dict[str, str]) -> list[_Credential]:
     return [credential] if credential is not None else []
 
 
-def _droid(root: Path, env: dict[str, str]) -> list[_Credential]:
-    """Point droid at a temporary ``HOME`` with a login copy, when a login file exists.
-
-    Args:
-        root: The call's temporary directory.
-        env: The environment to change in place.
-
-    Returns:
-        The login copies to put back after the call.
-    """
-    real_home = _user_home(env)
-    real_auth = real_home / ".factory" / DROID_AUTH_FILE
-    if not real_auth.is_file():
-        return []
-    home = root / "home"
-    home.mkdir()
-    credential = _copy_in(real_auth, home / ".factory" / DROID_AUTH_FILE)
-    if credential is None:
-        return []
-    library = real_home / "Library"
-    if library.is_dir():
-        # droid seals its login with the macOS login Keychain, which it finds under ~/Library.
-        (home / "Library").symlink_to(library, target_is_directory=True)
-    env["HOME"] = str(home)
-    return [credential]
-
-
 @contextlib.contextmanager
 def isolated_cli(cli: CliProvider, *, base_env: Mapping[str, str] | None = None) -> Iterator[CliIsolation]:
     """Give one CLI call an environment and flags without the user's personal setup.
@@ -225,7 +194,12 @@ def isolated_cli(cli: CliProvider, *, base_env: Mapping[str, str] | None = None)
     Yields:
         The allow-listed environment and the flags to add to the
         CLI's command. Temporary homes exist until the block ends.
+
+    Raises:
+        ValueError: If ``cli`` is not ``claude`` or ``codex``.
     """
+    if cli not in ("claude", "codex"):
+        raise ValueError(f"No isolated setup for CLI {cli!r}; only claude and codex are supported")
     source = os.environ if base_env is None else base_env
     env = cli_child_env(source)
     if cli == "claude":
@@ -234,14 +208,9 @@ def isolated_cli(cli: CliProvider, *, base_env: Mapping[str, str] | None = None)
     root = Path(tempfile.mkdtemp(prefix=f"skynet-{cli}-home-"))
     credentials: list[_Credential] = []
     try:
-        if cli == "codex":
-            credentials = _codex(root, env)
-            yield CliIsolation(env=env, args=CODEX_ARGS)
-        else:
-            credentials = _droid(root, env)
-            yield CliIsolation(env=env, args=DROID_ARGS)
+        credentials = _codex(root, env)
+        yield CliIsolation(env=env, args=CODEX_ARGS)
     finally:
         for credential in credentials:
             _copy_back(credential)
-        # rmtree removes the ~/Library link itself and never follows it.
         shutil.rmtree(root, ignore_errors=True)

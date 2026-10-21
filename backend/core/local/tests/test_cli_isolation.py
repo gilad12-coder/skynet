@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from core.local import cli_isolation
 from core.local.cli_isolation import isolated_cli
 
 # Every name from the review rounds, written out, plus unrelated backend
@@ -47,6 +46,7 @@ DROPPED_LITERALS = (
     "APP_SECRET_KEY",
     "OPENROUTER_API_KEY",
     "SKYNET_RANDOM_JUNK_7F3A",
+    "FACTORY_EXTRA_CA_CERTS",
 )
 # The allow-list, written out, so a change to it fails here.
 KEPT_LITERALS = (
@@ -74,7 +74,6 @@ KEPT_LITERALS = (
     "SSL_CERT_DIR",
     "NODE_EXTRA_CA_CERTS",
     "CODEX_CA_CERTIFICATE",
-    "FACTORY_EXTRA_CA_CERTS",
     "LC_ALL",
     "LC_CTYPE",
     "XDG_CONFIG_HOME",
@@ -179,29 +178,10 @@ def test_codex_without_a_login_gets_empty_homes(tmp_path: Path) -> None:
         assert list(Path(isolation.env["CODEX_HOME"]).iterdir()) == []
 
 
-def test_droid_gets_a_private_home_with_its_login(tmp_path: Path) -> None:
-    """Copy droid's login into a temporary HOME that links the real Keychain folder."""
-    home = tmp_path / "user"
-    (home / ".factory").mkdir(parents=True)
-    (home / ".factory" / "auth.v2.loginkeychain").write_bytes(b"sealed")
-    (home / ".factory" / "AGENTS.md").write_text("personal instructions", encoding="utf-8")
-    (home / "Library").mkdir()
-    with isolated_cli("droid", base_env={"HOME": str(home)}) as isolation:
-        private = Path(isolation.env["HOME"])
-        assert private != home
-        assert sorted(path.name for path in (private / ".factory").iterdir()) == ["auth.v2.loginkeychain"]
-        assert (private / "Library").is_symlink()
-        assert isolation.args == cli_isolation.DROID_ARGS
-    assert not private.exists()
-    assert (home / "Library").is_dir()
-
-
-def test_droid_without_a_login_file_keeps_the_real_home(tmp_path: Path) -> None:
-    """Keep the real HOME when droid has no login file to copy, so its login still works."""
-    home = tmp_path / "user"
-    home.mkdir()
-    with isolated_cli("droid", base_env={"HOME": str(home)}) as isolation:
-        assert isolation.env["HOME"] == str(home)
+def test_droid_is_refused() -> None:
+    """Refuse droid: it has no flags that skip the user's hooks, MCP servers, config or rules."""
+    with pytest.raises(ValueError, match="droid"), isolated_cli("droid"):  # type: ignore[arg-type]
+        pass
 
 
 @pytest.mark.parametrize("flag", ["--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"])
@@ -224,7 +204,7 @@ def test_the_default_environment_is_this_process(tmp_path: Path, monkeypatch: py
         assert isolation.env["HOME"] == os.environ["HOME"]
 
 
-@pytest.mark.parametrize("cli", ["claude", "codex", "droid"])
+@pytest.mark.parametrize("cli", ["claude", "codex"])
 def test_every_cli_gets_only_the_allow_listed_environment(tmp_path: Path, cli: str) -> None:
     """Pass exactly the allow-listed variables; drop provider switches, backend secrets and NODE_OPTIONS."""
     home = _user_home(tmp_path)

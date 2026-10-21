@@ -943,7 +943,7 @@ class ModelGateway:
         name = str(config.get("name") or "").removeprefix("openrouter/")
         parsed = parse_subscription_model_id(name)
         cli, model = parsed if parsed is not None else (config.get("cli_provider"), name)
-        if cli not in ("codex", "claude", "droid") or not model:
+        if cli not in ("codex", "claude") or not model:
             raise UnpricedOperationError("A subscription model needs a CLI that can run it.")
         return self.register_subscription(model, cli, role)
 

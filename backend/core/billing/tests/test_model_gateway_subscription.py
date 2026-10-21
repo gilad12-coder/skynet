@@ -117,6 +117,25 @@ def test_protect_payload_refuses_subscription_outside_local_mode(
 
 
 @pytest.mark.usefixtures("local")
+@pytest.mark.parametrize(
+    "model_config",
+    [
+        {"name": MODEL, "token_source": "subscription", "cli_provider": "droid"},
+        {"name": f"subscription/droid/{MODEL}", "token_source": "subscription", "cli_provider": "droid"},
+    ],
+)
+def test_protect_payload_refuses_a_stored_run_that_names_droid(gateway: ModelGateway, model_config: dict) -> None:
+    """Refuse a stored payload that still names the removed Droid CLI, before any CLI starts.
+
+    Args:
+        gateway: The model gateway under test.
+        model_config: A stored model config that names Droid.
+    """
+    with pytest.raises(UnpricedOperationError, match="needs a CLI"):
+        gateway.protect_payload({"model_config": model_config}, managed_key="")
+
+
+@pytest.mark.usefixtures("local")
 def test_subscription_agent_target_needs_its_model_config(gateway: ModelGateway) -> None:
     """Refuse a subscription agent target that has no model config to route."""
     payload = {"target": {"model": MODEL}, "token_source": "subscription"}

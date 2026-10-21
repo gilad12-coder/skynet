@@ -57,8 +57,6 @@ _CODEX_DISABLED_FEATURES = (
     "hooks",
     "skill_search",
 )
-# droid ignores an empty tool list, so it keeps one tool with no host access.
-_DROID_ONLY_TOOLS = "TodoWrite"
 _TRANSIENT_TEXT = re.compile(
     r"overloaded|timed? ?out|temporar|connection|network|econnreset|503|502|500|529", re.IGNORECASE
 )
@@ -505,62 +503,4 @@ def _stream_codex(argv: list[str], prompt: str, env: Mapping[str, str], settings
     )
 
 
-def run_droid(
-    model_arg: str, prompt: str, json_schema: Mapping[str, Any] | None, settings: Settings, cwd: Path
-) -> CliCompletion:
-    """Answer one prompt with ``droid exec`` in read-only mode, with its host tools off.
-
-    Args:
-        model_arg: The CLI's ``--model`` value.
-        prompt: The full prompt.
-        json_schema: A JSON schema the answer must match, or ``None``.
-        settings: Application settings.
-        cwd: The directory the CLI runs in.
-
-    Returns:
-        The completion.
-
-    Raises:
-        SubscriptionRateLimitedError: When the subscription is capped.
-        CliRunError: When the call fails.
-    """
-    if json_schema is not None:
-        # droid has no schema flag, so the schema travels in the prompt.
-        prompt = f"{prompt}\n\nAnswer with only a JSON value that matches this JSON schema:\n{json.dumps(json_schema)}"
-    with (
-        tempfile.TemporaryDirectory(prefix="skynet-droid-") as scratch,
-        cli_isolation.isolated_cli("droid") as isolation,
-    ):
-        prompt_path = Path(scratch) / "prompt.txt"
-        prompt_path.write_text(prompt, encoding="utf-8")
-        # No ``--auto``: droid then stays read-only. Its read-only mode still
-        # reads any host file, so its tools are cut down to one with no host access.
-        argv = [
-            cli_probe.cli_binary("droid", settings),
-            "exec",
-            "-o",
-            "json",
-            *isolation.args,
-            "--only-tools",
-            _DROID_ONLY_TOOLS,
-            "--model",
-            model_arg,
-            "-f",
-            str(prompt_path),
-        ]
-        stdout, stderr = _run("droid", argv, None, isolation.env, settings, cwd)
-    raw = _json_object("droid", stdout, stderr)
-    if raw.get("is_error"):
-        raise _failure("droid", str(raw.get("result") or stderr))
-    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
-    duration = raw.get("duration_ms")
-    return CliCompletion(
-        text=str(raw.get("result") or ""),
-        prompt_tokens=_int(usage.get("input_tokens")) + _int(usage.get("cache_read_input_tokens")),
-        completion_tokens=_int(usage.get("output_tokens")),
-        model_ms=_int(duration) if isinstance(duration, int | float) and duration > 0 else None,
-        raw=raw,
-    )
-
-
-RUNNERS = {"claude": run_claude, "codex": run_codex, "droid": run_droid}
+RUNNERS = {"claude": run_claude, "codex": run_codex}

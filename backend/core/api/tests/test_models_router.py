@@ -312,7 +312,7 @@ def test_call_holds_report_the_boxes_open_before_the_first_call() -> None:
 
 
 def _local_agent_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """Build a local-mode models router: a signed-in claude, a signed-out codex, no droid.
+    """Build a local-mode models router: a signed-in claude and a signed-out codex.
 
     Args:
         tmp_path: Where the fake CLIs and the state folder go.
