@@ -48,6 +48,7 @@ import { sessionIdentity } from "@/shared/lib/session-identity";
 import { Label } from "@/shared/ui/primitives/label";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { shareLinkUrl } from "@/shared/lib/share-link";
+import { shareDialogPlan } from "@/shared/lib/share-dialog-plan";
 import { LocalShareNotice } from "@/shared/ui/local-share-notice";
 
 const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
@@ -121,6 +122,8 @@ export function ShareDialog({
   // owner, ``me`` the signed-in caller.
   const isOwner = !!state?.owner && state.owner.toLowerCase() === me;
 
+  const plan = shareDialogPlan("optimization", isLocalMode());
+
   const shareUrl = state?.token ? shareLinkUrl(`/share/${state.token}`) : null;
 
   // Owner (if present) plus every invited member — drives the header count.
@@ -132,12 +135,12 @@ export function ShareDialog({
   // built-in trigger or a controlling parent. An effect catches both; the trigger's
   // click handler alone would miss the externally-driven open.
   useEffect(() => {
-    if (open && state === null && !isLocalMode()) {
+    if (open && state === null && plan.loadSharing) {
       getSharing(optimizationId)
         .then(setState)
         .catch((err) => toast.error(err instanceof Error ? err.message : msg("share.error")));
     }
-  }, [open, state, optimizationId]);
+  }, [open, state, optimizationId, plan.loadSharing]);
 
   const handleAccessChange = async (value: GeneralAccess) => {
     setSavingAccess(true);
@@ -167,6 +170,35 @@ export function ShareDialog({
       setSavingVisibility(false);
     }
   };
+
+  // Explore-corpus visibility: a separate axis from the link's general
+  // access. It controls public discovery in /explore, not who can open the
+  // share link. The Mac app keeps it next to the hosted-account notice.
+  const visibilityRow = state && (
+    <SettingsRow
+      icon={state.is_private ? Lock : Globe}
+      label={msg("share.visibility.label")}
+      description={
+        state.is_private
+          ? msg("share.visibility.private_desc")
+          : msg("share.visibility.public_desc")
+      }
+    >
+      <Select
+        value={state.is_private ? "private" : "public"}
+        onValueChange={(next) => handleVisibilityChange(next === "private")}
+        disabled={savingVisibility}
+      >
+        <SelectTrigger size="sm" className={cn(TOUCH_FIELD_SM, "min-w-[120px]")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="public">{msg("share.visibility.public")}</SelectItem>
+          <SelectItem value="private">{msg("share.visibility.private")}</SelectItem>
+        </SelectContent>
+      </Select>
+    </SettingsRow>
+  );
 
   // The tier an "anyone with the link" link grants signed-in visitors. Anonymous
   // visitors stay read-only regardless, so this never elevates a bare URL.
@@ -262,8 +294,15 @@ export function ShareDialog({
               <DialogTitle>{msg("share.dialog_title")}</DialogTitle>
             </DialogHeader>
 
-            {isLocalMode() ? (
-              <LocalShareNotice />
+            {plan.showLocalNotice ? (
+              <>
+                <LocalShareNotice />
+                {plan.showExploreVisibility && visibilityRow && (
+                  <div className="shrink-0 border-t border-border/40 px-4 py-4 sm:px-6">
+                    {visibilityRow}
+                  </div>
+                )}
+              </>
             ) : state === null ? (
               <div className="flex items-center justify-center gap-2 px-6 py-10 text-sm text-muted-foreground">
                 <CircleNotch className="size-4 animate-spin" />
@@ -392,32 +431,7 @@ export function ShareDialog({
                 </div>
 
                 <div className="shrink-0 space-y-3 border-t border-border/40 px-4 py-4 sm:px-6">
-                  {/* Explore-corpus visibility — a separate axis from the
-                      link's general access: this controls public discovery in
-                      /explore, not who can open the share link. */}
-                  <SettingsRow
-                    icon={state.is_private ? Lock : Globe}
-                    label={msg("share.visibility.label")}
-                    description={
-                      state.is_private
-                        ? msg("share.visibility.private_desc")
-                        : msg("share.visibility.public_desc")
-                    }
-                  >
-                    <Select
-                      value={state.is_private ? "private" : "public"}
-                      onValueChange={(next) => handleVisibilityChange(next === "private")}
-                      disabled={savingVisibility}
-                    >
-                      <SelectTrigger size="sm" className={cn(TOUCH_FIELD_SM, "min-w-[120px]")}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="public">{msg("share.visibility.public")}</SelectItem>
-                        <SelectItem value="private">{msg("share.visibility.private")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </SettingsRow>
+                  {visibilityRow}
 
                   <SettingsRow
                     icon={state.general_access === "anyone" ? Globe : Lock}
@@ -687,10 +701,7 @@ function InvitePeople({
             className="shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0"
           >
             {inviting ? (
-              <CircleNotch
-                className="animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
             ) : (
               <UserPlus className="size-4" />
             )}

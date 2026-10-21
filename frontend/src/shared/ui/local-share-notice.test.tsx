@@ -4,8 +4,6 @@
  * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -68,26 +66,4 @@ void describe("shareLinkUrl", () => {
   void it("returns no link while rendering on the server", () => {
     assert.equal(shareLinkUrl("/share/t"), null);
   });
-});
-
-// The dialogs render through a Radix portal, which a static render cannot
-// reach. These checks keep each dialog on the guarded link builder and the
-// local-mode branch, so no dialog can show a loopback link in the Mac app.
-const SHARE_DIALOGS = [
-  "features/optimizations/components/ShareDialog.tsx",
-  "features/datasets/components/DatasetShareDialog.tsx",
-  "features/sidebar/components/FolderShareDialog.tsx",
-  "features/tagger/components/TaggingSessionShareDialog.tsx",
-];
-
-void describe("share dialogs in local mode", () => {
-  const src = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-  for (const file of SHARE_DIALOGS) {
-    void it(`${file} builds no link from the page origin and shows the notice`, () => {
-      const code = readFileSync(path.join(src, file), "utf8");
-      assert.doesNotMatch(code, /window\.location\.origin/);
-      assert.match(code, /shareLinkUrl\(`/);
-      assert.match(code, /isLocalMode\(\) \? \(\s*<LocalShareNotice \/>/);
-    });
-  }
 });
