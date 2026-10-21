@@ -230,7 +230,13 @@ def route_local_byok_model(
         OpenRouter key; the normal routes then apply.
 
     Raises:
-        DomainError: 422 when an explicit id is not an OpenRouter model id.
+        DomainError: 422 ``models.unknown_model`` when an explicit id is not
+            an OpenRouter model id; 400 ``billing.byok_missing_connection``
+            when the key is deleted after the verified-key check; 400
+            ``billing.byok_model_not_served`` when the saved connection cannot
+            route the model; 409 ``billing.byok_key_undecryptable`` when the
+            saved key cannot be decrypted; 503 ``billing.byok_not_configured``
+            when the vault key is unconfigured.
     """
     if not settings.local_mode:
         return None
@@ -253,7 +259,7 @@ def route_local_byok_model(
         return resolve_byok_model_config(config, username=username, vault=vault)
     except ValueError as exc:
         # The key was deleted or failed a new check after the check above.
-        raise DomainError("billing.byok_missing_connection", status=400, provider=str(exc)) from exc
+        raise DomainError("billing.byok_missing_connection", status=400, provider=_LOCAL_BYOK_PROVIDER) from exc
 
 
 def metering_token_source(model_config: ModelConfig | None) -> str:

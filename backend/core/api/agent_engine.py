@@ -104,8 +104,9 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
 
     Returns:
         ``model`` unchanged when it names a model, in hosted mode, or when the
-        engine is OpenRouter or unknown (the model router then refuses the turn
-        in local mode). Otherwise ``subscription/<cli>/<slug>`` on the engine
+        engine is OpenRouter or unknown (in local mode the model router then
+        runs the turn on the caller's verified OpenRouter key, or refuses it).
+        Otherwise ``subscription/<cli>/<slug>`` on the engine
         CLI's first catalog model.
     """
     name = str(model or "").strip()

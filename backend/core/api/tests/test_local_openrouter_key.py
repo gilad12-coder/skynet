@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import socket
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -41,7 +42,7 @@ from ...service_gateway.agents import code as code_agent
 from ...service_gateway.agents import generalist
 from ...service_gateway.language_models import build_language_model
 from ...storage.models import AgentEnginePreferenceModel, Base, BillingProviderKeyModel
-from .. import agent_engine, model_catalog, model_router
+from .. import agent_engine, interview_model, model_catalog, model_router
 from .. import auth as auth_mod
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -58,6 +59,8 @@ _USER = "alice@example.com"
 _FAKE_KEY = "sk-or-v1-FAKE0000000000000000000000000000000000000000000000000000001"
 _MODEL = "openrouter/anthropic/claude-haiku-4.5"
 _CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+# The fixture replaces this with a fake; the empty-pick test needs the real one.
+_REAL_DEFAULT_MODEL_ID = model_router.default_model_id
 
 
 def _engine() -> Engine:
@@ -317,6 +320,57 @@ def test_explicit_pick_routes_on_the_saved_key_with_the_real_empty_catalog(
         with pytest.raises(DomainError) as caught:
             model_router.route_local_byok_model(malformed, job_store=store, username=_USER)
         assert (caught.value.code, caught.value.status_code) == ("models.unknown_model", 422)
+
+
+def test_empty_picks_route_the_real_defaults_on_the_saved_key(
+    local: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Route an empty agent pick and an empty interview pick onto the saved key with the real defaults.
+
+    The Mac app sends no pick when the user keeps the default, so the real
+    ``default_model_id`` and ``interview_model_id`` pick the model, over the
+    real empty curated catalog. The result must be an OpenRouter id, because
+    the user's OpenRouter key pays for it.
+
+    Args:
+        local: The blocked remote addresses.
+        monkeypatch: Restores the real catalog and default functions and clears the cache.
+    """
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(model_catalog, "_cached_response", None)
+    monkeypatch.setattr(model_router, "get_catalog_cached", model_catalog.get_catalog_cached)
+    monkeypatch.setattr(model_router, "default_model_id", _REAL_DEFAULT_MODEL_ID)
+    monkeypatch.setattr(model_router, "interview_model_id", interview_model.interview_model_id)
+    store = SimpleNamespace(engine=_engine())
+    _save(_client(store))
+
+    for interview in (False, True):
+        routed = model_router.route_local_byok_model("", job_store=store, username=_USER, interview=interview)
+        assert routed is not None
+        assert re.fullmatch(r"openrouter/[^/\s]+/[^/\s]+", routed.name), routed.name
+        assert (routed.token_source, routed.byok_provider) == (TOKEN_SOURCE_BYOK, "openrouter")
+        assert routed.extra["api_key"] == _FAKE_KEY
+
+
+def test_key_deleted_between_reads_gives_one_clean_message(
+    local: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Name the provider once when the saved key disappears after the verified-key check.
+
+    Args:
+        local: The blocked remote addresses.
+        monkeypatch: Makes the vault lose the key between the check and the read.
+    """
+    store = SimpleNamespace(engine=_engine())
+    _save(_client(store))
+    monkeypatch.setattr(byok_vault.ProviderKeyVault, "resolve_connection", lambda self, username, provider, **_: None)
+
+    with pytest.raises(DomainError) as caught:
+        model_router.route_local_byok_model("", job_store=store, username=_USER)
+    assert (caught.value.code, caught.value.status_code) == ("billing.byok_missing_connection", 400)
+    assert caught.value.detail == (
+        "No saved key for openrouter. Add a connection in Settings → Providers to run with your own key."
+    )
 
 
 def test_byok_configs_skip_the_managed_gateway_base_url(local: list[object]) -> None:
