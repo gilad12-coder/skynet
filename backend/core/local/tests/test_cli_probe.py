@@ -90,6 +90,16 @@ KEPT_LITERALS = (
 )
 
 
+# Shapes from claude 2.1.306 `auth status --json`, with personal fields removed.
+CLAUDE_SUBSCRIPTION = (
+    '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}'
+)
+CLAUDE_API_KEY_HELPER = (
+    '{"loggedIn": true, "authMethod": "api_key_helper", "apiProvider": "firstParty", "apiKeySource": "apiKeyHelper"}'
+)
+CLAUDE_OAUTH_TOKEN = '{"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"}'
+
+
 @pytest.fixture(autouse=True)
 def _fresh_cache() -> None:
     """Start every test without cached probe results."""
@@ -179,7 +189,7 @@ def test_logged_out_cli_is_reported(tmp_path: Path) -> None:
 def test_ready_clis_report_ok(tmp_path: Path) -> None:
     """Current, signed-in CLIs report their version and ``logged_in=True``."""
     codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out="Logged in using ChatGPT")
-    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": true}')
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out=CLAUDE_SUBSCRIPTION)
     settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
 
     statuses = probe_clis(settings)
@@ -188,6 +198,24 @@ def test_ready_clis_report_ok(tmp_path: Path) -> None:
     assert [status.version for status in statuses] == ["0.163.0", "2.1.306"]
     assert all(status.version_ok and status.logged_in for status in statuses)
     assert all(status.rate_limited_until is None for status in statuses)
+
+
+@pytest.mark.parametrize(
+    ("login_out", "expected"),
+    [(CLAUDE_SUBSCRIPTION, True), (CLAUDE_API_KEY_HELPER, False), (CLAUDE_OAUTH_TOKEN, False)],
+    ids=["claude.ai", "api_key_helper", "oauth_token"],
+)
+def test_claude_is_signed_in_only_with_a_claude_ai_login(tmp_path: Path, login_out: str, expected: bool) -> None:
+    """Count only a claude.ai login as signed in; other methods fail closed.
+
+    Args:
+        tmp_path: Directory for the fake binary.
+        login_out: The ``auth status --json`` output.
+        expected: The ``logged_in`` value the probe must report.
+    """
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out=login_out)
+
+    assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is expected
 
 
 def test_unreadable_login_output_is_unknown(tmp_path: Path) -> None:
@@ -206,7 +234,7 @@ def test_probe_strips_provider_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     """
     for key in DROPPED_LITERALS:
         monkeypatch.setenv(key, "fixture-not-a-key")
-    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out='{"loggedIn": true}')
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out=CLAUDE_SUBSCRIPTION)
 
     assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is True
     assert not set(DROPPED_LITERALS) & set(cli_env())

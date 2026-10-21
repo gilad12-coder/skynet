@@ -189,7 +189,13 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
     if not isinstance(payload, dict):
         return None
     flag = payload.get("loggedIn")
-    return flag if isinstance(flag, bool) else None
+    if not isinstance(flag, bool):
+        return None
+    # claude also says loggedIn for an apiKeyHelper or a CLAUDE_CODE_OAUTH_TOKEN it
+    # never checks; only a claude.ai login is a subscription the runners can use.
+    if flag:
+        return payload.get("authMethod") == "claude.ai"
+    return flag
 
 
 def _active_limit(limits: dict[str, dict[str, str]], cli: CliProvider, now: datetime) -> str | None:
