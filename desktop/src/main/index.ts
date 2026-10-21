@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
+import { holdQuitUntilStopped } from "./quit";
 import { databaseUrl, removeSandboxContainers, startPostgres, stopPostgres, type DockerCtx } from "./postgres";
 import { ensureSandboxImage } from "./sandbox-image";
 import { ensurePrivateDir, loadOrCreateSecrets } from "./secrets";
@@ -374,15 +375,16 @@ if (!app.requestSingleInstanceLock()) {
     startUpdateCheck(log);
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", (event) => {
-    if (quitting) return;
-    quitting = true;
-    event.preventDefault();
-    stopStack()
-      .catch((err: Error) => log(`shutdown error: ${err.message}`))
-      .finally(() => {
-        log("stopped");
-        desktopLog.end(() => app.exit(0));
-      });
-  });
+  app.on(
+    "before-quit",
+    holdQuitUntilStopped(() => {
+      quitting = true;
+      stopStack()
+        .catch((err: Error) => log(`shutdown error: ${err.message}`))
+        .finally(() => {
+          log("stopped");
+          desktopLog.end(() => app.exit(0));
+        });
+    }),
+  );
 }
