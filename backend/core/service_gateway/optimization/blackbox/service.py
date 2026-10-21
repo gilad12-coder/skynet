@@ -117,6 +117,15 @@ _REPO_ENGINE_REASON = "Auto mode does not optimize a repository; pick one engine
 _PROGRESS_EVENTS = 100
 
 
+def _proposer_runtime() -> str:
+    """Name the sandbox runtime this deployment runs proposers in.
+
+    Returns:
+        ``"docker"`` in local mode, otherwise ``"vercel"``.
+    """
+    return "docker" if settings.local_mode else "vercel"
+
+
 def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
     """Describe what this deployment and ``target`` offer the engines.
 
@@ -127,7 +136,7 @@ def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
         target per the job.
     """
     reason = None if current_sandbox_runtime() is not None else agent_target_unavailable_reason(settings)
-    proposer_reason = native_runtime_unavailable_reason("vercel", settings)
+    proposer_reason = native_runtime_unavailable_reason(_proposer_runtime(), settings)
     return EngineCapabilities(
         sandbox=reason is None,
         agent_target=target.kind == BLACKBOX_TARGET_AGENT,
@@ -152,13 +161,16 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
         (ENGINES[name].unavailable_reason_for(caps) for name in AUTO_ENGINES if not ENGINES[name].available_for(caps)),
         None,
     )
-    unavailable = native_runtime_unavailable_reason("vercel", settings)
+    runtime = _proposer_runtime()
+    unavailable = native_runtime_unavailable_reason(runtime, settings)
     runtimes = [
         BlackboxProposerRuntimeInfo(
+            # The catalog model only names "vercel" so far; in local mode the
+            # entry carries the Docker runtime's availability and zero cost.
             id="vercel",
             available=unavailable is None,
             unavailable_reason=unavailable,
-            cost=runtime_cost_profile(settings, "anything", "vercel"),
+            cost=runtime_cost_profile(settings, "anything", runtime),
             checkpoint_restore_supported=unavailable is None,
             checkpoint_restore_reason=unavailable,
         )

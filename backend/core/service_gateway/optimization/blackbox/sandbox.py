@@ -40,6 +40,7 @@ from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
 from ....config import Settings, app_env, with_legacy_env
 from ....exceptions import ServiceError
+from . import docker_sandbox
 from .sandbox_log import logged_command
 
 # The SDK is a declared dependency, but an image built from an older
@@ -1068,6 +1069,8 @@ def sandbox_unavailable_reason(settings: Settings) -> str | None:
     """
     if current_sandbox_runtime() is not None:
         return None
+    if settings.local_mode:
+        return docker_sandbox.docker_sandbox_unavailable_reason(settings)
     if vercel_sync is None or vercel_api is None:
         return _PACKAGE_MISSING
     if not (settings.vercel_token and settings.vercel_team_id and settings.vercel_project_id):
@@ -1076,7 +1079,9 @@ def sandbox_unavailable_reason(settings: Settings) -> str | None:
 
 
 def sandbox_runtime_from_settings(settings: Settings) -> SandboxRuntime | None:
-    """Build the Vercel runtime from settings, or return ``None`` when unconfigured.
+    """Build the deployment's runtime from settings, or return ``None`` when unconfigured.
+
+    Local mode builds the local Docker runtime; every other deployment builds Vercel.
 
     Args:
         settings: The backend settings.
@@ -1088,6 +1093,8 @@ def sandbox_runtime_from_settings(settings: Settings) -> SandboxRuntime | None:
         return current_sandbox_runtime()
     if sandbox_unavailable_reason(settings) is not None:
         return None
+    if settings.local_mode:
+        return docker_sandbox.docker_runtime_from_settings(settings)
     return VercelSandboxRuntime(
         VercelCredentials(
             token=settings.vercel_token.get_secret_value(),
@@ -1099,7 +1106,7 @@ def sandbox_runtime_from_settings(settings: Settings) -> SandboxRuntime | None:
 
 
 def scorer_runtime_from_settings(settings: Settings) -> SandboxRuntime:
-    """Return the current contained runtime or the managed Vercel sandbox.
+    """Return the current contained runtime, or the deployment's sandbox (Docker in local mode).
 
     Args:
         settings: The backend settings.

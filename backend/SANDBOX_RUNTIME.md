@@ -14,6 +14,20 @@ Keep runtime networking disabled. The parent owns model dispatch, sandbox contro
 
 Each paid Continue check and each submitted run creates exactly one outer Vercel execution sandbox. The complete Anything readiness or optimization orchestrator runs there. Scorer, target-agent, and native-engine commands receive private workspaces inside that same boundary, so they do not open or reserve nested Vercel sandboxes. A fresh wizard path has two Continue checks (Evaluation and Optimization) plus the submitted run; matching evidence retries reuse the completed check rather than opening another session. Python scorers also use one dependency-resolution session when a matching lock is unavailable, before the full readiness check. The runtime estimate includes this additional setup session.
 
+## Local Docker sandbox (local mode)
+
+With `APP_LOCAL_MODE=1` (the Mac app), the protected parent opens its boxes as containers on the local Docker daemon instead of Vercel microVMs. `DockerSandboxRuntime` in `core/service_gateway/optimization/blackbox/docker_sandbox.py` implements the same `SandboxRuntime` contract, so the model mailbox, the sandbox broker and the guest protocol do not change. Hosted deployments (local mode off) still accept only Vercel.
+
+- **Image.** `APP_LOCAL_SANDBOX_IMAGE` holds a local image id (`sha256:<64 hex>`), built from `backend/Dockerfile` and read with `docker image inspect --format '{{.Id}}'`. In local mode only this bare id is accepted, for every workflow. The current Dockerfile installs x64-only harness packages, so on Apple silicon build it with `--platform linux/amd64`.
+- **CLI.** `APP_DOCKER_BIN` selects the Docker CLI (default `docker`). OrbStack works through the same CLI.
+- **Isolation.** Each box runs `docker run -d --rm --init --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 1024 --cpus <vcpus> --memory <vcpus × 2048>m`, with no published ports. Only the tmpfs mounts `/workspace` (the working directory and `HOME`) and `/tmp` are writable. The box's only process is `sleep <lifetime>`, so the container and every command in it end at the wall-time limit. Commands run through `docker exec` with `timeout --signal=KILL`.
+- **Streaming.** Command output is read line by line while the command runs, so the model mailbox answers guest model requests mid-command. File writes use a separate `docker exec` with a tar stream and can run beside an in-flight command.
+- **Labels.** Every box has `skynet=blackbox` and `skynet.job=<owner>`. The worker sweep and the desktop shell remove leftover boxes by the `skynet.job` label.
+- **Cost.** Local boxes are never billed: no Vercel quote, no budget reservation, and `runtime_cost_profile(..., "docker")` reports zero bounds.
+- **Preflight.** `docker_sandbox_unavailable_reason` reports `sandbox.docker_unavailable` when the CLI is missing or the daemon does not answer, and `sandbox.docker_image_missing` when the image id is unset or not present.
+
+Known gaps against Vercel: a box that needs package registries during setup joins the default `bridge` network, and Docker cannot limit it to the allowlisted hosts. The repository workspace then disconnects it with `docker network disconnect` and probes that the hosts are unreachable before any candidate runs. Guest environment values are passed as `docker` arguments; they are non-secret by design. tmpfs pages count toward the container's memory limit.
+
 ## Offline dependencies
 
 | Dependency | Execution identity |
