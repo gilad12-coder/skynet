@@ -6,11 +6,13 @@ are spawned.  FakeJobStore from conftest is used as the in-memory store.
 
 from __future__ import annotations
 
+import copy
 import inspect
 import itertools
 import json
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +23,7 @@ from core.i18n import CANCELLATION_REASON
 from core.storage.base import JobStore
 
 from .. import engine as engine_module
+from ..checkpoint_compat import CheckpointCompatibilityError, checkpoint_manifest, validate_checkpoint
 from ..constants import EVENT_ERROR, EVENT_RESULT
 from ..engine import BackgroundWorker, WorkerShutdownError, reset_worker_for_tests
 from .conftest import FakeJobStore
@@ -33,6 +36,7 @@ from .mocks import (
     make_progress_event,
     make_result_event,
 )
+from .test_budget_lifecycle import _checkpoint
 
 
 @pytest.fixture(autouse=True)
@@ -286,6 +290,72 @@ def test_worker_shutdown_flag_is_temporary_only_for_active_job(
     store.update_job("opt-shutdown", status="cancelled")
     with pytest.raises(engine_module.CancellationError):
         worker._raise_if_interrupted(event, "opt-shutdown")
+
+
+def test_process_job_releases_run_when_worker_shuts_down_during_validating(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A shutdown while validating hands the run to the orphan sweep instead of failing it."""
+    store.seed_job("opt-stop-validating", payload=REAL_RUN_PAYLOAD, status="validating", claimed_by="w1")
+    worker.enqueue_job("opt-stop-validating")
+
+    def _shutdown(*_args: object, **_kwargs: object) -> None:
+        """Stop the worker while the payload is validated."""
+        worker._running = False
+        raise WorkerShutdownError("Optimization was interrupted by worker shutdown.")
+
+    with (
+        patch("core.worker.engine.notify_job_completed") as notify,
+        patch.object(worker, "_get_service") as mock_svc,
+    ):
+        mock_svc.return_value.validate_payload.side_effect = _shutdown
+        worker._process_job("opt-stop-validating", 0)
+
+    job = store._jobs["opt-stop-validating"]
+    assert job["status"] == "validating"
+    assert job["claimed_by"] is None
+    assert job["lease_expires_at"] is None
+    assert job["recovery"]["cause"] == engine_module.WORKER_RESTART_CAUSE
+    assert "completed_at" not in job
+    notify.assert_not_called()
+
+
+def test_process_job_releases_run_when_worker_shuts_down_during_running(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A shutdown while the optimizer runs leaves the run active for a live worker to resume."""
+    store.seed_job("opt-stop-running", payload=REAL_RUN_PAYLOAD, claimed_by="w1")
+    worker.enqueue_job("opt-stop-running")
+    worker._running = True
+    ctx, proc = make_mp_context(exitcode=0, result_events=[])
+    proc.is_alive.return_value = True
+
+    def _shutdown() -> None:
+        """Stop the worker once the optimizer subprocess starts."""
+        assert store._jobs["opt-stop-running"]["status"] == "running"
+        worker._running = False
+        for event in worker._cancel_events.values():
+            event.set()
+
+    proc.start.side_effect = _shutdown
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with (
+        patch("core.worker.engine.notify_job_completed") as notify,
+        patch.object(worker, "_get_service") as mock_svc,
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-stop-running", 0)
+
+    job = store._jobs["opt-stop-running"]
+    assert job["status"] == "running"
+    assert job["claimed_by"] is None
+    assert job["recovery"]["cause"] == engine_module.WORKER_RESTART_CAUSE
+    assert job["message"] == "Waiting for a live worker after a restart"
+    notify.assert_not_called()
 
 
 def test_process_job_sets_status_failed_when_subprocess_sends_no_result(
@@ -836,3 +906,32 @@ def test_the_pinned_commit_is_stored_on_the_run(worker: BackgroundWorker, store:
     worker._record_repo_commit("opt-repo", "a" * 40)
 
     assert store._jobs["opt-repo"]["payload"]["target"]["repo"] == {"repository": "acme/app", "commit": "a" * 40}
+
+
+def test_checkpoints_taken_after_the_environment_is_recorded_stay_resumable(
+    worker: BackgroundWorker, store: FakeJobStore, tmp_path: Path
+) -> None:
+    """Hand back the stored payload, so checkpoints hash what resume validates against."""
+    staged = {
+        "optimizer_name": "GEPA",
+        "target": {"kind": "repo", "repo": {"repository": "acme/app", "commit": "a" * 40}},
+    }
+    store.seed_job("opt-repo", payload=copy.deepcopy(staged))
+    data = _checkpoint(tmp_path)
+
+    recorded = worker._record_repo_environment("opt-repo", {"services": []})
+
+    stored = store._jobs["opt-repo"]["payload"]
+    assert recorded == stored
+    assert stored["target"]["repo"]["environment"] == {"services": []}
+    validate_checkpoint(data, checkpoint_manifest(data, dict(recorded), "fixture-v1"), stored, "fixture-v1")
+    with pytest.raises(CheckpointCompatibilityError, match="configuration_sha256"):
+        validate_checkpoint(data, checkpoint_manifest(data, staged, "fixture-v1"), stored, "fixture-v1")
+
+
+def test_a_payload_without_a_repository_records_no_environment(worker: BackgroundWorker, store: FakeJobStore) -> None:
+    """Leave a payload without a repository untouched and report nothing to sync."""
+    store.seed_job("opt-plain", payload={"optimizer_name": "GEPA"})
+
+    assert worker._record_repo_environment("opt-plain", {"services": []}) is None
+    assert store._jobs["opt-plain"]["payload"] == {"optimizer_name": "GEPA"}

@@ -144,20 +144,27 @@ def _inside(path: str, roots: Iterable[str]) -> bool:
     return any(root == "." or path == root or path.startswith(root.rstrip("/") + "/") for root in roots)
 
 
-def patch_violations(patch: str, editable_paths: Iterable[str], readonly_paths: Iterable[str] = ()) -> list[str]:
+def patch_violations(
+    patch: str,
+    editable_paths: Iterable[str],
+    readonly_paths: Iterable[str] = (),
+    protected_paths: Iterable[str] = (),
+) -> list[str]:
     """Explain every way a patch breaks the run's editing rules.
 
     Args:
         patch: ``git diff`` output for one version.
         editable_paths: Files and folders the agent may change.
         readonly_paths: Submodules and Git LFS files, which stay as fetched.
+        protected_paths: Files and folders the repository's constraints file
+            protects; they win over the editable paths.
 
     Returns:
         One readable reason per broken rule; empty when the patch is allowed.
     """
     if len(patch.encode("utf-8")) > MAX_PATCH_BYTES:
         return [f"The change is larger than the {MAX_PATCH_BYTES // (1024 * 1024)} MiB limit."]
-    editable, readonly = list(editable_paths), list(readonly_paths)
+    editable, readonly, protected = list(editable_paths), list(readonly_paths), list(protected_paths)
     problems: list[str] = []
     in_header = False
     for line in patch.splitlines():
@@ -173,6 +180,8 @@ def patch_violations(patch: str, editable_paths: Iterable[str], readonly_paths: 
         parts = path.split("/")
         if path.startswith("/") or any(part in ("", ".", "..") for part in parts) or ".git" in parts:
             problems.append(f"'{path}' is not a path inside the repository.")
+        elif _inside(path, protected):
+            problems.append(f"'{path}' is protected by the repository's optimize.toml ([paths] protected).")
         elif _inside(path, readonly):
             problems.append(f"'{path}' is a submodule or Git LFS file, which are read-only.")
         elif not _inside(path, editable):
