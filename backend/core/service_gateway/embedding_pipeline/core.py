@@ -386,7 +386,8 @@ def set_embedding_privacy(job_store: Any, optimization_id: str, is_private: bool
     The public Explore corpus filters on the indexed ``job_embeddings.is_private``
     column, so flipping a job's visibility after it was embedded must update that
     row — not just ``payload_overview`` — or the change stays invisible to search
-    and the explore page until the row is re-embedded. A no-op when the job has no
+    and the explore page until the row is re-embedded. A no-op when the embedding
+    schema is off (SEARCH_BACKEND is not 'semantic') or the job has no
     embedding row yet (not-yet-embedded or non-success): the pipeline reads
     ``is_private`` from the overview at embed time and picks up the new value then.
 
@@ -395,6 +396,10 @@ def set_embedding_privacy(job_store: Any, optimization_id: str, is_private: bool
         optimization_id: Optimization whose embedding row should be updated.
         is_private: New visibility flag (``True`` hides it from the public corpus).
     """
+    # Without SEARCH_BACKEND=semantic the migrations skip ``job_embeddings``
+    # (the Mac app among them), so the update would fail on a missing table.
+    if not settings.embeddings_enabled:
+        return
     with Session(job_store.engine) as session:
         session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).update(
             {

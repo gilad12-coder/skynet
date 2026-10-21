@@ -633,3 +633,27 @@ def test_embed_finished_job_uses_free_summary_when_owner_has_no_balance() -> Non
 
     assert summarize.call_args.kwargs["use_llm"] is False
     meter.assert_not_called()
+
+
+def test_set_embedding_privacy_skips_without_embedding_schema() -> None:
+    """A non-semantic backend has no ``job_embeddings`` table, so no query runs."""
+    store = _FakeJobStore()
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", False),
+        patch.object(pipeline, "Session") as session_cls,
+    ):
+        pipeline.set_embedding_privacy(store, "opt-1", True)
+    session_cls.assert_not_called()
+
+
+def test_set_embedding_privacy_updates_row_with_embedding_schema() -> None:
+    """The semantic backend syncs ``is_private`` onto the embedding row."""
+    store = _FakeJobStore()
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "Session") as session_cls,
+    ):
+        pipeline.set_embedding_privacy(store, "opt-1", True)
+    session = session_cls.return_value.__enter__.return_value
+    session.query.return_value.filter.return_value.update.assert_called_once()
+    session.commit.assert_called_once()
