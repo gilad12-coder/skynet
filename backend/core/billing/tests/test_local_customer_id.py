@@ -3,7 +3,8 @@
 ``billing_customers.stripe_customer_id`` is ``String(64)``. SQLite does not
 enforce that width, so each test asserts the stored length directly; with
 ``APP_BUDGET_TEST_DB_URL`` set, the same tests also run on PostgreSQL, which
-rejects a longer value with ``StringDataRightTruncation``.
+rejects a longer value with ``StringDataRightTruncation``. The checkout
+webhook tests check that a customerless session never stores an empty id.
 """
 
 from __future__ import annotations
@@ -209,3 +210,61 @@ def test_existing_short_local_row_still_counts_as_customerless(engine: Engine, m
         row = session.get(BillingCustomerModel, "old@x.com")
         assert row is not None
         assert (row.stripe_customer_id, row.balance_cents) == ("cus_real", 7)
+
+
+def _complete_checkout(engine: Engine, username: str, customer: object) -> None:
+    """Apply a paid one-time Checkout Session for ``username`` and commit it.
+
+    Args:
+        engine: Database holding the billing tables.
+        username: Buyer identity stamped into the session metadata.
+        customer: The session's ``customer`` field (id, expanded object, or ``None``).
+    """
+    obj = {
+        "mode": "payment",
+        "payment_status": "paid",
+        "customer": customer,
+        "payment_intent": f"pi_{uuid4().hex}",
+        "metadata": {"username": username, "cents": "500", "pack_id": "starter"},
+    }
+    with Session(engine) as session:
+        StripeBillingService(engine=engine)._on_checkout_completed(session, f"evt_{uuid4().hex}", obj)
+        session.commit()
+
+
+def test_customerless_checkouts_for_two_new_accounts_each_get_a_row(engine: Engine) -> None:
+    """A Checkout Session without a customer must not store an empty, colliding id."""
+    names = ["first@x.com", "second@x.com"]
+    for name in names:
+        _complete_checkout(engine, name, None)
+
+    ids = [_stored_id(engine, name) for name in names]
+    assert ids == [local_customer_id(name) for name in names]
+    with Session(engine) as session:
+        assert [session.get(BillingCustomerModel, name).balance_cents for name in names] == [500, 500]
+
+
+def test_checkout_stores_the_session_customer_id(engine: Engine) -> None:
+    """A new account keeps the real Stripe id, also when the field is expanded."""
+    _complete_checkout(engine, "plain@x.com", "cus_plain")
+    _complete_checkout(engine, "expanded@x.com", {"id": "cus_expanded", "object": "customer"})
+
+    assert _stored_id(engine, "plain@x.com") == "cus_plain"
+    assert _stored_id(engine, "expanded@x.com") == "cus_expanded"
+
+
+def test_existing_empty_customer_id_counts_as_customerless(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row an older checkout stored with an empty id upgrades to a real id."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="empty@x.com", stripe_customer_id="", balance_cents=500))
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    customer_api = SimpleNamespace(create=lambda **_: SimpleNamespace(id="cus_new"))
+    monkeypatch.setattr(service, "_stripe", lambda: SimpleNamespace(Customer=customer_api))
+
+    assert service._existing_customer_id("empty@x.com") is None
+    assert service.get_or_create_customer("empty@x.com") == "cus_new"
+    with Session(engine) as session:
+        row = session.get(BillingCustomerModel, "empty@x.com")
+        assert row is not None
+        assert (row.stripe_customer_id, row.balance_cents) == ("cus_new", 500)

@@ -134,6 +134,21 @@ def local_customer_id(username: str) -> str:
     return f"{LOCAL_CUSTOMER_PREFIX}{digest[: _CUSTOMER_ID_MAX_LENGTH - len(LOCAL_CUSTOMER_PREFIX)]}"
 
 
+def _is_customerless(customer_id: str) -> bool:
+    """Return whether a stored ``stripe_customer_id`` names no real Stripe customer.
+
+    An older checkout webhook stored ``""`` for a session without a customer, so
+    an empty id counts as customerless like a ``local:`` placeholder.
+
+    Args:
+        customer_id: Stored ``billing_customers.stripe_customer_id`` value.
+
+    Returns:
+        ``True`` for an empty or placeholder id.
+    """
+    return not customer_id or customer_id.startswith(LOCAL_CUSTOMER_PREFIX)
+
+
 # Subscription lifecycle events the webhook mirrors onto ``billing_customers``.
 # Each one re-reads the subscription, so they are order-independent.
 SUBSCRIPTION_EVENTS = frozenset(
@@ -676,7 +691,7 @@ class StripeBillingService:
         """
         with Session(self._engine) as session:
             row = session.get(BillingCustomerModel, username)
-            if row is None or row.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+            if row is None or _is_customerless(row.stripe_customer_id):
                 return None
             return row.stripe_customer_id
 
@@ -694,7 +709,7 @@ class StripeBillingService:
         """
         with Session(self._engine) as session:
             row = session.get(BillingCustomerModel, username)
-            if row is not None and not row.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+            if row is not None and not _is_customerless(row.stripe_customer_id):
                 return row.stripe_customer_id
         stripe_mod = self._stripe()
         customer = stripe_mod.Customer.create(email=username, metadata={"username": username})
@@ -705,7 +720,7 @@ class StripeBillingService:
                 # A local debit may have created a placeholder row before the
                 # account reached Stripe; upgrade it in place to the real id so the
                 # accrued grant/balance carry over.
-                if existing.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+                if _is_customerless(existing.stripe_customer_id):
                     existing.stripe_customer_id = customer.id
                     existing.updated_at = now
                     session.commit()
@@ -1686,7 +1701,9 @@ class StripeBillingService:
         if customer is None:
             customer = BillingCustomerModel(
                 username=username,
-                stripe_customer_id=str(obj.get("customer") or ""),
+                # A session without a customer must not store "": the column is
+                # unique, so a second customerless buyer would fail the webhook.
+                stripe_customer_id=_stripe_id(obj.get("customer")) or local_customer_id(username),
                 balance_cents=0,
             )
             session.add(customer)
