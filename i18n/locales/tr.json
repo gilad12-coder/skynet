@@ -294,6 +294,8 @@
     "optimization.resume_not_resumable": "Bu optimizasyonun kayıtlı bir devam noktası yok — bunun yerine yeniden çalıştırın.",
     "optimization.resume_wrong_status": "Yalnızca çalışma ortasında duran optimizasyonlar devam ettirilebilir — bu optimizasyon '{status}' durumunda.",
     "optimization.protected_interactive_sandbox_required": "Bu korumalı optimizasyon API işlemi içinde değerlendirilemez veya sunulamaz. Ayrı olarak ölçümlenen bir {runtime} sanal alanı gerekir; bu alan henüz bu uç noktada kullanılamıyor.",
+    "sandbox.docker_unavailable": "Bu bilgisayarda Docker çalışmıyor. Docker Desktop veya OrbStack’i başlatıp tekrar deneyin.",
+    "sandbox.docker_image_missing": "Yerel sanal alan imajı henüz oluşturulmadı. Oluşturmak için uygulamayı yeniden başlatın.",
     "optimization.retry_no_payload": "Kaynak optimizasyonun yeniden denenecek kayıtlı bir yükü yok.",
     "optimization.retry_wrong_status": "Yalnızca 'failed' veya 'cancelled' durumundaki optimizasyonlar yeniden denenebilir — bu optimizasyon '{status}' durumunda. Bunun yerine kopyalayın.",
     "quota.reached": "{quota, plural, one {1 optimizasyon} other {# optimizasyon}} sınırınıza ulaştınız. Yeni optimizasyonlar oluşturmak için eski optimizasyonları silin.",

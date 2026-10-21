@@ -294,6 +294,8 @@
     "optimization.resume_not_resumable": "Esta optimización no tiene ningún punto de reanudación guardado; ejecútala de nuevo en su lugar.",
     "optimization.resume_wrong_status": "Solo se pueden reanudar las optimizaciones que se detuvieron a mitad de ejecución; esta está en '{status}'.",
     "optimization.protected_interactive_sandbox_required": "Esta optimización protegida no se puede evaluar ni servir en el proceso de la API. Se requiere un entorno aislado {runtime} con medición independiente, que aún no está disponible en este endpoint.",
+    "sandbox.docker_unavailable": "Docker no se está ejecutando en este equipo. Inicia Docker Desktop u OrbStack e inténtalo de nuevo.",
+    "sandbox.docker_image_missing": "La imagen del sandbox local aún no está creada. Reinicia la aplicación para crearla.",
     "optimization.retry_no_payload": "La optimización de origen no tiene ninguna carga útil guardada para reintentar.",
     "optimization.retry_wrong_status": "Solo se pueden reintentar las optimizaciones en estado 'failed' o 'cancelled'; esta está en '{status}'. Clónala en su lugar.",
     "quota.reached": "Has alcanzado tu límite de {quota, plural, one {1 optimización} other {# optimizaciones}}. Elimina optimizaciones antiguas para crear nuevas.",
