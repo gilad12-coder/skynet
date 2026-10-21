@@ -66,6 +66,7 @@ from ..constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_BYOK,
     TOKEN_SOURCE_MANAGED,
+    WORKER_RESTART_CAUSE,
 )
 from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from ..i18n import CANCELLATION_REASON, SAMPLE_DATASETS
@@ -1261,6 +1262,9 @@ class BackgroundWorker:
                         usage_tracker,
                         generation=execution_generation,
                     )
+            if isinstance(exc, WorkerShutdownError):
+                self._release_for_restart(optimization_id, execution_generation)
+                return
             if is_cancelled:
                 final_status, error_message = "cancelled", CANCELLATION_REASON
                 logger.info("Optimization %s cancelled", optimization_id)
@@ -1319,6 +1323,40 @@ class BackgroundWorker:
                     )
             if is_shutdown:
                 raise
+
+    def _release_for_restart(self, optimization_id: str, generation: int | None) -> None:
+        """Hand a run that this worker's shutdown interrupted to the orphan sweep.
+
+        The run stays active instead of failing. Clearing the claim stops this
+        worker's heartbeat from extending the lease, so the next sweep on a live
+        pod requeues the run to resume from its checkpoint.
+
+        Args:
+            optimization_id: The interrupted run.
+            generation: Execution generation this worker owns, or ``None``.
+        """
+        fields = {
+            "message": "Waiting for a live worker after a restart",
+            "recovery": {
+                "state": "recovering",
+                "phase": "requeue",
+                "cause": WORKER_RESTART_CAUSE,
+                "reason": "The worker restarted. The run continues on another worker.",
+            },
+            "claimed_by": None,
+            "claimed_at": None,
+            "lease_expires_at": None,
+        }
+        try:
+            cas = getattr(self._job_store, "update_job_if_status", None)
+            if cas is None:
+                self._job_store.update_job(optimization_id, **fields)
+            else:
+                fence = {} if generation is None else {"expected_generation": generation}
+                cas(optimization_id, ("validating", "running"), **fence, **fields)
+        except Exception:  # a failed release still leaves the lease to expire into the same sweep
+            logger.exception("Optimization %s: could not release the run for a restart", optimization_id)
+        logger.info("Optimization %s released for recovery after a worker shutdown", optimization_id)
 
     def _close_budget_gateway(
         self, optimization_id: str, gateway: ModelGateway, generation: int | None

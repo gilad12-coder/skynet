@@ -292,6 +292,72 @@ def test_worker_shutdown_flag_is_temporary_only_for_active_job(
         worker._raise_if_interrupted(event, "opt-shutdown")
 
 
+def test_process_job_releases_run_when_worker_shuts_down_during_validating(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A shutdown while validating hands the run to the orphan sweep instead of failing it."""
+    store.seed_job("opt-stop-validating", payload=REAL_RUN_PAYLOAD, status="validating", claimed_by="w1")
+    worker.enqueue_job("opt-stop-validating")
+
+    def _shutdown(*_args: object, **_kwargs: object) -> None:
+        """Stop the worker while the payload is validated."""
+        worker._running = False
+        raise WorkerShutdownError("Optimization was interrupted by worker shutdown.")
+
+    with (
+        patch("core.worker.engine.notify_job_completed") as notify,
+        patch.object(worker, "_get_service") as mock_svc,
+    ):
+        mock_svc.return_value.validate_payload.side_effect = _shutdown
+        worker._process_job("opt-stop-validating", 0)
+
+    job = store._jobs["opt-stop-validating"]
+    assert job["status"] == "validating"
+    assert job["claimed_by"] is None
+    assert job["lease_expires_at"] is None
+    assert job["recovery"]["cause"] == engine_module.WORKER_RESTART_CAUSE
+    assert "completed_at" not in job
+    notify.assert_not_called()
+
+
+def test_process_job_releases_run_when_worker_shuts_down_during_running(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A shutdown while the optimizer runs leaves the run active for a live worker to resume."""
+    store.seed_job("opt-stop-running", payload=REAL_RUN_PAYLOAD, claimed_by="w1")
+    worker.enqueue_job("opt-stop-running")
+    worker._running = True
+    ctx, proc = make_mp_context(exitcode=0, result_events=[])
+    proc.is_alive.return_value = True
+
+    def _shutdown() -> None:
+        """Stop the worker once the optimizer subprocess starts."""
+        assert store._jobs["opt-stop-running"]["status"] == "running"
+        worker._running = False
+        for event in worker._cancel_events.values():
+            event.set()
+
+    proc.start.side_effect = _shutdown
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with (
+        patch("core.worker.engine.notify_job_completed") as notify,
+        patch.object(worker, "_get_service") as mock_svc,
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-stop-running", 0)
+
+    job = store._jobs["opt-stop-running"]
+    assert job["status"] == "running"
+    assert job["claimed_by"] is None
+    assert job["recovery"]["cause"] == engine_module.WORKER_RESTART_CAUSE
+    assert job["message"] == "Waiting for a live worker after a restart"
+    notify.assert_not_called()
+
+
 def test_process_job_sets_status_failed_when_subprocess_sends_no_result(
     worker: BackgroundWorker,
     store: FakeJobStore,

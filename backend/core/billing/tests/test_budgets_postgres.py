@@ -269,3 +269,37 @@ def test_preflight_claim_and_fencing_are_atomic_on_postgres(database: Engine) ->
     assert service.get(budget.id, "alice").reserved_cents == 5
     with pytest.raises(BudgetConflictError):
         store.finish(owner.document["id"], claim_token=owner.token, status="succeeded", result={"checks": []})
+
+
+def test_restart_waiver_cuts_at_the_checkpoint_time(database: Engine) -> None:
+    """Compare timezone-aware settle times with the checkpoint time and credit only the later work."""
+    service = BudgetService(engine=database)
+    budget = service.create("alice", 40, idempotency_key="restart")
+    service.attach_to_job(budget.id, "alice", "restart-job", expected_revision=budget.revision)
+
+    def bill(key: str, cents: int) -> None:
+        """Settle one run-phase call of the interrupted generation."""
+        operation = service.reserve(
+            budget.id,
+            "alice",
+            operation_key=key,
+            generation=0,
+            phase="run",
+            cost_kind="model",
+            request_fingerprint=key,
+            price_snapshot={"version": "fixture-v1"},
+            max_cents=cents,
+        )
+        service.mark_dispatched(operation.id, "alice")
+        service.settle(operation.id, "alice", evidence_key=key, actual_cents=cents, evidence={"usage": key})
+
+    bill("kept", 2)
+    checkpoint = datetime.now(UTC)
+    bill("lost", 3)
+    service.fence_generation(budget.id, "alice", expected_generation=0)
+
+    waived = service.waive_interrupted_work(budget.id, "alice", generation=0, settled_after=checkpoint)
+
+    assert waived.billed_cents == 2
+    with Session(database) as session:
+        assert session.get(BillingCustomerModel, "alice").balance_cents == 48

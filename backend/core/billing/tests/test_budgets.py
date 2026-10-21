@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
@@ -864,3 +865,108 @@ def test_run_lanes_wait_for_each_other_even_with_pinned_boxes(engine: Engine) ->
 
     with pytest.raises(UsagePendingError):
         runtime.reserve(_quote(35), operation_key="call", cost_kind="model")
+
+
+def _settled_run_call(service: BudgetService, budget_id: str, key: str, cents: int, generation: int = 0) -> None:
+    """Reserve, dispatch, and settle one run-phase model call.
+
+    Args:
+        service: Budget service under test.
+        budget_id: Attached run envelope.
+        key: Operation identity.
+        cents: Actual charge.
+        generation: Execution generation of the call.
+    """
+    operation = _reserve(service, budget_id, key, phase="run", generation=generation, max_cents=cents)
+    service.mark_dispatched(operation.id, "alice")
+    service.settle(operation.id, "alice", evidence_key=f"{key}-usage", actual_cents=cents, evidence={"usage": key})
+
+
+def _interrupted_run(engine: Engine, *, grant: int = 0) -> tuple[BudgetService, Any, datetime]:
+    """Bill one call before a checkpoint and two after it, then fence the interrupted generation.
+
+    Args:
+        engine: Private funded ledger database.
+        grant: Free-grant cents alice holds before the run.
+
+    Returns:
+        The service, the fenced budget, and the checkpoint time.
+    """
+    with Session(engine) as session:
+        session.get(BillingCustomerModel, "alice").grant_remaining = grant
+        session.commit()
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key=f"restart-{grant}")
+    service.attach_to_job(budget.id, "alice", "restart-job", expected_revision=budget.revision)
+    _settled_run_call(service, budget.id, "kept", 2)
+    time.sleep(0.01)
+    checkpoint = datetime.now(UTC)
+    time.sleep(0.01)
+    _settled_run_call(service, budget.id, "lost-a", 3)
+    _settled_run_call(service, budget.id, "lost-b", 4)
+    return service, service.fence_generation(budget.id, "alice", expected_generation=0), checkpoint
+
+
+def test_restart_waiver_returns_only_work_after_the_checkpoint(engine: Engine) -> None:
+    """Credit the repeated leg back once, and let the resumed run bill its redo in full."""
+    service, budget, checkpoint = _interrupted_run(engine)
+    assert _balance(engine) == 41
+
+    waived = service.waive_interrupted_work(budget.id, "alice", generation=0, settled_after=checkpoint)
+    again = service.waive_interrupted_work(budget.id, "alice", generation=0, settled_after=checkpoint)
+    _settled_run_call(service, budget.id, "redo", 7, generation=1)
+
+    assert waived.billed_cents == again.billed_cents == 2
+    assert waived.available_cents == 38
+    assert _balance(engine) == 50 - 2 - 7
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(WalletLedgerModel).where(WalletLedgerModel.settlement_key == f"restart:{budget.id}:g0")
+        ).all()
+    assert [(row.delta_cents, row.from_grant_cents) for row in rows] == [(7, 0)]
+
+
+def test_restart_waiver_without_checkpoint_returns_the_whole_generation(engine: Engine) -> None:
+    """A run that starts again repeats every call of the interrupted generation."""
+    service, budget, _ = _interrupted_run(engine)
+
+    waived = service.waive_interrupted_work(budget.id, "alice", generation=0, settled_after=None)
+
+    assert waived.billed_cents == 0
+    assert _balance(engine) == 50
+
+
+def test_restart_waiver_keeps_the_setup_charge(engine: Engine) -> None:
+    """A restart repeats run work only; the setup check before the run stays paid."""
+    with Session(engine) as session:
+        session.get(BillingCustomerModel, "alice").grant_remaining = 4
+        session.commit()
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 40, idempotency_key="restart-setup")
+    setup = _reserve(service, budget.id, "setup-check", max_cents=3)
+    service.mark_dispatched(setup.id, "alice")
+    service.settle(setup.id, "alice", evidence_key="setup-usage", actual_cents=3, evidence={"usage": "setup"})
+    service.attach_to_job(budget.id, "alice", "restart-job", expected_revision=service.get(budget.id, "alice").revision)
+    _settled_run_call(service, budget.id, "lost", 5)
+    fenced = service.fence_generation(budget.id, "alice", expected_generation=0)
+
+    waived = service.waive_interrupted_work(fenced.id, "alice", generation=0, settled_after=None)
+
+    assert waived.billed_cents == 3
+    with Session(engine) as session:
+        wallet = session.get(BillingCustomerModel, "alice")
+        assert (wallet.grant_remaining, wallet.balance_cents) == (1, 50)
+
+
+def test_restart_waiver_returns_grant_cents_to_the_grant(engine: Engine) -> None:
+    """A waiver never turns free-grant cents into paid balance."""
+    service, budget, checkpoint = _interrupted_run(engine, grant=4)
+    with Session(engine) as session:
+        wallet = session.get(BillingCustomerModel, "alice")
+        assert (wallet.grant_remaining, wallet.balance_cents) == (0, 45)
+
+    service.waive_interrupted_work(budget.id, "alice", generation=0, settled_after=checkpoint)
+
+    with Session(engine) as session:
+        wallet = session.get(BillingCustomerModel, "alice")
+        assert (wallet.grant_remaining, wallet.balance_cents) == (2, 50)
