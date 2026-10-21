@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 
@@ -13,7 +13,7 @@ from core.api import model_router
 from core.billing import cli_dispatch
 from core.billing.tests.test_cli_runners import CLAUDE_SUCCESS, fake_cli, local_settings, printing
 from core.constants import TOKEN_SOURCE_BYOK
-from core.local.cli_catalog import CLI_MODELS
+from core.local.cli_catalog import CLI_MODELS, CliProvider
 from core.models import ModelConfig
 from core.service_gateway import language_models
 from core.service_gateway.agents import generalist
@@ -257,3 +257,10 @@ async def test_local_cli_summary_answers_through_the_fake_cli(tmp_path: Path, mo
     assert sink[0].usage_totals.reported_cost_usd == 0.0
     log = (tmp_path / "claude.log").read_text()
     assert CLI_MODELS["claude"][generalist._LOCAL_SUMMARY_MODELS["claude"]] in log
+
+
+def test_label_models_cover_exactly_the_local_clis() -> None:
+    """Name a label model for each CLI local mode offers, and none for a removed CLI like Droid."""
+    assert set(generalist._LOCAL_SUMMARY_MODELS) == set(get_args(CliProvider))
+    for cli, model in generalist._LOCAL_SUMMARY_MODELS.items():
+        assert model in CLI_MODELS[cli]

@@ -2295,7 +2295,6 @@ _SUMMARY_PROMPT = (
 _LOCAL_SUMMARY_MODELS: dict[CliProvider, str] = {
     "codex": "openai/gpt-5.6-luna",
     "claude": "anthropic/claude-haiku-4.5",
-    "droid": "anthropic/claude-haiku-4.5",
 }
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
 # Stored labels put the heading on its own first line, which the row shows bold.
