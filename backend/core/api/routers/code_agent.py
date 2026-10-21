@@ -34,6 +34,7 @@ from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_byte
 from ...service_gateway.agents.steering import STEER_KEY_MAX_CHARS, get_steer_store
 from ...service_gateway.agents.task_interview import task_interview_turn_stream
 from ...storage.models import UserModel
+from ..agent_engine import engine_agent_model
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -518,7 +519,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         billed_store = await asyncio.to_thread(
             gate_interactive_turn, job_store, current_user.username, req.unified is not None
         )
-        model = route_menu_model(req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        model = route_menu_model(picked)
         effort = effective_reasoning_effort(model, req.reasoning_effort)
         if req.unified is not None and not req.user_message.strip() and not req.reasoning_effort:
             # The wizard's seed lanes write two short functions; at the catalog
@@ -599,7 +601,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         ):
             return await _turn_response(oversized_kickoff("data"), current_user.username)
         billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
-        model = await asyncio.to_thread(route_interview_model, req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        model = await asyncio.to_thread(route_interview_model, picked)
         usage_sink: list = []
 
         async def source() -> AsyncIterator[dict]:
@@ -657,7 +660,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         """
         # A free turn has no billed store, so there is no usage to meter.
         await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
-        model = await asyncio.to_thread(route_interview_model, req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        model = await asyncio.to_thread(route_interview_model, picked)
         return await asyncio.to_thread(infer_inputs, req.model_copy(update={"model": model}))
 
     @router.post(
@@ -687,7 +691,10 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         """
         billed_store, platform_paid = await asyncio.to_thread(gate_intake_turn, job_store, current_user.username)
         catalog_models, provider_slugs = await asyncio.to_thread(_intake_catalog)
-        model = await asyncio.to_thread(route_interview_model, None if platform_paid else req.model)
+        picked = await asyncio.to_thread(
+            engine_agent_model, job_store, current_user.username, None if platform_paid else req.model
+        )
+        model = await asyncio.to_thread(route_interview_model, picked)
         if req.reasoning_effort and not platform_paid:
             effort = effective_reasoning_effort(model, req.reasoning_effort)
         else:

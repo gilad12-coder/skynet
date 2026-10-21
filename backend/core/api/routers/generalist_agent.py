@@ -46,6 +46,7 @@ from ...service_gateway.agents.steering import (
 )
 from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
+from ..agent_engine import engine_agent_model
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
@@ -732,7 +733,8 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         conversation_id, title = await asyncio.to_thread(_setup_turn)
 
         wizard_state: WizardState = {**req.wizard_state}  # type: ignore[typeddict-item]
-        model_config = route_agent_model(req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        model_config = route_agent_model(picked)
         effort = effective_reasoning_effort(model_config.name, req.reasoning_effort)
         if effort:
             model_config = model_config.model_copy(update={"extra": {**model_config.extra, "reasoning_effort": effort}})

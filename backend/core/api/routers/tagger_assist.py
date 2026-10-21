@@ -49,6 +49,7 @@ from ...service_gateway import tagging
 from ...service_gateway.agents.kickoff import fits_kickoff_budget, oversized_kickoff
 from ...storage.models import TaggingSessionModel
 from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
+from ..agent_engine import engine_agent_model
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
@@ -358,7 +359,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model = route_interview_model(req.model)
+        model = route_interview_model(engine_agent_model(job_store, user.username, req.model))
         usage_sink: list = []
         try:
             turn = tagging.interview_turn(
@@ -415,7 +416,8 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 sse_from_events(oversized_kickoff("data")), media_type="text/event-stream", headers=_SSE_HEADERS
             )
         await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
-        model = await asyncio.to_thread(route_interview_model, req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, user.username, req.model)
+        model = await asyncio.to_thread(route_interview_model, picked)
         usage_sink: list = []
 
         async def source() -> Any:

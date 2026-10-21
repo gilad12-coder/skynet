@@ -95,6 +95,7 @@ from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
 from .routers.admin_dashboard import create_admin_dashboard_router
+from .routers.agent_engine import create_agent_engine_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
 from .routers.api_tokens import create_api_tokens_router
@@ -1341,6 +1342,7 @@ def create_app(
     app.include_router(create_notifications_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_experience_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_agent_engine_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_scorer_dependencies_router(job_store=job_store), tags=["Wizard"])
     app.include_router(create_datasets_router(job_store=job_store), tags=["Datasets"])
