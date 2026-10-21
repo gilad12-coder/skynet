@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...storage.models import NotificationPreferenceModel
-from ..catalog import DEFAULT_GRID, EMAIL, INBOX, PRODUCT_NEWS
+from ..catalog import CHROME, DEFAULT_GRID, EMAIL, FAILED, FINISHED, INBOX, PRODUCT_NEWS, SLACK
 from ..preferences import (
     NotificationSettings,
     clamp_hold_minutes,
@@ -64,6 +64,42 @@ def test_stored_cells_overlay_the_defaults() -> None:
     assert settings.enabled("failed", EMAIL) is True
     assert settings.hold_minutes == 3
     assert settings.held_channels == ("email", "slack")
+
+
+def test_finished_and_failed_push_to_chrome_by_default() -> None:
+    """Without a stored grid, run completion and failure reach Chrome with no opt-in step."""
+    settings = NotificationSettings()
+
+    for event in (FAILED, FINISHED):
+        assert settings.enabled(event, CHROME) is True
+        assert settings.enabled(event, EMAIL) is True
+        assert settings.enabled(event, INBOX) is True
+        assert settings.enabled(event, SLACK) is False
+
+
+def test_stored_opt_outs_win_over_the_chrome_default() -> None:
+    """A stored Chrome off (and any other saved channel choice) survives the new default."""
+    engine = _engine()
+    with Session(engine) as session:
+        session.add(
+            NotificationPreferenceModel(
+                username="carol@example.com",
+                channel_grid={
+                    "finished": {"chrome": False, "email": False},
+                    "failed": {"chrome": False, "slack": True},
+                },
+            )
+        )
+        session.commit()
+    configure_notification_preferences(engine)
+
+    settings = notification_settings("carol@example.com")
+
+    assert settings.enabled(FINISHED, CHROME) is False
+    assert settings.enabled(FINISHED, EMAIL) is False
+    assert settings.enabled(FAILED, CHROME) is False
+    assert settings.enabled(FAILED, SLACK) is True
+    assert settings.enabled(FAILED, EMAIL) is True
 
 
 def test_product_news_is_forced_inbox_only() -> None:

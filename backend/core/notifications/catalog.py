@@ -60,11 +60,14 @@ def _row(inbox: bool, email: bool, chrome: bool, slack: bool) -> dict[str, bool]
     return {INBOX: inbox, EMAIL: email, CHROME: chrome, SLACK: slack}
 
 
+# Finished and failed push to Chrome by default: there is no run-start opt-in,
+# and a push only reaches browsers the user subscribed in Settings. A stored
+# grid always overrides these cells, so a saved opt-out stays off.
 DEFAULT_GRID: Final[dict[str, dict[str, bool]]] = {
     NEEDS_INPUT: _row(True, True, True, True),
     BUDGET_NEAR: _row(True, True, True, False),
-    FAILED: _row(True, True, False, False),
-    FINISHED: _row(True, True, False, False),
+    FAILED: _row(True, True, True, False),
+    FINISHED: _row(True, True, True, False),
     NEW_BEST: _row(True, False, False, False),
     STUCK: _row(True, False, False, False),
     SHARED: _row(True, False, False, False),
