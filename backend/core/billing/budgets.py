@@ -19,6 +19,8 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from ..storage.models import (
@@ -295,10 +297,14 @@ class BudgetService:
         if wallet is None and free_grant_cents() > 0:
             # A new account's grant is only shown until a mutation creates its
             # row; create that row here so the grant can also fund a budget.
-            session.add(
-                BillingCustomerModel(username=username, stripe_customer_id=local_customer_id(username), balance_cents=0)
+            # Two first submissions race to create it, so the loser keeps the
+            # winner's row instead of failing on the primary key (SKY-87).
+            insert = postgresql_insert if self._engine.dialect.name == "postgresql" else sqlite_insert
+            session.execute(
+                insert(BillingCustomerModel)
+                .values(username=username, stripe_customer_id=local_customer_id(username), balance_cents=0)
+                .on_conflict_do_nothing()
             )
-            session.flush()
             wallet = session.get(BillingCustomerModel, username, with_for_update=True)
         if wallet is None:
             raise AccountFundsError("The account has no funded wallet.")
