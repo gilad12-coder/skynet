@@ -262,12 +262,12 @@ function watchForCrash(proc: ManagedProcess, label: string): void {
   }, 1_000);
 }
 
-/** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
 function recordStarted(role: string, pid: number | undefined): void {
   const started = pid ? psStartOf(pid) : null;
   if (pid && started) recordPid(dataDir, { role, pgid: pid, started });
 }
 
+/** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
 async function stopStack(): Promise<void> {
   killActiveCommands();
   const fe = frontend;

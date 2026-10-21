@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChildEnv, DELETED_ENV_KEYS, DELETED_ENV_PREFIXES, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
+import { ALLOWED_ENV_KEYS, ALLOWED_ENV_PREFIXES, buildChildEnv, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
 
 describe("parseEnvNul", () => {
   it("parses NUL-separated records, including values with = and newlines", () => {
@@ -50,52 +50,128 @@ describe("loginShellPath", () => {
   });
 });
 
+// Every key named in the deny lists of rounds 1-3 and in the SKY-112 review,
+// plus variables that change how Node, Python or uv behave.
+const DROPPED_KEYS = [
+  "OPENROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_PROFILE",
+  "ANTHROPIC_FEDERATION_RULE_ID",
+  "ANTHROPIC_ORGANIZATION_ID",
+  "ANTHROPIC_UNIX_SOCKET",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_FEDERATION_RULE_ID",
+  "OPENAI_IDENTITY_TOKEN_FILE",
+  "CODEX_API_KEY",
+  "CODEX_ACCESS_TOKEN",
+  "FACTORY_API_KEY",
+  "FACTORY_API_BASE_URL",
+  "FACTORY_API_BASE_URL_EU",
+  "FACTORY_HOME_OVERRIDE",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "VERCEL_TOKEN",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "RAILWAY_ENVIRONMENT_NAME",
+  "NODE_OPTIONS",
+  "PYTHONPATH",
+  "UV_INDEX_URL",
+  "APP_REMOTE_MODE",
+  "DATABASE_URL",
+  "ELECTRON_RUN_AS_NODE",
+  "SOME_JUNK",
+];
+
+const KEPT: Record<string, string> = {
+  PATH: "/opt/homebrew/bin:/bin",
+  HOME: "/Users/x",
+  USER: "x",
+  LOGNAME: "x",
+  SHELL: "/bin/zsh",
+  TMPDIR: "/var/folders/t/",
+  LANG: "he_IL.UTF-8",
+  TERM: "xterm",
+  TZ: "Asia/Jerusalem",
+  CLAUDE_CODE_OAUTH_TOKEN: "subscription",
+  CLAUDE_CONFIG_DIR: "/Users/x/.claude",
+  CODEX_HOME: "/Users/x/.codex",
+  HTTP_PROXY: "http://proxy:1",
+  HTTPS_PROXY: "http://proxy:1",
+  ALL_PROXY: "socks5://proxy:2",
+  NO_PROXY: "localhost",
+  http_proxy: "http://proxy:1",
+  https_proxy: "http://proxy:1",
+  all_proxy: "socks5://proxy:2",
+  no_proxy: "localhost",
+  SSL_CERT_FILE: "/etc/cert.pem",
+  SSL_CERT_DIR: "/etc/certs",
+  NODE_EXTRA_CA_CERTS: "/etc/ca.pem",
+  CODEX_CA_CERTIFICATE: "/etc/ca.pem",
+  FACTORY_EXTRA_CA_CERTS: "/etc/ca.pem",
+  DOCKER_HOST: "unix:///Users/x/.colima/docker.sock",
+  LC_ALL: "C",
+  LC_CTYPE: "UTF-8",
+  XDG_CONFIG_HOME: "/Users/x/.config",
+  XDG_CACHE_HOME: "/Users/x/.cache",
+};
+
 describe("buildChildEnv", () => {
-  it("removes every provider key, even when an override sets one", () => {
-    const base: NodeJS.ProcessEnv = { HOME: "/Users/x", PATH: "/bin" };
-    for (const key of DELETED_ENV_KEYS) base[key] = "secret";
-    const env = buildChildEnv(base, { API_PORT: "48100", OPENAI_API_KEY: "again" });
-    for (const key of DELETED_ENV_KEYS) expect(env).not.toHaveProperty(key);
-    expect(env).toMatchObject({ HOME: "/Users/x", PATH: "/bin", API_PORT: "48100" });
+  it("keeps only the allowed variables", () => {
+    const base: NodeJS.ProcessEnv = { ...KEPT };
+    for (const key of DROPPED_KEYS) base[key] = "secret";
+    expect(buildChildEnv(base)).toEqual(KEPT);
   });
 
-  it("lists exactly the keys from the desktop contract", () => {
-    expect([...DELETED_ENV_KEYS].sort()).toEqual(
+  it("lists exactly the allowed keys and prefixes", () => {
+    expect(ALLOWED_ENV_PREFIXES).toEqual(["LC_", "XDG_"]);
+    expect([...ALLOWED_ENV_KEYS].sort()).toEqual(
       [
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_BASE_URL",
-        "AWS_BEARER_TOKEN_BEDROCK",
-        "CODEX_ACCESS_TOKEN",
-        "CODEX_API_KEY",
-        "FACTORY_API_BASE_URL",
-        "FACTORY_API_BASE_URL_EU",
-        "FACTORY_API_KEY",
-        "FACTORY_HOME_OVERRIDE",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "RAILWAY_ENVIRONMENT_NAME",
-        "STRIPE_SECRET_KEY",
-        "STRIPE_WEBHOOK_SECRET",
-        "VERCEL_TOKEN",
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "LANG",
+        "TERM",
+        "TZ",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        "CODEX_CA_CERTIFICATE",
+        "FACTORY_EXTRA_CA_CERTS",
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG",
+        "DOCKER_CERT_PATH",
+        "DOCKER_TLS_VERIFY",
       ].sort(),
     );
   });
 
-  it("removes every CLAUDE_CODE_USE_ key but keeps the subscription token and PATH", () => {
-    expect(DELETED_ENV_PREFIXES).toEqual(["CLAUDE_CODE_USE_"]);
+  it("adds explicit overrides on top of the allowed variables", () => {
     const env = buildChildEnv(
-      {
-        PATH: "/opt/homebrew/bin:/bin",
-        CLAUDE_CODE_OAUTH_TOKEN: "subscription",
-        CLAUDE_CODE_USE_BEDROCK: "1",
-        CLAUDE_CODE_USE_VERTEX: "1",
-        CLAUDE_CODE_USE_FOUNDRY: "1",
-      },
-      { CLAUDE_CODE_USE_BEDROCK: "again" },
+      { HOME: "/Users/x", PATH: "/bin", ANTHROPIC_PROFILE: "work", APP_LOCAL_MODE: "0" },
+      { PATH: "/opt/homebrew/bin:/bin", APP_LOCAL_MODE: "1", API_PORT: "48100" },
     );
-    expect(env).toEqual({ PATH: "/opt/homebrew/bin:/bin", CLAUDE_CODE_OAUTH_TOKEN: "subscription" });
+    expect(env).toEqual({ HOME: "/Users/x", PATH: "/opt/homebrew/bin:/bin", APP_LOCAL_MODE: "1", API_PORT: "48100" });
   });
 
   it("drops an inherited ELECTRON_RUN_AS_NODE but keeps an explicit one", () => {
@@ -104,6 +180,6 @@ describe("buildChildEnv", () => {
   });
 
   it("removes a key when the override is undefined", () => {
-    expect(buildChildEnv({ A: "1" }, { A: undefined })).not.toHaveProperty("A");
+    expect(buildChildEnv({ HOME: "/Users/x" }, { HOME: undefined })).not.toHaveProperty("HOME");
   });
 });

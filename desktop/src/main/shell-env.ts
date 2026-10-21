@@ -2,36 +2,55 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 
 /**
- * Keys removed from every child environment (§1.7). With none of these keys
- * present, no child can bill OpenRouter, Anthropic, OpenAI, Factory, Vercel or
- * Stripe, and the backend's hosted-safety validator cannot see a Railway
- * environment. The CLI keys match the set the backend strips (SKY-112): each
- * one moves a claude, codex or droid call off the user's subscription, to an
- * API account, another endpoint (base URLs, Bedrock) or another config home.
+ * The only variables a child inherits from the app's environment (§1.7). Every
+ * other variable is dropped, so no provider key, base URL, profile, federation
+ * id, socket or config switch reaches claude, codex, droid or the stack. The
+ * stack gets its settings (APP_*, REMOTE_DB_URL, ports, secrets) as explicit
+ * overrides from index.ts, never from the user's shell.
  * CLAUDE_CODE_OAUTH_TOKEN stays: it is the subscription login itself.
+ * The DOCKER_* keys select the Docker daemon (Colima, remote contexts); they
+ * carry no provider credential.
  */
-export const DELETED_ENV_KEYS = [
-  "OPENROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "AWS_BEARER_TOKEN_BEDROCK",
-  "OPENAI_API_KEY",
-  "OPENAI_BASE_URL",
-  "CODEX_API_KEY",
-  "CODEX_ACCESS_TOKEN",
-  "FACTORY_API_KEY",
-  "FACTORY_API_BASE_URL",
-  "FACTORY_API_BASE_URL_EU",
-  "FACTORY_HOME_OVERRIDE",
-  "VERCEL_TOKEN",
-  "STRIPE_SECRET_KEY",
-  "STRIPE_WEBHOOK_SECRET",
-  "RAILWAY_ENVIRONMENT_NAME",
+export const ALLOWED_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "LANG",
+  "TERM",
+  "TZ",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "CODEX_CA_CERTIFICATE",
+  "FACTORY_EXTRA_CA_CERTS",
+  "DOCKER_HOST",
+  "DOCKER_CONTEXT",
+  "DOCKER_CONFIG",
+  "DOCKER_CERT_PATH",
+  "DOCKER_TLS_VERIFY",
 ] as const;
 
-/** Every key with one of these prefixes is removed too (CLAUDE_CODE_USE_BEDROCK, _VERTEX, _FOUNDRY, ...). */
-export const DELETED_ENV_PREFIXES = ["CLAUDE_CODE_USE_"] as const;
+/** Every variable with one of these prefixes is inherited too (locale and XDG directories). */
+export const ALLOWED_ENV_PREFIXES = ["LC_", "XDG_"] as const;
+
+/** Whether a child may inherit this variable from the app's environment. */
+export function isAllowedEnvKey(key: string): boolean {
+  return (ALLOWED_ENV_KEYS as readonly string[]).includes(key) || ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
 
 export const LOGIN_SHELL_TIMEOUT_MS = 10_000;
 
@@ -95,10 +114,11 @@ export async function loginShellPath(
 }
 
 /**
- * Build a child process environment: the base env minus DELETED_ENV_KEYS and
- * DELETED_ENV_PREFIXES,
- * plus overrides. The keys are deleted again after the overrides so a caller
- * can never reintroduce a provider credential by accident.
+ * Build a child process environment: only the allowed variables of the base
+ * env, plus explicit overrides. CLI checks pass only PATH; the stack passes its
+ * own settings. ELECTRON_RUN_AS_NODE is not allowed, so a stray inherited copy
+ * (it turns every spawned Electron binary into plain Node) is dropped, while an
+ * explicit override still sets it for the bundled web server.
  */
 export function buildChildEnv(
   base: NodeJS.ProcessEnv,
@@ -106,18 +126,11 @@ export function buildChildEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
-    if (value !== undefined) env[key] = value;
+    if (value !== undefined && isAllowedEnvKey(key)) env[key] = value;
   }
-  // Electron sets this for its own helper processes; a stray copy would turn
-  // every spawned Electron binary into plain Node.
-  delete env.ELECTRON_RUN_AS_NODE;
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) delete env[key];
     else env[key] = value;
-  }
-  for (const key of DELETED_ENV_KEYS) delete env[key];
-  for (const key of Object.keys(env)) {
-    if (DELETED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) delete env[key];
   }
   return env;
 }

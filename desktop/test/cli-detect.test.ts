@@ -104,6 +104,10 @@ describe("probeCli with fake binaries", () => {
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
     fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": true}\'; fi');
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: true });
+    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo "Logged in"; fi');
+    expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
+    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": "yes"}\'; fi');
+    expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
   });
 
   it("needs exit 0 and 'logged in' from codex login status", async () => {
@@ -132,21 +136,27 @@ describe("probeCli with fake binaries", () => {
     expect(await droid("null")).toMatchObject({ loggedIn: null });
   });
 
-  it("probes with provider keys removed from the environment", async () => {
+  it("probes with only the allowed environment", async () => {
     fake("claude", "echo 2.1.300");
     const seen: Record<string, string>[] = [];
     const runner: Runner = async (_file, args, env) => {
       seen.push(env);
       return { code: 0, stdout: args[0] === "--version" ? "2.1.300" : '{"loggedIn":true}', stderr: "" };
     };
-    await probeClis([dir], { ANTHROPIC_API_KEY: "sk-test", OPENAI_API_KEY: "sk-test", FACTORY_API_KEY: "fk-test", HOME: "/Users/x" }, runner);
+    await probeClis(
+      [dir],
+      {
+        ANTHROPIC_API_KEY: "sk-test",
+        ANTHROPIC_PROFILE: "work",
+        OPENAI_API_KEY: "sk-test",
+        FACTORY_API_KEY: "fk-test",
+        NODE_OPTIONS: "--require /tmp/x.js",
+        HOME: "/Users/x",
+      },
+      runner,
+    );
     expect(seen.length).toBeGreaterThan(0);
-    for (const env of seen) {
-      expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
-      expect(env).not.toHaveProperty("OPENAI_API_KEY");
-      expect(env).not.toHaveProperty("FACTORY_API_KEY");
-      expect(env.HOME).toBe("/Users/x");
-    }
+    for (const env of seen) expect(env).toEqual({ HOME: "/Users/x" });
   });
 });
 

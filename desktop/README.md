@@ -18,11 +18,13 @@ On launch the app:
 6. Starts the bundled Next.js server and opens it in the window.
 
 All services listen on `127.0.0.1` only (API 48100-48119, web 48120-48139, Postgres 48140-48159).
-The app removes these keys from every child environment, so the CLIs run on your subscription and no child can bill a provider:
-`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `AWS_BEARER_TOKEN_BEDROCK`,
-`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `FACTORY_API_KEY`, `FACTORY_API_BASE_URL`,
-`FACTORY_API_BASE_URL_EU`, `FACTORY_HOME_OVERRIDE`, every `CLAUDE_CODE_USE_*` key, `VERCEL_TOKEN`, `STRIPE_SECRET_KEY`,
-`STRIPE_WEBHOOK_SECRET` and `RAILWAY_ENVIRONMENT_NAME`. `CLAUDE_CODE_OAUTH_TOKEN` (a subscription login) and `PATH` stay.
+Children inherit only an allow-list from the app's environment, so the CLIs run on your subscription and no child can bill a provider:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `TERM`, `TZ`, `CLAUDE_CODE_OAUTH_TOKEN` (a subscription login),
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, upper and lower case),
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, `FACTORY_EXTRA_CA_CERTS`, the Docker daemon selectors
+(`DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`) and every `LC_*` and `XDG_*` variable.
+All other variables (API keys, base URLs, profiles, `CLAUDE_CODE_USE_*`, `NODE_OPTIONS`, ...) are dropped.
+The CLI checks add only `PATH`. The API, worker and web server get their settings (`APP_*`, the database URL, ports, secrets) as explicit values from the app, never from your shell.
 Quitting stops the web server, the API, Postgres and every `skynet.job` sandbox container.
 
 ## Requirements

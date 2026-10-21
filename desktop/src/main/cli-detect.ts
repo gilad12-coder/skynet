@@ -129,9 +129,10 @@ export async function checkLogin(id: CliId, bin: string, run: Runner, env: Recor
       const parsed = JSON.parse(res.stdout) as { loggedIn?: unknown };
       if (typeof parsed.loggedIn === "boolean") return parsed.loggedIn;
     } catch {
-      // Older builds print text; the exit code still says whether a login exists.
+      // Not JSON: fall through.
     }
-    return res.code === 0;
+    // Fail closed: output without a boolean loggedIn counts as signed out.
+    return false;
   }
   if (id === "codex") {
     const res = await run(bin, ["login", "status"], env);
