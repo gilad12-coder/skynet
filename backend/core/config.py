@@ -898,15 +898,16 @@ class Settings(BaseSettings):
         description="Address main.run_server and the local-mode image command bind",
         validation_alias="API_HOST",
     )
-    # One port source for the bind and the agent's MCP self-dial URL. PORT
-    # comes first because the hosted image binds the platform PORT; main.py
-    # (local runs and the desktop app) sets API_PORT. SKY-111 D2.
+    # One port source for the bind and the agent's MCP self-dial URL (SKY-111
+    # D2). main.py binds this port, and API_PORT comes first so a PORT left in
+    # a dev shell (Node tools) does not move it. The image binds the platform
+    # PORT and exports that same value as API_PORT, so both agree there too.
     port: int = Field(
         default=8000,
         ge=1024,
         le=65535,
         description="Server port",
-        validation_alias=AliasChoices("PORT", "API_PORT"),
+        validation_alias=AliasChoices("API_PORT", "PORT"),
     )
     reload: bool = Field(default=False, description="Enable auto-reload on code changes (dev only)")
 
@@ -1461,13 +1462,17 @@ class Settings(BaseSettings):
         host is dialled as ``127.0.0.1`` — the IPv4 literal, not ``localhost``,
         because some container runtimes (e.g. Railway) resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
-        a raw ``ConnectError``.
+        a raw ``ConnectError``. Local mode binds ``api_host`` instead, so the
+        agent dials that loopback host; an IPv6 literal such as ``::1`` gets
+        brackets.
 
         Returns:
             The settings instance with ``generalist_agent_mcp_url`` populated.
         """
         if not self.generalist_agent_mcp_url:
             host = "127.0.0.1" if self.host in ("0.0.0.0", "") else self.host
+            if self.local_mode:
+                host = f"[{self.api_host}]" if ":" in self.api_host else self.api_host
             self.generalist_agent_mcp_url = f"http://{host}:{self.port}/mcp/"
         return self
 

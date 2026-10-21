@@ -195,12 +195,14 @@ EXPOSE 8000
 # same Dockerfile; the env var picks the entrypoint so neither service needs
 # a dashboard-only custom start command.
 # Bind the platform-provided PORT when present (Railway/Heroku-style runtimes
-# inject it and route edge traffic to it) so the bound port always matches
-# settings.port and the generalist agent's derived MCP self-dial URL. The
-# sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
+# inject it and route edge traffic to it), else 8000. The command exports that
+# port as API_PORT, which settings.port reads first, so settings.port and the
+# generalist agent's derived MCP self-dial URL always match the bind, even when
+# docker compose passes an API_PORT from backend/.env. The sh -c + exec keeps
+# the process as PID 1 for clean SIGTERM handling.
 # Python decides the bind, so local mode is read exactly as Settings reads it
 # (any case, and backend/.env). It prints the checked loopback API_HOST in
 # local mode and nothing otherwise. If the local-mode guard fails, the import
 # fails too and the server refuses to start, so it never binds 0.0.0.0 in
 # local mode.
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else LOCAL_HOST=$(python -c 'from core.config import local_bind_host; print(local_bind_host())' 2>/dev/null | tail -n 1); exec uvicorn main:app --host \"${LOCAL_HOST:-0.0.0.0}\" --port ${PORT:-8000}; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else export API_PORT=\"${PORT:-8000}\"; LOCAL_HOST=$(python -c 'from core.config import local_bind_host; print(local_bind_host())' 2>/dev/null | tail -n 1); exec uvicorn main:app --host \"${LOCAL_HOST:-0.0.0.0}\" --port \"$API_PORT\"; fi"]

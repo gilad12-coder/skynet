@@ -138,20 +138,46 @@ def test_subscription_model_needs_a_cli() -> None:
 def _dockerfile_bind(env: dict[str, str]) -> str:
     """Run the image's start command with ``exec`` replaced by ``echo``.
 
-    The command still runs the real Python bind helper from this backend.
-
     Args:
         env: Environment the container would start with, without ``PATH``.
 
     Returns:
         The command line the container would run.
     """
+    return _run_dockerfile_cmd(env, ("exec ", "echo "))
+
+
+def _dockerfile_env(env: dict[str, str], name: str) -> str:
+    """Run the image's start command and read one variable the server would inherit.
+
+    Args:
+        env: Environment the container would start with, without ``PATH``.
+        name: Variable to read at the point where uvicorn would start.
+
+    Returns:
+        The variable's value, or an empty string when it is unset.
+    """
+    return _run_dockerfile_cmd(env, ("exec uvicorn", f"printenv {name}; : uvicorn"))
+
+
+def _run_dockerfile_cmd(env: dict[str, str], swap: tuple[str, str]) -> str:
+    """Run the image's API start command with one text swap.
+
+    The command still runs the real Python bind helper from this backend.
+
+    Args:
+        env: Environment the container would start with, without ``PATH``.
+        swap: Text to replace in the command and its replacement.
+
+    Returns:
+        The command's standard output, stripped.
+    """
     backend = Path(__file__).resolve().parents[2]
     cmd = next(line for line in (backend / "Dockerfile").read_text().splitlines() if line.startswith("CMD "))
-    script = json.loads(cmd.removeprefix("CMD "))[2].replace("exec ", "echo ")
+    script = json.loads(cmd.removeprefix("CMD "))[2].replace(*swap)
     path = f"{Path(sys.executable).parent}:/usr/bin:/bin"
     result = subprocess.run(
-        ["sh", "-c", script], env={"PATH": path, **env}, cwd=backend, capture_output=True, text=True, check=True
+        ["sh", "-c", script], env={"PATH": path, **env}, cwd=backend, capture_output=True, text=True, check=False
     )
     return result.stdout.strip()
 
@@ -215,16 +241,66 @@ def test_api_port_sets_the_mcp_url(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.generalist_agent_mcp_url == "http://127.0.0.1:48100/mcp/"
 
 
-def test_platform_port_wins_over_api_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hosted image binds PORT, so PORT stays the port when both are set.
+def test_api_port_wins_over_a_stray_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main.py binds API_PORT, so a PORT left in the shell does not take over.
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
     """
-    monkeypatch.setenv("PORT", "9090")
+    monkeypatch.setenv("PORT", "3000")
     monkeypatch.setenv("API_PORT", "48100")
 
     settings = Settings(_env_file=None)
 
-    assert settings.port == 9090
-    assert settings.generalist_agent_mcp_url == "http://127.0.0.1:9090/mcp/"
+    assert settings.port == 48100
+    assert settings.generalist_agent_mcp_url == "http://127.0.0.1:48100/mcp/"
+
+
+def test_local_mcp_url_dials_the_ipv6_bind_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In local mode the MCP URL dials the host the API binds, with IPv6 brackets.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+    """
+    monkeypatch.setenv("APP_LOCAL_MODE", "1")
+    monkeypatch.setenv("API_HOST", "::1")
+    monkeypatch.setenv("API_PORT", "48100")
+
+    assert Settings(_env_file=None).generalist_agent_mcp_url == "http://[::1]:48100/mcp/"
+
+
+@pytest.mark.parametrize(
+    ("env", "port"),
+    [
+        ({"API_PORT": "9000"}, "8000"),
+        ({"PORT": "8080", "API_PORT": "9000"}, "8080"),
+        ({"PORT": "8080"}, "8080"),
+    ],
+)
+def test_dockerfile_binds_the_settings_port(env: dict[str, str], port: str) -> None:
+    """The image binds the platform PORT and hands the same port to Settings.
+
+    docker compose passes backend/.env (with API_PORT) into the container, and
+    Railway sets PORT. The image keeps its old bind in both cases and exports
+    it as API_PORT, so Settings and the MCP URL see the port uvicorn binds.
+
+    Args:
+        env: Environment the container starts with.
+        port: Port the image must bind and export.
+    """
+    assert _dockerfile_bind(env) == f"uvicorn main:app --host 0.0.0.0 --port {port}"
+    assert _dockerfile_env(env, "API_PORT") == port
+
+
+def test_process_api_port_wins_over_the_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The port the image exports wins over an API_PORT in backend/.env.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+        tmp_path: Pytest directory that holds the ``.env`` file.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_PORT=9000\n")
+    monkeypatch.setenv("API_PORT", "8000")
+
+    assert Settings(_env_file=env_file).port == 8000
