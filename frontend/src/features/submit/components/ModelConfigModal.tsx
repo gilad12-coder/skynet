@@ -5,6 +5,7 @@ import { Coins, Desktop, Key, X } from "@/shared/ui/icons";
 import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/features/billing";
 import {
   SubscriptionSourcePicker,
+  byokHintKey,
   cliState,
   findCli,
   subscriptionCatalogModels,
@@ -440,7 +441,7 @@ export function ModelConfigModal({
 
               {mode === "byok" && (
                 <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1">{msg("billing.mode.byok_hint")}</span>
+                  <span className="min-w-0 flex-1">{msg(byokHintKey(localMode))}</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button

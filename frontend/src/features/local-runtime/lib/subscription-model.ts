@@ -149,6 +149,16 @@ export function isLocalModelRefusal(code: string | null | undefined): boolean {
   return code === LOCAL_MODEL_REFUSED_CODE;
 }
 
+/**
+ * The hint under "Your own key". The hosted text names a platform fee, which
+ * the local build never charges, so local mode gets its own line.
+ */
+export function byokHintKey(
+  localMode: boolean,
+): "billing.mode.byok_hint" | "billing.mode.byok_hint_local" {
+  return localMode ? "billing.mode.byok_hint_local" : "billing.mode.byok_hint";
+}
+
 /** A model config billed to the user's CLI subscription. */
 export function subscriptionModelConfig(name: string, cli: CliProvider): ModelConfig {
   return { name, token_source: "subscription", cli_provider: cli };

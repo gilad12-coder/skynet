@@ -4318,5 +4318,6 @@
   "subscription.cli.claude": "Claude Code",
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "Mac ऐप में टैगिंग के लिए आपकी अपनी प्रोवाइडर कुंजी चाहिए। «आपकी अपनी कुंजी» में एक मॉडल चुनें।",
-  "submit.budget.local_note": "Mac ऐप कोई खर्च सीमा नहीं रखता। हर मॉडल कॉल का भुगतान आपकी प्रोवाइडर कुंजी या आपका CLI प्लान करता है।"
+  "submit.budget.local_note": "Mac ऐप कोई खर्च सीमा नहीं रखता। हर मॉडल कॉल का भुगतान आपकी प्रोवाइडर कुंजी या आपका CLI प्लान करता है।",
+  "billing.mode.byok_hint_local": "मॉडल का बिल आपकी अपनी प्रोवाइडर कुंजी पर आता है। Mac ऐप कोई शुल्क नहीं लेता।"
 }

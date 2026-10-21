@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const {
+  byokHintKey,
   cliState,
   defaultAgentCli,
   hostCliPatch,
@@ -272,4 +273,9 @@ test("the proposer host CLI select starts at workspace only and clears on off", 
     host_cli: undefined,
     host_permission: undefined,
   });
+});
+
+test("the own-key hint names no platform fee in local mode", () => {
+  assert.equal(byokHintKey(false), "billing.mode.byok_hint");
+  assert.equal(byokHintKey(true), "billing.mode.byok_hint_local");
 });

@@ -4318,5 +4318,6 @@
   "subscription.cli.claude": "Claude Code",
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "L'etichettatura nell'app Mac richiede la tua chiave del provider. Scegli un modello in «La tua chiave».",
-  "submit.budget.local_note": "L'app Mac non imposta un limite di spesa. Ogni chiamata al modello la paga la tua chiave del provider o il tuo piano CLI."
+  "submit.budget.local_note": "L'app Mac non imposta un limite di spesa. Ogni chiamata al modello la paga la tua chiave del provider o il tuo piano CLI.",
+  "billing.mode.byok_hint_local": "Il modello è addebitato sulla tua chiave del provider. L'app Mac non applica commissioni."
 }

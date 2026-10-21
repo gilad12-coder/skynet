@@ -4318,5 +4318,6 @@
   "subscription.cli.claude": "Claude Code",
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "يحتاج التصنيف في تطبيق Mac إلى مفتاح مزوّد خاص بك. اختر نموذجًا ضمن «مفتاحك الخاص».",
-  "submit.budget.local_note": "لا يضع تطبيق Mac حدًا للإنفاق. يدفع مفتاح المزوّد أو خطة CLI الخاصة بك ثمن كل استدعاء للنموذج."
+  "submit.budget.local_note": "لا يضع تطبيق Mac حدًا للإنفاق. يدفع مفتاح المزوّد أو خطة CLI الخاصة بك ثمن كل استدعاء للنموذج.",
+  "billing.mode.byok_hint_local": "تُحتسب تكلفة النموذج على مفتاح المزوّد الخاص بك. لا يفرض تطبيق Mac أي رسوم."
 }

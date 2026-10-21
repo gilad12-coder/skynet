@@ -28,6 +28,7 @@ import {
   Warning,
   XCircle,
 } from "@/shared/ui/icons";
+import { byokHintKey } from "@/features/local-runtime";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { RolePill } from "@/shared/ui/role-pill";
@@ -432,7 +433,7 @@ export function RunOverview({
                         )
                       }
                       label={msg("submit.budget.billing_source")}
-                      help={msg(byok ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
+                      help={msg(byok ? byokHintKey(isLocalMode()) : "billing.mode.managed_hint")}
                     >
                       {msg(byok ? "billing.mode.byok" : "billing.mode.managed")}
                     </Row>

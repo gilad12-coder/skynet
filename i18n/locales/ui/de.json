@@ -4318,5 +4318,6 @@
   "subscription.cli.claude": "Claude Code",
   "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "Taggen in der Mac-App braucht deinen eigenen Anbieterschlüssel. Wähle ein Modell unter „Dein eigener Schlüssel“.",
-  "submit.budget.local_note": "Die Mac-App setzt kein Ausgabenlimit. Dein Anbieterschlüssel oder dein CLI-Tarif bezahlt jeden Modellaufruf."
+  "submit.budget.local_note": "Die Mac-App setzt kein Ausgabenlimit. Dein Anbieterschlüssel oder dein CLI-Tarif bezahlt jeden Modellaufruf.",
+  "billing.mode.byok_hint_local": "Das Modell wird über deinen eigenen Anbieterschlüssel abgerechnet. Die Mac-App berechnet keine Gebühr."
 }

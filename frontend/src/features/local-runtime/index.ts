@@ -7,6 +7,7 @@ export {
   useLocalAgentMenuModels,
 } from "./hooks/use-local-status";
 export {
+  byokHintKey,
   CLI_PROVIDERS,
   cliState,
   defaultAgentCli,
