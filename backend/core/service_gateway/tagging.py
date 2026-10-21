@@ -976,6 +976,7 @@ def interview_turn(
     model: str | None = None,
     reasoning_effort: str | None = None,
     usage_sink: list | None = None,
+    model_config: ModelConfig | None = None,
 ) -> dict[str, Any]:
     """Run one interview turn and return the assistant's reply (non-streaming).
 
@@ -990,13 +991,15 @@ def interview_turn(
             the model's default.
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
+        model_config: Optional resolved config for ``model`` (the Mac app's
+            BYOK route); it wins over ``model``.
 
     Returns:
         ``{"message", "options", "rubric", "done"}`` — ``rubric`` is empty
         until ``done`` is true.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort, model_config=model_config)
     if usage_sink is not None:
         usage_sink.append(lm)
     with dspy.context(lm=lm):
@@ -1116,6 +1119,7 @@ async def interview_turn_stream(
     model: str | None = None,
     reasoning_effort: str | None = None,
     usage_sink: list | None = None,
+    model_config: ModelConfig | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -1149,10 +1153,12 @@ async def interview_turn_stream(
             the model's default.
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
+        model_config: Optional resolved config for ``model`` (the Mac app's
+            BYOK route); it wins over ``model``.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(InterviewTurnSig)
-    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort, model_config=model_config)
     if usage_sink is not None:
         usage_sink.append(lm)
     inputs = _interview_inputs(config, columns, data, turns, locale)

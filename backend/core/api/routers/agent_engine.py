@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
 from ...storage.models import AgentEnginePreferenceModel
 from ..agent_engine import OPENROUTER_ENGINE, AgentEngine, effective_agent_engine
@@ -20,7 +21,8 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 _ENGINE_DESCRIPTION = (
     "Which engine runs agent turns that pick no model: 'openrouter' (managed models), or a "
     "subscription CLI on this machine: 'codex' (Codex CLI) or 'claude' (Claude Code CLI). "
-    "The CLIs run only in the Mac app, which cannot use 'openrouter'."
+    "The CLIs run only in the Mac app, which uses 'openrouter' only with the caller's saved "
+    "and verified OpenRouter key."
 )
 
 
@@ -83,14 +85,17 @@ def create_agent_engine_router(*, job_store) -> APIRouter:
         Raises:
             DomainError: 422 ``models.subscription_local_only`` for a CLI engine
                 in hosted mode; 422 ``models.managed_unavailable_local`` for
-                ``openrouter`` in the Mac app.
+                ``openrouter`` in the Mac app when the caller has no verified
+                OpenRouter key, because the app has no managed key.
         """
         if not settings.local_mode:
             if body.engine != OPENROUTER_ENGINE:
                 raise DomainError("models.subscription_local_only", status=422)
             # Hosted turns always run on OpenRouter, so there is nothing to store.
             return AgentEnginePreference(engine=OPENROUTER_ENGINE)
-        if body.engine == OPENROUTER_ENGINE:
+        if body.engine == OPENROUTER_ENGINE and not ProviderKeyVault(engine=job_store.engine).has_verified_connection(
+            user.username, OPENROUTER_ENGINE
+        ):
             raise DomainError("models.managed_unavailable_local", status=422)
         with Session(job_store.engine) as session:
             row = session.get(AgentEnginePreferenceModel, user.username)

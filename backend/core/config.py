@@ -18,6 +18,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .local.vault_key import load_or_create_vault_key
+
 _ENV_FILE = Path(__file__).parent.parent / ".env"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1494,6 +1496,21 @@ class Settings(BaseSettings):
             raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
         if self.api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
             raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {self.api_host!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _local_vault_key(self) -> Settings:
+        """Give the Mac app a BYOK vault key from its state directory.
+
+        Without a vault key the user cannot save a provider key, and the Mac
+        app has no operator to set ``BYOK_VAULT_KEY``. An explicit key wins.
+
+        Returns:
+            The settings instance, with ``byok_vault_key`` set in local mode
+            when a state directory is configured.
+        """
+        if self.local_mode and self.byok_vault_key is None and self.local_state_dir:
+            self.byok_vault_key = SecretStr(load_or_create_vault_key(self.local_state_dir))
         return self
 
     @property
