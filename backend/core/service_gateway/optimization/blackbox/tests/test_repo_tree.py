@@ -163,3 +163,14 @@ def test_archive_chunks_rebuild_the_archive(tmp_path: Path, monkeypatch: pytest.
 
     assert len(pieces) == 8
     assert b"".join(base64.b64decode(piece) for piece in pieces) == bytes(range(50))
+
+
+def test_protected_paths_are_refused_even_under_the_whole_tree(tmp_path: Path) -> None:
+    """A protected file is named with its rule while an editable sibling passes."""
+    checkout = _unpacked(tmp_path, {"src/a.py": "a\n", "eval/labels.json": "[]\n"})
+    (checkout / "src/a.py").write_text("b\n")
+    (checkout / "eval/labels.json").write_text("[1]\n")
+
+    problems = patch_violations(version_patch(checkout), ["."], [], ["eval"])
+
+    assert problems == ["'eval/labels.json' is protected by the repository's optimize.toml ([paths] protected)."]
