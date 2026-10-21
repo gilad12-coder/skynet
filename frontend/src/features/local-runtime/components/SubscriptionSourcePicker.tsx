@@ -21,6 +21,14 @@ const CLI_LABEL_KEYS: Record<CliProvider, MessageKey> = {
   droid: "subscription.cli.droid",
 };
 
+// The backend's login hint is an English sentence; the note shows only the
+// command, after its own localized prefix.
+const LOGIN_COMMANDS: Record<CliProvider, string> = {
+  codex: "codex login",
+  claude: "claude auth login",
+  droid: "droid",
+};
+
 export function cliLabel(cli: CliProvider): string {
   return msg(CLI_LABEL_KEYS[cli]);
 }
@@ -110,9 +118,9 @@ export function SubscriptionSourcePicker({
         {warn && <Warning className="size-3.5 shrink-0" aria-hidden="true" />}
         <span className="min-w-0 flex-1" dir="auto">
           {note}
-          {state?.kind === "logged_out" && state.hint && (
+          {chosen && state?.kind === "logged_out" && (
             <code className="ms-1 font-mono" dir="ltr">
-              {state.hint}
+              {LOGIN_COMMANDS[chosen.id]}
             </code>
           )}
         </span>

@@ -126,60 +126,62 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
       const controller = new AbortController();
       abortRef.current = controller;
 
-      void streamTaskInterviewTurn(
-        {
-          turns: next,
-          objective: current.objective,
-          background: current.background,
-          artifact_kind: current.artifactKind,
-          starting_version: current.startingVersion,
-          locale: getActiveLocale(),
-          model: localAgentModel(model, agentSubscriptionFor("interview")) ?? undefined,
-          reasoning_effort: reasoningEffort ?? undefined,
-        },
-        {
-          onReasoning: (chunk: string) =>
-            setThinking((prev) => ({
-              reasoning: (prev?.reasoning ?? "") + chunk,
-              startedAt: prev?.startedAt ?? Date.now(),
-              endedAt: null,
-              streaming: true,
-            })),
-          onMessagePatch: (chunk: string) => {
-            setThinking((prev) =>
-              prev && prev.streaming ? { ...prev, streaming: false, endedAt: Date.now() } : prev,
-            );
-            setStreamText((text) => text + chunk);
+      void localAgentModel(model, agentSubscriptionFor("interview")).then((sentModel) =>
+        streamTaskInterviewTurn(
+          {
+            turns: next,
+            objective: current.objective,
+            background: current.background,
+            artifact_kind: current.artifactKind,
+            starting_version: current.startingVersion,
+            locale: getActiveLocale(),
+            model: sentModel ?? undefined,
+            reasoning_effort: reasoningEffort ?? undefined,
           },
-          onReset: () => {
-            setStreamText("");
-            setThinking(null);
+          {
+            onReasoning: (chunk: string) =>
+              setThinking((prev) => ({
+                reasoning: (prev?.reasoning ?? "") + chunk,
+                startedAt: prev?.startedAt ?? Date.now(),
+                endedAt: null,
+                streaming: true,
+              })),
+            onMessagePatch: (chunk: string) => {
+              setThinking((prev) =>
+                prev && prev.streaming ? { ...prev, streaming: false, endedAt: Date.now() } : prev,
+              );
+              setStreamText((text) => text + chunk);
+            },
+            onReset: () => {
+              setStreamText("");
+              setThinking(null);
+            },
+            onDone: (result: TaskInterviewTurnResult) => {
+              const transcript: UnifiedChatTurn[] = [
+                ...next,
+                { role: "assistant", content: result.message },
+              ];
+              patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
+              setServed((prev) => ({
+                ...prev,
+                [transcript.length - 1]: {
+                  model: result.model ?? null,
+                  servedModel: result.served_model ?? null,
+                },
+              }));
+              setOptions(result.done ? [] : result.options);
+              setDone(result.done);
+              setBusy(false);
+              setStreamText("");
+              setThinking(null);
+            },
+            onError: () => {
+              setError(true);
+              clearStream();
+            },
           },
-          onDone: (result: TaskInterviewTurnResult) => {
-            const transcript: UnifiedChatTurn[] = [
-              ...next,
-              { role: "assistant", content: result.message },
-            ];
-            patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
-            setServed((prev) => ({
-              ...prev,
-              [transcript.length - 1]: {
-                model: result.model ?? null,
-                servedModel: result.served_model ?? null,
-              },
-            }));
-            setOptions(result.done ? [] : result.options);
-            setDone(result.done);
-            setBusy(false);
-            setStreamText("");
-            setThinking(null);
-          },
-          onError: () => {
-            setError(true);
-            clearStream();
-          },
-        },
-        controller.signal,
+          controller.signal,
+        ),
       ).finally(() => {
         if (abortRef.current === controller) abortRef.current = null;
       });

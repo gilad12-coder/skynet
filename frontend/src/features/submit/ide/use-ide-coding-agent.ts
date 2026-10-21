@@ -14,6 +14,9 @@ import { firstChangedLine } from "./open-file";
 const NO_COLUMNS: Record<string, never> = {};
 // The wizard checks the workspace with its own Check; the agent checks inside its turn with verify_code.
 const noValidation = async () => null;
+// Reads the role's CLI at send time, so a Settings change applies to the next turn.
+const resolveCodeModel = (model: string | null) =>
+  localAgentModel(model, agentSubscriptionFor("code"));
 
 export interface IdeCodingAgent {
   agent: CodeAgentState;
@@ -142,7 +145,8 @@ export function useIdeCodingAgent(options: {
     files: files as Record<string, string>,
     setFile: writeFile,
     onOpenFile: openFile,
-    model: localAgentModel(model, agentSubscriptionFor("code")),
+    model,
+    resolveModel: resolveCodeModel,
     reasoningEffort: effort,
     initialMessages: options.initialMessages,
   });

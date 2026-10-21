@@ -196,7 +196,9 @@ export function interviewComposerModel(assist: Pick<AssistState, "interviewModel
  * The model an interview request sends: the composer's, or the local CLI's
  * when the tagger runs on one.
  */
-export function interviewRequestModel(assist: Pick<AssistState, "interviewModel">): string | null {
+export function interviewRequestModel(
+  assist: Pick<AssistState, "interviewModel">,
+): Promise<string | null> {
   return localAgentModel(interviewComposerModel(assist), agentSubscriptionFor("tagger"));
 }
 

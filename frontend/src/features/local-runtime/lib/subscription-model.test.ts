@@ -3,6 +3,8 @@ import test from "node:test";
 
 const {
   cliState,
+  hostCliPatch,
+  resolveAgentModel,
   parseSubscriptionModelId,
   subscriptionAgentModel,
   subscriptionCatalogModels,
@@ -20,7 +22,7 @@ const cli = (patch: Partial<Cli> = {}): Cli => ({
   min_version: "2.0.0",
   version_ok: true,
   logged_in: true,
-  login_hint: "claude /login",
+  login_hint: "Run `claude auth login` in a terminal.",
   rate_limited_until: null,
   models: ["anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1"],
   ...patch,
@@ -44,7 +46,7 @@ test("each CLI state wins in order: missing, old, signed out, capped, ready", ()
   });
   assert.deepEqual(cliState(cli({ logged_in: false }), now), {
     kind: "logged_out",
-    hint: "claude /login",
+    hint: "Run `claude auth login` in a terminal.",
   });
   const capped = cliState(cli({ rate_limited_until: "2026-10-21T12:00:00Z" }), now);
   assert.equal(capped.kind, "capped");
@@ -114,5 +116,65 @@ test("a subscription model config names its CLI", () => {
     name: "anthropic/claude-sonnet-4.5",
     token_source: "subscription",
     cli_provider: "claude",
+  });
+});
+
+test("an agent request waits for the status before it picks the CLI's slug", async () => {
+  // Nothing is cached yet: the id comes from the loaded status, not a guess.
+  let loads = 0;
+  const loaded = await resolveAgentModel(
+    "openrouter/anthropic/claude-opus-4.1",
+    "claude",
+    async () => {
+      loads += 1;
+      return status([cli()]);
+    },
+    () => null,
+  );
+  assert.equal(loaded, "subscription/claude/anthropic/claude-opus-4.1");
+  assert.equal(loads, 1);
+  assert.equal(
+    await resolveAgentModel(null, "claude", async () => status([cli()]), () => null),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+});
+
+test("a failed status request falls back to the last loaded status", async () => {
+  const failing = async () => {
+    throw new Error("local status 503");
+  };
+  assert.equal(
+    await resolveAgentModel(null, "claude", failing, () => status([cli()])),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+  // With no status at all, the composer's slug goes out under the CLI.
+  assert.equal(
+    await resolveAgentModel("anthropic/claude-opus-4.1", "claude", failing, () => null),
+    "subscription/claude/anthropic/claude-opus-4.1",
+  );
+});
+
+test("a role left off sends the composer's model and loads nothing", async () => {
+  let loads = 0;
+  const load = async () => {
+    loads += 1;
+    return status([cli()]);
+  };
+  assert.equal(await resolveAgentModel("openai/gpt-5", null, load, () => null), "openai/gpt-5");
+  assert.equal(loads, 0);
+});
+
+test("the proposer host CLI select starts at workspace only and clears on off", () => {
+  assert.deepEqual(hostCliPatch("codex", undefined), {
+    host_cli: "codex",
+    host_permission: "workspace_only",
+  });
+  assert.deepEqual(hostCliPatch("claude", "full_access"), {
+    host_cli: "claude",
+    host_permission: "full_access",
+  });
+  assert.deepEqual(hostCliPatch("off", "full_access"), {
+    host_cli: undefined,
+    host_permission: undefined,
   });
 });

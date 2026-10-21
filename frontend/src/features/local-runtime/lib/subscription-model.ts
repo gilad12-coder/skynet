@@ -149,3 +149,35 @@ export function subscriptionAgentModel(
   const chosen = served ?? entry.models[0];
   return chosen ? subscriptionModelId(cli, chosen) : model;
 }
+
+/**
+ * The agent model for a role on `cli`, resolved against a loaded status: the
+ * CLI's slugs decide what the request sends, so the request waits for the
+ * status. A failed load falls back to the last status any caller loaded.
+ */
+export async function resolveAgentModel(
+  model: string | null,
+  cli: CliProvider | null | undefined,
+  load: () => Promise<LocalStatus>,
+  peek: () => LocalStatus | null,
+): Promise<string | null> {
+  if (!cli) return model;
+  const status = await load().catch(() => peek());
+  return subscriptionAgentModel(model, cli, status);
+}
+
+/**
+ * The proposer patch for a host CLI choice. Picking a CLI keeps the current
+ * permission, or starts at workspace only; any other value turns both off.
+ */
+export function hostCliPatch(
+  value: string,
+  permission: "workspace_only" | "full_access" | undefined,
+): {
+  host_cli: CliProvider | undefined;
+  host_permission: "workspace_only" | "full_access" | undefined;
+} {
+  return isCliProvider(value)
+    ? { host_cli: value, host_permission: permission ?? "workspace_only" }
+    : { host_cli: undefined, host_permission: undefined };
+}

@@ -718,7 +718,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             // role/content go over the wire.
             turns: turns.map(({ role, content }) => ({ role, content })),
             locale: getActiveLocale(),
-            model: interviewRequestModel(state) ?? undefined,
+            model: (await interviewRequestModel(state)) ?? undefined,
             reasoning_effort: interviewComposerEffort(state) ?? undefined,
           },
           {

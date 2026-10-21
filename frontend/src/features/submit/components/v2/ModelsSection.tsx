@@ -24,7 +24,7 @@ import {
   CLI_PROVIDERS,
   HostAgentPermissionField,
   cliLabel,
-  isCliProvider,
+  hostCliPatch,
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
@@ -286,14 +286,7 @@ export function ModelsSection({ kind, choice }: { kind: ArtifactKind; choice: Op
                 <Select
                   value={proposer.host_cli ?? HOST_CLI_OFF}
                   onValueChange={(value) =>
-                    updateProposer(
-                      isCliProvider(value)
-                        ? {
-                            host_cli: value,
-                            host_permission: proposer.host_permission ?? "workspace_only",
-                          }
-                        : { host_cli: undefined, host_permission: undefined },
-                    )
+                    updateProposer(hostCliPatch(value, proposer.host_permission))
                   }
                 >
                   <SelectTrigger id="v2-proposer-host-cli" className={cn("w-full", TOUCH_FIELD)}>

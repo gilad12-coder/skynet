@@ -4,7 +4,7 @@ import * as React from "react";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
 import type { CliProvider } from "@/features/billing";
-import { subscriptionAgentModel, type LocalStatus } from "../lib/subscription-model";
+import { resolveAgentModel, type LocalStatus } from "../lib/subscription-model";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -47,12 +47,16 @@ export function peekLocalStatus(): LocalStatus | null {
 }
 
 /**
- * The model id an agent request sends for a role set to run on `cli`. Hosted
- * builds, and roles left off, send the composer's choice unchanged.
+ * The model id an agent request sends for a role set to run on `cli`. It waits
+ * for `/local/status`, since the CLI's models decide the id. Hosted builds, and
+ * roles left off, send the composer's choice unchanged.
  */
-export function localAgentModel(model: string | null, cli: CliProvider | null): string | null {
+export async function localAgentModel(
+  model: string | null,
+  cli: CliProvider | null,
+): Promise<string | null> {
   if (!cli || !isLocalMode()) return model;
-  return subscriptionAgentModel(model, cli, peekLocalStatus());
+  return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
 }
 
 /**

@@ -8,6 +8,7 @@ export {
   CLI_PROVIDERS,
   cliState,
   findCli,
+  hostCliPatch,
   isCliProvider,
   parseSubscriptionModelId,
   subscriptionAgentModel,
