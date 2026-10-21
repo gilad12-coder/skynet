@@ -223,11 +223,21 @@ def test_local_setting_persists_per_user() -> None:
         ("auto:intelligent", _CODEX_ID),
         ("subscription/claude/anthropic/claude-haiku-4.5", "subscription/claude/anthropic/claude-haiku-4.5"),
         ("openai/gpt-5.5", "openai/gpt-5.5"),
+        ("subscription/codex/openai/gpt-5.6-terra", "subscription/codex/openai/gpt-5.6-terra"),
+        ("openrouter/x-ai/grok-build", _CODEX_ID),
     ],
-    ids=["none", "empty", "retired_sentinel", "explicit_subscription", "explicit_managed"],
+    ids=[
+        "none",
+        "empty",
+        "retired_sentinel",
+        "explicit_subscription",
+        "explicit_managed",
+        "subscription_matching_removed_pattern",
+        "removed_managed",
+    ],
 )
 def test_engine_fills_only_an_empty_pick(model: str | None, expected: str) -> None:
-    """Fill an empty or retired pick from the engine, and keep any explicit pick.
+    """Fill an empty, retired or removed pick from the engine, and keep any explicit pick.
 
     Args:
         model: The request's model value.

@@ -13,7 +13,7 @@ from typing import Literal, get_args
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..local.cli_catalog import CLI_MODELS, CliProvider
+from ..local.cli_catalog import CLI_MODELS, CliProvider, parse_subscription_model_id
 from ..local.cli_probe import CliStatus, probe_clis
 from ..storage.models import AgentEnginePreferenceModel
 from .model_catalog import is_removed_model
@@ -103,7 +103,11 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
         CLI's first catalog model.
     """
     name = str(model or "").strip()
-    if not settings.local_mode or (name and name != _RETIRED_AUTO_ID and not is_removed_model(name)):
+    if not settings.local_mode or parse_subscription_model_id(name) is not None:
+        return model
+    # The removed-model pattern is unanchored and also matches valid
+    # subscription slugs, so it runs only after the subscription check.
+    if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
         return model
     engine = effective_agent_engine(job_store, username)
     if engine is None or engine == OPENROUTER_ENGINE:

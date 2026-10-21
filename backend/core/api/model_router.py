@@ -180,6 +180,10 @@ def route_interview_model(model: str | None) -> str | None:
             that is not a subscription model.
     """
     name = str(model or "").strip()
+    # The removed-model pattern also matches valid subscription slugs such as
+    # gpt-5.6-terra, so a subscription pick skips it.
+    if settings.local_mode and parse_subscription_model_id(name) is not None:
+        return route_menu_model(name)
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
         return route_menu_model(name)
     _refuse_local_managed()
