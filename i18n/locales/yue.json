@@ -429,6 +429,11 @@
     "sync.bundle_too_large": "匯出檔案大過 {max_mb} MB。",
     "sync.export_not_finished": "只可以匯出已完成嘅執行。呢個執行係 '{status}'。",
     "sync.unsupported_run_type": "'{optimization_type}' 類型嘅執行唔可以匯出。",
-    "serve.subscription_model_hosted": "呢次運行用咗本機訂閱模型。請喺 {term.appName} Mac app 度提供服務，或者用託管模型或你自己嘅供應商金鑰開始一個新嘅優化。"
+    "serve.subscription_model_hosted": "呢次運行用咗本機訂閱模型。請喺 {term.appName} Mac app 度提供服務，或者用託管模型或你自己嘅供應商金鑰開始一個新嘅優化。",
+    "budget.insufficient": "可用預算或者帳戶餘額唔夠支付下一個操作。",
+    "budget.pending": "用量仲結算緊。請等進行中嘅工作完成再繼續。",
+    "budget.conflict": "呢個預算喺另一個分頁改過。更新之前請重新整理餘額。",
+    "budget.not_found": "你嘅帳戶無法使用呢個預算。請建立新嘅設定預算。",
+    "budget.invalid": "請輸入可以涵蓋已花費或者已預留用量嘅支出上限。"
   }
 }

@@ -12,6 +12,15 @@ from core.api import protected_interaction
 from core.api.auth import AuthenticatedUser
 from core.api.errors import DomainError
 from core.api.routers import serve as serve_router
+from core.api.routers.execution_budgets import budget_http_error
+from core.billing.budgets import (
+    BudgetBoundExceededError,
+    BudgetConflictError,
+    BudgetError,
+    BudgetInFlightError,
+    BudgetInsufficientError,
+    BudgetNotFoundError,
+)
 from core.billing.operation_pricing import ChargePolicy, operation_quote
 from core.billing.runtime import PaidResult
 from core.i18n_en import t_en
@@ -329,3 +338,36 @@ def test_stream_logs_server_failures_but_not_client_refusals(
     assert bool(failures) is logged
     if logged:
         assert failures[0].exc_info is not None
+
+
+@pytest.mark.parametrize(
+    "budget_error",
+    [
+        BudgetInsufficientError("no funds"),
+        BudgetInFlightError("settling"),
+        BudgetConflictError("stale revision"),
+        BudgetNotFoundError("missing"),
+        BudgetBoundExceededError("over bound"),
+    ],
+)
+def test_streamed_budget_refusal_reads_as_a_sentence(budget_error: BudgetError) -> None:
+    """Send words, not a bare catalog key, when a streamed serve or chat call hits its budget.
+
+    Args:
+        budget_error: Ledger refusal the streamed interaction raises.
+    """
+    refusal = budget_http_error(budget_error)
+
+    def run(_emit: Any) -> dict[str, Any]:
+        """Refuse the interaction like the ledger does on admission."""
+        raise refusal
+
+    async def collect() -> list[dict[str, Any]]:
+        """Drain the SSE source into a list."""
+        return [event async for event in serve_router._protected_sse(run, final_event="final")]
+
+    [event] = asyncio.run(collect())
+
+    assert event["data"]["code"] == refusal.code
+    assert event["data"]["error"] != refusal.code
+    assert event["data"]["error"] == t_en(refusal.code)

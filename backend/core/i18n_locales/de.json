@@ -429,6 +429,11 @@
     "sync.bundle_too_large": "Die Exportdatei ist größer als {max_mb} MB.",
     "sync.export_not_finished": "Nur ein abgeschlossener Lauf kann exportiert werden. Dieser Lauf ist '{status}'.",
     "sync.unsupported_run_type": "Läufe vom Typ '{optimization_type}' können nicht exportiert werden.",
-    "serve.subscription_model_hosted": "Dieser Lauf hat ein lokales Abo-Modell verwendet. Stelle ihn in der {term.appName}-Mac-App bereit oder starte eine neue Optimierung mit einem verwalteten Modell oder deinem eigenen Anbieterschlüssel."
+    "serve.subscription_model_hosted": "Dieser Lauf hat ein lokales Abo-Modell verwendet. Stelle ihn in der {term.appName}-Mac-App bereit oder starte eine neue Optimierung mit einem verwalteten Modell oder deinem eigenen Anbieterschlüssel.",
+    "budget.insufficient": "Das verfügbare Budget oder Kontoguthaben reicht für den nächsten Vorgang nicht aus.",
+    "budget.pending": "Die Nutzung wird noch abgerechnet. Warte, bis laufende Vorgänge abgeschlossen sind, bevor du fortfährst.",
+    "budget.conflict": "Dieses Budget wurde in einem anderen Tab geändert. Lade den Kontostand neu, bevor du es aktualisierst.",
+    "budget.not_found": "Dieses Budget ist für dein Konto nicht verfügbar. Erstelle ein neues Einrichtungsbudget.",
+    "budget.invalid": "Gib ein Ausgabenlimit ein, das bereits verbrauchte oder reservierte Beträge abdeckt."
   }
 }

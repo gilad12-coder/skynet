@@ -429,6 +429,11 @@
     "sync.bundle_too_large": "El archivo de exportación supera los {max_mb} MB.",
     "sync.export_not_finished": "Solo se puede exportar una ejecución terminada. Esta ejecución está en '{status}'.",
     "sync.unsupported_run_type": "No se pueden exportar ejecuciones de tipo '{optimization_type}'.",
-    "serve.subscription_model_hosted": "Esta ejecución usó un modelo de suscripción local. Sírvela en la app de {term.appName} para Mac o inicia una nueva optimización con un modelo gestionado o tu propia clave de proveedor."
+    "serve.subscription_model_hosted": "Esta ejecución usó un modelo de suscripción local. Sírvela en la app de {term.appName} para Mac o inicia una nueva optimización con un modelo gestionado o tu propia clave de proveedor.",
+    "budget.insufficient": "El presupuesto disponible o el saldo de la cuenta no cubren la siguiente operación.",
+    "budget.pending": "El consumo todavía se está liquidando. Espera a que termine el trabajo en curso antes de continuar.",
+    "budget.conflict": "Este presupuesto cambió en otra pestaña. Actualiza su saldo antes de modificarlo.",
+    "budget.not_found": "Este presupuesto no está disponible para tu cuenta. Crea un nuevo presupuesto de configuración.",
+    "budget.invalid": "Introduce un límite de gasto que cubra el consumo ya gastado o reservado."
   }
 }

@@ -429,6 +429,11 @@
     "sync.bundle_too_large": "Il file di esportazione supera {max_mb} MB.",
     "sync.export_not_finished": "Si può esportare solo un'esecuzione terminata. Questa esecuzione è '{status}'.",
     "sync.unsupported_run_type": "Le esecuzioni di tipo '{optimization_type}' non possono essere esportate.",
-    "serve.subscription_model_hosted": "Questa esecuzione ha usato un modello in abbonamento locale. Servila nell'app {term.appName} per Mac, oppure avvia una nuova ottimizzazione con un modello gestito o la tua chiave del provider."
+    "serve.subscription_model_hosted": "Questa esecuzione ha usato un modello in abbonamento locale. Servila nell'app {term.appName} per Mac, oppure avvia una nuova ottimizzazione con un modello gestito o la tua chiave del provider.",
+    "budget.insufficient": "Il budget disponibile o il saldo dell’account non copre l’operazione successiva.",
+    "budget.pending": "Il consumo è ancora in fase di addebito. Attendi che il lavoro in corso termini prima di continuare.",
+    "budget.conflict": "Questo budget è cambiato in un’altra scheda. Aggiorna il saldo prima di modificarlo.",
+    "budget.not_found": "Questo budget non è disponibile per il tuo account. Crea un nuovo budget di configurazione.",
+    "budget.invalid": "Inserisci un limite di spesa che copra gli importi già spesi o riservati."
   }
 }
