@@ -88,6 +88,8 @@ class DesktopTokenModel(Base):
     ``parent_hash`` names the refresh token that minted this token, so a
     retried refresh can replace the pair it minted. ``used_at`` marks a
     refresh token as rotated; a later use of it is the theft signal.
+    ``superseded_at`` marks a refresh token whose pair a retry replaced; any
+    use of it is also the theft signal.
     """
 
     __tablename__ = "desktop_tokens"
@@ -101,6 +103,7 @@ class DesktopTokenModel(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopLinkCodeModel(Base):

@@ -291,6 +291,22 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         else None
     )
 
+    desktop_link_rows = session.scalars(
+        select(DesktopLinkModel).where(DesktopLinkModel.username == username).order_by(DesktopLinkModel.created_at)
+    ).all()
+    desktop_links = [
+        {
+            "id": link.id,
+            "device_name": link.device_name,
+            "scopes": link.scopes.split(),
+            "created_at": _iso(link.created_at),
+            "last_used_at": _iso(link.last_used_at),
+            "revoked_at": _iso(link.revoked_at),
+            "absolute_expires_at": _iso(link.absolute_expires_at),
+        }
+        for link in desktop_link_rows
+    ]
+
     provider_keys = session.scalars(
         select(BillingProviderKeyModel).where(BillingProviderKeyModel.username == username)
     ).all()
@@ -405,6 +421,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "agent_conversations": conversations_out,
         "billing": billing,
         "api_token": api_token,
+        "desktop_links": desktop_links,
         "provider_keys": provider_keys_out,
         "passkeys": passkeys_out,
         "sign_in_methods": sign_in_methods,

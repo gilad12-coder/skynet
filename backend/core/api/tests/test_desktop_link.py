@@ -31,7 +31,7 @@ from ...storage.models import (
     UserModel,
 )
 from .. import desktop_auth
-from ..account_data_service import delete_account
+from ..account_data_service import delete_account, export_account
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..desktop_auth import DesktopPrincipal, get_desktop_principal
 from ..errors import DomainError
@@ -496,7 +496,7 @@ def test_refresh_rotates_the_pair(harness: Any) -> None:
 
 
 def test_refresh_retry_inside_grace_replaces_the_lost_pair(harness: Any) -> None:
-    """A retried refresh inside 30 s gets a fresh pair and kills the lost one."""
+    """A retried refresh inside 30 s gets a fresh pair; the lost pair is superseded."""
     client, _, _ = harness
     pair = _link(client)
     lost = _refresh(client, pair["refresh_token"]).json()
@@ -504,8 +504,64 @@ def test_refresh_retry_inside_grace_replaces_the_lost_pair(harness: Any) -> None
     assert retry.status_code == 200, retry.text
     fresh = retry.json()
     assert client.get("/desktop/v1/whoami", headers=_bearer(lost["access_token"])).status_code == 401
-    assert _refresh(client, lost["refresh_token"]).status_code in {400, 401}
     assert client.get("/desktop/v1/whoami", headers=_bearer(fresh["access_token"])).status_code == 200
+    late = _refresh(client, lost["refresh_token"])
+    assert late.status_code == 401
+    assert _code(late) == "desktop.link_revoked"
+
+
+def test_honest_retry_inside_grace_keeps_the_link(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """A Mac that lost one or two refresh responses keeps a working link and gets no email."""
+    client, engine, _ = harness
+    pair = _link(client)
+    mailbox.clear()
+    _refresh(client, pair["refresh_token"])
+    _refresh(client, pair["refresh_token"])
+    retry = _refresh(client, pair["refresh_token"])
+    assert retry.status_code == 200, retry.text
+    kept = retry.json()
+    assert kept["link_id"] == pair["link_id"]
+    assert client.get("/desktop/v1/whoami", headers=_bearer(kept["access_token"])).status_code == 200
+    rotated = _refresh(client, kept["refresh_token"])
+    assert rotated.status_code == 200, rotated.text
+    assert client.get("/desktop/v1/whoami", headers=_bearer(rotated.json()["access_token"])).status_code == 200
+    with Session(engine) as session:
+        assert session.get(DesktopLinkModel, pair["link_id"]).revoked_at is None
+    assert mailbox == []
+
+
+def test_replay_inside_grace_cannot_take_over_the_link(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """A stolen refresh token replayed inside 30 s ends the link at the Mac's next refresh (R782A-1)."""
+    client, engine, _ = harness
+    pair = _link(client)
+    mailbox.clear()
+    mac = _refresh(client, pair["refresh_token"])
+    assert mac.status_code == 200
+    thief = _refresh(client, pair["refresh_token"])
+    assert thief.status_code == 200
+    mac_next = _refresh(client, mac.json()["refresh_token"])
+    assert mac_next.status_code == 401
+    assert _code(mac_next) == "desktop.link_revoked"
+    with Session(engine) as session:
+        assert session.get(DesktopLinkModel, pair["link_id"]).revoked_at is not None
+    assert _refresh(client, thief.json()["refresh_token"]).status_code == 401
+    who = client.get("/desktop/v1/whoami", headers=_bearer(thief.json()["access_token"]))
+    assert _code(who) == "desktop.link_revoked"
+    assert len(mailbox) == 1
+    assert "removed" in mailbox[0][1].lower()
+
+
+def test_thief_first_then_mac_retry_still_detects_reuse(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """If the thief rotates first and the Mac retries, the thief's next refresh revokes the link."""
+    client, _, _ = harness
+    pair = _link(client)
+    mailbox.clear()
+    thief = _refresh(client, pair["refresh_token"]).json()
+    assert _refresh(client, pair["refresh_token"]).status_code == 200
+    stolen_next = _refresh(client, thief["refresh_token"])
+    assert stolen_next.status_code == 401
+    assert _code(stolen_next) == "desktop.link_revoked"
+    assert len(mailbox) == 1
 
 
 def test_refresh_reuse_after_grace_revokes_the_link(harness: Any) -> None:
@@ -708,6 +764,21 @@ def test_linked_macs_list_and_remove(harness: Any) -> None:
     assert client.delete("/settings/desktop-links/dl_missing").status_code == 404
 
 
+def test_linked_macs_routes_refuse_personal_access_token(harness: Any) -> None:
+    """Listing and removing Linked Macs needs a browser session, not a ``skyd_`` token (R782A-2)."""
+    client, _, _ = harness
+    pair = _link(client)
+    pat = client.post("/settings/api-token").json()["token"]
+    client.app.dependency_overrides.clear()
+    listed = client.get("/settings/desktop-links", headers=_bearer(pat))
+    assert listed.status_code == 403
+    assert _code(listed) == "desktop.session_required"
+    removed = client.delete(f"/settings/desktop-links/{pair['link_id']}", headers=_bearer(pat))
+    assert removed.status_code == 403
+    assert _code(removed) == "desktop.session_required"
+    assert client.get("/desktop/v1/whoami", headers=_bearer(pair["access_token"])).status_code == 200
+
+
 def test_eleventh_link_is_refused(harness: Any) -> None:
     """A user can hold at most 10 live links."""
     client, _, _ = harness
@@ -793,6 +864,37 @@ def test_account_deletion_removes_desktop_links(harness: Any) -> None:
         assert session.scalars(select(DesktopTokenModel)).all() == []
         assert session.scalars(select(DesktopLinkCodeModel)).all() == []
     assert client.get("/desktop/v1/whoami", headers=_bearer(pair["access_token"])).status_code == 401
+
+
+def test_account_export_lists_desktop_links_without_secrets(harness: Any) -> None:
+    """The data export has one ``desktop_links`` row per link and no token or code material (R782A-3)."""
+    client, engine, _ = harness
+    first = _link(client)
+    second = _link(client, scope="identity")
+    client.delete(f"/settings/desktop-links/{second['link_id']}")
+    _authorize(client)
+    with Session(engine) as session:
+        bundle = export_account(session, "alice@example.test")
+        token_hashes = {row.token_hash for row in session.scalars(select(DesktopTokenModel))}
+        code_hashes = {row.code_hash for row in session.scalars(select(DesktopLinkCodeModel))}
+    rows = {row["id"]: row for row in bundle["desktop_links"]}
+    assert set(rows) == {first["link_id"], second["link_id"]}
+    assert set(rows[first["link_id"]]) == {
+        "id",
+        "device_name",
+        "scopes",
+        "created_at",
+        "last_used_at",
+        "revoked_at",
+        "absolute_expires_at",
+    }
+    assert rows[first["link_id"]]["device_name"] == "Alice's MacBook Pro"
+    assert rows[first["link_id"]]["scopes"] == ALL_SCOPES.split()
+    assert rows[first["link_id"]]["revoked_at"] is None
+    assert rows[second["link_id"]]["revoked_at"] is not None
+    text = repr(bundle)
+    for secret in (*token_hashes, *code_hashes, first["access_token"], first["refresh_token"]):
+        assert secret not in text
 
 
 def test_token_prefixes_are_distinct() -> None:

@@ -7,7 +7,8 @@ Create Date: 2026-10-21 12:00:00.000000
 SKY-124 PR 1: the hosted side of the Mac account link. ``desktop_links`` holds
 one row per linked Mac. ``desktop_tokens`` holds the SHA-256 hashes of its
 ``skyl_`` access and refresh tokens; ``parent_hash`` names the refresh token
-that minted a pair, for rotation and reuse detection. ``desktop_link_codes``
+that minted a pair, for rotation and reuse detection; ``superseded_at`` marks a
+refresh token whose pair a retried refresh replaced. ``desktop_link_codes``
 holds the hashes of the single-use link codes from the consent page. No
 plaintext code or token is stored.
 """
@@ -56,10 +57,14 @@ def upgrade() -> None:
             parent_hash VARCHAR(64),
             created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-            used_at TIMESTAMP WITH TIME ZONE
+            used_at TIMESTAMP WITH TIME ZONE,
+            superseded_at TIMESTAMP WITH TIME ZONE
         )
         """
     )
+    # A database that ran an earlier build of this unmerged revision has the
+    # table without the column.
+    op.execute("ALTER TABLE desktop_tokens ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMP WITH TIME ZONE")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS desktop_link_codes (

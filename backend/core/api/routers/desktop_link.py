@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 DESKTOP_CLIENT_ID = "skynet-desktop"
 LINK_CODE_TTL = timedelta(seconds=60)
 # A retried refresh inside this window (lost response) gets a fresh pair
-# instead of tripping reuse detection.
+# instead of tripping reuse detection. The pair it replaces is superseded, so a
+# later use of that pair's refresh token is still a theft signal.
 REFRESH_REUSE_GRACE = timedelta(seconds=30)
 MAX_LIVE_LINKS = 10
 # Matches LOW_BALANCE_USD in frontend/src/features/billing/lib/wallet.ts.
@@ -167,6 +168,19 @@ def _check_redirect(redirect_uri: str) -> None:
         raise DomainError("desktop.invalid_redirect", status=400)
 
 
+def _require_session(request: Request) -> None:
+    """Refuse a personal access token on a browser-session route.
+
+    Args:
+        request: Incoming request, after ``get_authenticated_user`` ran.
+
+    Raises:
+        DomainError: 403 ``desktop.session_required`` for a ``skyd_`` caller.
+    """
+    if getattr(request.state, "auth_channel", None) == "api_token":
+        raise DomainError("desktop.session_required", status=403)
+
+
 def _s256(verifier: str) -> str:
     """Return the PKCE S256 challenge for ``verifier``."""
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
@@ -247,6 +261,24 @@ def _revoke_link(session: Session, link_id: str, now: datetime) -> None:
         .where(DesktopLinkModel.id == link_id, DesktopLinkModel.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+
+
+def _revoke_for_reuse(session: Session, link: DesktopLinkModel, now: datetime) -> None:
+    """Revoke ``link`` for refresh-token reuse, email the owner, and refuse the call.
+
+    Args:
+        session: Open ORM session; committed here.
+        link: Link whose refresh token was reused.
+        now: Current UTC time.
+
+    Raises:
+        DomainError: Always, 401 ``desktop.link_revoked``.
+    """
+    _revoke_link(session, link.id, now)
+    session.commit()
+    # Sent inline: background tasks do not run when the route raises.
+    _send_notice(*_link_reuse_notice(link))
+    raise DomainError("desktop.link_revoked", status=401)
 
 
 def _send_notice(to: str, subject: str, body: str) -> None:
@@ -444,7 +476,8 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         Raises:
             DomainError: 400 ``desktop.invalid_grant`` for an unknown, expired
                 or non-refresh token; 401 ``desktop.link_revoked`` for a dead
-                link or a reuse outside the grace window; 429.
+                link, a superseded refresh token, or a reuse outside the grace
+                window; 429.
         """
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
@@ -456,6 +489,9 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             if link is None or not link_is_live(link, now):
                 raise DomainError("desktop.link_revoked", status=401)
             _limit(f"desktop-link-refresh:{link.id}", limit=60, window_seconds=3600)
+            if row.superseded_at is not None:
+                # A grace retry replaced this pair, so the honest Mac never holds it.
+                _revoke_for_reuse(session, link, now)
             if row.used_at is not None:
                 successor_used = session.scalar(
                     select(func.count())
@@ -467,17 +503,21 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
                     )
                 )
                 if successor_used or now - as_utc(row.used_at) > REFRESH_REUSE_GRACE:
-                    _revoke_link(session, link.id, now)
-                    session.commit()
-                    # Sent inline: background tasks do not run when the route raises.
-                    _send_notice(*_link_reuse_notice(link))
-                    raise DomainError("desktop.link_revoked", status=401)
-                # The Mac lost the response: the pair it never got must die.
-                lost = session.scalars(
-                    select(DesktopTokenModel).where(DesktopTokenModel.parent_hash == token_hash)
+                    _revoke_for_reuse(session, link, now)
+                # The caller cannot be told from a thief here. Kill the access
+                # token of the replaced pair, and keep its refresh row as a
+                # superseded marker: whoever holds the other pair is caught
+                # at its next refresh.
+                children = session.scalars(
+                    select(DesktopTokenModel).where(
+                        DesktopTokenModel.parent_hash == token_hash, DesktopTokenModel.superseded_at.is_(None)
+                    )
                 ).all()
-                for child in lost:
-                    session.delete(child)
+                for child in children:
+                    if child.kind == TOKEN_KIND_REFRESH:
+                        child.superseded_at = now
+                    else:
+                        session.delete(child)
             elif as_utc(row.expires_at) <= now:
                 raise DomainError("desktop.invalid_grant", status=400)
             else:
@@ -509,8 +549,7 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
                 400 ``desktop.invalid_redirect`` or ``desktop.invalid_scope``,
                 409 ``desktop.too_many_links``, or 429.
         """
-        if getattr(request.state, "auth_channel", None) == "api_token":
-            raise DomainError("desktop.session_required", status=403)
+        _require_session(request)
         _limit(f"desktop-link-authorize:{user.username}", limit=10, window_seconds=3600)
         _check_redirect(body.redirect_uri)
         scopes = _canonical_scopes(body.scope)
@@ -617,15 +656,20 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         response_model=list[DesktopLinkInfo],
         summary="List the caller's linked Macs",
     )
-    def list_links(user: AuthenticatedUserDep) -> list[DesktopLinkInfo]:
+    def list_links(request: Request, user: AuthenticatedUserDep) -> list[DesktopLinkInfo]:
         """List the caller's live links, newest first.
 
         Args:
+            request: Incoming request; tells a session JWT from a PAT.
             user: Authenticated caller.
 
         Returns:
             One row per live link.
+
+        Raises:
+            DomainError: 403 ``desktop.session_required`` for a PAT caller.
         """
+        _require_session(request)
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
             links = session.scalars(
@@ -640,17 +684,20 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         status_code=204,
         summary="Remove a linked Mac",
     )
-    def remove_link(link_id: str, user: AuthenticatedUserDep) -> None:
+    def remove_link(link_id: str, request: Request, user: AuthenticatedUserDep) -> None:
         """Revoke one of the caller's links and all its tokens at once.
 
         Args:
             link_id: Link to remove.
+            request: Incoming request; tells a session JWT from a PAT.
             user: Authenticated caller; must own the link.
 
         Raises:
-            DomainError: 404 ``desktop.link_not_found`` when the caller has no
-                such live link.
+            DomainError: 403 ``desktop.session_required`` for a PAT caller;
+                404 ``desktop.link_not_found`` when the caller has no such
+                live link.
         """
+        _require_session(request)
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
             link = session.get(DesktopLinkModel, link_id)
