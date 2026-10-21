@@ -119,7 +119,7 @@ export function SubscriptionSourcePicker({
         <span className="min-w-0 flex-1" dir="auto">
           {note}
           {chosen && state?.kind === "logged_out" && (
-            <code className="ms-1 font-mono" dir="ltr">
+            <code className="mx-1 font-mono" dir="ltr">
               {LOGIN_COMMANDS[chosen.id]}
             </code>
           )}
