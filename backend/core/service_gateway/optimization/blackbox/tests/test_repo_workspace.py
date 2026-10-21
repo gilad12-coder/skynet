@@ -348,9 +348,11 @@ def test_a_source_only_version_whose_code_rewrites_the_labels_is_caught(tmp_path
     try:
         version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
         assert space.checkout(version).path == WORK_DIR
+        assert space.stamp_before_run() is None
         assert space.protected_changes() == ()
 
         space.checkout(version)
+        space.stamp_before_run()
         space.session().run(f"cd {WORK_DIR} && printf 'a,0\\n' > eval/labels.csv && touch eval/extra.csv")
         assert space.protected_changes() == (
             "'eval/extra.csv' is protected by the repository's optimize.toml ([paths] protected),"
@@ -360,6 +362,7 @@ def test_a_source_only_version_whose_code_rewrites_the_labels_is_caught(tmp_path
         )
 
         space.checkout(version)
+        space.stamp_before_run()
         space.session().run(f"rm {WORK_DIR}/eval/judge.py")
         assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/judge.py"]
     finally:
@@ -372,6 +375,7 @@ def test_a_protected_file_rewritten_and_restored_while_the_version_runs_is_caugh
     try:
         version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
         space.checkout(version)
+        space.stamp_before_run()
         space.session().run(
             f"cd {WORK_DIR} && saved=$(cat eval/labels.csv) && printf 'a,0\\n' > eval/labels.csv"
             " && printf '%s\\n' \"$saved\" > eval/labels.csv"
@@ -379,10 +383,12 @@ def test_a_protected_file_rewritten_and_restored_while_the_version_runs_is_caugh
         assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
 
         space.checkout(version)
+        space.stamp_before_run()
         space.session().run(f"cd {WORK_DIR} && touch eval/extra.csv && rm eval/extra.csv")
         assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval"]
 
         space.checkout(version)
+        space.stamp_before_run()
         space.session().run(f"cd {WORK_DIR} && cat eval/labels.csv eval/judge.py > /dev/null")
         assert space.protected_changes() == ()
     finally:
@@ -398,6 +404,7 @@ def test_tampering_with_the_prepared_tree_is_caught_on_the_next_version(tmp_path
         space.session().run(f"printf 'a,0\\n' > {PREPARED_DIR}/eval/labels.csv")
 
         space.checkout(version)
+        space.stamp_before_run()
 
         assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
     finally:

@@ -366,14 +366,27 @@ class RepoWorkspace:
             )
             if not applied.ok:
                 return Checkout(path=None, problems=(f"The change does not apply cleanly: {_tail(applied)}",))
-            if self._protected:
-                before = self._fingerprint(session, WORK_DIR)
-                if before is None:
-                    return Checkout(
-                        path=None, problems=("The protected files could not be checked before the version ran.",)
-                    )
-                self._stamps_before_run = before[1]
             return Checkout(path=WORK_DIR)
+
+    def stamp_before_run(self) -> str | None:
+        """Record the protected files' inodes and change times just before the version runs.
+
+        Call it after the last file the host writes into the box and right
+        before the scorer starts: a Vercel file write moves the change time of
+        every file in the box, so stamps taken earlier would flag every
+        protected file.
+
+        Returns:
+            Why the files could not be stamped, or ``None`` once they are.
+        """
+        if not self._protected:
+            return None
+        with self._lock:
+            before = self._fingerprint(self.session(), WORK_DIR)
+            if before is None:
+                return "The protected files could not be checked before the version ran."
+            self._stamps_before_run = before[1]
+            return None
 
     def protected_changes(self) -> tuple[str, ...]:
         """Explain how the version that last ran changed the protected files.

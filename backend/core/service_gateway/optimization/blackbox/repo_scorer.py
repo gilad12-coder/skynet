@@ -123,6 +123,9 @@ class RepoScorer:
                     )
                 }
             )
+            unstamped = self._workspace.stamp_before_run()
+            if unstamped:
+                raise RepoScoreError(unstamped)
             # A sink makes the session stream stderr live, which is where log() events travel.
             with sandbox_log.event_scope(source="scorer"):
                 result = session.run(

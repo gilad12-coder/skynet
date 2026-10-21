@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -213,6 +214,83 @@ def test_a_protected_file_named_after_a_secret_is_reported_redacted(tmp_path: Pa
         assert refused.status == 422
         assert "very-secret-value" not in refused.body.decode()
         assert "'eval/[secret]' is protected" in refused.body.decode()
+    finally:
+        scorer.close()
+
+
+class _WriteTouchingSession:
+    """Local box whose file writes move every file's change time, as a Vercel box's do."""
+
+    def __init__(self, session: Any) -> None:
+        """Wrap one local box.
+
+        Args:
+            session: The local box.
+        """
+        self._session = session
+
+    def __getattr__(self, name: str) -> Any:
+        """Pass everything else to the local box.
+
+        Args:
+            name: The attribute asked for.
+
+        Returns:
+            The local box's attribute.
+        """
+        return getattr(self._session, name)
+
+    def write_files(self, files: Mapping[str, str]) -> None:
+        """Write the files, then touch the metadata of everything in the box.
+
+        Args:
+            files: Relative path to content.
+        """
+        self._session.write_files(files)
+        # Flip a bit and back: macOS keeps the change time when the mode is unchanged.
+        self._session.run("chmod -R o+w . && chmod -R o-w .")
+
+
+class _WriteTouchingRuntime(LocalSubprocessRuntime):
+    """Local runtime whose boxes behave like Vercel's on file writes."""
+
+    def open(self, spec: SandboxSpec) -> Any:
+        """Open a local box wrapped so writes touch every file.
+
+        Args:
+            spec: The box's spec.
+
+        Returns:
+            The wrapped box.
+        """
+        return _WriteTouchingSession(super().open(spec))
+
+
+def test_a_clean_version_keeps_its_score_when_box_writes_touch_every_file(tmp_path: Path) -> None:
+    """Stamp the protected files after the host's last write, so a box that touches files on write flags nothing."""
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os\n"
+        "def score(repo_path):\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=_WriteTouchingRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+        assert scorer.score("")["score"] == pytest.approx(1.0)
     finally:
         scorer.close()
 
