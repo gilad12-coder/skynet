@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -52,6 +53,11 @@ const RETIRED_AUTO_MODEL = "auto:intelligent";
 // Caps the fallback list when the catalog flags no featured models (a
 // listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
+
+/** Whether a listed model runs on a saved provider key, not a subscription. */
+function keyGroup(model: CatalogModel): boolean {
+  return !!model.byok_provider;
+}
 
 function effortHint(level: string | null): string {
   switch (level) {
@@ -140,6 +146,10 @@ export function ComposerModelMenu({
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [models, available]);
+  // A given list that mixes subscription models with own-key models (the local
+  // build with a saved OpenRouter key) labels each group, since both can list
+  // the same model name.
+  const grouped = !!models && models.some((m) => keyGroup(m)) && models.some((m) => !keyGroup(m));
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -222,14 +232,24 @@ export function ComposerModelMenu({
                   onSelect={() => pick(currentExtra.value)}
                 />
               )}
-              {featured.map((m) => (
-                <MenuItem
-                  key={m.value}
-                  selected={effective === m.value}
-                  label={modelDisplayName(m.value, available)}
-                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
-                  onSelect={() => pick(m.value)}
-                />
+              {featured.map((m, i) => (
+                <React.Fragment key={m.value}>
+                  {grouped && (i === 0 || keyGroup(featured[i - 1]!) !== keyGroup(m)) && (
+                    <DropdownMenuLabel>
+                      {msg(
+                        keyGroup(m)
+                          ? "agent.model_menu.group_own_key"
+                          : "agent.model_menu.group_subscription",
+                      )}
+                    </DropdownMenuLabel>
+                  )}
+                  <MenuItem
+                    selected={effective === m.value}
+                    label={modelDisplayName(m.value, available)}
+                    icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
+                    onSelect={() => pick(m.value)}
+                  />
+                </React.Fragment>
               ))}
             </div>
           </DropdownMenuSubContent>

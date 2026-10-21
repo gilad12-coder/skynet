@@ -148,7 +148,52 @@ export function subscriptionMenuModels(
   return subscriptionCatalogModels(cli, catalog).map((model) => ({
     ...model,
     value: subscriptionModelId(cli.id, model.value),
+    // A catalog hit may name a BYOK provider; this row runs on the CLI.
+    byok_provider: null,
   }));
+}
+
+/** The one provider key the local backend runs composer turns on. */
+export const LOCAL_KEY_PROVIDER = "openrouter";
+
+// Caps the key's rows when its listing flags no featured models; an OpenRouter
+// key can list hundreds, and the hosted menu uses the same cap.
+const KEY_MENU_CAP = 50;
+
+/** Whether a BYOK catalog model runs on the saved OpenRouter key. */
+export function isLocalKeyModel(model: CatalogModel): boolean {
+  return model.byok_provider === LOCAL_KEY_PROVIDER && model.available !== false;
+}
+
+/**
+ * The composer menu rows for the saved OpenRouter key: the featured models,
+ * or the first ones when the listing flags none.
+ */
+export function keyMenuModels(catalog: CatalogModel[] | undefined): CatalogModel[] {
+  const rows = (catalog ?? []).filter(isLocalKeyModel);
+  const featured = rows.filter((model) => model.featured);
+  return featured.length ? featured : rows.slice(0, KEY_MENU_CAP);
+}
+
+/**
+ * The local composer menu: the CLI's subscription models, then the saved
+ * key's models. `null` key models mean the key's list is still loading; the
+ * whole menu then waits, so a saved key pick is not judged stale too early.
+ */
+export function localMenuModels(
+  cliModels: CatalogModel[],
+  keyModels: CatalogModel[] | null,
+): CatalogModel[] {
+  return keyModels === null ? [] : [...cliModels, ...keyModels];
+}
+
+/**
+ * Whether an agent request sends `model` unchanged to run on the saved key:
+ * a catalog id (not a subscription id) that the key's listing serves.
+ */
+export function runsOnLocalKey(model: string | null, catalog: CatalogModel[] | undefined): boolean {
+  if (!model || parseSubscriptionModelId(model)) return false;
+  return (catalog ?? []).some((entry) => entry.value === model && isLocalKeyModel(entry));
 }
 
 /**

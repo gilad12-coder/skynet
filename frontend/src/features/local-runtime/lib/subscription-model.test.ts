@@ -16,7 +16,10 @@ const {
   isAgentEngine,
   isCliProvider,
   isLocalModelRefusal,
+  keyMenuModels,
+  localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
+  runsOnLocalKey,
   resolveAgentModel,
   parseSubscriptionModelId,
   subscriptionAgentModel,
@@ -521,8 +524,76 @@ test("the local English texts name no fee and no Skynet charge", () => {
     "usage_tab.subscription_api_rates_note_local",
     "usage_tab.api_rate",
     "tooltip.usage_tab.api_rate",
+    "settings.keys.description_local",
   ]) {
     assert.ok(en[key], key);
     assert.doesNotMatch(en[key], /platform fee|term\.appName|Skynet/, key);
   }
+});
+
+type Catalog = NonNullable<Parameters<typeof keyMenuModels>[0]>;
+type CatalogRow = Catalog[number];
+
+const keyRow = (value: string, patch: Partial<CatalogRow> = {}): CatalogRow => ({
+  value,
+  label: value.split("/").slice(1).join("/"),
+  provider: "openrouter",
+  byok_provider: "openrouter",
+  supports_thinking: false,
+  supports_vision: false,
+  available: true,
+  ...patch,
+});
+
+test("the key's menu rows are its OpenRouter models, featured first, else capped", () => {
+  const catalog: Catalog = [
+    keyRow("openrouter/anthropic/claude-sonnet-4.5"),
+    keyRow("openrouter/openai/gpt-5-mini"),
+    keyRow("openai/gpt-5", { byok_provider: "openai", provider: "openai" }),
+    keyRow("openrouter/x/withdrawn", { available: false }),
+  ];
+  assert.deepEqual(
+    keyMenuModels(catalog).map((m) => m.value),
+    ["openrouter/anthropic/claude-sonnet-4.5", "openrouter/openai/gpt-5-mini"],
+  );
+  const featured = [...catalog, keyRow("openrouter/google/gemini-3-pro", { featured: true })];
+  assert.deepEqual(
+    keyMenuModels(featured).map((m) => m.value),
+    ["openrouter/google/gemini-3-pro"],
+  );
+  const many = Array.from({ length: 80 }, (_, i) => keyRow(`openrouter/lab/model-${i}`));
+  assert.equal(keyMenuModels(many).length, 50);
+  assert.deepEqual(keyMenuModels(undefined), []);
+});
+
+test("the local menu lists the CLI's models, then the key's, and waits for the key", () => {
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  const cliRows = subscriptionMenuModels(codex, [
+    keyRow("openrouter/openai/gpt-5", { byok_provider: "openrouter" }),
+  ]);
+  // A catalog hit must not mark the CLI row as an own-key row.
+  assert.equal(cliRows[0]!.byok_provider, null);
+  const keyRows = [keyRow("openrouter/anthropic/claude-sonnet-4.5")];
+  assert.deepEqual(
+    localMenuModels(cliRows, keyRows).map((m) => m.value),
+    ["subscription/codex/openai/gpt-5", "openrouter/anthropic/claude-sonnet-4.5"],
+  );
+  // No key: exactly the SKY-115 menu.
+  assert.deepEqual(localMenuModels(cliRows, []), cliRows);
+  // Key models still loading: no rows yet, so a saved key pick is not cleared.
+  assert.deepEqual(localMenuModels(cliRows, null), []);
+});
+
+test("only a pick the key serves runs on the key", () => {
+  const catalog: Catalog = [
+    keyRow("openrouter/anthropic/claude-sonnet-4.5"),
+    keyRow("openai/gpt-5", { byok_provider: "openai", provider: "openai" }),
+  ];
+  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-sonnet-4.5", catalog), true);
+  assert.equal(runsOnLocalKey("openai/gpt-5", catalog), false);
+  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-opus-4.1", catalog), false);
+  assert.equal(runsOnLocalKey("subscription/claude/anthropic/claude-sonnet-4.5", catalog), false);
+  assert.equal(runsOnLocalKey(null, catalog), false);
+  // No saved key: the catalog is empty and every pick keeps the SKY-115 route.
+  assert.equal(runsOnLocalKey("openrouter/anthropic/claude-sonnet-4.5", []), false);
 });
