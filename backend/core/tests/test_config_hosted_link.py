@@ -24,6 +24,8 @@ _ENV_VARS = (
 )
 _STAGING_APP = "https://frontend-staging-102e.up.railway.app"
 _STAGING_API = "https://backend-staging-6295.up.railway.app"
+_PRODUCTION_APP = "https://skynetml.com"
+_PRODUCTION_API = "https://api.skynetml.com"
 
 
 @pytest.fixture(autouse=True)
@@ -53,8 +55,7 @@ def test_missing_stamp_falls_back_to_production(monkeypatch: pytest.MonkeyPatch)
     """A build with no target and no stamp is treated as a release build.
 
     No packaging step writes the stamp yet, so a missing stamp must not send a
-    release build to staging. Production has no API origin yet, so the build
-    refuses to link (``hosted_link.not_configured``).
+    release build to staging.
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
@@ -64,8 +65,8 @@ def test_missing_stamp_falls_back_to_production(monkeypatch: pytest.MonkeyPatch)
     settings = Settings(_env_file=None)
 
     assert settings.hosted_target == "production"
-    assert settings.hosted_app_url == "https://skynet.app"
-    assert settings.hosted_api_url == ""
+    assert settings.hosted_app_url == _PRODUCTION_APP
+    assert settings.hosted_api_url == _PRODUCTION_API
 
 
 def test_dev_build_opts_in_to_staging(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,8 +104,8 @@ def test_release_stamp_links_to_production(monkeypatch: pytest.MonkeyPatch) -> N
     settings = Settings(_env_file=None)
 
     assert settings.hosted_target == "production"
-    assert settings.hosted_app_url == "https://skynet.app"
-    assert settings.hosted_api_url == ""
+    assert settings.hosted_app_url == _PRODUCTION_APP
+    assert settings.hosted_api_url == _PRODUCTION_API
 
 
 def test_unknown_stamp_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

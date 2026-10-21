@@ -41,6 +41,18 @@ CALLBACK_PATH = "/local/hosted-link/callback"
 STATE_TTL_SECONDS = 600
 REFRESH_MARGIN = timedelta(minutes=5)
 _TIMEOUT = httpx.Timeout(15.0)
+# Hosted (#782) gives an old refresh token a 30 s grace after a rotation. When a
+# refresh answer is lost, the client sends the same token again, and both
+# attempts must end inside that grace: the first attempt waits at most 10 s for
+# the answer, a resend starts at most 12 s after the first send, and the resend
+# itself takes at most 5 + 5 + 5 s, so the worst case ends at 27 s.
+_REFRESH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+_RESEND_TIMEOUT = httpx.Timeout(5.0)
+REFRESH_RESEND_DEADLINE = 12.0
+# Errors that can come after hosted received the request and rotated the pair.
+# A connect error means the request never left, so it gets no resend.
+_LOST_ANSWER_ERRORS = (httpx.ReadTimeout, httpx.ReadError, httpx.RemoteProtocolError, httpx.WriteError)
+_clock = time.monotonic
 # Fixed key so the API and the worker take the same advisory lock (addendum 2.7).
 _REFRESH_LOCK_KEY = 0x534B59_124
 _ACCESS_PREFIX = "skyl_at_"
@@ -69,8 +81,11 @@ def clear_used_states() -> None:
         _USED_STATES.clear()
 
 
-def _client() -> httpx.Client:
+def _client(timeout: httpx.Timeout = _TIMEOUT) -> httpx.Client:
     """Return an HTTP client for the hosted API.
+
+    Args:
+        timeout: Per-phase limits for each request.
 
     Returns:
         A client bound to ``settings.hosted_api_url``.
@@ -80,7 +95,7 @@ def _client() -> httpx.Client:
     """
     if not settings.hosted_api_url:
         raise DomainError("hosted_link.not_configured", status=503)
-    return httpx.Client(base_url=settings.hosted_api_url, timeout=_TIMEOUT, transport=_TRANSPORT)
+    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=_TRANSPORT)
 
 
 def callback_uri() -> str:
@@ -315,6 +330,43 @@ def _gone(engine: Engine, username: str) -> DomainError:
     return DomainError("hosted_link.revoked", status=401)
 
 
+def _post_refresh(refresh_token: str) -> httpx.Response:
+    """Send the refresh grant, and send it once more when the answer is lost.
+
+    Hosted can rotate the pair and then lose the answer (timeout, broken
+    connection). The client still holds only the old refresh token, and a later
+    use of it after the 30 s grace revokes the link and emails the owner a
+    false theft notice. So the client sends the same token once more while the
+    grace is still open; hosted then answers with a new pair. The caller holds
+    the refresh locks, so no other caller sends in between.
+
+    Args:
+        refresh_token: The stored refresh token.
+
+    Returns:
+        The hosted response.
+
+    Raises:
+        DomainError: 503 ``hosted_link.unreachable`` when no answer arrives.
+    """
+    body = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    started = _clock()
+    try:
+        with _client(_REFRESH_TIMEOUT) as client:
+            return client.post("/desktop/link/token", json=body)
+    except _LOST_ANSWER_ERRORS as exc:
+        if _clock() - started > REFRESH_RESEND_DEADLINE:
+            raise DomainError("hosted_link.unreachable", status=503) from exc
+        logger.info("The hosted refresh answer was lost; sending the same refresh grant once more")
+    except httpx.HTTPError as exc:
+        raise DomainError("hosted_link.unreachable", status=503) from exc
+    try:
+        with _client(_RESEND_TIMEOUT) as client:
+            return client.post("/desktop/link/token", json=body)
+    except httpx.HTTPError as exc:
+        raise DomainError("hosted_link.unreachable", status=503) from exc
+
+
 def refresh_after(engine: Engine, username: str, *, stale_access_token: str) -> str:
     """Refresh the pair once, unless another caller did it while this one waited.
 
@@ -342,14 +394,7 @@ def refresh_after(engine: Engine, username: str, *, stale_access_token: str) -> 
             raise DomainError("hosted_link.not_linked", status=409)
         if secret.access_token != stale_access_token:
             return secret.access_token
-        try:
-            with _client() as client:
-                response = client.post(
-                    "/desktop/link/token",
-                    json={"grant_type": "refresh_token", "refresh_token": secret.refresh_token},
-                )
-        except httpx.HTTPError as exc:
-            raise DomainError("hosted_link.unreachable", status=503) from exc
+        response = _post_refresh(secret.refresh_token)
         if response.status_code != 200:
             hosted_code = _hosted_code(response)
             if hosted_code in _GONE_CODES:

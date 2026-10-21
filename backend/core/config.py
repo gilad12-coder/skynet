@@ -50,11 +50,10 @@ DEFAULT_API_HOST = "0.0.0.0"
 # ``APP_HOSTED_TARGET`` and no stamp file is treated as a release build, so a
 # packaging slip can never send real users to staging. Dev builds opt in with
 # ``APP_HOSTED_TARGET=staging`` (see ``.env.example``). The production API
-# origin is not decided yet, so a release build refuses to link
-# (``hosted_link.not_configured``) until it is set.
+# origin is the Railway production backend behind ``api.skynetml.com``.
 HOSTED_TARGET_STAMP = Path(__file__).parent / "hosted_target.txt"
 HOSTED_TARGET_URLS = {
-    "production": ("https://skynet.app", ""),
+    "production": ("https://skynetml.com", "https://api.skynetml.com"),
     "staging": ("https://frontend-staging-102e.up.railway.app", "https://backend-staging-6295.up.railway.app"),
 }
 

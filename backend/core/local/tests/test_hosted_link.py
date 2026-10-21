@@ -603,3 +603,135 @@ def test_parallel_callers_refresh_once(tmp_path: Path, hosted: FakeHosted) -> No
     assert hosted.refresh_count == 1
     assert hosted.reuse_notices == 0
     assert hosted_link.hosted_get(file_engine, _USER, "/desktop/v1/whoami")["email"] == "dana@example.test"
+
+
+def test_lost_refresh_response_is_sent_again_inside_the_grace(engine: Engine, hosted: FakeHosted) -> None:
+    """Hosted rotates the pair but the answer is lost: one resend gets a working pair, with no theft notice.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    hosted.access_ttl = 120
+    _link(engine, hosted)
+    old = ConnectorVault(engine).resolve(_USER, hosted_link.PROVIDER)
+    assert old is not None
+    hosted.access_ttl = 3600
+    hosted.lose_refresh_responses = 1
+
+    token = hosted_link.access_token(engine, _USER)
+
+    new = ConnectorVault(engine).resolve(_USER, hosted_link.PROVIDER)
+    assert new is not None
+    assert token == new.access_token != old.access_token
+    assert new.refresh_token != old.refresh_token
+    assert hosted.refresh_count == 2
+    assert hosted.reuse_notices == 0
+    assert hosted_link.hosted_get(engine, _USER, "/desktop/v1/whoami")["email"] == "dana@example.test"
+    assert hosted_link.access_token(engine, _USER) == token
+    assert hosted.reuse_notices == 0
+    assert not hosted.revoked
+
+
+def test_both_refresh_attempts_end_inside_the_grace(engine: Engine, hosted: FakeHosted) -> None:
+    """The worst-case time of the first attempt plus the resend stays under the hosted 30 s grace.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    hosted.access_ttl = 120
+    _link(engine, hosted)
+    hosted.lose_refresh_responses = 1
+    hosted.refresh_timeouts.clear()
+
+    hosted_link.access_token(engine, _USER)
+
+    first, retry = hosted.refresh_timeouts
+    assert first["read"] is not None
+    assert all(value is not None for value in retry.values())
+    # The rotation commits after the first request is sent, so the first attempt
+    # can wait at most its read timeout after the commit. The resend can start
+    # no later than the resend deadline and then needs connect + write + read.
+    worst_end = hosted_link.REFRESH_RESEND_DEADLINE + retry["connect"] + retry["write"] + retry["read"]
+    assert first["read"] <= hosted_link.REFRESH_RESEND_DEADLINE
+    assert worst_end < 30.0
+
+
+def test_late_lost_refresh_response_is_not_sent_again(
+    engine: Engine, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first attempt that fails after the resend deadline makes no resend, so no late reuse.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to move the client clock.
+    """
+    hosted.access_ttl = 120
+    _link(engine, hosted)
+    hosted.lose_refresh_responses = 1
+    ticks = iter([0.0, hosted_link.REFRESH_RESEND_DEADLINE + 1.0])
+    monkeypatch.setattr(hosted_link, "_clock", lambda: next(ticks))
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.access_token(engine, _USER)
+
+    assert exc.value.code == "hosted_link.unreachable"
+    assert hosted.refresh_count == 1
+    assert hosted.reuse_notices == 0
+
+
+def test_connect_error_on_refresh_is_not_sent_again(
+    engine: Engine, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A connect error means hosted never got the request, so the client sends it only once.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to swap the transport.
+    """
+    hosted.access_ttl = 120
+    _link(engine, hosted)
+    attempts: list[str] = []
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        """Count one attempt and fail to connect.
+
+        Args:
+            request: The outgoing request.
+
+        Raises:
+            httpx.ConnectError: Always.
+        """
+        attempts.append(request.url.path)
+        raise httpx.ConnectError("offline", request=request)
+
+    monkeypatch.setattr(hosted_link, "_TRANSPORT", httpx.MockTransport(refuse))
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.access_token(engine, _USER)
+
+    assert exc.value.code == "hosted_link.unreachable"
+    assert attempts == ["/desktop/link/token"]
+    assert hosted_link.link_status(engine, _USER) is not None
+
+
+def test_two_lost_refresh_responses_are_a_clear_error(engine: Engine, hosted: FakeHosted) -> None:
+    """When the resend also loses its answer, the client stops with 503 and keeps the link.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    hosted.access_ttl = 120
+    _link(engine, hosted)
+    hosted.lose_refresh_responses = 2
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.access_token(engine, _USER)
+
+    assert exc.value.code == "hosted_link.unreachable"
+    assert hosted.refresh_count == 2
+    assert hosted_link.link_status(engine, _USER) is not None

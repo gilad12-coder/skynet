@@ -61,6 +61,7 @@ class FakeHosted:
     revoked: bool = False
     reject_all_access: bool = False
     refresh_delay: float = 0.0
+    lose_refresh_responses: int = 0
     clock: Callable[[], float] = time.monotonic
     codes: dict[str, _Code] = field(default_factory=dict)
     access: set[str] = field(default_factory=set)
@@ -70,6 +71,7 @@ class FakeHosted:
     refresh_count: int = 0
     reuse_notices: int = 0
     revoke_bodies: list[dict[str, Any]] = field(default_factory=list)
+    refresh_timeouts: list[dict[str, float | None]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def transport(self) -> httpx.MockTransport:
@@ -241,16 +243,25 @@ class FakeHosted:
 
         Raises:
             httpx.ConnectError: When the fake is set unreachable.
+            httpx.ReadTimeout: When the fake commits a refresh but loses its response.
         """
         if not self.reachable:
             raise httpx.ConnectError("offline", request=request)
         path = request.url.path
-        if request.method == "POST" and path == "/desktop/link/token" and self.refresh_delay:
+        is_token_post = request.method == "POST" and path == "/desktop/link/token"
+        if is_token_post:
+            self.refresh_timeouts.append(dict(request.extensions.get("timeout", {})))
+        if is_token_post and self.refresh_delay:
             # Holds the request in flight, so a second client caller can race this one.
             time.sleep(self.refresh_delay)
         # The real server serializes a token row with SELECT ... FOR UPDATE.
         with self._lock:
-            return self._route(request, path)
+            response = self._route(request, path)
+        if is_token_post and self.lose_refresh_responses and response.status_code == 200:
+            # The server committed the rotation, but the answer never reaches the Mac.
+            self.lose_refresh_responses -= 1
+            raise httpx.ReadTimeout("response lost", request=request)
+        return response
 
     def _route(self, request: httpx.Request, path: str) -> httpx.Response:
         """Answer one request under the fake's lock.
