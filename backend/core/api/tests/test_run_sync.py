@@ -31,6 +31,7 @@ from .conftest import bypass_auth
 
 DESK_USER = AuthenticatedUser(username="desk-user", role="user", groups=())
 HOSTED_USER = AuthenticatedUser(username="bob", role="user", groups=())
+_SIGNATURE_CODE = "class QA(dspy.Signature):\n    question = dspy.InputField()\n    answer = dspy.OutputField()"
 _PROGRAM_STATE = {"predict": {"signature": {"instructions": "Answer briefly."}, "demos": []}}
 
 
@@ -84,6 +85,7 @@ def _seed_finished_run(store: _SQLiteJobStore, optimization_id: str = "local-run
             "module_name": "predict",
             "optimizer_name": "gepa",
             "model_name": "openai/gpt-4o-mini",
+            "signature_code": _SIGNATURE_CODE,
             "max_cost_cents": 500,
             "estimated_cents_low": 10,
             "estimated_cents_high": 40,
@@ -250,7 +252,7 @@ def test_import_makes_no_wallet_or_budget_rows(hosted_store: _SQLiteJobStore, bu
 
 
 def test_imported_run_cannot_be_requeued(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
-    """Restart of an imported failed run is refused, so its stored result survives."""
+    """Restart of an imported failed run is refused, and the failed copy keeps no result."""
     bundle["job"]["status"] = "failed"
     resp = _import(hosted_store, bundle)
     assert resp.status_code == 201, resp.text
@@ -258,7 +260,9 @@ def test_imported_run_cannot_be_requeued(hosted_store: _SQLiteJobStore, bundle: 
     restart = _client(hosted_store, HOSTED_USER).post(f"/optimizations/{new_id}/restart")
     assert restart.status_code == 409
     assert restart.json()["detail"] == t_en("optimization.retry_no_payload")
-    assert hosted_store.get_job(new_id)["status"] == "failed"
+    job = hosted_store.get_job(new_id)
+    assert job["status"] == "failed"
+    assert job["result"] is None
 
 
 def test_import_in_local_mode_is_422(
@@ -339,3 +343,47 @@ def test_oversized_bundle_is_413_before_parsing(hosted_store: _SQLiteJobStore, m
 def test_default_cap_is_50_mb() -> None:
     """The bundle cap is the 50 MB the contract names."""
     assert run_sync.MAX_BUNDLE_BYTES == 50 * 1024 * 1024
+
+
+def test_inline_result_artifact_is_cleaned(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """A program artifact placed inside the result loses its pickle and path, like the artifacts entry."""
+    encoded = bundle["artifacts"].pop(run_sync.PROGRAM_ARTIFACT_NAME)
+    inline = json.loads(base64.b64decode(encoded))
+    inline.update(path="/Users/desk/secret.json", program_pickle_base64=base64.b64encode(b"evil").decode())
+    bundle["job"]["result"]["program_artifact"] = inline
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    artifact = _client(hosted_store, HOSTED_USER).get(f"/optimizations/{resp.json()['optimization_id']}/artifact")
+    assert artifact.status_code == 200, artifact.text
+    program = artifact.json()["program_artifact"]
+    assert program["program_state_json"] == _PROGRAM_STATE
+    assert program["program_pickle_base64"] is None
+    assert program["path"] is None
+
+
+def test_artifact_without_signature_code_is_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """Without a signature the hosted copy could rebuild the program only from a pickle, so it is refused."""
+    bundle["optimization"]["payload_overview"].pop("signature_code")
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
+def test_deeply_nested_body_is_422(hosted_store: _SQLiteJobStore) -> None:
+    """A body nested past the JSON parser's recursion limit is refused, not a server error."""
+    resp = _client(hosted_store, HOSTED_USER).post("/optimizations/import", content=b"[" * 5000)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+
+
+def test_deeply_nested_metrics_are_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """Nesting that parses but passes the depth cap is refused before it can break the run list."""
+    nested: Any = 1
+    for _ in range(run_sync.MAX_BUNDLE_DEPTH + 1):
+        nested = {"x": nested}
+    bundle["job"]["latest_metrics"] = {"deep": nested}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0

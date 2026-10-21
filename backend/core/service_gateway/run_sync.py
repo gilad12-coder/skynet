@@ -31,8 +31,10 @@ from ..constants import (
     PAYLOAD_OVERVIEW_MAX_COST_CENTS,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_SIGNATURE_CODE,
     PAYLOAD_OVERVIEW_SOURCE_DATASET_ID,
     PAYLOAD_OVERVIEW_USERNAME,
+    PAYLOAD_OVERVIEW_WORKFLOW,
 )
 from ..models import BlackboxRunResponse, RunResponse
 from ..storage.models import JobModel, ProgressEventModel
@@ -66,6 +68,36 @@ _DROPPED_OVERVIEW_KEYS = frozenset(
 # file on the exporting machine; neither belongs in a hosted artifact.
 _DROPPED_ARTIFACT_KEYS = frozenset({"program_pickle_base64", "path"})
 _MAX_MESSAGE_CHARS = 10_000
+# Deep nesting passes json.loads but later breaks Python-side reads and
+# serialization of the caller's run list and detail, so it is refused up front.
+MAX_BUNDLE_DEPTH = 64
+
+
+def _within_depth(value: Any, limit: int) -> bool:
+    """Report whether ``value`` nests no deeper than ``limit`` containers.
+
+    Walks iteratively, so a hostile depth cannot exhaust the Python stack.
+
+    Args:
+        value: A decoded JSON value.
+        limit: Largest allowed number of nested lists or dicts.
+
+    Returns:
+        ``True`` when the deepest container is at most ``limit`` levels down.
+    """
+    stack: list[tuple[Any, int]] = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            continue
+        if depth > limit:
+            return False
+        stack.extend((child, depth + 1) for child in children)
+    return True
 
 
 class RunSyncError(Exception):
@@ -246,9 +278,9 @@ def _decode_program_artifact(artifacts: dict[str, str]) -> dict[str, Any] | None
         return None
     try:
         artifact = json.loads(base64.b64decode(encoded, validate=True))
-    except (binascii.Error, ValueError):
+    except (binascii.Error, ValueError, RecursionError):
         raise RunSyncError("sync.invalid_bundle", 422) from None
-    if not isinstance(artifact, dict):
+    if not isinstance(artifact, dict) or not _within_depth(artifact, MAX_BUNDLE_DEPTH):
         raise RunSyncError("sync.invalid_bundle", 422)
     return {key: value for key, value in artifact.items() if key not in _DROPPED_ARTIFACT_KEYS}
 
@@ -278,11 +310,17 @@ def _imported_overview(overview: dict[str, Any], optimization_type: str, usernam
     return cleaned
 
 
-def _validated_result(bundle: _Bundle) -> dict[str, Any] | None:
+def _validated_result(bundle: _Bundle, overview: dict[str, Any]) -> dict[str, Any] | None:
     """Return the result to store, checked against the response model the detail page reads.
+
+    A failed or cancelled run keeps no result: nothing on hosted reads one, and
+    an unchecked shape would break the summary route. A program artifact is
+    cleaned wherever the bundle put it, and is accepted only with the signature
+    code the server needs to rebuild the program from its state JSON.
 
     Args:
         bundle: The validated bundle.
+        overview: The overview the copy will store.
 
     Returns:
         The result mapping with its cleaned program artifact, or ``None``.
@@ -290,22 +328,27 @@ def _validated_result(bundle: _Bundle) -> dict[str, Any] | None:
     Raises:
         RunSyncError: 422 ``sync.invalid_bundle`` when the result does not parse.
     """
-    result = dict(bundle.job.result) if bundle.job.result is not None else None
-    if result is not None:
-        result.pop("program_artifact_path", None)
+    if bundle.job.status not in _RESULT_STATUSES or bundle.job.result is None:
+        return None
+    result = dict(bundle.job.result)
+    result.pop("program_artifact_path", None)
     artifact = _decode_program_artifact(bundle.artifacts)
+    if artifact is None and result.get("program_artifact") is not None:
+        inline = result["program_artifact"]
+        if not isinstance(inline, dict):
+            raise RunSyncError("sync.invalid_bundle", 422)
+        artifact = {key: value for key, value in inline.items() if key not in _DROPPED_ARTIFACT_KEYS}
     if artifact is not None:
-        if result is None:
+        signature_code = overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE)
+        has_signature = isinstance(signature_code, str) and bool(signature_code.strip())
+        if not has_signature and not overview.get(PAYLOAD_OVERVIEW_WORKFLOW):
             raise RunSyncError("sync.invalid_bundle", 422)
         result["program_artifact"] = artifact
-    if result is not None and bundle.job.status in _RESULT_STATUSES:
-        model = (
-            BlackboxRunResponse if bundle.optimization.optimization_type == OPTIMIZATION_TYPE_BLACKBOX else RunResponse
-        )
-        try:
-            model.model_validate(result)
-        except ValidationError:
-            raise RunSyncError("sync.invalid_bundle", 422) from None
+    model = BlackboxRunResponse if bundle.optimization.optimization_type == OPTIMIZATION_TYPE_BLACKBOX else RunResponse
+    try:
+        model.model_validate(result)
+    except ValidationError:
+        raise RunSyncError("sync.invalid_bundle", 422) from None
     return result
 
 
@@ -326,12 +369,15 @@ def import_run(job_store, username: str, bundle: dict) -> str:
 
     Raises:
         RunSyncError: 422 ``sync.unsupported_schema`` for another schema version
-            and 422 ``sync.invalid_bundle`` for a malformed bundle.
+            and 422 ``sync.invalid_bundle`` for a malformed or too deeply
+            nested bundle.
     """
     if not isinstance(bundle, dict):
         raise RunSyncError("sync.invalid_bundle", 422)
     if bundle.get("schema") != SCHEMA_VERSION:
         raise RunSyncError("sync.unsupported_schema", 422, schema=str(bundle.get("schema"))[:64])
+    if not _within_depth(bundle, MAX_BUNDLE_DEPTH):
+        raise RunSyncError("sync.invalid_bundle", 422)
     try:
         parsed = _Bundle.model_validate(bundle)
     except ValidationError:
@@ -340,7 +386,7 @@ def import_run(job_store, username: str, bundle: dict) -> str:
     now = datetime.now(UTC)
     optimization_type = parsed.optimization.optimization_type
     overview = _imported_overview(parsed.optimization.payload_overview, optimization_type, username)
-    result = _validated_result(parsed)
+    result = _validated_result(parsed, overview)
     created_at = _parse_time(parsed.job.created_at, default=now) or now
     started_at = _parse_time(parsed.job.started_at, default=None)
     completed_at = _parse_time(parsed.job.completed_at, default=created_at)

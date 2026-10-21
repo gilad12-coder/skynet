@@ -55,7 +55,7 @@ jobs:
         if: matrix.shard == 0
         env:
           SKYNET_BUDGET_TEST_DB_URL: postgresql+psycopg2://budget_test:budget_test@127.0.0.1:5432/budget_test
-        run: uv run pytest core/billing/tests/test_budgets_postgres.py -q
+        run: uv run pytest core/billing/tests/test_budgets_postgres.py core/api/tests/test_run_sync_postgres.py -q
       - name: Load-test release-gate unit tests
         if: matrix.shard == 0
         run: uv run pytest tests/unit/test_load_test_slo.py -q

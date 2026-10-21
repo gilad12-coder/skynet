@@ -48,6 +48,7 @@ from ...constants import (
 )
 from ...models.results import result_scores
 from ...storage.models import JobEmbeddingModel
+from ..run_sync import IMPORTED_FROM_DESKTOP, IMPORTED_FROM_KEY
 from .embeddings import get_embedder
 from .summarizer import summarize_blackbox_task, summarize_task
 
@@ -291,7 +292,10 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     task_metric = workspace.get("metric_code") or scorer.get("metric_code") or payload.get("metric_code")
     owner = overview.get(PAYLOAD_OVERVIEW_USERNAME)
     engine = getattr(job_store, "engine", None)
-    use_llm = _owner_can_fund_summary(engine, owner)
+    # A run imported from the desktop never charges its owner (SKY-117), so it
+    # gets the free heuristic summary instead of the metered LLM one.
+    imported = overview.get(IMPORTED_FROM_KEY) == IMPORTED_FROM_DESKTOP
+    use_llm = not imported and _owner_can_fund_summary(engine, owner)
     summary_lms: list[Any] = []
     if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX:
         summary_text = summarize_blackbox_task(

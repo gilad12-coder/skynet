@@ -98,7 +98,7 @@ def register_sync_routes(router: APIRouter, *, job_store) -> None:
         raw = await _read_capped_body(request)
         try:
             bundle: Any = json.loads(raw)
-        except (UnicodeDecodeError, ValueError):
+        except (UnicodeDecodeError, ValueError, RecursionError):
             raise DomainError("sync.invalid_bundle", status=422) from None
         enforce_job_quota(job_store, current_user.username)
         enforce_storage_quota(job_store, current_user.username, len(raw))
