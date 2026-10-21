@@ -76,7 +76,9 @@ elif command == "ps":
 elif command == "network ls":
     print(os.environ.get("FAKE_DOCKER_NETWORKS", "net1").replace(",", "\\n"))
 elif command == "network inspect":
-    print("1" if args[-1].startswith("busy") else "0")
+    import time
+    created = int(time.time()) - (60 if args[-1].startswith("young") else 3600)
+    print(("1" if args[-1].startswith("busy") else "0"), created)
 elif command == "inspect":
     print("null")
 elif command == "logs":
@@ -315,18 +317,22 @@ def test_stop_job_sandboxes_removes_every_box_under_the_job_label(fake_docker: t
 def test_remove_idle_sandbox_networks_keeps_networks_still_in_use(
     fake_docker: tuple[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Remove only sandbox networks with no attached container."""
+    """Remove only old sandbox networks with no attached container.
+
+    A young idle network may belong to a box that is still opening, so it stays.
+    """
     binary, log = fake_docker
-    monkeypatch.setenv("FAKE_DOCKER_NETWORKS", "idle1,busy1,idle2")
+    monkeypatch.setenv("FAKE_DOCKER_NETWORKS", "idle1,busy1,young1,idle2")
 
     assert remove_idle_sandbox_networks(binary) == 2
 
-    inspect = ["network", "inspect", "--format", "{{len .Containers}}"]
+    inspect = ["network", "inspect", "--format", "{{len .Containers}} {{.Created.Unix}}"]
     assert _calls(log) == [
         ["network", "ls", "-q", "--filter", "label=skynet=blackbox"],
         [*inspect, "idle1"],
         ["network", "rm", "idle1"],
         [*inspect, "busy1"],
+        [*inspect, "young1"],
         [*inspect, "idle2"],
         ["network", "rm", "idle2"],
     ]

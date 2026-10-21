@@ -64,6 +64,10 @@ _EGRESS_PORT = 3128
 _EGRESS_READY_SECONDS = 30.0
 # Above the port range a non-root user may bind, and without any capability.
 _EGRESS_USER = "65534:65534"
+# A setup network has no container between ``network create`` and the proxy's
+# ``docker run``. That window lasts at most two CLI calls plus the proxy's ready
+# wait, so the idle-network sweep leaves younger networks alone.
+_IDLE_NETWORK_MIN_AGE_SECONDS = 300.0
 
 
 def _docker(
@@ -629,8 +633,11 @@ def remove_idle_sandbox_networks(docker_bin: str) -> int:
 
     A setup box's internal network has no lifetime of its own: a killed
     backend leaves it behind after ``--rm`` removes the box and its proxy, and
-    each one holds a /16 from Docker's small address pool. Run this at startup,
-    before any box opens. It never raises: a failure is logged and skipped.
+    each one holds a /16 from Docker's small address pool. A network younger
+    than ``_IDLE_NETWORK_MIN_AGE_SECONDS`` is skipped, because a box that is
+    still opening has a network with no container yet; this keeps the sweep
+    safe beside other workers or backends on the same daemon. It never raises:
+    a failure is logged and skipped.
 
     Args:
         docker_bin: Docker (or OrbStack) CLI path.
@@ -650,8 +657,15 @@ def remove_idle_sandbox_networks(docker_bin: str) -> int:
     removed = 0
     for network in listed.stdout.decode().split():
         try:
-            attached = _docker(docker_bin, ["network", "inspect", "--format", "{{len .Containers}}", network])
-            if attached.returncode != 0 or attached.stdout.strip() != b"0":
+            inspected = _docker(
+                docker_bin, ["network", "inspect", "--format", "{{len .Containers}} {{.Created.Unix}}", network]
+            )
+            if inspected.returncode != 0:
+                continue
+            attached, _, created = inspected.stdout.decode().strip().partition(" ")
+            if attached != "0" or not created.isdigit():
+                continue
+            if time.time() - int(created) < _IDLE_NETWORK_MIN_AGE_SECONDS:
                 continue
             result = _docker(docker_bin, ["network", "rm", network])
         except ServiceError as error:
