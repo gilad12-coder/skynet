@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import tarfile
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -108,11 +109,10 @@ class ResultRefusedError(ValueError):
     """Raised for a returned tree the shim will not write into the workspace."""
 
 
-def _checked_members(workspace: Path, archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
+def _checked_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
     """Validate every returned member before anything is written.
 
     Args:
-        workspace: Directory the proposer works in.
         archive: The returned archive.
 
     Returns:
@@ -120,25 +120,34 @@ def _checked_members(workspace: Path, archive: tarfile.TarFile) -> list[tarfile.
 
     Raises:
         ResultRefusedError: For an absolute or escaping path or link, a hard link,
-            or a FIFO or device.
+            a FIFO or device, or a path through a returned link.
     """
     members = []
-    for member in archive.getmembers():
-        name = member.name.removeprefix("./")
-        if not name or name == ".":
-            continue
-        if excluded_path(Path(name)):
-            continue
-        if Path(name).is_absolute():
-            # data_filter would quietly make it relative; the parent never sends one.
-            raise ResultRefusedError(f"The result has an absolute path: {name}")
-        if member.islnk() or not (member.isreg() or member.isdir() or member.issym()):
-            raise ResultRefusedError(f"The result has a special file: {name}")
-        try:
-            tarfile.data_filter(member, str(workspace))
-        except tarfile.FilterError as error:
-            raise ResultRefusedError(f"The result has an unsafe entry: {error}") from error
-        members.append(member)
+    links: set[str] = set()
+    # The live workspace can still hold an old entry of another kind (a file where
+    # a folder now goes), and realpath fails through it, so names are checked in an
+    # empty folder. extractall(filter="data") checks the real tree again.
+    with tempfile.TemporaryDirectory() as empty:
+        for member in archive.getmembers():
+            name = member.name.removeprefix("./")
+            if not name or name == ".":
+                continue
+            if excluded_path(Path(name)):
+                continue
+            if Path(name).is_absolute():
+                # data_filter would quietly make it relative; the parent never sends one.
+                raise ResultRefusedError(f"The result has an absolute path: {name}")
+            if member.islnk() or not (member.isreg() or member.isdir() or member.issym()):
+                raise ResultRefusedError(f"The result has a special file: {name}")
+            if any(name.startswith(f"{link}/") for link in links):
+                raise ResultRefusedError(f"The result writes through a link: {name}")
+            try:
+                tarfile.data_filter(member, empty)
+            except tarfile.FilterError as error:
+                raise ResultRefusedError(f"The result has an unsafe entry: {error}") from error
+            if member.issym():
+                links.add(name.rstrip("/"))
+            members.append(member)
     return members
 
 
@@ -172,7 +181,7 @@ def apply_result(workspace: Path, archive_bytes: bytes, shipped: set[str]) -> No
     except (tarfile.TarError, OSError, EOFError) as error:
         raise ResultRefusedError(f"The result archive is invalid: {error}") from error
     with archive:
-        members = _checked_members(workspace, archive)
+        members = _checked_members(archive)
         returned = {member.name.removeprefix("./") for member in members}
         for relative in shipped - returned:
             _remove(workspace / relative)

@@ -360,6 +360,17 @@ def test_unsafe_result_leaves_the_workspace_unchanged(workspace: Path, bad: tupl
     assert not (workspace.parent / "escape.txt").exists()
 
 
+def test_result_cannot_write_through_a_returned_link(workspace: Path) -> None:
+    """A member under a link from the same result is refused before any change."""
+    archive = _archive(_special("sub", tarfile.SYMTYPE, "."), _file("sub/solver.py", b"evil\n"))
+
+    with pytest.raises(host_agent_shim.ResultRefusedError, match="through a link"):
+        host_agent_shim.apply_result(workspace, archive, {"solver.py", "stale.txt"})
+
+    assert (workspace / "solver.py").read_text() == "def solve():\n    return 1\n"
+    assert not os.path.lexists(workspace / "sub")
+
+
 def test_result_can_change_a_path_kind_and_skips_agent_config(workspace: Path) -> None:
     """A file that became a folder is replaced, and returned agent config is never written."""
     (workspace / "notes").write_text("was a file\n")
