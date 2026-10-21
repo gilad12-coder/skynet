@@ -176,9 +176,11 @@ export function decodeScheduledRun(raw: string | null): ContinuousEnableRequest 
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const { schedule, permitted, source } = parsed as Record<string, unknown>;
+  const { schedule, permitted } = parsed as Record<string, unknown>;
   if (!schedule || typeof schedule !== "object") return null;
   if (!permitted || typeof permitted !== "object") return null;
-  if (source !== null && typeof source !== "object") return null;
-  return parsed as ContinuousEnableRequest;
+  const { task_model, reflection_model } = permitted as Record<string, unknown>;
+  // A draft saved before the model switches existed has neither, so it no longer describes a plan.
+  if (typeof task_model !== "boolean" || typeof reflection_model !== "boolean") return null;
+  return { schedule: schedule as ContinuousEnableRequest["schedule"], permitted: { task_model, reflection_model } };
 }
