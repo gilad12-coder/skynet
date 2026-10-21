@@ -283,6 +283,12 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     signature_code = payload.get("signature_code")
     task_title = overview.get("name") or payload.get("name")
     task_description = overview.get(PAYLOAD_OVERVIEW_DESCRIPTION) or payload.get("description")
+    task = payload.get("task") or {}
+    workspace = payload.get("workspace") or {}
+    data = payload.get("data") or {}
+    scorer = payload.get("scorer") or {}
+    task_objective = task.get("objective") or payload.get("objective")
+    task_metric = workspace.get("metric_code") or scorer.get("metric_code") or payload.get("metric_code")
     owner = overview.get(PAYLOAD_OVERVIEW_USERNAME)
     engine = getattr(job_store, "engine", None)
     use_llm = _owner_can_fund_summary(engine, owner)
@@ -291,7 +297,9 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
         summary_text = summarize_blackbox_task(
             title=task_title,
             description=task_description,
-            cases_sample=payload.get("cases") or [],
+            objective=task_objective,
+            metric=task_metric,
+            cases_sample=data.get("cases") or payload.get("cases") or [],
             use_llm=use_llm,
             usage_sink=summary_lms,
         )
@@ -299,6 +307,8 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
         summary_text = summarize_task(
             title=task_title,
             description=task_description,
+            objective=task_objective,
+            metric=task_metric,
             dataset_sample=payload.get("dataset") or [],
             use_llm=use_llm,
             usage_sink=summary_lms,
