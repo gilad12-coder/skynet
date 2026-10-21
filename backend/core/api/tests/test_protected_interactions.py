@@ -293,3 +293,39 @@ def test_stream_error_event_carries_the_translatable_code() -> None:
         }
     ]
     assert "serve.subscription_model_hosted" not in events[0]["data"]["error"]
+
+
+@pytest.mark.parametrize(
+    ("error", "logged"),
+    [
+        (DomainError("serve.protected_interaction_failed", status=502, error="guest crashed"), True),
+        (DomainError("serve.subscription_model_hosted", status=409), False),
+    ],
+)
+def test_stream_logs_server_failures_but_not_client_refusals(
+    error: DomainError, logged: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Keep a server log for a streamed 5xx, which answers 200 and leaves no other trace.
+
+    Args:
+        error: Domain error the streamed interaction raises.
+        logged: Whether the stream must write an error log for it.
+        caplog: Pytest log capture fixture.
+    """
+
+    def run(_emit: Any) -> dict[str, Any]:
+        """Fail the interaction with the parametrized domain error."""
+        raise error
+
+    async def collect() -> list[dict[str, Any]]:
+        """Drain the SSE source into a list."""
+        return [event async for event in serve_router._protected_sse(run, final_event="final")]
+
+    with caplog.at_level("WARNING", logger=serve_router.logger.name):
+        events = asyncio.run(collect())
+
+    assert events[0]["data"]["code"] == error.code
+    failures = [record for record in caplog.records if record.name == serve_router.logger.name]
+    assert bool(failures) is logged
+    if logged:
+        assert failures[0].exc_info is not None

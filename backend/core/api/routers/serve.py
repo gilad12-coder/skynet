@@ -620,6 +620,9 @@ async def _protected_sse(run: Callable[[Callable[[dict[str, Any]], None]], dict[
     except DomainError as error:
         # The stream already answered 200, so send the same code and params as the
         # HTTP error envelope for the client to translate.
+        if error.status_code >= 500:
+            # The 200 stream hides a server failure from access logs, so keep the trace here.
+            logger.exception("Protected interaction stream failed")
         yield {"event": "error", "data": {"error": error.detail, "code": error.code, "params": error.params}}
     except Exception as error:
         logger.exception("Protected interaction stream failed")
