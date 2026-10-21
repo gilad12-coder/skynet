@@ -5,14 +5,18 @@ import { getAgentEngine, updateAgentEngine } from "@/shared/lib/api";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { OPENROUTER_ENGINE, isAgentEngine, type AgentEngine } from "../lib/subscription-model";
 
-// Only this select changes the engine, so one load per page is enough. A
-// failed load is not cached, so the next caller tries again.
-let cached: { engine: AgentEngine | null } | null = null;
+// With no stored engine the backend picks the first ready CLI, which changes
+// when a CLI signs out or hits its cap. So each CLI status refresh marks the
+// engine stale (refreshAgentEngine). A failed load is not cached, so the next
+// caller tries again.
+let cached: { engine: AgentEngine | null; stale: boolean } | null = null;
 let inflight: Promise<AgentEngine | null> | null = null;
+// Bumped by every save, so a load that started before a save cannot overwrite it.
+let saves = 0;
 const listeners = new Set<() => void>();
 
 function setCached(engine: AgentEngine | null) {
-  cached = { engine };
+  cached = { engine, stale: false };
   listeners.forEach((notify) => notify());
 }
 
@@ -28,10 +32,12 @@ function asEngine(value: unknown): AgentEngine | null {
  */
 export function loadAgentEngine(): Promise<AgentEngine | null> {
   if (!isLocalMode()) return Promise.resolve(OPENROUTER_ENGINE);
-  if (cached) return Promise.resolve(cached.engine);
+  if (cached && !cached.stale) return Promise.resolve(cached.engine);
   if (inflight) return inflight;
+  const startSaves = saves;
   const promise = getAgentEngine()
     .then(({ engine: raw }) => {
+      if (startSaves !== saves && cached) return cached.engine;
       const engine = asEngine(raw);
       setCached(engine);
       return engine;
@@ -42,6 +48,16 @@ export function loadAgentEngine(): Promise<AgentEngine | null> {
     });
   inflight = promise;
   return promise;
+}
+
+/**
+ * Load the engine again after a CLI status refresh, so an engine the user never
+ * chose follows the backend's pick. It does nothing before the first load.
+ */
+export function refreshAgentEngine(): void {
+  if (!isLocalMode() || !cached) return;
+  cached = { ...cached, stale: true };
+  void loadAgentEngine();
 }
 
 /** The last engine any caller loaded, for code outside React. */
@@ -57,6 +73,7 @@ export function peekAgentEngine(): AgentEngine | null {
  */
 export async function saveAgentEngine(engine: AgentEngine): Promise<AgentEngine | null> {
   const saved = asEngine((await updateAgentEngine(engine)).engine);
+  saves += 1;
   setCached(saved);
   return saved;
 }

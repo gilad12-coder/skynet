@@ -15,7 +15,7 @@ import {
   subscriptionMenuModels,
   type LocalStatus,
 } from "../lib/subscription-model";
-import { loadAgentEngine, useAgentEngine } from "./use-agent-engine";
+import { loadAgentEngine, refreshAgentEngine, useAgentEngine } from "./use-agent-engine";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -43,6 +43,7 @@ export function loadLocalStatus(force = false): Promise<LocalStatus> {
     .then((status) => {
       cached = { status, at: Date.now() };
       listeners.forEach((notify) => notify());
+      refreshAgentEngine();
       return status;
     })
     .finally(() => {
@@ -69,8 +70,11 @@ export async function localAgentModel(
   cli: CliProvider | null,
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
-  const engine = cli ? null : await loadAgentEngine();
-  return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus, engine);
+  if (cli) return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
+  // A status refresh can change the engine, so load the engine after the status.
+  await loadLocalStatus().catch(() => null);
+  const engine = await loadAgentEngine();
+  return resolveAgentModel(model, null, loadLocalStatus, peekLocalStatus, engine);
 }
 
 /**

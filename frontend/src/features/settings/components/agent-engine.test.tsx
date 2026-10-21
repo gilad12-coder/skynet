@@ -14,7 +14,9 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 const { AgentEngineSelect } = await import("./AgentEngineSetting");
-const { saveAgentEngine } = await import("@/features/local-runtime");
+const { loadAgentEngine, loadLocalStatus, peekAgentEngine, saveAgentEngine } = await import(
+  "@/features/local-runtime"
+);
 
 const cli = (id: CliStatus["id"], patch: Partial<CliStatus> = {}): CliStatus => ({
   id,
@@ -105,6 +107,66 @@ void describe("saveAgentEngine", () => {
       });
     } finally {
       globalThis.fetch = realFetch;
+    }
+  });
+});
+
+void describe("loadAgentEngine", () => {
+  void it("an unchosen engine follows the backend when the CLI status refreshes", async () => {
+    // The backend's engine with nothing stored is the first ready CLI.
+    let backendEngine = "codex";
+    const realFetch = globalThis.fetch;
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    globalThis.fetch = (async (url: string) => {
+      const body = String(url).endsWith("/account/agent-engine")
+        ? { engine: backendEngine }
+        : status([cli("codex"), cli("claude")]);
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      await loadLocalStatus(true);
+      assert.equal(await loadAgentEngine(), "codex");
+      // Codex signs out or hits its cap, so the backend now picks Claude.
+      backendEngine = "claude";
+      await loadLocalStatus(true);
+      assert.equal(await loadAgentEngine(), "claude");
+      assert.equal(peekAgentEngine(), "claude");
+      // A save during a refresh wins over the refresh's older answer.
+      let answer: (res: Response) => void = () => {};
+      globalThis.fetch = (async (url: string, init?: RequestInit) => {
+        if (init?.method === "PUT") {
+          return new Response(JSON.stringify({ engine: "droid" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (String(url).endsWith("/account/agent-engine")) {
+          return new Promise<Response>((resolve) => (answer = resolve));
+        }
+        return new Response(JSON.stringify(status([cli("claude"), cli("droid")])), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch;
+      await loadLocalStatus(true);
+      const refreshing = loadAgentEngine();
+      assert.equal(await saveAgentEngine("droid"), "droid");
+      answer(
+        new Response(JSON.stringify({ engine: "claude" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      assert.equal(await refreshing, "droid");
+      assert.equal(peekAgentEngine(), "droid");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
     }
   });
 });
