@@ -46,6 +46,9 @@ import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { Label } from "@/shared/ui/primitives/label";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { shareLinkUrl } from "@/shared/lib/share-link";
+import { LocalShareNotice } from "@/shared/ui/local-share-notice";
 
 const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
 
@@ -118,10 +121,7 @@ export function ShareDialog({
   // owner, ``me`` the signed-in caller.
   const isOwner = !!state?.owner && state.owner.toLowerCase() === me;
 
-  const shareUrl =
-    state?.token && typeof window !== "undefined"
-      ? `${window.location.origin}/share/${state.token}`
-      : null;
+  const shareUrl = state?.token ? shareLinkUrl(`/share/${state.token}`) : null;
 
   // Owner (if present) plus every invited member — drives the header count.
   const accessCount = state ? (state.owner ? 1 : 0) + state.members.length : 0;
@@ -132,7 +132,7 @@ export function ShareDialog({
   // built-in trigger or a controlling parent. An effect catches both; the trigger's
   // click handler alone would miss the externally-driven open.
   useEffect(() => {
-    if (open && state === null) {
+    if (open && state === null && !isLocalMode()) {
       getSharing(optimizationId)
         .then(setState)
         .catch((err) => toast.error(err instanceof Error ? err.message : msg("share.error")));
@@ -262,7 +262,9 @@ export function ShareDialog({
               <DialogTitle>{msg("share.dialog_title")}</DialogTitle>
             </DialogHeader>
 
-            {state === null ? (
+            {isLocalMode() ? (
+              <LocalShareNotice />
+            ) : state === null ? (
               <div className="flex items-center justify-center gap-2 px-6 py-10 text-sm text-muted-foreground">
                 <CircleNotch className="size-4 animate-spin" />
                 {msg("share.loading")}

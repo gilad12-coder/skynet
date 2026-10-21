@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "ユーザー名で人を追加",
   "share.link_copied": "リンクをコピーしました",
   "share.loading": "読み込み中…",
+  "share.local.title": "共有するにはホスト版アカウントにサインインしてください",
+  "share.local.body": "共有リンクはホスト版の {term.appName} アカウントから発行されます。このアプリの項目はこのコンピューターにのみ保存されるため、他の人はそのリンクを開けません。",
   "share.member_added": "ユーザーを追加しました",
   "share.member_removed": "ユーザーを削除しました",
   "share.member_updated": "ロールを更新しました",

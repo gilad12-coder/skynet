@@ -127,6 +127,8 @@
   "share.general_access.restricted_desc": "Apenas o proprietário e as pessoas convidadas podem acessar.",
   "share.invite_placeholder": "Adicionar pessoas por nome de usuário",
   "share.loading": "Carregando…",
+  "share.local.title": "Entre em uma conta hospedada para compartilhar",
+  "share.local.body": "Os links de compartilhamento vêm de uma conta {term.appName} hospedada. Os itens deste app ficam neste computador, então outras pessoas não conseguem abrir um link para eles.",
   "share.member_added": "Usuário adicionado",
   "share.member_removed": "Usuário removido",
   "share.no_results": "Nenhum usuário correspondente encontrado.",

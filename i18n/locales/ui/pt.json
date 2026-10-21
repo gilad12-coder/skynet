@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "Adicionar pessoas por nome de utilizador",
   "share.link_copied": "Ligação copiada",
   "share.loading": "A carregar…",
+  "share.local.title": "Inicie sessão numa conta alojada para partilhar",
+  "share.local.body": "Os links de partilha vêm de uma conta {term.appName} alojada. Os itens desta app ficam neste computador, por isso outras pessoas não conseguem abrir um link para eles.",
   "share.member_added": "Utilizador adicionado",
   "share.member_removed": "Utilizador removido",
   "share.member_updated": "Função atualizada",

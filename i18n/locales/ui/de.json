@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "Personen per Benutzername hinzufügen",
   "share.link_copied": "Link kopiert",
   "share.loading": "Wird geladen…",
+  "share.local.title": "Melde dich bei einem gehosteten Konto an, um zu teilen",
+  "share.local.body": "Freigabelinks kommen von einem gehosteten {term.appName}-Konto. Elemente in dieser App bleiben auf diesem Computer, daher können andere Personen keinen Link dazu öffnen.",
   "share.member_added": "Benutzer hinzugefügt",
   "share.member_removed": "Benutzer entfernt",
   "share.member_updated": "Rolle aktualisiert",

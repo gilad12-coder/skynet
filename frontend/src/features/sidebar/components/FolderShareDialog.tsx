@@ -39,6 +39,9 @@ import {
   type MemberRole,
 } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { shareLinkUrl } from "@/shared/lib/share-link";
+import { LocalShareNotice } from "@/shared/ui/local-share-notice";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { InvitePeople, ROLE_OPTIONS, TRANSFER_VALUE, roleLabel } from "@/features/datasets";
 
@@ -74,10 +77,7 @@ export function FolderShareDialog({
 
   const isOwner = state?.role === "owner";
   const canManage = !!state?.can_manage;
-  const shareUrl =
-    state?.token && typeof window !== "undefined"
-      ? `${window.location.origin}/folders/share/${state.token}`
-      : null;
+  const shareUrl = state?.token ? shareLinkUrl(`/folders/share/${state.token}`) : null;
   const accessCount = state ? (state.owner ? 1 : 0) + state.members.length : 0;
 
   useEffect(() => {
@@ -85,6 +85,7 @@ export function FolderShareDialog({
       setState(null);
       return;
     }
+    if (isLocalMode()) return;
     let cancelled = false;
     getFolderSharing(folderId)
       .then((next) => {
@@ -187,10 +188,14 @@ export function FolderShareDialog({
                   {msg("folders.share.title", { name: folderName })}
                 </span>
               </DialogTitle>
-              <p className="text-xs text-muted-foreground">{msg("folders.share.reaches")}</p>
+              {!isLocalMode() && (
+                <p className="text-xs text-muted-foreground">{msg("folders.share.reaches")}</p>
+              )}
             </DialogHeader>
 
-            {state === null ? (
+            {isLocalMode() ? (
+              <LocalShareNotice />
+            ) : state === null ? (
               <div className="flex items-center justify-center gap-2 px-6 py-10 text-sm text-muted-foreground">
                 <CircleNotch className="size-4 animate-spin" />
                 {msg("share.loading")}

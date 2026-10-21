@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "Aggiungi persone tramite nome utente",
   "share.link_copied": "Link copiato",
   "share.loading": "Caricamento…",
+  "share.local.title": "Accedi a un account ospitato per condividere",
+  "share.local.body": "I link di condivisione provengono da un account {term.appName} ospitato. Gli elementi di questa app restano su questo computer, quindi altre persone non possono aprirne un link.",
   "share.member_added": "Utente aggiunto",
   "share.member_removed": "Utente rimosso",
   "share.member_updated": "Ruolo aggiornato",

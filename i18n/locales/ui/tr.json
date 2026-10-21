@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "Kullanıcı adıyla kişi ekleyin",
   "share.link_copied": "Bağlantı kopyalandı",
   "share.loading": "Yükleniyor…",
+  "share.local.title": "Paylaşmak için barındırılan bir hesaba giriş yapın",
+  "share.local.body": "Paylaşım bağlantıları barındırılan bir {term.appName} hesabından gelir. Bu uygulamadaki öğeler bu bilgisayarda kalır, bu yüzden diğer kişiler onlara giden bir bağlantıyı açamaz.",
   "share.member_added": "Kullanıcı eklendi",
   "share.member_removed": "Kullanıcı kaldırıldı",
   "share.member_updated": "Rol güncellendi",

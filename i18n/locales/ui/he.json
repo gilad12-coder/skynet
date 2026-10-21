@@ -2049,6 +2049,8 @@
   "share.invite_placeholder": "הוסף/הוסיפי אנשים לפי שם משתמש",
   "share.link_copied": "הקישור הועתק",
   "share.loading": "טוען…",
+  "share.local.title": "התחבר/י לחשבון בענן כדי לשתף",
+  "share.local.body": "קישורי שיתוף מגיעים מחשבון {term.appName} בענן. הפריטים באפליקציה הזו נשמרים במחשב הזה, ולכן אנשים אחרים לא יכולים לפתוח קישור אליהם.",
   "share.member_added": "המשתמש נוסף",
   "share.member_removed": "המשתמש הוסר",
   "share.member_updated": "התפקיד עודכן",

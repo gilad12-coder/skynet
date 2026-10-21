@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "उपयोगकर्ता नाम से लोगों को जोड़ें",
   "share.link_copied": "लिंक कॉपी किया गया",
   "share.loading": "लोड हो रहा है…",
+  "share.local.title": "शेयर करने के लिए होस्टेड खाते में साइन इन करें",
+  "share.local.body": "शेयर लिंक होस्टेड {term.appName} खाते से आते हैं। इस ऐप के आइटम इसी कंप्यूटर पर रहते हैं, इसलिए दूसरे लोग उनका लिंक नहीं खोल सकते।",
   "share.member_added": "उपयोगकर्ता जोड़ा गया",
   "share.member_removed": "उपयोगकर्ता हटाया गया",
   "share.member_updated": "भूमिका अपडेट की गई",

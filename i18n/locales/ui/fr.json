@@ -3023,6 +3023,8 @@
   "share.invite_placeholder": "Ajouter des personnes par nom d'utilisateur",
   "share.link_copied": "Lien copié",
   "share.loading": "Chargement…",
+  "share.local.title": "Connectez-vous à un compte hébergé pour partager",
+  "share.local.body": "Les liens de partage proviennent d’un compte {term.appName} hébergé. Les éléments de cette app restent sur cet ordinateur : les autres personnes ne peuvent donc pas ouvrir de lien vers eux.",
   "share.member_added": "Utilisateur ajouté",
   "share.member_removed": "Utilisateur retiré",
   "share.member_updated": "Rôle mis à jour",
