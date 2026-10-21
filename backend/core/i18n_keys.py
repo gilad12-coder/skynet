@@ -317,6 +317,7 @@ class I18nKey(StrEnum):
     SUBMIT_NO_MODELS_AVAILABLE = 'submit.no_models_available'
     SUBMIT_PREFLIGHT_BUDGET_EXHAUSTED = 'submit.preflight.budget_exhausted'
     SUBMIT_PREFLIGHT_BUDGET_LIMIT = 'submit.preflight.budget_limit'
+    SUBMIT_PREFLIGHT_BUDGET_SANDBOXES = 'submit.preflight.budget_sandboxes'
     SUBMIT_PREFLIGHT_BUDGET_SETUP = 'submit.preflight.budget_setup'
     SUBMIT_PREFLIGHT_CANNOT_FUND = 'submit.preflight.cannot_fund'
     SUBMIT_PREFLIGHT_CONTRACT_BUDGET_MISSING = 'submit.preflight.contract_budget_missing'

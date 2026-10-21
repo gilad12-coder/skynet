@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "Среда выполнения не вернула подтверждения настройки.",
     "submit.preflight.incomplete_checks": "Настройка не вернула полный набор проверок готовности.",
     "submit.preflight.budget_limit": "Следующей операции нужно до {needed}, но от лимита {limit} осталось только {remaining}.",
+    "submit.preflight.budget_sandboxes": "Следующей операции нужно до {needed}, но песочницы этой проверки удерживают {held} из оставшихся {remaining}.",
     "submit.preflight.contract_budget_missing": "Выберите бюджет расходов, прежде чем запускать проверку кода.",
     "submit.unified.optimizer_not_allowed": "Оптимизатор «{optimizer}» не подходит к этой настройке. Выберите один из: {allowed}.",
     "submit.unified.pairs_need_cases": "Для запуска на парах вход/выход нужно не меньше двух пар или загруженный набор данных.",

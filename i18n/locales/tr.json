@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "Çalışma ortamı kurulum kanıtı döndürmedi.",
     "submit.preflight.incomplete_checks": "Kurulum, hazırlık kontrollerinin tam bir kümesini döndürmedi.",
     "submit.preflight.budget_limit": "Sonraki işlem en fazla {needed} gerektiriyor, ancak {limit} limitinden yalnızca {remaining} kaldı.",
+    "submit.preflight.budget_sandboxes": "Sonraki işlem en fazla {needed} gerektiriyor, ancak bu kontrolün korumalı alanları kalan {remaining} tutarın {held} kadarını tutuyor.",
     "submit.preflight.contract_budget_missing": "Kod kontrolünü çalıştırmadan önce bir harcama bütçesi seçin.",
     "submit.unified.optimizer_not_allowed": "'{optimizer}' optimize edicisi bu kuruluma uymuyor. Şunlardan birini seçin: {allowed}.",
     "submit.unified.pairs_need_cases": "Girdi/çıktı çiftleriyle bir çalıştırma için en az iki çift veya yüklenmiş bir veri kümesi gerekir.",

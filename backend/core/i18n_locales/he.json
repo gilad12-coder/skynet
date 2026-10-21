@@ -381,6 +381,7 @@
     "submit.preflight.no_evidence": "סביבת ההרצה לא החזירה ראיות להגדרה.",
     "submit.preflight.incomplete_checks": "ההגדרה לא החזירה סט מלא של בדיקות מוכנות.",
     "submit.preflight.budget_limit": "הפעולה הבאה צריכה עד {needed}, אבל נשארו רק {remaining} מתוך מגבלה של {limit}.",
+    "submit.preflight.budget_sandboxes": "הפעולה הבאה צריכה עד {needed}, אבל ארגזי החול של הבדיקה הזו מחזיקים {held} מתוך {remaining} שנשארו.",
     "submit.preflight.contract_budget_missing": "בחרו תקציב הוצאה לפני הרצת בדיקת הקוד.",
     "contract.run_missing": "קוד הריצה חייב להגדיר run(artifact, input).",
     "contract.metric_missing": "קוד פונקציית המדידה לא מגדיר את הפונקציה שהאופטימייזר הזה קורא לה.",

@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "ランタイムがセットアップの証跡を返しませんでした。",
     "submit.preflight.incomplete_checks": "セットアップが準備チェックの完全なセットを返しませんでした。",
     "submit.preflight.budget_limit": "次の操作には最大 {needed} が必要ですが、上限 {limit} のうち残りは {remaining} だけです。",
+    "submit.preflight.budget_sandboxes": "次の操作には最大 {needed} が必要ですが、残りの {remaining} のうち {held} をこのチェックのサンドボックスが確保しています。",
     "submit.preflight.contract_budget_missing": "コードのチェックを実行する前に支出予算を選んでください。",
     "submit.unified.optimizer_not_allowed": "オプティマイザー「{optimizer}」はこの設定に合いません。次のいずれかを選んでください: {allowed}。",
     "submit.unified.pairs_need_cases": "入力と出力のペアでの実行には、2 つ以上のペアかアップロードしたデータセットが必要です。",

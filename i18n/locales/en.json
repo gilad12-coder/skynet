@@ -381,6 +381,7 @@
     "submit.preflight.no_evidence": "The runtime did not return setup evidence.",
     "submit.preflight.incomplete_checks": "Setup did not return a complete set of readiness checks.",
     "submit.preflight.budget_limit": "The next operation needs up to {needed}, but only {remaining} of the {limit} limit remain.",
+    "submit.preflight.budget_sandboxes": "The next operation needs up to {needed}, but this check's sandboxes hold {held} of the {remaining} that remain.",
     "submit.preflight.contract_budget_missing": "Choose a spending budget before running the contract check.",
     "contract.run_missing": "The run code must define run(artifact, input).",
     "contract.metric_missing": "The metric code does not define the function this optimizer calls.",

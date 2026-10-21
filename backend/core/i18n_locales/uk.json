@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "Середовище виконання не повернуло підтвердження налаштування.",
     "submit.preflight.incomplete_checks": "Налаштування не повернуло повного набору перевірок готовності.",
     "submit.preflight.budget_limit": "Наступній операції потрібно до {needed}, але з ліміту {limit} залишилося лише {remaining}.",
+    "submit.preflight.budget_sandboxes": "Наступній операції потрібно до {needed}, але пісочниці цієї перевірки утримують {held} із залишку {remaining}.",
     "submit.preflight.contract_budget_missing": "Виберіть бюджет витрат, перш ніж запускати перевірку коду.",
     "submit.unified.optimizer_not_allowed": "Оптимізатор «{optimizer}» не підходить до цього налаштування. Виберіть один із: {allowed}.",
     "submit.unified.pairs_need_cases": "Для запуску на парах вхід/вихід потрібно щонайменше дві пари або завантажений набір даних.",

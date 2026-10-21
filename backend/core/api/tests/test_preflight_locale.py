@@ -390,6 +390,29 @@ def test_budget_limit_text_keeps_its_amounts_in_the_callers_locale(monkeypatch: 
     assert hebrew["pending_reason"]["message"] == worded
 
 
+SANDBOXES_TEXT = "The next operation needs up to $0.35, but this check's sandboxes hold $0.10 of the $0.40 that remain."
+
+
+def test_sandbox_budget_text_keeps_its_amounts_in_the_callers_locale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setup refusal for budget held by the check's own sandboxes is coded with its amounts as params."""
+    monkeypatch.setattr(wizard_preflight, "run_preflight", lambda *args: _fixed_text_response(SANDBOXES_TEXT))
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    monkeypatch.setattr(wizard_preflight, "_materialize_unified_cases", lambda *args, **kwargs: None)
+
+    english = _post("/wizard/preflight", _body()).json()
+    hebrew = _post("/wizard/preflight", _body(locale="he")).json()
+
+    params = {"needed": "$0.35", "held": "$0.10", "remaining": "$0.40"}
+    usage = next(check for check in english["checks"] if check["key"] == "usage")
+    assert (usage["message_code"], usage["message_params"]) == (wizard_preflight.BUDGET_SANDBOXES_CODE, params)
+    assert usage["message"] == SANDBOXES_TEXT == t_locale("en", wizard_preflight.BUDGET_SANDBOXES_CODE, **params)
+    worded = t_locale("he", wizard_preflight.BUDGET_SANDBOXES_CODE, **params)
+    assert worded != SANDBOXES_TEXT
+    assert all(amount in worded for amount in params.values())
+    assert next(check for check in hebrew["checks"] if check["key"] == "usage")["message"] == worded
+    assert hebrew["pending_reason"]["message"] == worded
+
+
 def test_contract_check_without_a_budget_is_refused_in_the_callers_locale(monkeypatch: pytest.MonkeyPatch) -> None:
     """The 402 detail reads in English by default and follows ``Accept-Language``."""
     monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)

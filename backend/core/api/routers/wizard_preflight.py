@@ -80,13 +80,19 @@ FIXED_MESSAGE_CODES = {
     "The runtime did not return setup evidence.": "submit.preflight.no_evidence",
     "Setup did not return a complete set of readiness checks.": "submit.preflight.incomplete_checks",
 }
-# The one budget text with amounts in it (``billing.budgets._admit``); its
-# groups become the catalog message's params.
+# The budget texts with amounts in them (``billing.budgets._admit`` and
+# ``billing.runtime.BudgetRuntime._wait_cannot_help``); their groups become the
+# catalog message's params.
 BUDGET_LIMIT_MESSAGE = re.compile(
     r"The next operation needs up to (?P<needed>\$[\d,]+\.\d{2}), but only "
     r"(?P<remaining>\$[\d,]+\.\d{2}) of the (?P<limit>\$[\d,]+\.\d{2}) limit remain\."
 )
 BUDGET_LIMIT_CODE = "submit.preflight.budget_limit"
+BUDGET_SANDBOXES_MESSAGE = re.compile(
+    r"The next operation needs up to (?P<needed>\$[\d,]+\.\d{2}), but this check's sandboxes hold "
+    r"(?P<held>\$[\d,]+\.\d{2}) of the (?P<remaining>\$[\d,]+\.\d{2}) that remain\."
+)
+BUDGET_SANDBOXES_CODE = "submit.preflight.budget_sandboxes"
 
 
 def _message_code(message: str | None) -> tuple[str, dict[str, str]] | None:
@@ -101,8 +107,14 @@ def _message_code(message: str | None) -> tuple[str, dict[str, str]] | None:
     code = FIXED_MESSAGE_CODES.get(message or "")
     if code is not None:
         return code, {}
-    match = BUDGET_LIMIT_MESSAGE.fullmatch(message or "")
-    return (BUDGET_LIMIT_CODE, match.groupdict()) if match else None
+    for pattern, pattern_code in (
+        (BUDGET_LIMIT_MESSAGE, BUDGET_LIMIT_CODE),
+        (BUDGET_SANDBOXES_MESSAGE, BUDGET_SANDBOXES_CODE),
+    ):
+        match = pattern.fullmatch(message or "")
+        if match:
+            return pattern_code, match.groupdict()
+    return None
 
 
 def _contract_failure(contract: dict[str, Any], spec: UnifiedRunRequest | None) -> ContractCheckItem | None:

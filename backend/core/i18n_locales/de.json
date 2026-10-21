@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "Die Laufzeitumgebung hat keine Nachweise für die Einrichtung geliefert.",
     "submit.preflight.incomplete_checks": "Die Einrichtung hat keinen vollständigen Satz an Bereitschaftsprüfungen geliefert.",
     "submit.preflight.budget_limit": "Der nächste Vorgang braucht bis zu {needed}, aber vom Limit von {limit} sind nur noch {remaining} übrig.",
+    "submit.preflight.budget_sandboxes": "Der nächste Vorgang braucht bis zu {needed}, aber die Sandboxes dieser Prüfung belegen {held} der verbleibenden {remaining}.",
     "submit.preflight.contract_budget_missing": "Wähle ein Ausgabenbudget, bevor du die Code-Prüfung startest.",
     "submit.unified.optimizer_not_allowed": "Der Optimierer „{optimizer}“ passt nicht zu dieser Einrichtung. Wählen Sie einen von: {allowed}.",
     "submit.unified.pairs_need_cases": "Ein Lauf mit Eingabe-/Ausgabe-Paaren braucht mindestens zwei Paare oder einen hochgeladenen Datensatz.",

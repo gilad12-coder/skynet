@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "執行環境冇交返設定證據。",
     "submit.preflight.incomplete_checks": "設定冇交返完整嘅準備檢查。",
     "submit.preflight.budget_limit": "下一個操作最多要 {needed}，但係 {limit} 嘅上限淨返 {remaining}。",
+    "submit.preflight.budget_sandboxes": "下一個操作最多要 {needed}，但係呢次檢查嘅沙盒佔住咗剩低 {remaining} 入面嘅 {held}。",
     "submit.preflight.contract_budget_missing": "行程式碼檢查之前，請揀一個支出預算。",
     "submit.unified.optimizer_not_allowed": "優化器「{optimizer}」唔啱呢個設定。請由以下選項揀一個：{allowed}。",
     "submit.unified.pairs_need_cases": "用輸入/輸出對嘅運行最少需要兩對資料或者一個已上載嘅資料集。",

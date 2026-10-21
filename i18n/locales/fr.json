@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "L’environnement d’exécution n’a renvoyé aucune preuve de configuration.",
     "submit.preflight.incomplete_checks": "La configuration n’a pas renvoyé un ensemble complet de vérifications de disponibilité.",
     "submit.preflight.budget_limit": "La prochaine opération nécessite jusqu’à {needed}, mais il ne reste que {remaining} sur la limite de {limit}.",
+    "submit.preflight.budget_sandboxes": "La prochaine opération nécessite jusqu’à {needed}, mais les bacs à sable de cette vérification retiennent {held} sur les {remaining} restants.",
     "submit.preflight.contract_budget_missing": "Choisissez un budget de dépenses avant de lancer la vérification du code.",
     "submit.unified.optimizer_not_allowed": "L'optimiseur « {optimizer} » ne convient pas à cette configuration. Choisissez l'un de ceux-ci : {allowed}.",
     "submit.unified.pairs_need_cases": "Une exécution sur des paires entrée/sortie nécessite au moins deux paires ou un jeu de données importé.",

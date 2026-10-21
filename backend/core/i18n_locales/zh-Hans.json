@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "运行环境未返回设置证据。",
     "submit.preflight.incomplete_checks": "设置未返回完整的就绪检查。",
     "submit.preflight.budget_limit": "下一个操作最多需要 {needed}，但 {limit} 的上限只剩 {remaining}。",
+    "submit.preflight.budget_sandboxes": "下一个操作最多需要 {needed}，但此检查的沙盒占用了剩余 {remaining} 中的 {held}。",
     "submit.preflight.contract_budget_missing": "运行代码检查前，请先选择支出预算。",
     "submit.unified.optimizer_not_allowed": "优化器“{optimizer}”不适合此设置。请从以下选项中选择：{allowed}。",
     "submit.unified.pairs_need_cases": "使用输入/输出对的运行至少需要两个数据对或一个已上传的数据集。",

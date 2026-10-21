@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "لم تُرجع بيئة التشغيل أدلة الإعداد.",
     "submit.preflight.incomplete_checks": "لم يُرجع الإعداد مجموعة كاملة من فحوصات الجاهزية.",
     "submit.preflight.budget_limit": "تحتاج العملية التالية إلى ما يصل إلى {needed}، لكن لم يتبقَّ سوى {remaining} من حد {limit}.",
+    "submit.preflight.budget_sandboxes": "تحتاج العملية التالية إلى ما يصل إلى {needed}، لكن بيئات الحماية الخاصة بهذا الفحص تحجز {held} من أصل {remaining} المتبقية.",
     "submit.preflight.contract_budget_missing": "اختر ميزانية إنفاق قبل تشغيل فحص الكود.",
     "submit.unified.optimizer_not_allowed": "المُحسِّن '{optimizer}' لا يناسب هذا الإعداد. اختر واحدًا من: {allowed}.",
     "submit.unified.pairs_need_cases": "يحتاج تشغيل بأزواج إدخال/إخراج إلى زوجين على الأقل أو إلى مجموعة بيانات مرفوعة.",

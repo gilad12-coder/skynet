@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "रनटाइम ने सेटअप का प्रमाण नहीं लौटाया।",
     "submit.preflight.incomplete_checks": "सेटअप ने तैयारी जाँचों का पूरा सेट नहीं लौटाया।",
     "submit.preflight.budget_limit": "अगले ऑपरेशन को {needed} तक चाहिए, लेकिन {limit} की सीमा में से केवल {remaining} बचे हैं।",
+    "submit.preflight.budget_sandboxes": "अगले ऑपरेशन को {needed} तक चाहिए, लेकिन इस जाँच के सैंडबॉक्स बचे हुए {remaining} में से {held} रोके हुए हैं।",
     "submit.preflight.contract_budget_missing": "कोड जाँच चलाने से पहले एक खर्च बजट चुनें।",
     "submit.unified.optimizer_not_allowed": "ऑप्टिमाइज़र '{optimizer}' इस सेटअप के अनुकूल नहीं है। इनमें से एक चुनें: {allowed}।",
     "submit.unified.pairs_need_cases": "इनपुट/आउटपुट जोड़ियों वाले रन को कम से कम दो जोड़ियाँ या एक अपलोड किया गया डेटासेट चाहिए।",

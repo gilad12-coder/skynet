@@ -102,6 +102,7 @@
     "submit.preflight.no_evidence": "O ambiente de execução não devolveu provas da configuração.",
     "submit.preflight.incomplete_checks": "A configuração não devolveu um conjunto completo de verificações de prontidão.",
     "submit.preflight.budget_limit": "A próxima operação precisa de até {needed}, mas só restam {remaining} do limite de {limit}.",
+    "submit.preflight.budget_sandboxes": "A próxima operação precisa de até {needed}, mas as sandboxes desta verificação retêm {held} dos {remaining} que restam.",
     "submit.preflight.contract_budget_missing": "Escolha um orçamento de gastos antes de executar a verificação do código.",
     "submit.unified.optimizer_not_allowed": "O otimizador '{optimizer}' não é adequado a esta configuração. Escolha um destes: {allowed}.",
     "submit.unified.pairs_need_cases": "Uma execução com pares de entrada/saída precisa de pelo menos dois pares ou de um conjunto de dados carregado.",
