@@ -13,6 +13,7 @@ starts from a copy of that prepared tree and runs no setup of its own.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shlex
 import threading
@@ -20,6 +21,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ....billing.runtime import UsagePendingError
 from .repo_tree import archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
@@ -239,7 +241,10 @@ class RepoWorkspace:
                 self._cut_network(session)
         except BaseException as error:
             self._failure = error
-            session.close()
+            # Pending usage stays reserved for reconciliation; the setup error
+            # is what the user can act on, so it must not be replaced.
+            with contextlib.suppress(UsagePendingError):
+                session.close()
             raise
         self._session = session
         return session

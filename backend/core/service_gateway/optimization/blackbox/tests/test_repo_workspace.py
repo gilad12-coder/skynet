@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from core.billing.runtime import UsagePendingError
 from core.exceptions import ServiceError
 
 from ..repo_tree import unpack_tree, version_patch
@@ -229,6 +230,43 @@ def test_a_failed_network_cutoff_stops_the_workspace(tmp_path: Path, cutoff: str
     assert len(runtime.boxes) == 1
     assert runtime.boxes[0].closed
     assert all("version.patch" not in command for command, _, _ in runtime.boxes[0].commands)
+
+
+class _UnsettledBox(_Box):
+    """Close like a cloud box whose final usage receipt is still incomplete."""
+
+    def close(self) -> None:
+        """Close the box, then report that its usage cannot be settled yet."""
+        super().close()
+        raise UsagePendingError("The cloud sandbox has not reported final network transfer.")
+
+
+class _UnsettledRuntime(_Runtime):
+    """Open boxes that cannot settle their usage when closed."""
+
+    def open(self, spec: SandboxSpec) -> _Box:
+        """Open one recording box that fails to settle on close."""
+        box = _UnsettledBox(self._local.open(spec), online=not spec.network_disabled, cutoff=self._cutoff)
+        self.boxes.append(box)
+        return box
+
+
+@pytest.mark.parametrize(
+    ("cutoff", "setup", "expected"),
+    [("ok", "exit 3", RepoSetupError), ("refused", "true", NetworkCutoffError)],
+)
+def test_pending_usage_on_close_keeps_the_setup_error(
+    tmp_path: Path, cutoff: str, setup: str, expected: type[Exception]
+) -> None:
+    """Show the setup or cutoff failure, not the billing settlement error, when the failed box closes."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
+    runtime = _UnsettledRuntime(cutoff)
+    space = _space(archive, runtime, setup=setup)
+
+    with pytest.raises(expected):
+        space.checkout(_patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"}))
+
+    assert runtime.boxes[0].closed
 
 
 def test_a_box_that_cannot_switch_its_network_off_is_refused(tmp_path: Path) -> None:
