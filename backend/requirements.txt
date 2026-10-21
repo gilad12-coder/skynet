@@ -465,7 +465,7 @@ webauthn==2.8.0
     # via skynet
 websockets==16.0
     # via fastmcp
-yarl==1.23.0
+yarl==1.25.1
     # via aiohttp
 zipp==3.23.1
     # via importlib-metadata
