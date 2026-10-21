@@ -103,7 +103,7 @@ def _clean_path(raw: Any, key: str) -> str:
         The ``/``-joined path without leading or trailing slashes; ``.`` for the whole tree.
 
     Raises:
-        ConstraintsError: When the value is not a path inside the repository.
+        ConstraintsError: When the value is not a path inside the repository, or is a pattern.
     """
     if not isinstance(raw, str):
         raise ConstraintsError(f"{CONSTRAINTS_FILE}: every entry of [paths] {key} must be a text path.")
@@ -117,6 +117,13 @@ def _clean_path(raw: Any, key: str) -> str:
         )
     if stripped == ".git" or stripped.startswith(".git/"):
         raise ConstraintsError(f"{CONSTRAINTS_FILE}: [paths] {key} cannot name the .git folder.")
+    # Paths are compared literally, so a pattern would match no file and
+    # protect nothing while still being listed as protected.
+    if any(char in stripped for char in "*?["):
+        raise ConstraintsError(
+            f"{CONSTRAINTS_FILE}: '{raw}' in [paths] {key} looks like a pattern. Patterns are not supported;"
+            " name the files or folders."
+        )
     return stripped
 
 
@@ -285,11 +292,17 @@ def effective_environment(
 
     Raises:
         ConstraintsError: When the file proposes an editable path outside the approved ones,
-            or protects every editable path.
+            or when the protected paths (always including the file itself) cover every editable path.
     """
     if constraints is None:
+        editable = tuple(approved_editable)
+        if all(_inside(path, (CONSTRAINTS_FILE,)) for path in editable):
+            raise ConstraintsError(
+                f"{CONSTRAINTS_FILE} is always protected, so the approved editable paths ({', '.join(editable)})"
+                " leave nothing a version can change. Approve a path other than the constraints file."
+            )
         return RepoEnvironment(
-            editable_paths=tuple(approved_editable), protected_paths=(CONSTRAINTS_FILE,), setup_command=approved_setup
+            editable_paths=editable, protected_paths=(CONSTRAINTS_FILE,), setup_command=approved_setup
         )
     editable = tuple(approved_editable)
     if constraints.editable_paths is not None:

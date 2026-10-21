@@ -124,6 +124,12 @@ def test_a_file_that_protects_every_editable_path_fails_the_setup_check(raw: byt
         effective_environment(constraints, approved_editable=approved, approved_setup=None)
 
 
+def test_a_run_without_the_file_that_can_only_edit_the_file_fails_the_setup_check() -> None:
+    """The constraints file is protected even when absent, so approving only it leaves nothing to change."""
+    with pytest.raises(ConstraintsError, match="is always protected, so the approved editable paths"):
+        effective_environment(None, approved_editable=["optimize.toml"], approved_setup=None)
+
+
 def test_a_file_that_protects_part_of_an_editable_path_still_runs() -> None:
     """Protecting a file inside an editable folder leaves the rest of the folder editable."""
     constraints = parse_constraints(b'[paths]\nprotected = ["bot/labels.csv"]\n')
@@ -143,6 +149,8 @@ def test_a_file_that_protects_part_of_an_editable_path_still_runs() -> None:
         (b"[paths]\neditable = []\n", r"\[paths\] editable is empty"),
         (b'[paths]\neditable = ["../outside"]\n', "must be relative and stay inside"),
         (b'[paths]\nprotected = [".git/hooks"]\n', "cannot name the .git folder"),
+        (b'[paths]\nprotected = ["data/*.csv"]\n', "looks like a pattern"),
+        (b'[paths]\neditable = ["bot/[ab]"]\n', "looks like a pattern"),
         (b"version = 2\n", "version 2 is not supported"),
         (b"[paths\n", "is not valid TOML"),
         (b"paths = 1\n", r"must be a \[paths\] table"),
