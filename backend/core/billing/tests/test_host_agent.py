@@ -205,7 +205,15 @@ def guest(tmp_path: Path) -> Path:
         (
             "claude",
             "workspace_only",
-            ["-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--disallowedTools", "Bash"],
+            [
+                "-p",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "acceptEdits",
+                "--tools",
+                "Read,Edit,Write,Glob,Grep",
+            ],
         ),
         ("claude", "full_access", ["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"]),
     ],
@@ -218,6 +226,11 @@ def test_argv_follows_the_permission_table(cli: str, permission: str, expected: 
     assert argv == ["bin", *expected, *tail, "--model", "m"]
     assert "--add-dir" not in argv
     assert "--bare" not in argv
+    if cli == "claude" and permission == "workspace_only":
+        # Bash, Monitor, Task agents and Workflow can all run a command.
+        tools = argv[argv.index("--tools") + 1].split(",")
+        assert tools == ["Read", "Edit", "Write", "Glob", "Grep"]
+        assert not {"Bash", "Monitor", "Task", "Workflow"} & set(tools)
 
 
 def test_unknown_permission_is_refused(tmp_path: Path) -> None:
@@ -371,10 +384,12 @@ def test_expired_codex_login_tells_the_user_to_refresh_it(
     "login",
     [
         {"auth_mode": "apikey", "OPENAI_API_KEY": "sk-" + "x" * 40, "tokens": None},
+        # Without a mode, codex takes a key as an API-key login, even beside tokens.
         {"OPENAI_API_KEY": "sk-" + "x" * 40, "tokens": {"account_id": "a", "access_token": "A" * 32}},
         {"tokens": {"account_id": "a"}},
+        {"auth_mode": "chatgpt", "OPENAI_API_KEY": None},
     ],
-    ids=["api_key_mode", "api_key_beside_tokens", "no_access_token"],
+    ids=["api_key_mode", "no_mode_with_key", "no_access_token", "no_tokens"],
 )
 def test_codex_api_key_login_is_refused(
     login: dict, local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -393,6 +408,58 @@ def test_codex_api_key_login_is_refused(
     assert document["status"] == "error"
     assert document["error"]["message"] == host_agent.CODEX_SUBSCRIPTION_HINT
     assert not (tmp_path / "record.json").exists()
+
+
+@pytest.mark.parametrize(
+    "login",
+    [
+        {"auth_mode": None, "OPENAI_API_KEY": None},
+        {"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-" + "x" * 40},
+        {"OPENAI_API_KEY": None},
+    ],
+    ids=["null_mode", "chatgpt_with_key", "no_mode"],
+)
+def test_codex_chatgpt_login_runs_without_its_api_key(login: dict, tmp_path: Path) -> None:
+    """A ChatGPT login by codex's rule runs, and the turn's copy has no API key and no refresh token.
+
+    Args:
+        login: The user's ``auth.json`` fields other than the tokens.
+    """
+    user = tmp_path / "user-codex"
+    user.mkdir()
+    login["tokens"] = {"account_id": "a", "access_token": "A" * 32, "refresh_token": "R" * 32}
+    (user / "auth.json").write_text(json.dumps(login))
+    turn = tmp_path / "turn"
+    turn.mkdir()
+    env = {"CODEX_HOME": str(user)}
+
+    host_agent._turn_home("codex", env, turn)
+
+    copy = json.loads((Path(env["CODEX_HOME"]) / "auth.json").read_text())
+    assert copy.get("OPENAI_API_KEY") is None
+    assert copy["tokens"] == {"account_id": "a", "access_token": "A" * 32, "refresh_token": ""}
+    assert json.loads((user / "auth.json").read_text()) == login
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("unexpected status 401 Unauthorized", True),
+        ("Your access token could not be refreshed", True),
+        ("failed to refresh token", True),
+        ("unexpected status 500 Internal Server Error, cf-ray: 9a4013c2be1f2e3d-FRA", False),
+        ("failed to refresh MCP servers", False),
+        ("model not found (request id req_8401aa)", False),
+    ],
+)
+def test_codex_auth_hint_matches_only_auth_failures(message: str, expected: bool) -> None:
+    """The expired-login hint needs a clear auth signal, not a 401 inside an id or any refresh.
+
+    Args:
+        message: The codex error text.
+        expected: Whether it is an auth failure.
+    """
+    assert bool(host_agent._CODEX_AUTH_FAILURE.search(message)) is expected
 
 
 def test_archive_that_escapes_the_copy_is_refused(local: Settings, tmp_path: Path) -> None:

@@ -106,6 +106,20 @@ def _fresh_cache() -> None:
     clear_probe_cache()
 
 
+@pytest.fixture(autouse=True)
+def _codex_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give codex a dummy ChatGPT login, never the user's real one.
+
+    Args:
+        tmp_path: Directory for the login.
+        monkeypatch: Pytest fixture used to set CODEX_HOME.
+    """
+    home = tmp_path / "default-codex-home"
+    home.mkdir()
+    (home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "A" * 32}}))
+    monkeypatch.setenv("CODEX_HOME", str(home))
+
+
 def _fake_cli(directory: Path, name: str, *, version: str, login_exit: int = 0, login_out: str = "") -> Path:
     """Write an executable shell script that answers like a coding CLI.
 
@@ -219,19 +233,33 @@ def test_claude_is_signed_in_only_with_a_claude_ai_login(tmp_path: Path, login_o
 
 
 @pytest.mark.parametrize(
-    ("login_out", "expected"),
-    [("Logged in using ChatGPT", True), ("Logged in using an API key - sk-proj-***", False)],
-    ids=["chatgpt", "api_key"],
+    ("login", "expected"),
+    [
+        ({}, True),
+        ({"auth_mode": None, "OPENAI_API_KEY": None}, True),
+        ({"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-" + "x" * 40}, True),
+        ({"OPENAI_API_KEY": "sk-" + "x" * 40}, False),
+        ({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-" + "x" * 40}, False),
+        ({"tokens": None}, False),
+    ],
+    ids=["no_mode", "null_mode", "chatgpt_with_key", "no_mode_with_key", "api_key", "no_tokens"],
 )
-def test_codex_is_signed_in_only_with_a_chatgpt_login(tmp_path: Path, login_out: str, expected: bool) -> None:
-    """Count only a ChatGPT login as signed in; an API key bills the user's API account.
+def test_codex_is_signed_in_only_with_a_chatgpt_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, login: dict, expected: bool
+) -> None:
+    """Count a login as codex does, and only a ChatGPT one; an API key bills the user's API account.
 
     Args:
-        tmp_path: Directory for the fake binary.
-        login_out: The ``login status`` output.
+        tmp_path: Directory for the fake binary and login.
+        monkeypatch: Pytest fixture used to point CODEX_HOME at the login.
+        login: The ``auth.json`` fields over a ChatGPT token set.
         expected: The ``logged_in`` value the probe must report.
     """
-    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out=login_out)
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    (home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "A" * 32}, **login}))
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out="Logged in using ChatGPT")
 
     assert probe_cli("codex", _settings(tmp_path, codex_bin=str(codex))).logged_in is expected
 
