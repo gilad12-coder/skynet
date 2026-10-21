@@ -207,6 +207,38 @@ export function localKeyRows(state: {
   return models ? models.filter(isLocalKeyModel) : null;
 }
 
+/** Identifies a verified OpenRouter key's model list; null when the key is not verified. */
+export function localKeyStamp(
+  key: { id: string; addedAt: string; status: string } | null | undefined,
+): string | null {
+  return key?.status === "verified" ? `${key.id}:${key.addedAt}` : null;
+}
+
+/**
+ * The saved key's rows for an agent request, from the same state the menu
+ * reads: the provider's key list, the last key model load, and the cached key
+ * catalog. Null while the menu has no key rows yet, so a request sends no key
+ * model while the chip shows the default label.
+ */
+export function requestKeyRows(
+  keys: {
+    loading: boolean;
+    failed: boolean;
+    keys: Array<{ id: string; provider: string; status: string; addedAt: string }>;
+  } | null,
+  loaded: { stamp: string; models: CatalogModel[] | null } | null,
+  cached: CatalogModel[] | null,
+): CatalogModel[] | null {
+  if (!keys) return null;
+  return localKeyRows({
+    keysLoading: keys.loading,
+    keysFailed: keys.failed,
+    stamp: localKeyStamp(keys.keys.find((key) => key.provider === LOCAL_KEY_PROVIDER)),
+    loaded,
+    cached,
+  });
+}
+
 /** The longest wait between retries of a failed key list or key model list. */
 export const KEY_RETRY_MAX_MS = 30_000;
 
@@ -259,8 +291,9 @@ export function isOpenRouterModelId(model: string | null | undefined): boolean {
  * shows. A subscription pick resolves on the CLI and waits for nothing else.
  * An OpenRouter pick is sent unchanged unless the app knows there is no
  * verified key. With no pick and no CLI model, the chip shows the key's first
- * model, so the request sends that model; while the menu's key list loads or
- * failed, the chip shows the default label and nothing is sent.
+ * model, so the request sends that model; while the menu's key list or key
+ * model list loads or failed, the chip shows the default label and nothing is
+ * sent.
  */
 export async function resolveLocalAgentModel(
   model: string | null,
@@ -270,7 +303,8 @@ export async function resolveLocalAgentModel(
     peekStatus: () => LocalStatus | null;
     /** Whether the saved OpenRouter key is verified; null while the menu's key list loads or failed. */
     keyVerified: () => Promise<boolean | null>;
-    keyCatalog: () => Promise<CatalogModel[]>;
+    /** The saved key's rows the menu reads; null while they load or failed. */
+    keyRows: () => CatalogModel[] | null;
     /** The agent engine; a role with no CLI runs on it. */
     engine?: AgentEngine | null;
   },
@@ -286,7 +320,8 @@ export async function resolveLocalAgentModel(
   const status = await deps.loadStatus().catch(() => deps.peekStatus());
   const sent = subscriptionAgentModel(null, cli ?? defaultAgentCli(status, engine), status);
   if (sent || !status || !(await deps.keyVerified())) return sent;
-  return keyMenuModels(await deps.keyCatalog())[0]?.value ?? null;
+  const rows = deps.keyRows();
+  return rows ? (keyMenuModels(rows)[0]?.value ?? null) : null;
 }
 
 /**

@@ -16,8 +16,10 @@ import {
   keyRetryDelayMs,
   LOCAL_KEY_PROVIDER,
   localKeyRows,
+  localKeyStamp,
   localMenuModels,
   menuKeyVerified,
+  requestKeyRows,
   resolveLocalAgentModel,
   subscriptionMenuModels,
   type AgentEngine,
@@ -32,6 +34,8 @@ const STATUS_MAX_AGE_MS = 15_000;
 let cached: { status: LocalStatus; at: number } | null = null;
 let inflight: Promise<LocalStatus> | null = null;
 const listeners = new Set<() => void>();
+// The last key model load of any menu, so a request reads the rows the menu shows.
+let lastKeyLoad: { stamp: string; models: CatalogModel[] | null } | null = null;
 
 async function fetchLocalStatus(): Promise<LocalStatus> {
   const res = await fetchWithAuthRetry(`${getRuntimeEnv().apiUrl}/local/status`, {
@@ -89,7 +93,7 @@ export async function localAgentModel(
     loadStatus: loadLocalStatus,
     peekStatus: peekLocalStatus,
     keyVerified: async () => menuKeyVerified(peekByokKeys()),
-    keyCatalog: async () => (await getByokModelCatalog()).models,
+    keyRows: () => requestKeyRows(peekByokKeys(), lastKeyLoad, cachedByokCatalog()?.models ?? null),
     engine,
   });
 }
@@ -103,7 +107,7 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
   const { keyFor, loading, failed, reload } = useByokKeys();
   const key = keyFor(LOCAL_KEY_PROVIDER);
   // A new or re-verified key changes this stamp, which fetches its models again.
-  const stamp = enabled && key?.status === "verified" ? `${key.id}:${key.addedAt}` : null;
+  const stamp = enabled ? localKeyStamp(key) : null;
   const [loaded, setLoaded] = React.useState<{
     stamp: string;
     models: CatalogModel[] | null;
@@ -125,7 +129,8 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
       if (!active) return;
       // A failed load resolves an empty catalog and leaves the cache unset.
       const ok = cachedByokCatalog() !== null;
-      setLoaded({ stamp, models: ok ? catalog.models : null });
+      lastKeyLoad = { stamp, models: ok ? catalog.models : null };
+      setLoaded(lastKeyLoad);
       if (ok) setModelTries(0);
       else retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));
     });

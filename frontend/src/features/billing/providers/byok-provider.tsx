@@ -118,6 +118,36 @@ export function ByokKeysProvider({
     [],
   );
 
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const reload = React.useCallback(() => {
+    const load = (): Promise<void> => {
+      const gen = keysGen.current;
+      return getProviderKeys()
+        .then((r) => {
+          if (!mounted.current) return;
+          // A save, verify, or remove set the keys meanwhile, so this result
+          // may be older: fetch again. Only a key change starts another fetch.
+          if (gen !== keysGen.current) return load();
+          setKeys(r.keys.map(toProviderKey));
+          setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
+          setFailed(false);
+        })
+        .catch(() => {
+          if (!mounted.current) return;
+          if (gen !== keysGen.current) return load();
+          setFailed(true);
+        });
+    };
+    return load();
+  }, []);
+
   React.useEffect(() => {
     // The vault only answers a signed-in caller; skip it on signed-out pages.
     if (sessionStatus === "loading") return;
@@ -129,14 +159,18 @@ export function ByokKeysProvider({
     const gen = keysGen.current;
     getProviderKeys()
       .then((r) => {
-        if (!active || gen !== keysGen.current) return;
+        if (!active) return;
+        // A save, verify, or remove set the keys meanwhile, so this result may be older: fetch again.
+        if (gen !== keysGen.current) return reload();
         setKeys(r.keys.map(toProviderKey));
         setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
         setFailed(false);
       })
       .catch(() => {
+        if (!active) return;
+        if (gen !== keysGen.current) return reload();
         // Keep the current keys (no backend), but say the list is not known.
-        if (active && gen === keysGen.current) setFailed(true);
+        setFailed(true);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -144,30 +178,7 @@ export function ByokKeysProvider({
     return () => {
       active = false;
     };
-  }, [sessionStatus]);
-
-  const mounted = React.useRef(true);
-  React.useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  const reload = React.useCallback(() => {
-    const gen = keysGen.current;
-    // A dropped result leaves `failed` as it is, so a failed list retries again.
-    return getProviderKeys()
-      .then((r) => {
-        if (!mounted.current || gen !== keysGen.current) return;
-        setKeys(r.keys.map(toProviderKey));
-        setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
-        setFailed(false);
-      })
-      .catch(() => {
-        if (mounted.current && gen === keysGen.current) setFailed(true);
-      });
-  }, []);
+  }, [sessionStatus, reload]);
 
   const keyFor = React.useCallback(
     (provider: string) => keys.find((k) => k.provider === provider) ?? null,

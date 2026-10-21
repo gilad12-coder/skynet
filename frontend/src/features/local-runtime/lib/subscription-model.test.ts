@@ -20,9 +20,11 @@ const {
   KEY_RETRY_MAX_MS,
   keyRetryDelayMs,
   localKeyRows,
+  localKeyStamp,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
   menuKeyVerified,
+  requestKeyRows,
   isOpenRouterModelId,
   resolveAgentModel,
   resolveLocalAgentModel,
@@ -703,7 +705,7 @@ const localDeps = (
       calls.push("keys");
       return true;
     },
-    keyCatalog: async () => {
+    keyRows: () => {
       calls.push("catalog");
       return [];
     },
@@ -735,7 +737,9 @@ test("a key pick goes unchanged, even when the key's model list is empty", async
 test("a subscription pick waits for no key or model list", async () => {
   const deps = localDeps({
     keyVerified: () => new Promise<boolean | null>(() => {}),
-    keyCatalog: () => new Promise<Catalog>(() => {}),
+    keyRows: () => {
+      throw new Error("a subscription pick reads no key rows");
+    },
   });
   const pick = "subscription/claude/anthropic/claude-opus-4.1";
   assert.equal(await resolveLocalAgentModel(pick, "claude", deps), pick);
@@ -753,7 +757,7 @@ test("no pick sends the model the chip shows", async () => {
   // No CLI model: the chip shows the key's first menu row.
   const noCli = {
     loadStatus: async () => status([cli({ path: null, models: [] })]),
-    keyCatalog: async () => [
+    keyRows: () => [
       keyRow("openrouter/google/gemini-3-pro"),
       keyRow("openrouter/openai/gpt-5-mini"),
     ],
@@ -786,7 +790,7 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
   const verifiedKey = { provider: "openrouter", status: "verified" };
   const noCli = {
     loadStatus: async () => status([cli({ path: null, models: [] })]),
-    keyCatalog: async () => [keyRow("openrouter/google/gemini-3-pro")],
+    keyRows: () => [keyRow("openrouter/google/gemini-3-pro")],
   };
   const unknown = [
     { loading: true, failed: false, keys: [] },
@@ -841,4 +845,44 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
     ),
     "openrouter/google/gemini-3-pro",
   );
+});
+
+test("no pick sends nothing while the key's model list loads or failed, as the chip shows", async () => {
+  const key = { id: "k1", provider: "openrouter", status: "verified", addedAt: "t1" };
+  const keys = { loading: false, failed: false, keys: [key] };
+  const stamp = localKeyStamp(key);
+  assert.equal(stamp, "k1:t1");
+  assert.equal(localKeyStamp({ ...key, status: "invalid" }), null);
+  assert.equal(localKeyStamp(null), null);
+  const gemini = keyRow("openrouter/google/gemini-3-pro");
+  const noCli = { loadStatus: async () => status([cli({ path: null, models: [] })]) };
+  const cases = [
+    // The model list still loads: no load and no cache.
+    { loaded: null, cached: null, sent: null },
+    // The model list failed and the cache is unset.
+    { loaded: { stamp: "k1:t1", models: null }, cached: null, sent: null },
+    // A load for an older key does not count for this key.
+    { loaded: { stamp: "k0:t0", models: [gemini] }, cached: null, sent: null },
+    // The model list loaded.
+    { loaded: { stamp: "k1:t1", models: [gemini] }, cached: null, sent: gemini.value },
+    // A failed reload keeps the cached list the menu shows.
+    { loaded: { stamp: "k1:t1", models: null }, cached: [gemini], sent: gemini.value },
+  ];
+  for (const { loaded, cached, sent } of cases) {
+    // The chip reads the menu's first row, or shows "Default" with no rows.
+    const menuRows = localKeyRows({ keysLoading: false, keysFailed: false, stamp, loaded, cached });
+    const menu = localMenuModels([], menuRows && keyMenuModels(menuRows, null), null);
+    assert.equal(menu[0]?.value ?? null, sent);
+    assert.deepEqual(requestKeyRows(keys, loaded, cached), menuRows);
+    assert.equal(
+      await resolveLocalAgentModel(
+        null,
+        "claude",
+        localDeps({ ...noCli, keyRows: () => requestKeyRows(keys, loaded, cached) }),
+      ),
+      sent,
+    );
+  }
+  // No provider state: no key rows.
+  assert.equal(requestKeyRows(null, { stamp: "k1:t1", models: [gemini] }, [gemini]), null);
 });
