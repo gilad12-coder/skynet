@@ -41,7 +41,7 @@ from ...service_gateway.agents import code as code_agent
 from ...service_gateway.agents import generalist
 from ...service_gateway.language_models import build_language_model
 from ...storage.models import AgentEnginePreferenceModel, Base, BillingProviderKeyModel
-from .. import agent_engine, model_router
+from .. import agent_engine, model_catalog, model_router
 from .. import auth as auth_mod
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -271,7 +271,7 @@ def test_save_route_and_clear_the_key(local: list[object]) -> None:
     subscription = f"subscription/codex/{next(iter(CLI_MODELS['codex']))}"
     assert model_router.route_local_byok_model(subscription, job_store=store, username=_USER) is None
     with pytest.raises(DomainError) as caught:
-        model_router.route_local_byok_model("openrouter/not/in-catalog", job_store=store, username=_USER)
+        model_router.route_local_byok_model("anthropic/not-an-openrouter-id", job_store=store, username=_USER)
     assert caught.value.status_code == 422
 
     chosen = client.put("/account/agent-engine", json={"engine": "openrouter"})
@@ -285,6 +285,38 @@ def test_save_route_and_clear_the_key(local: list[object]) -> None:
     with pytest.raises(DomainError) as caught:
         model_router.route_agent_model(agent_engine.engine_agent_model(store, _USER, None))
     assert caught.value.code == "models.managed_unavailable_local"
+
+
+def test_explicit_pick_routes_on_the_saved_key_with_the_real_empty_catalog(
+    local: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Route an explicit OpenRouter pick onto the saved key when the curated catalog is empty.
+
+    The Mac app has no platform OpenRouter key, so the real curated catalog
+    lists no OpenRouter model. The pick runs on the user's own key, so the
+    curated catalog must not refuse it. A malformed id still gets 422.
+
+    Args:
+        local: The blocked remote addresses.
+        monkeypatch: Restores the real catalog functions and clears the cache.
+    """
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(model_catalog, "_cached_response", None)
+    monkeypatch.setattr(model_router, "get_catalog_cached", model_catalog.get_catalog_cached)
+    monkeypatch.setattr(model_router, "require_known_model", model_catalog.require_known_model)
+    picked = "openrouter/anthropic/claude-sonnet-4.5"
+    assert all(entry.value != picked for entry in model_catalog.get_catalog_cached().models)
+    store = SimpleNamespace(engine=_engine())
+    _save(_client(store))
+
+    routed = model_router.route_local_byok_model(picked, job_store=store, username=_USER)
+    assert routed is not None
+    assert (routed.name, routed.token_source, routed.byok_provider) == (picked, TOKEN_SOURCE_BYOK, "openrouter")
+    assert routed.extra["api_key"] == _FAKE_KEY
+    for malformed in ("anthropic/claude-sonnet-4.5", "openrouter/claude-sonnet-4.5", "openrouter//x", "gpt-5"):
+        with pytest.raises(DomainError) as caught:
+            model_router.route_local_byok_model(malformed, job_store=store, username=_USER)
+        assert (caught.value.code, caught.value.status_code) == ("models.unknown_model", 422)
 
 
 def test_byok_configs_skip_the_managed_gateway_base_url(local: list[object]) -> None:

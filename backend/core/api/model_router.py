@@ -9,6 +9,7 @@ prices), the composer degrades to the engine's configured server default.
 from __future__ import annotations
 
 import logging
+import re
 
 from ..billing.byok_bridge import resolve_byok_model_config
 from ..billing.byok_vault import ProviderKeyVault
@@ -36,6 +37,11 @@ _LOCAL_BYOK_PROVIDER = "openrouter"
 # The retired "Auto · Intelligent" menu entry; saved conversations and
 # browser prefs may still send it, so it runs the default like no pick at all.
 _RETIRED_AUTO_ID = "auto:intelligent"
+
+# An OpenRouter model id: openrouter/<vendor>/<model>. A saved-key pick is
+# checked only for this shape, because the user's key pays for the turn and
+# the Mac app's curated catalog is empty (it has no platform OpenRouter key).
+_OPENROUTER_MODEL_ID = re.compile(r"openrouter/[^/\s]+/[^/\s]+")
 
 
 def default_model_id() -> str | None:
@@ -207,7 +213,8 @@ def route_local_byok_model(
     """Route a Mac app composer pick onto the caller's saved OpenRouter key.
 
     The Mac app has no managed key. A user who saved and verified an
-    OpenRouter key runs catalog models, and the catalog default, on that key.
+    OpenRouter key runs any OpenRouter model id, and the catalog default, on
+    that key.
     It never falls back to a managed key.
 
     Args:
@@ -223,7 +230,7 @@ def route_local_byok_model(
         OpenRouter key; the normal routes then apply.
 
     Raises:
-        DomainError: 422 when an explicit id is not a catalog model.
+        DomainError: 422 when an explicit id is not an OpenRouter model id.
     """
     if not settings.local_mode:
         return None
@@ -237,7 +244,8 @@ def route_local_byok_model(
     if not vault.has_verified_connection(username, _LOCAL_BYOK_PROVIDER):
         return None
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
-        require_known_model(name)
+        if not _OPENROUTER_MODEL_ID.fullmatch(name):
+            raise DomainError("models.unknown_model", status=422)
     else:
         name = (interview_model_id() if interview else default_model_id()) or agent_model_id()
     config = ModelConfig(name=name, token_source=TOKEN_SOURCE_BYOK, byok_provider=_LOCAL_BYOK_PROVIDER)
