@@ -18,7 +18,6 @@ class SubmissionReplayKeys:
 
     job: str | None
     budget: str | None
-    synthesized: bool = False
 
 
 def resolve_submission_replay_keys(
@@ -63,4 +62,4 @@ def resolve_submission_replay_keys(
             "request_fingerprint": request_fingerprint,
         }
     )
-    return SubmissionReplayKeys(job=synthesized, budget=synthesized, synthesized=True)
+    return SubmissionReplayKeys(job=synthesized, budget=synthesized)
