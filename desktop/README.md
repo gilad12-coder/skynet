@@ -110,6 +110,7 @@ These variables are for development and tests:
 | `SKYNET_DESKTOP_LANG` | `en` or `he` |
 | `SKYNET_DESKTOP_THEME` | `light` or `dark` |
 | `SKYNET_DESKTOP_NO_UPDATE` | `1` turns off the update check |
+| `SKYNET_DESKTOP_PG_VOLUME` | Use this Docker volume for Postgres instead of `skynet-local-pgdata`, so a test run does not touch your data. Only a plain volume name is accepted |
 
 The version floors in `src/main/cli-detect.ts` copy `MIN_VERSIONS` from the backend CLI catalog. Change both together.
 

@@ -3,6 +3,17 @@ import { runCommand, waitFor } from "./supervisor";
 export const PG_CONTAINER = "skynet-local-postgres";
 export const PG_IMAGE = "pgvector/pgvector:pg16";
 export const PG_VOLUME = "skynet-local-pgdata";
+
+/**
+ * The Postgres volume: PG_VOLUME, or SKYNET_DESKTOP_PG_VOLUME for test runs
+ * that must not touch the real data. Only a plain volume name is accepted,
+ * because a path would make `docker run -v` bind-mount a host folder.
+ */
+export function pgVolume(env: NodeJS.ProcessEnv = process.env): string {
+  const name = env.SKYNET_DESKTOP_PG_VOLUME || PG_VOLUME;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) throw new Error(`SKYNET_DESKTOP_PG_VOLUME is not a Docker volume name: ${name}`);
+  return name;
+}
 export const PG_DB = "skynet";
 export const PG_USER = "skynet";
 
@@ -34,7 +45,7 @@ export async function startPostgres(ctx: DockerCtx, port: number, password: stri
       "-p",
       `127.0.0.1:${port}:5432`,
       "-v",
-      `${PG_VOLUME}:/var/lib/postgresql/data`,
+      `${pgVolume()}:/var/lib/postgresql/data`,
       "-e",
       `POSTGRES_DB=${PG_DB}`,
       "-e",

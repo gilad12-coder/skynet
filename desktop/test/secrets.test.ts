@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensurePrivateDir, LEGACY_SECRETS_FILE, loadOrCreateSecrets, SECRETS_FILE } from "../src/main/secrets";
-import { PG_PASSWORD_VAR, setPasswordArgs } from "../src/main/postgres";
+import { PG_PASSWORD_VAR, PG_VOLUME, pgVolume, setPasswordArgs } from "../src/main/postgres";
 
 let dir: string;
 
@@ -122,5 +122,18 @@ describe("setPasswordArgs", () => {
     expect(script).toContain(`\\getenv pw ${PG_PASSWORD_VAR}`);
     expect(script).toContain("ALTER ROLE CURRENT_USER PASSWORD :'pw';");
     expect(script).toContain("ON_ERROR_STOP=1");
+  });
+});
+
+describe("pgVolume", () => {
+  it("uses the default, or a plain volume name from SKYNET_DESKTOP_PG_VOLUME", () => {
+    expect(pgVolume({})).toBe(PG_VOLUME);
+    expect(pgVolume({ SKYNET_DESKTOP_PG_VOLUME: "skynet-e2e.vol_1" })).toBe("skynet-e2e.vol_1");
+  });
+
+  it("refuses a path, so no host folder is bind-mounted", () => {
+    for (const bad of ["/etc", "./data", "../x", "a/b", "-v"]) {
+      expect(() => pgVolume({ SKYNET_DESKTOP_PG_VOLUME: bad })).toThrow(/not a Docker volume name/);
+    }
   });
 });
