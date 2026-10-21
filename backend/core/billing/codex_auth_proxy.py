@@ -12,8 +12,10 @@ certificate is signed.
 The proxy runs in the Skynet backend, outside the turn's Seatbelt profile. It
 accepts only requests that carry this turn's random placeholder, forwards only
 the model paths codex needs to ``chatgpt.com`` over verified TLS, puts in the
-real token and account there, and streams the answer back. It stops when the
-turn ends, so the placeholder opens nothing after it.
+real token and account there, and streams the answer back. When the turn
+ends, the proxy closes its port and every open connection, so the placeholder
+opens nothing after it. A connection that sends no request for
+:data:`CLIENT_IDLE_TIMEOUT_SECONDS` is closed too.
 
 The real refresh token never enters the turn or the proxy: when the access
 token expires, the turn fails with the "refresh your login" hint.
@@ -66,6 +68,9 @@ ALLOWED_CALLS = frozenset(
 MAX_BODY_BYTES = 64 * 1024 * 1024
 UPSTREAM_TIMEOUT_SECONDS = 300.0
 HANDSHAKE_TIMEOUT_SECONDS = 30.0
+# Applies to each read of codex's request and write of the answer, not to the
+# provider's stream, so a long SSE answer is not cut.
+CLIENT_IDLE_TIMEOUT_SECONDS = 300.0
 REFUSE_DRAIN_SECONDS = 2.0
 LOOPBACK = "127.0.0.1"
 _HOP_BY_HOP = frozenset(
@@ -272,6 +277,25 @@ class _Server(http.server.ThreadingHTTPServer):
         self.account_id = account_id
         self.expected = f"Bearer {placeholder}".encode()
         self.context = context
+        self.stopping = False
+        self._live: set[ssl.SSLSocket] = set()
+        self._live_lock = threading.Lock()
+
+    def close_connections(self) -> None:
+        """Refuse new requests and close every accepted connection.
+
+        The accept loop and the port stop separately; without this, a
+        keep-alive connection would go on forwarding with the real token.
+        """
+        with self._live_lock:
+            self.stopping = True
+            live = list(self._live)
+            self._live.clear()
+        for connection in live:
+            with contextlib.suppress(OSError):
+                connection.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                connection.close()
 
     def finish_request(self, request: Any, client_address: Any) -> None:
         """Run the TLS handshake on the connection's own thread, then handle it.
@@ -289,10 +313,18 @@ class _Server(http.server.ThreadingHTTPServer):
             secured = self.context.wrap_socket(request, server_side=True)
         except (OSError, ssl.SSLError):
             return
-        secured.settimeout(None)
+        secured.settimeout(CLIENT_IDLE_TIMEOUT_SECONDS)
+        with self._live_lock:
+            if self.stopping:
+                with contextlib.suppress(OSError):
+                    secured.close()
+                return
+            self._live.add(secured)
         try:
             super().finish_request(secured, client_address)
         finally:
+            with self._live_lock:
+                self._live.discard(secured)
             with contextlib.suppress(OSError):
                 secured.close()
 
@@ -379,6 +411,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         headers = {name: value for name, value in self.headers.items() if name.lower() not in _DROPPED_REQUEST}
         headers["Host"] = UPSTREAM_HOST
         headers["Authorization"] = f"Bearer {self.server.access_token}"
+        if self.server.stopping:
+            self._refuse(503)
+            return
         if self.server.account_id:
             headers["ChatGPT-Account-ID"] = self.server.account_id
         if self.command == "POST":
@@ -500,7 +535,7 @@ class CodexAuthProxy:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Stop serving and close the port.
+        """Stop serving, close the port and close every open connection.
 
         Args:
             exc_type: Unused.
@@ -510,5 +545,6 @@ class CodexAuthProxy:
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
+            self._server.close_connections()
         if self._thread is not None:
             self._thread.join(timeout=5)

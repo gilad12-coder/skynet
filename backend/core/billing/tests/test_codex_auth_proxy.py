@@ -254,12 +254,44 @@ def test_streamed_events_pass_through_as_they_arrive(proxy: CodexAuthProxy, upst
 
 
 def test_closed_proxy_accepts_no_connection(upstream: type[_Upstream]) -> None:
-    """At turn end the port closes, so nothing in or after the turn can use the login."""
+    """At turn end the port closes, so no new connection after the turn can use the login."""
     with CodexAuthProxy(access_token=REAL_ACCESS, account_id=REAL_ACCOUNT, placeholder=PLACEHOLDER) as running:
         port = running.port
 
     with pytest.raises(OSError), socket.create_connection(("127.0.0.1", port), timeout=2):
         pass
+
+
+def test_open_connection_forwards_nothing_after_the_proxy_stops(upstream: type[_Upstream]) -> None:
+    """A keep-alive connection opened during the turn cannot send the login anywhere after the turn."""
+    running = CodexAuthProxy(access_token=REAL_ACCESS, account_id=REAL_ACCOUNT, placeholder=PLACEHOLDER)
+    with running:
+        context = ssl.create_default_context(cadata=running.ca_pem.decode())
+        connection = http.client.HTTPSConnection("127.0.0.1", running.port, timeout=5, context=context)
+        headers = {"authorization": f"Bearer {PLACEHOLDER}"}
+        connection.request("GET", "/backend-api/codex/models", headers=headers)
+        first = connection.getresponse()
+        assert first.status == 200
+        first.read()
+
+    with pytest.raises((OSError, http.client.HTTPException)):
+        connection.request("GET", "/backend-api/codex/models", headers=headers)
+        connection.getresponse().read()
+    connection.close()
+
+    assert [call["path"] for call in upstream.seen] == ["/backend-api/codex/models"]
+
+
+def test_idle_connection_is_closed(monkeypatch: pytest.MonkeyPatch, upstream: type[_Upstream]) -> None:
+    """A connection that sends no request within the idle time is closed and holds no thread."""
+    monkeypatch.setattr(codex_auth_proxy, "CLIENT_IDLE_TIMEOUT_SECONDS", 0.5)
+    with CodexAuthProxy(access_token=REAL_ACCESS, account_id=REAL_ACCOUNT, placeholder=PLACEHOLDER) as running:
+        context = ssl.create_default_context(cadata=running.ca_pem.decode())
+        with (
+            socket.create_connection(("127.0.0.1", running.port), timeout=5) as raw,
+            context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
+        ):
+            assert secured.recv(1) == b""
 
 
 def test_proxy_listens_on_loopback_only(proxy: CodexAuthProxy) -> None:
