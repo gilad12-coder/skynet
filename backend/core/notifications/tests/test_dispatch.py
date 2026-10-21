@@ -137,14 +137,14 @@ def test_non_urgent_email_is_held_then_sent_when_unread(engine, channels) -> Non
     notification_id = notify(_USER, "finished", "run1", {"score": 0.9}, title="Bot", now=_T0)
 
     row = _row(engine, notification_id)
-    assert _states(row) == {"email": "held"}
+    assert _states(row) == {"email": "held", "chrome": "sent"}
     assert row.hold_until is not None
     assert channels["email"].sent == []
 
     assert release_held(engine, now=_T0 + timedelta(minutes=5)) == 0
     assert release_held(engine, now=_T0 + timedelta(minutes=10)) == 1
 
-    assert _states(_row(engine, notification_id)) == {"email": "sent"}
+    assert _states(_row(engine, notification_id)) == {"email": "sent", "chrome": "sent"}
     assert len(channels["email"].sent) == 1
     assert release_held(engine, now=_T0 + timedelta(hours=1)) == 0
 
@@ -158,7 +158,7 @@ def test_held_send_is_dropped_when_the_inbox_item_was_read(engine, channels) -> 
 
     release_held(engine, now=_T0 + timedelta(minutes=11))
 
-    assert _states(_row(engine, notification_id)) == {"email": "dropped"}
+    assert _states(_row(engine, notification_id)) == {"email": "dropped", "chrome": "sent"}
     assert channels["email"].sent == []
 
 
@@ -175,8 +175,29 @@ def test_held_send_still_goes_out_after_the_item_is_removed(engine, channels) ->
     for notification_id in (removed_one, cleared):
         row = _row(engine, notification_id)
         assert row.in_inbox is False
-        assert _states(row) == {"email": "sent"}
+        assert _states(row) == {"email": "sent", "chrome": "sent"}
     assert len(channels["email"].sent) == 2
+
+
+@pytest.mark.parametrize("event", ["finished", "failed"])
+def test_run_end_pushes_to_chrome_by_default(engine, channels, event: str) -> None:
+    """With no saved preferences, a finished or failed run pushes to Chrome at once."""
+    notification_id = notify(_USER, event, "run1", {}, title="Bot", now=_T0)
+
+    assert _states(_row(engine, notification_id)) == {"email": "held", "chrome": "sent"}
+    assert len(channels["chrome"].sent) == 1
+    assert channels["slack"].sent == []
+
+
+@pytest.mark.parametrize("event", ["finished", "failed"])
+def test_stored_chrome_opt_out_still_wins(engine, channels, event: str) -> None:
+    """A saved Chrome off for a run-end event sends nothing to Chrome."""
+    _prefs(engine, channel_grid={event: {"chrome": False}})
+
+    notification_id = notify(_USER, event, "run1", {}, title="Bot", now=_T0)
+
+    assert _states(_row(engine, notification_id)) == {"email": "held"}
+    assert channels["chrome"].sent == []
 
 
 def test_only_the_selected_channels_hold(engine, channels) -> None:
@@ -194,7 +215,7 @@ def test_zero_hold_sends_at_once(engine, channels) -> None:
 
     notification_id = notify(_USER, "finished", "run1", {}, title="Bot", now=_T0)
 
-    assert _states(_row(engine, notification_id)) == {"email": "sent"}
+    assert _states(_row(engine, notification_id)) == {"email": "sent", "chrome": "sent"}
 
 
 def test_inbox_off_still_routes_other_channels(engine, channels) -> None:
@@ -233,7 +254,7 @@ def test_switching_a_channel_off_during_the_hold_drops_it(engine, channels) -> N
 
     release_held(engine, now=_T0 + timedelta(minutes=10))
 
-    assert _states(_row(engine, notification_id)) == {"email": "dropped"}
+    assert _states(_row(engine, notification_id)) == {"email": "dropped", "chrome": "sent"}
 
 
 def test_notify_without_storage_or_recipient_is_a_no_op(channels) -> None:
@@ -300,7 +321,7 @@ def test_released_held_email_goes_through_the_renderer(engine, real_email: FakeM
 
     release_held(engine, now=_T0 + timedelta(minutes=10))
 
-    assert _states(_row(engine, notification_id)) == {"email": "sent"}
+    assert _states(_row(engine, notification_id)) == {"email": "sent", "chrome": "sent"}
     call = real_email.last()
     assert call["to"] == _USER
     assert "Bot" in call["subject"]
@@ -320,5 +341,5 @@ def test_released_held_email_is_dropped_when_read_first(engine, real_email: Fake
 
     release_held(engine, now=_T0 + timedelta(minutes=10))
 
-    assert _states(_row(engine, notification_id)) == {"email": "dropped"}
+    assert _states(_row(engine, notification_id)) == {"email": "dropped", "chrome": "sent"}
     assert real_email.call_count == 0

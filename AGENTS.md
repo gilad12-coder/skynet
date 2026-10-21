@@ -89,8 +89,9 @@ environment. Six things broke that once; keep them true:
   `Invalid proxy server token`. `deploy/litellm/start.py` registers
   `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
   `${{backend.LITELLM_PROXY_API_KEY}}`.
-- **Preview accounts work without email and with credit.** In a `*-pr-<n>`
-  environment, sign-up is auto-verified and a new account gets
+- **Preview accounts verify email and get credit.** In a `*-pr-<n>`
+  environment, sign-up sends a real confirmation code, exactly like `staging`
+  (the test-account helper reads it from the owned inbox), and a new account gets
   `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
 - **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a

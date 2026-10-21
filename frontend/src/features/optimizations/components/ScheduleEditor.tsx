@@ -54,18 +54,6 @@ export function describeSchedule(rule: ScheduleRule): string {
   });
 }
 
-/** Format a check time in the plan's zone, so it reads like the rule. */
-export function formatCheck(iso: string, timezone: string): string {
-  return new Date(iso).toLocaleString(getActiveIntlLocale(), {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: timezone,
-  });
-}
-
 /**
  * When a continuous plan checks, edited in one calendar card: the schedule
  * in words, one-click presets, a month calendar where the check days are

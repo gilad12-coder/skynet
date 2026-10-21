@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -114,6 +115,217 @@ def test_a_failing_scorer_is_reported(tmp_path: Path) -> None:
     try:
         with pytest.raises(RepoScoreError, match="tests failed"):
             scorer.score("")
+    finally:
+        scorer.close()
+
+
+def test_a_version_whose_code_rewrites_its_judge_gets_no_score(tmp_path: Path) -> None:
+    """Refuse the score of a source-only version that overwrites the protected labels while it runs."""
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os, runpy\n"
+        "def score(repo_path):\n"
+        "    runpy.run_path(os.path.join(repo_path, 'src/app.py'))\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'labels read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+        cheat = _patch(tmp_path / "cheat", archive, {"src/app.py": "open('eval/labels.csv', 'w').write('99')\n"})
+        refused = scorer.dispatch({"candidate": cheat})
+        assert refused.status == 422
+        assert "'eval/labels.csv' is protected" in refused.body.decode()
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+    finally:
+        scorer.close()
+
+
+def _labels_judge(tmp_path: Path, secrets: dict[str, str]) -> tuple[RepoScorer, Path]:
+    """Build a scorer whose judge runs the version's source, then reads the protected labels.
+
+    Args:
+        tmp_path: Scratch folder.
+        secrets: Environment the scorer receives.
+
+    Returns:
+        The scorer and its archive.
+    """
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os, runpy\n"
+        "def score(repo_path):\n"
+        "    runpy.run_path(os.path.join(repo_path, 'src/app.py'))\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'labels read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets=secrets,
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    return scorer, archive
+
+
+def test_a_version_that_restores_its_judge_at_exit_gets_no_score(tmp_path: Path) -> None:
+    """Refuse a version that rewrites the labels for the judge and puts them back when the process exits."""
+    scorer, archive = _labels_judge(tmp_path, {})
+    cheat = (
+        "import atexit\n"
+        "saved = open('eval/labels.csv').read()\n"
+        "open('eval/labels.csv', 'w').write('99')\n"
+        "atexit.register(lambda: open('eval/labels.csv', 'w').write(saved))\n"
+    )
+    try:
+        refused = scorer.dispatch({"candidate": _patch(tmp_path / "cheat", archive, {"src/app.py": cheat})})
+        assert refused.status == 422
+        assert "'eval/labels.csv' is protected" in refused.body.decode()
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+    finally:
+        scorer.close()
+
+
+def test_a_protected_file_named_after_a_secret_is_reported_redacted(tmp_path: Path) -> None:
+    """Hide a secret the version's code writes into a protected file name, as everywhere else."""
+    scorer, archive = _labels_judge(tmp_path, {"API_KEY": "very-secret-value"})
+    leak = "import os\nopen(os.path.join('eval', os.environ['API_KEY']), 'w').close()\n"
+    try:
+        refused = scorer.dispatch({"candidate": _patch(tmp_path / "leak", archive, {"src/app.py": leak})})
+        assert refused.status == 422
+        assert "very-secret-value" not in refused.body.decode()
+        assert "'eval/[secret]' is protected" in refused.body.decode()
+    finally:
+        scorer.close()
+
+
+class _WriteTouchingSession:
+    """Local box whose file writes move every file's change time, as a Vercel box's do."""
+
+    def __init__(self, session: Any) -> None:
+        """Wrap one local box.
+
+        Args:
+            session: The local box.
+        """
+        self._session = session
+
+    def __getattr__(self, name: str) -> Any:
+        """Pass everything else to the local box.
+
+        Args:
+            name: The attribute asked for.
+
+        Returns:
+            The local box's attribute.
+        """
+        return getattr(self._session, name)
+
+    def write_files(self, files: Mapping[str, str]) -> None:
+        """Write the files, then touch the metadata of everything in the box.
+
+        Args:
+            files: Relative path to content.
+        """
+        self._session.write_files(files)
+        # Flip a bit and back: macOS keeps the change time when the mode is unchanged.
+        self._session.run("chmod -R o+w . && chmod -R o-w .")
+
+
+class _WriteTouchingRuntime(LocalSubprocessRuntime):
+    """Local runtime whose boxes behave like Vercel's on file writes."""
+
+    def open(self, spec: SandboxSpec) -> Any:
+        """Open a local box wrapped so writes touch every file.
+
+        Args:
+            spec: The box's spec.
+
+        Returns:
+            The wrapped box.
+        """
+        return _WriteTouchingSession(super().open(spec))
+
+
+def test_a_clean_version_keeps_its_score_when_box_writes_touch_every_file(tmp_path: Path) -> None:
+    """Stamp the protected files after the host's last write, so a box that touches files on write flags nothing."""
+    archive = _archive(tmp_path, {"src/app.py": "pass\n", "eval/labels.csv": "1\n"})
+    judge = (
+        "import os\n"
+        "def score(repo_path):\n"
+        "    return {'score': float(open(os.path.join(repo_path, 'eval/labels.csv')).read()), 'feedback': 'read'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=_WriteTouchingRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+        assert scorer.score("")["score"] == pytest.approx(1.0)
+    finally:
+        scorer.close()
+
+
+def test_a_judge_that_imports_its_protected_package_keeps_its_score(tmp_path: Path) -> None:
+    """Score a version whose judge imports a protected package, which must not leave bytecode there."""
+    archive = _archive(
+        tmp_path,
+        {"src/app.py": "pass\n", "eval/__init__.py": "", "eval/metric.py": "def value():\n    return 0.5\n"},
+    )
+    judge = (
+        "import os, sys\n"
+        "def score(repo_path):\n"
+        "    sys.path.insert(0, repo_path)\n"
+        "    from eval.metric import value\n"
+        "    return {'score': value(), 'feedback': 'judged'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            # A Vercel box writes bytecode by default; the local runtime does not.
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True, env={"PYTHONDONTWRITEBYTECODE": ""}),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(0.5)
+        assert scorer.score("")["score"] == pytest.approx(0.5)
     finally:
         scorer.close()
 

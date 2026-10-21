@@ -75,7 +75,7 @@ def test_patch_merges_grid_cells_and_hold_settings() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["grid"]["finished"] == {"inbox": True, "email": False, "chrome": False, "slack": False}
+    assert body["grid"]["finished"] == {"inbox": True, "email": False, "chrome": True, "slack": False}
     assert body["grid"]["stuck"]["slack"] is True
     assert body["grid"]["failed"] == DEFAULT_GRID["failed"]
     assert (body["hold_minutes"], body["held_channels"]) == (3, ["email", "slack"])
