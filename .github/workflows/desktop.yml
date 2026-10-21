@@ -43,11 +43,20 @@ jobs:
         env:
           # Ad-hoc signing ("-" in electron-builder.yml) needs no certificate.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # electron-builder skips all signing on pull requests by default. Ad-hoc
+          # signing uses no secret, so it is safe here.
+          CSC_FOR_PULL_REQUEST: "true"
         run: npm run build:mac
       - name: Verify signatures
         run: |
+          # The Electron binary already has a linker ad-hoc signature, so also check
+          # that electron-builder signed the bundle (identifier and hardened runtime).
           for app in desktop/dist/mac-arm64/Skynet.app desktop/dist/mac/Skynet.app; do
-            codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+            info=$(codesign -dv "$app" 2>&1); echo "$info"
+            grep -q "Signature=adhoc" <<<"$info"
+            grep -q "Identifier=com.skynetml.desktop" <<<"$info"
+            grep -q "flags=.*runtime" <<<"$info"
+            codesign --verify --deep --strict "$app"
           done
           lipo -archs desktop/dist/mac/Skynet.app/Contents/MacOS/Skynet | grep -qx x86_64
           lipo -archs desktop/dist/mac/Skynet.app/Contents/Resources/uv/uv | grep -qx x86_64
