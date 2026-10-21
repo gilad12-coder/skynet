@@ -26,6 +26,8 @@ from ..model_catalog import CatalogModel, CatalogProvider, ModelCatalogResponse
 from ..routers import models as models_router_module
 from ..routers.models import _validate_discover_url, create_models_router
 from .conftest import bypass_auth
+from .test_local_mode import _local_submit_client
+from .test_submissions_router import unified_payload
 
 
 def _make_catalog(*model_ids: str) -> ModelCatalogResponse:
@@ -360,3 +362,46 @@ def test_agent_models_in_hosted_mode_are_the_catalog(models_client: TestClient) 
     with patch("core.api.routers.models.get_catalog_cached", return_value=fake_catalog):
         body = models_client.get("/models/for-agent", params={"query": "gpt"}).json()
     assert [row["name"] for row in body["models"]] == ["openai/gpt-4o-mini"]
+
+
+@pytest.mark.parametrize("sent_source", [{}, {"token_source": "managed"}])
+def test_listed_agent_model_submits_as_a_subscription_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sent_source: dict[str, str]
+) -> None:
+    """Accept a local agent model id from ``/models/for-agent`` as a subscription model on ``/optimize``.
+
+    The agent wizard copies only the listed ``name`` into the run; the web
+    form adds ``token_source: managed``. Neither sends a ``cli_provider``.
+    """
+    name = _local_agent_client(tmp_path, monkeypatch).get("/models/for-agent").json()["models"][0]["name"]
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+
+    resp = client.post("/optimize", json=unified_payload(models={"reflection_model": {"name": name, **sent_source}}))
+
+    assert resp.status_code == 201, resp.text
+    payload = store._jobs[resp.json()["optimization_id"]]["payload"]
+    assert payload["token_source"] == "subscription"
+    reflection = payload["models"]["reflection_model"]
+    assert (reflection["name"], reflection["token_source"], reflection["cli_provider"]) == (
+        name,
+        "subscription",
+        "claude",
+    )
+
+
+def test_hosted_submit_ignores_the_subscription_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a hosted ``/optimize`` blind to a ``subscription/<cli>/`` name.
+
+    The name stays a managed model, so the empty wallet refuses it with 402,
+    as before; it never becomes a subscription run.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=False)
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(models={"reflection_model": {"name": "subscription/claude/anthropic/claude-haiku-4.5"}}),
+    )
+
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "billing.insufficient_funds"
+    assert store.created_ids() == []
