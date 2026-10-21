@@ -6,6 +6,7 @@ import base64
 import contextlib
 import http.client
 import http.server
+import io
 import json
 import logging
 import socket
@@ -39,6 +40,7 @@ class _Upstream(http.server.BaseHTTPRequestHandler):
     release = threading.Event()
     expired = False
     empty_status: int | None = None
+    early_hints = False
 
     def do_POST(self) -> None:
         """Record the request, then stream two events with a pause the test controls."""
@@ -59,6 +61,8 @@ class _Upstream(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Record the request and answer with a small JSON body."""
         type(self).seen.append({"path": self.path, "headers": dict(self.headers.items()), "body": b""})
+        if type(self).early_hints:
+            self.wfile.write(b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n")
         if type(self).empty_status is not None:
             self.send_response(type(self).empty_status)
             self.end_headers()
@@ -98,6 +102,7 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_Upstream]]:
     _Upstream.release = threading.Event()
     _Upstream.expired = False
     _Upstream.empty_status = None
+    _Upstream.early_hints = False
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Upstream)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -147,13 +152,14 @@ def _request(
     return connection.getresponse()
 
 
-def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes) -> bytes:
-    """Send one POST with hand-written body framing and read the answer's head.
+def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes, *, method: str = "POST") -> bytes:
+    """Send one request (a POST unless told otherwise) with hand-written body framing and read the answer's head.
 
     Args:
         proxy: The running proxy.
-        framing: The body-framing header line, with its CRLF.
+        framing: The body-framing header lines, each with its CRLF.
         payload: The bytes after the blank line.
+        method: The request method.
 
     Returns:
         The bytes up to the end of the answer's headers, or what came before a 5-second silence.
@@ -164,7 +170,7 @@ def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes) -> bytes:
         context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
     ):
         secured.sendall(
-            b"POST /backend-api/codex/responses HTTP/1.1\r\nHost: x\r\n"
+            f"{method} /backend-api/codex/responses HTTP/1.1\r\nHost: x\r\n".encode()
             + f"Authorization: Bearer {PLACEHOLDER}\r\n".encode()
             + framing
             + b"\r\n"
@@ -268,6 +274,135 @@ def test_chunk_size_that_is_not_plain_hex_is_refused(
 
     assert answer.startswith(b"HTTP/1.1 400 ")
     assert upstream.seen == []
+
+
+@pytest.mark.parametrize(
+    ("framing", "payload"),
+    [
+        (b"Transfer-Encoding: gzip\r\nContent-Length: 5\r\n", b"hello"),
+        (b"Transfer-Encoding: identity\r\n", b""),
+        (b"Transfer-Encoding: gzip, chunked\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
+        (b"Transfer-Encoding: chunked, gzip\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
+        (b"Transfer-Encoding: xchunkedx\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
+        (b"Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
+        (b"Transfer-Encoding: chunked\r\nContent-Length: 15\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
+        (b"Content-Length: 5\r\nContent-Length: 5\r\n", b"hello"),
+        (b"Content-Length: 2\r\nContent-Length: 5\r\n", b"hello"),
+    ],
+    ids=[
+        "gzip-with-length",
+        "identity",
+        "gzip-then-chunked",
+        "chunked-then-gzip",
+        "chunked-substring",
+        "chunked-twice",
+        "chunked-with-length",
+        "same-length-twice",
+        "different-lengths",
+    ],
+)
+def test_unclear_body_framing_is_refused(
+    framing: bytes, payload: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """A body whose length RFC 9112 does not fix gets 400 and is not forwarded.
+
+    Args:
+        framing: The framing header lines.
+        payload: The body bytes.
+    """
+    answer = _raw_post(proxy, framing, payload)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"5;" + b"x" * 5000 + b"\r\nhello\r\n0\r\n\r\n", b"5\r\nhelloEXTRA\r\n0\r\n\r\n"],
+    ids=["line-over-4-kib", "data-longer-than-size"],
+)
+def test_broken_chunk_framing_is_refused(payload: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """A chunk-framing line over 4 KiB, or chunk data longer than its size, gets 400 and is not forwarded.
+
+    Args:
+        payload: The chunked body bytes.
+    """
+    answer = _raw_post(proxy, b"Transfer-Encoding: chunked\r\n", payload)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize("payload", [b"5", b"5\r\nhel"], ids=["line-without-end", "data-cut-short"])
+def test_chunked_body_cut_off_by_the_stream_end_is_malformed(payload: bytes) -> None:
+    """A chunk line or chunk the stream ends inside is malformed, which ``_forward`` answers with 400.
+
+    Over TLS the 400 cannot reach a client that ended its stream without a
+    close_notify (OpenSSL 3 then stops the session), so this reads the body
+    from a plain stream.
+
+    Args:
+        payload: The chunked body bytes before the stream ends.
+    """
+    handler = object.__new__(codex_auth_proxy._Handler)
+    handler.rfile = io.BytesIO(payload)
+    handler.headers = http.client.parse_headers(io.BytesIO(b"Transfer-Encoding: chunked\r\n\r\n"))
+
+    with pytest.raises(ValueError, match="unterminated"):
+        handler._body()
+
+
+@pytest.mark.parametrize(
+    ("framing", "payload"),
+    [
+        (b"Content-Length: 17\r\n", b"A" * 17),
+        (b"Transfer-Encoding: chunked\r\n", b"10\r\n" + b"A" * 16 + b"\r\n1\r\nA\r\n0\r\n\r\n"),
+    ],
+    ids=["content-length", "chunked"],
+)
+def test_body_over_the_limit_gets_413(
+    framing: bytes,
+    payload: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+    proxy: CodexAuthProxy,
+    upstream: type[_Upstream],
+) -> None:
+    """A body larger than the limit (16 bytes here) gets 413 and is not forwarded.
+
+    Args:
+        framing: The framing header line.
+        payload: A 17-byte body in that framing.
+    """
+    monkeypatch.setattr(codex_auth_proxy, "MAX_BODY_BYTES", 16)
+
+    answer = _raw_post(proxy, framing, payload)
+
+    assert answer.startswith(b"HTTP/1.1 413 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
+def test_other_method_with_a_large_body_gets_501(method: str, proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """A method other than GET or POST gets a readable 501, even with a body the proxy never reads.
+
+    Args:
+        method: A method the proxy does not serve.
+    """
+    answer = _raw_post(proxy, b"Content-Length: 200000\r\n", b"A" * 200_000, method=method)
+
+    assert answer.startswith(b"HTTP/1.1 501 ")
+    assert upstream.seen == []
+
+
+def test_early_hints_before_the_answer_are_skipped(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """A provider 103 before its 200 does not replace the answer; codex gets the 200 and its body."""
+    upstream.early_hints = True
+
+    response = _request(proxy, "GET", "/backend-api/codex/models")
+
+    assert response.status == 200
+    assert response.read() == b'{"models": []}'
+    assert len(upstream.seen) == 1
 
 
 def test_chunked_body_with_extensions_is_forwarded(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:

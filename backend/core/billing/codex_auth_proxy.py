@@ -259,6 +259,26 @@ def _upstream_connection() -> http.client.HTTPConnection:
     return http.client.HTTPSConnection(UPSTREAM_HOST, 443, context=context, timeout=UPSTREAM_TIMEOUT_SECONDS)
 
 
+class _FinalResponse(http.client.HTTPResponse):
+    """An upstream answer that skips interim 1xx answers, as RFC 9110 15.2 asks of a client."""
+
+    def _read_status(self) -> tuple[str, int, str]:
+        """Read status lines until one that is not an interim answer.
+
+        ``http.client`` skips only ``100 Continue``; a ``103 Early Hints`` would
+        otherwise be taken as the answer and the real one lost. ``101`` stays,
+        because it ends the HTTP exchange instead of preceding an answer.
+
+        Returns:
+            ``(version, status, reason)`` of the first answer that is not interim.
+        """
+        while True:
+            version, status, reason = super()._read_status()
+            if not 100 <= status < 200 or status == 101:
+                return version, status, reason
+            http.client._read_headers(self.fp)  # type: ignore[attr-defined]
+
+
 class _Server(http.server.ThreadingHTTPServer):
     """The proxy's HTTP server, carrying the real login for its handlers."""
 
@@ -345,6 +365,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         """Forward an allowed POST."""
         self._forward()
 
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """Answer the HTTP server's own errors (501 for another method, a bad request line) like :meth:`_refuse`.
+
+        The stdlib version closes with the request body unread, so on Linux the
+        reply can be lost to a TCP reset.
+
+        Args:
+            code: The HTTP status.
+            message: Unused.
+            explain: Unused.
+        """
+        self._refuse(code)
+
     def _refuse(self, status: int) -> None:
         """Answer with an empty error and close the connection.
 
@@ -390,9 +423,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         Raises:
             ValueError: The body framing is malformed.
         """
+        # RFC 9112 6.1 and 6.3: any other coding, chunked with a Content-Length, or
+        # more than one Content-Length leaves the body length unclear, so refuse.
+        codings = self.headers.get_all("transfer-encoding") or []
+        lengths = self.headers.get_all("content-length") or []
+        if len(lengths) > 1:
+            raise ValueError("more than one content-length")
         # int() also takes a sign, "_" and spaces, and a negative size read to the end
         # of the stream past the size limit, so the sizes must be bare digits.
-        if "chunked" in (self.headers.get("transfer-encoding") or "").lower():
+        if codings:
+            if lengths or len(codings) != 1 or codings[0].strip().lower() != "chunked":
+                raise ValueError("transfer-encoding is not only chunked")
             parts: list[bytes] = []
             total = 0
             while True:
@@ -451,6 +492,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # A plain body, so the account id in it can be swapped below.
             headers["Accept-Encoding"] = "identity"
         upstream = _upstream_connection()
+        upstream.response_class = _FinalResponse
         try:
             try:
                 upstream.request(
