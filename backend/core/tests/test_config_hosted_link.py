@@ -49,8 +49,12 @@ def _local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("API_HOST", "127.0.0.1")
 
 
-def test_dev_build_links_to_staging(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A build with no stamp is a dev build, and dev builds link to staging.
+def test_missing_stamp_falls_back_to_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build with no target and no stamp is treated as a release build.
+
+    No packaging step writes the stamp yet, so a missing stamp must not send a
+    release build to staging. Production has no API origin yet, so the build
+    refuses to link (``hosted_link.not_configured``).
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
@@ -59,9 +63,32 @@ def test_dev_build_links_to_staging(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = Settings(_env_file=None)
 
+    assert settings.hosted_target == "production"
+    assert settings.hosted_app_url == "https://skynet.app"
+    assert settings.hosted_api_url == ""
+
+
+def test_dev_build_opts_in_to_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dev build sets ``APP_HOSTED_TARGET=staging`` and links to staging.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+    """
+    _local(monkeypatch)
+    monkeypatch.setenv("APP_HOSTED_TARGET", "staging")
+
+    settings = Settings(_env_file=None)
+
     assert settings.hosted_target == "staging"
     assert settings.hosted_app_url == _STAGING_APP
     assert settings.hosted_api_url == _STAGING_API
+
+
+def test_dev_env_example_opts_in_to_staging() -> None:
+    """The dev env template sets the staging target, because the default is production."""
+    env_example = Path(config_module.__file__).resolve().parents[1] / ".env.example"
+
+    assert "APP_HOSTED_TARGET=staging" in env_example.read_text(encoding="utf-8").splitlines()
 
 
 def test_release_stamp_links_to_production(monkeypatch: pytest.MonkeyPatch) -> None:

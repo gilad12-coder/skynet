@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from ...brand import APP_NAME
 from ...i18n_en import t_en
 from ...local import hosted_link
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -41,7 +42,7 @@ def _page(message: str, *, status: int) -> HTMLResponse:
         The HTML response.
     """
     body = (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Skynet</title>'
+        f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{html.escape(APP_NAME)}</title>'
         '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
         f'<body style="font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 32rem">'
         f"<p>{html.escape(message)}</p></body></html>"
@@ -98,8 +99,8 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
             view = hosted_link.finish_link(engine, code=code, state=state)
         except DomainError as exc:
             return _page(str(exc.detail), status=exc.status_code)
-        label = view.account_label or "your account"
-        return _page(f"Linked as {label}. You can go back to the Skynet app.", status=200)
+        label = view.account_label or t_en("hosted_link.linked_unknown_account")
+        return _page(t_en("hosted_link.linked", label=label), status=200)
 
     @router.get("/local/hosted-link/status", include_in_schema=False, dependencies=_LOCAL_ONLY)
     def status(user: AuthenticatedUserDep) -> dict[str, Any]:

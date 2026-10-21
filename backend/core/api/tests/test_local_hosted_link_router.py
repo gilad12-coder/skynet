@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from cryptography.fernet import Fernet
@@ -14,7 +16,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
+from ...brand import APP_NAME
 from ...config import settings
+from ...connectors import oauth
+from ...i18n_en import t_en
 from ...local import hosted_link
 from ...local.tests.fake_hosted import API_ORIGIN, APP_ORIGIN, FakeHosted
 from ...storage.models import UserConnectorModel
@@ -86,7 +91,7 @@ def client(engine: Engine) -> TestClient:
 
     app.include_router(create_local_hosted_link_router(job_store=SimpleNamespace(engine=engine)))
     app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(_USER, "user", ())
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=False)
 
 
 def _link(client: TestClient, hosted: FakeHosted) -> None:
@@ -174,3 +179,46 @@ def test_revoked_link_answers_401(client: TestClient, hosted: FakeHosted) -> Non
     assert response.status_code == 401
     assert response.json()["code"] == "hosted_link.revoked"
     assert client.get("/local/hosted-link/status").json() == {"linked": False}
+
+
+def test_success_page_uses_the_catalog(client: TestClient, hosted: FakeHosted) -> None:
+    """The success page text and title come from the catalog and the brand name.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    url = client.post("/local/hosted-link/start", json={"device_name": "Test Mac"}).json()["authorize_url"]
+    _redirect, code, state = hosted.authorize(url)
+
+    page = client.get("/local/hosted-link/callback", params={"code": code, "state": state})
+
+    assert page.status_code == 200
+    assert html.escape(t_en("hosted_link.linked", label="dana@example.test")) in page.text
+    assert f"<title>{html.escape(APP_NAME)}</title>" in page.text
+
+
+def test_connector_state_gives_the_state_invalid_page(client: TestClient, hosted: FakeHosted) -> None:
+    """A connector OAuth state sent to the link callback gives a 400 page, not a 500.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    app = oauth.OAuthApp(
+        provider="google_drive",
+        authorize_url="https://accounts.example.test/authorize",
+        token_url="https://accounts.example.test/token",
+        scopes="drive.readonly",
+        client_id="client-id",
+        client_secret=None,
+        extra_authorize_params={},
+    )
+    url = oauth.build_authorize_url(app, _USER, "http://127.0.0.1:8110/connectors/callback")
+    state = parse_qs(urlsplit(url).query)["state"][0]
+
+    page = client.get("/local/hosted-link/callback", params={"code": "c", "state": state})
+
+    assert page.status_code == 400
+    assert html.escape(t_en("hosted_link.state_invalid")) in page.text
+    assert hosted.calls == []

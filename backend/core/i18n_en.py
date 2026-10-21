@@ -169,6 +169,8 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "hosted_link.unreachable": f"The Mac app cannot reach the hosted {APP_NAME} site. Check your connection and try again.",
     "hosted_link.revoked": f"This Mac is no longer linked to your {APP_NAME} account. Link it again to continue.",
     "hosted_link.not_linked": f"Link your {APP_NAME} account in Settings first.",
+    "hosted_link.linked": f"Linked as {{label}}. You can go back to the {APP_NAME} app.",
+    "hosted_link.linked_unknown_account": "your account",
     "notifier.body.needs_input": "Projected spend exceeds the spending limit, so the optimization was paused. Raise the limit to continue from where it stopped.",
     "notifier.body.stuck": "No improvement over the last {percent}% of the optimization's evaluation budget.",
     "optimization.already_terminal": "Optimization is already in terminal state '{status}'.",

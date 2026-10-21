@@ -46,10 +46,12 @@ LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DEFAULT_API_HOST = "0.0.0.0"
 
 # Hosted Skynet the Mac app links to (SKY-124). Gilad's Q2 decision: release
-# builds link to production, dev builds to staging, set at build time. The
-# release packaging writes ``production`` into this stamp file; without it the
-# build is a dev build. The production API origin is not decided yet, so a
-# release build refuses to link (``hosted_link.not_configured``) until it is set.
+# builds link to production, dev builds to staging. A build with no
+# ``APP_HOSTED_TARGET`` and no stamp file is treated as a release build, so a
+# packaging slip can never send real users to staging. Dev builds opt in with
+# ``APP_HOSTED_TARGET=staging`` (see ``.env.example``). The production API
+# origin is not decided yet, so a release build refuses to link
+# (``hosted_link.not_configured``) until it is set.
 HOSTED_TARGET_STAMP = Path(__file__).parent / "hosted_target.txt"
 HOSTED_TARGET_URLS = {
     "production": ("https://skynet.app", ""),
@@ -250,7 +252,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias="APP_HOSTED_TARGET",
         description="Hosted Skynet the Mac app links to: production or staging. Unset reads the build stamp; "
-        "no stamp means a dev build, which links to staging.",
+        "no stamp means production. Dev builds set staging.",
     )
     hosted_app_url: str = Field(
         default="",
@@ -1573,7 +1575,7 @@ class Settings(BaseSettings):
         target = self.hosted_target.strip().lower()
         if not target and HOSTED_TARGET_STAMP.is_file():
             target = HOSTED_TARGET_STAMP.read_text(encoding="utf-8").strip().lower()
-        target = target or "staging"
+        target = target or "production"
         if target not in HOSTED_TARGET_URLS:
             raise ValueError(f"unknown hosted target {target!r}; expected production or staging")
         self.hosted_target = target

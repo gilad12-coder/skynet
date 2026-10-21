@@ -215,6 +215,8 @@ class I18nKey(StrEnum):
     HEALTH_WORKERS_DEAD = 'health.workers_dead'
     HEALTH_WORKERS_STUCK = 'health.workers_stuck'
     HOSTED_LINK_FAILED = 'hosted_link.failed'
+    HOSTED_LINK_LINKED = 'hosted_link.linked'
+    HOSTED_LINK_LINKED_UNKNOWN_ACCOUNT = 'hosted_link.linked_unknown_account'
     HOSTED_LINK_NOT_CONFIGURED = 'hosted_link.not_configured'
     HOSTED_LINK_NOT_LINKED = 'hosted_link.not_linked'
     HOSTED_LINK_REVOKED = 'hosted_link.revoked'

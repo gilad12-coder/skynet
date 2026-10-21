@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
@@ -15,7 +19,9 @@ from sqlalchemy.pool import StaticPool
 
 from ...api.errors import DomainError
 from ...config import settings
-from ...connectors.vault import ConnectorVault
+from ...connectors import oauth
+from ...connectors.vault import ConnectorVault, vault_cipher
+from ...notifications import slack
 from ...storage.models import UserConnectorModel
 from .. import hosted_link
 from .fake_hosted import API_ORIGIN, APP_ORIGIN, FakeHosted
@@ -244,7 +250,7 @@ def test_token_near_expiry_is_refreshed_and_rotated(engine: Engine, hosted: Fake
     assert hosted.refresh_count == 1
     assert token == new.access_token != old.access_token
     assert new.refresh_token != old.refresh_token
-    assert old.refresh_token not in hosted.refresh
+    assert hosted.refresh[old.refresh_token].used_at is not None
 
 
 def test_token_expired_answer_refreshes_once(engine: Engine, hosted: FakeHosted) -> None:
@@ -265,8 +271,8 @@ def test_token_expired_answer_refreshes_once(engine: Engine, hosted: FakeHosted)
     assert hosted.refresh_count == 1
 
 
-def test_parallel_refresh_runs_once(engine: Engine, hosted: FakeHosted) -> None:
-    """A second caller that waited on the lock reads the new pair, not a second refresh.
+def test_waiting_caller_reads_the_new_pair(engine: Engine, hosted: FakeHosted) -> None:
+    """A caller that comes after a refresh with the old token reads the new pair (sequential).
 
     Args:
         engine: Local database.
@@ -406,5 +412,194 @@ def test_tokens_never_reach_the_logs(engine: Engine, hosted: FakeHosted, caplog:
     hosted_link.unlink(engine, _USER)
 
     assert "skyl_" not in caplog.text
-    for token in hosted.access | hosted.refresh:
+    for token in hosted.access | set(hosted.refresh):
         assert token not in caplog.text
+
+
+def _state_from(url: str) -> str:
+    """Return the ``state`` query value of an authorize URL.
+
+    Args:
+        url: An authorize URL.
+
+    Returns:
+        The state.
+    """
+    return parse_qs(urlsplit(url).query)["state"][0]
+
+
+def test_connector_oauth_state_is_refused(engine: Engine, hosted: FakeHosted) -> None:
+    """A connector OAuth state, sealed with the same vault key, is not a link state.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    app = oauth.OAuthApp(
+        provider="google_drive",
+        authorize_url="https://accounts.example.test/authorize",
+        token_url="https://accounts.example.test/token",
+        scopes="drive.readonly",
+        client_id="client-id",
+        client_secret=None,
+        extra_authorize_params={},
+    )
+    state = _state_from(oauth.build_authorize_url(app, _USER, "http://127.0.0.1:8110/connectors/callback"))
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.finish_link(engine, code="abc", state=state)
+
+    assert exc.value.code == "hosted_link.state_invalid"
+    assert exc.value.status_code == 400
+    assert hosted.calls == []
+
+
+def test_slack_state_is_refused(engine: Engine, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Slack state has a nonce too, but it is not a link state.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to configure the Slack app.
+    """
+    monkeypatch.setattr(settings, "slack_client_id", "slack-client")
+    monkeypatch.setattr(settings, "slack_client_secret", SecretStr("slack-secret"))
+    state = _state_from(slack.build_authorize_url(_USER, "http://127.0.0.1:8110/notifications/slack/callback"))
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.finish_link(engine, code="abc", state=state)
+
+    assert exc.value.code == "hosted_link.state_invalid"
+    assert hosted.calls == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ["not", "a", "dict"],
+        {"t": "hosted_link", "v": "x", "n": 5, "r": "http://127.0.0.1:8110/cb", "u": _USER},
+        {"t": "hosted_link", "v": "", "n": "nonce", "r": "http://127.0.0.1:8110/cb", "u": _USER},
+        {"v": "x", "n": "nonce", "r": "http://127.0.0.1:8110/cb", "u": _USER},
+    ],
+)
+def test_badly_shaped_state_is_refused(engine: Engine, hosted: FakeHosted, payload: object) -> None:
+    """A state with no link tag or with a wrong field type gives 400, not a crash.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+        payload: A sealed payload of the wrong shape.
+    """
+    state = vault_cipher().encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.finish_link(engine, code="abc", state=state)
+
+    assert exc.value.code == "hosted_link.state_invalid"
+    assert hosted.calls == []
+
+
+def test_unknown_access_token_refreshes_and_retries(engine: Engine, hosted: FakeHosted) -> None:
+    """Hosted forgot the access token (401 ``auth.invalid_token``): one refresh, one retry.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    _link(engine, hosted)
+    hosted.access.clear()
+
+    who = hosted_link.hosted_get(engine, _USER, "/desktop/v1/whoami")
+
+    assert who["email"] == "dana@example.test"
+    assert hosted.refresh_count == 1
+    assert hosted_link.link_status(engine, _USER) is not None
+
+
+def test_unknown_access_token_after_refresh_clears_the_link(engine: Engine, hosted: FakeHosted) -> None:
+    """``auth.invalid_token`` again after a good refresh: the link is gone, so the Mac clears it.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    _link(engine, hosted)
+    hosted.reject_all_access = True
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.hosted_get(engine, _USER, "/desktop/v1/balance")
+
+    assert exc.value.code == "hosted_link.revoked"
+    assert exc.value.status_code == 401
+    assert hosted.refresh_count == 1
+    assert hosted_link.link_status(engine, _USER) is None
+
+
+def test_unknown_pair_clears_the_link(engine: Engine, hosted: FakeHosted) -> None:
+    """Hosted forgot the whole pair: the refresh gets ``invalid_grant`` and the Mac clears the link.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    _link(engine, hosted)
+    hosted.access.clear()
+    hosted.refresh.clear()
+
+    with pytest.raises(DomainError) as exc:
+        hosted_link.hosted_get(engine, _USER, "/desktop/v1/whoami")
+
+    assert exc.value.code == "hosted_link.revoked"
+    assert hosted_link.link_status(engine, _USER) is None
+
+
+def test_fake_copies_the_hosted_reuse_rules(engine: Engine, hosted: FakeHosted) -> None:
+    """A refresh token sent again after the 30 s grace revokes the link, as on #782.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    _link(engine, hosted)
+    secret = ConnectorVault(engine).resolve(_USER, hosted_link.PROVIDER)
+    assert secret is not None
+    now = [1000.0]
+    hosted.clock = lambda: now[0]
+    transport = hosted.transport()
+    request = {"grant_type": "refresh_token", "refresh_token": secret.refresh_token}
+
+    with httpx.Client(base_url=API_ORIGIN, transport=transport) as client:
+        first = client.post("/desktop/link/token", json=request)
+        retry = client.post("/desktop/link/token", json=request)
+        now[0] += 31
+        late = client.post("/desktop/link/token", json=request)
+
+    assert first.status_code == retry.status_code == 200
+    assert first.json()["access_token"] not in hosted.access
+    assert late.status_code == 401
+    assert late.json()["code"] == "desktop.link_revoked"
+    assert hosted.reuse_notices == 1
+
+
+def test_parallel_callers_refresh_once(tmp_path: Path, hosted: FakeHosted) -> None:
+    """Two callers that find the token old at the same time send one refresh, and the link lives.
+
+    Args:
+        tmp_path: Folder for a file database that two threads can share.
+        hosted: The fake hosted server.
+    """
+    file_engine = create_engine(f"sqlite:///{tmp_path / 'local.db'}")
+    UserConnectorModel.__table__.create(file_engine)
+    hosted.access_ttl = 120
+    _link(file_engine, hosted)
+    hosted.access_ttl = 3600
+    hosted.refresh_delay = 0.3
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tokens = list(pool.map(lambda _: hosted_link.access_token(file_engine, _USER), range(2)))
+
+    hosted.refresh_delay = 0.0
+    assert tokens[0] == tokens[1]
+    assert hosted.refresh_count == 1
+    assert hosted.reuse_notices == 0
+    assert hosted_link.hosted_get(file_engine, _USER, "/desktop/v1/whoami")["email"] == "dana@example.test"

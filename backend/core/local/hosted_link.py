@@ -46,7 +46,15 @@ _REFRESH_LOCK_KEY = 0x534B59_124
 _ACCESS_PREFIX = "skyl_at_"
 _REFRESH_PREFIX = "skyl_rt_"
 # Hosted codes that mean this link is gone for good; the Mac clears its link data.
-_GONE_CODES = frozenset({"desktop.link_revoked", "desktop.invalid_token", "desktop.invalid_grant"})
+_GONE_CODES = frozenset({"desktop.link_revoked", "desktop.invalid_grant"})
+# Hosted (#782) answers ``auth.invalid_token`` when it no longer knows the access
+# token, for example after a grace retry replaced the pair. A refresh can still
+# save the link, so the client refreshes once before it gives up.
+_REFRESH_CODES = frozenset({"desktop.token_expired", "auth.invalid_token"})
+# Purpose tag in the link state. Other flows seal their states with the same
+# vault key, so the tag keeps their states out of this callback.
+_STATE_PURPOSE = "hosted_link"
+_STATE_FIELDS = ("v", "n", "r", "u")
 
 # Tests swap in an ``httpx.MockTransport`` of the hosted routes.
 _TRANSPORT: httpx.BaseTransport | None = None
@@ -119,7 +127,7 @@ def start_link(username: str, *, device_name: str) -> str:
         raise DomainError("hosted_link.not_configured", status=503)
     verifier = secrets.token_urlsafe(64)
     redirect_uri = callback_uri()
-    payload = {"v": verifier, "n": secrets.token_urlsafe(16), "r": redirect_uri, "u": username}
+    payload = {"t": _STATE_PURPOSE, "v": verifier, "n": secrets.token_urlsafe(16), "r": redirect_uri, "u": username}
     state = vault_cipher().encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
     query = urlencode(
         {
@@ -143,16 +151,22 @@ def _open_state(state: str) -> dict[str, str]:
         state: The opaque state from the callback.
 
     Returns:
-        The state payload (``v``, ``n``, ``r``, ``u``).
+        The state payload (``t``, ``v``, ``n``, ``r``, ``u``).
 
     Raises:
         DomainError: 400 ``hosted_link.state_invalid`` when the state is forged,
-            expired or used before.
+            expired, used before, or made by another flow.
     """
     try:
         payload = json.loads(vault_cipher().decrypt(state.encode("ascii"), ttl=STATE_TTL_SECONDS))
     except (InvalidToken, UnicodeError, ValueError) as exc:
         raise DomainError("hosted_link.state_invalid", status=400) from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("t") != _STATE_PURPOSE
+        or not all(isinstance(payload.get(key), str) and payload[key] for key in _STATE_FIELDS)
+    ):
+        raise DomainError("hosted_link.state_invalid", status=400)
     now = time.time()
     with _USED_STATES_LOCK:
         for nonce, expiry in list(_USED_STATES.items()):
@@ -392,7 +406,9 @@ def _get(path: str, token: str) -> httpx.Response:
 def hosted_get(engine: Engine, username: str, path: str) -> dict[str, Any]:
     """Call a hosted ``/desktop/v1`` read route with the linked account.
 
-    A 401 ``desktop.token_expired`` refreshes once and retries once.
+    A 401 ``desktop.token_expired`` or ``auth.invalid_token`` refreshes once
+    and retries once. An ``auth.invalid_token`` after that refresh means hosted
+    dropped the link, so the local link data is cleared.
 
     Args:
         engine: Local database.
@@ -409,14 +425,15 @@ def hosted_get(engine: Engine, username: str, path: str) -> dict[str, Any]:
     """
     token = access_token(engine, username)
     response = _get(path, token)
-    if response.status_code == 401 and _hosted_code(response) == "desktop.token_expired":
+    if response.status_code == 401 and _hosted_code(response) in _REFRESH_CODES:
         token = refresh_after(engine, username, stale_access_token=token)
         response = _get(path, token)
     if response.status_code == 200:
         body = response.json()
         return body if isinstance(body, dict) else {}
     hosted_code = _hosted_code(response)
-    if response.status_code == 401 and hosted_code in _GONE_CODES:
+    # Only reached after a refresh, so a fresh token that hosted does not know means a dead link.
+    if response.status_code == 401 and (hosted_code in _GONE_CODES or hosted_code == "auth.invalid_token"):
         raise _gone(engine, username)
     logger.warning("Hosted call %s failed (status %s, %s)", path, response.status_code, hosted_code)
     raise DomainError("hosted_link.failed", status=502)
