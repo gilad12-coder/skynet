@@ -118,16 +118,20 @@ def _request(port: int, head: bytes, extra: bytes = b"") -> tuple[socket.socket,
         extra: Bytes sent right after the head, before any answer.
 
     Returns:
-        The open client socket and the proxy's first answer.
+        The open client socket and the proxy's first answer; empty when the
+        proxy closed the connection without one.
     """
     client = socket.create_connection(("127.0.0.1", port), timeout=5)
-    client.sendall(head + extra)
     answer = b""
-    while b"\r\n\r\n" not in answer:
-        chunk = client.recv(1024)
-        if not chunk:
-            break
-        answer += chunk
+    try:
+        client.sendall(head + extra)
+        while b"\r\n\r\n" not in answer:
+            chunk = client.recv(1024)
+            if not chunk:
+                break
+            answer += chunk
+    except ConnectionResetError:
+        pass
     return client, answer
 
 
@@ -174,3 +178,95 @@ def test_proxy_tunnels_an_allowed_host_to_its_checked_address(
         while len(echoed) < len(b"early-late"):
             echoed += client.recv(1024)
         assert echoed == b"EARLY-LATE"
+
+
+def _start_proxy(max_clients: int = proxy.MAX_CLIENTS) -> socket.socket:
+    """Serve the proxy on a loopback port in a background thread.
+
+    Args:
+        max_clients: Most clients served at the same time.
+
+    Returns:
+        The listener; closing it stops the proxy.
+    """
+    listener = socket.create_server(("127.0.0.1", 0))
+    threading.Thread(target=proxy.serve, args=(listener, frozenset({"pypi.org"}), max_clients), daemon=True).start()
+    return listener
+
+
+def _fail_thread_starts(monkeypatch: pytest.MonkeyPatch, times: int) -> list[int]:
+    """Make the next ``times`` thread starts raise like a full pids limit.
+
+    Args:
+        monkeypatch: Pytest fixture.
+        times: How many starts fail.
+
+    Returns:
+        A one-item counter of the failures raised so far.
+    """
+    real_start = threading.Thread.start
+    failed = [0]
+
+    def start(thread: threading.Thread) -> None:
+        """Raise for the first ``times`` calls, then start normally.
+
+        Args:
+            thread: The thread to start.
+
+        Raises:
+            RuntimeError: For the first ``times`` calls.
+        """
+        if failed[0] < times:
+            failed[0] += 1
+            raise RuntimeError("can't start new thread")
+        real_start(thread)
+
+    monkeypatch.setattr(proxy.threading.Thread, "start", start)
+    return failed
+
+
+def test_serve_closes_a_client_whose_thread_cannot_start_and_keeps_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A full pids limit costs one client, not the whole proxy."""
+    listener = _start_proxy()
+    with listener:
+        failed = _fail_thread_starts(monkeypatch, 1)
+        port = listener.getsockname()[1]
+        first, answer = _request(port, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")
+        with first:
+            assert answer == b""
+        second, answer = _request(port, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")
+        with second:
+            assert answer.startswith(b"HTTP/1.1 403 ")
+        assert failed == [1]
+
+
+def test_serve_closes_clients_beyond_the_cap_and_frees_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Over the cap a client is closed at once; a finished client frees its slot."""
+    listener = _start_proxy(max_clients=1)
+    with listener:
+        port = listener.getsockname()[1]
+        held = socket.create_connection(("127.0.0.1", port), timeout=5)
+        extra, answer = _request(port, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")
+        with extra:
+            assert answer == b""
+        held.close()
+        for _ in range(50):
+            client, answer = _request(port, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")
+            with client:
+                if answer:
+                    break
+            threading.Event().wait(0.05)
+        assert answer.startswith(b"HTTP/1.1 403 ")
+
+
+def test_handle_closes_the_tunnel_when_its_return_pipe_cannot_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ``200`` goes out when the second pipe thread cannot start."""
+    upstream = socket.create_server(("127.0.0.1", 0))
+    monkeypatch.setattr(proxy, "public_addresses", lambda host, port: [(socket.AF_INET, upstream.getsockname())])
+    _fail_thread_starts(monkeypatch, 1)
+    ours, theirs = socket.socketpair()
+    with upstream, ours:
+        ours.sendall(b"CONNECT pypi.org:443 HTTP/1.1\r\n\r\n")
+        proxy.handle(theirs, frozenset({"pypi.org"}))
+        ours.settimeout(5)
+        assert ours.recv(1024) == b""

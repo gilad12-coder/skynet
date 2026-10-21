@@ -624,6 +624,46 @@ class DockerSandboxRuntime:
         return stopped
 
 
+def remove_idle_sandbox_networks(docker_bin: str) -> int:
+    """Remove every sandbox network that no container uses any more.
+
+    A setup box's internal network has no lifetime of its own: a killed
+    backend leaves it behind after ``--rm`` removes the box and its proxy, and
+    each one holds a /16 from Docker's small address pool. Run this at startup,
+    before any box opens. It never raises: a failure is logged and skipped.
+
+    Args:
+        docker_bin: Docker (or OrbStack) CLI path.
+
+    Returns:
+        How many networks were removed.
+    """
+    filters = [arg for key, value in sandbox.SANDBOX_TAG.items() for arg in ("--filter", f"label={key}={value}")]
+    try:
+        listed = _docker(docker_bin, ["network", "ls", "-q", *filters])
+    except ServiceError as error:
+        logger.warning("could not list idle local sandbox networks: %s", error)
+        return 0
+    if listed.returncode != 0:
+        logger.warning("could not list idle local sandbox networks: %s", _stderr_line(listed))
+        return 0
+    removed = 0
+    for network in listed.stdout.decode().split():
+        try:
+            attached = _docker(docker_bin, ["network", "inspect", "--format", "{{len .Containers}}", network])
+            if attached.returncode != 0 or attached.stdout.strip() != b"0":
+                continue
+            result = _docker(docker_bin, ["network", "rm", network])
+        except ServiceError as error:
+            logger.warning("could not remove idle local sandbox network %s: %s", network, error)
+            continue
+        if result.returncode != 0:
+            logger.warning("could not remove idle local sandbox network %s: %s", network, _stderr_line(result))
+            continue
+        removed += 1
+    return removed
+
+
 def docker_sandbox_unavailable_reason(settings: Settings) -> str | None:
     """Explain why local Docker sandboxes cannot start, or return ``None``.
 

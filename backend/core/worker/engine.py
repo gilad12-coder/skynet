@@ -77,6 +77,7 @@ from ..notifications.run_watcher import RunNotificationWatcher
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
+from ..service_gateway.optimization.blackbox.docker_sandbox import remove_idle_sandbox_networks
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_from_settings
 from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME
@@ -2475,6 +2476,10 @@ def get_worker(
         if _worker is None or not _worker.threads_alive():
             num_workers = settings.worker_threads
             poll_interval = settings.worker_poll_interval
+            if settings.local_mode:
+                # A killed backend leaves setup networks behind; each holds a /16
+                # of Docker's small pool, so clear idle ones before any box opens.
+                remove_idle_sandbox_networks(settings.docker_bin)
             _worker = BackgroundWorker(
                 job_store=job_store,
                 num_workers=num_workers,

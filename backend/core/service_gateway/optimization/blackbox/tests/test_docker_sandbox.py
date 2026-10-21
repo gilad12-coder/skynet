@@ -20,6 +20,7 @@ from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import Settings
 from core.exceptions import ServiceError
 from core.i18n import t
+from core.worker import engine
 from core.worker.vercel_dspy import _require_image_protocol
 
 from ..docker_egress_proxy import READY_MARKER
@@ -28,6 +29,7 @@ from ..docker_sandbox import (
     DockerSandboxRuntime,
     DockerSandboxSession,
     docker_sandbox_unavailable_reason,
+    remove_idle_sandbox_networks,
 )
 from ..native_runtime import native_runtime_unavailable_reason
 from ..sandbox import (
@@ -72,7 +74,9 @@ elif command == "ps":
     print("box1")
     print("box2")
 elif command == "network ls":
-    print("net1")
+    print(os.environ.get("FAKE_DOCKER_NETWORKS", "net1").replace(",", "\\n"))
+elif command == "network inspect":
+    print("1" if args[-1].startswith("busy") else "0")
 elif command == "inspect":
     print("null")
 elif command == "logs":
@@ -306,6 +310,79 @@ def test_stop_job_sandboxes_removes_every_box_under_the_job_label(fake_docker: t
         ["network", "ls", "-q", "--filter", f"label={DOCKER_JOB_LABEL}=job-7"],
         ["network", "rm", "net1"],
     ]
+
+
+def test_remove_idle_sandbox_networks_keeps_networks_still_in_use(
+    fake_docker: tuple[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Remove only sandbox networks with no attached container."""
+    binary, log = fake_docker
+    monkeypatch.setenv("FAKE_DOCKER_NETWORKS", "idle1,busy1,idle2")
+
+    assert remove_idle_sandbox_networks(binary) == 2
+
+    inspect = ["network", "inspect", "--format", "{{len .Containers}}"]
+    assert _calls(log) == [
+        ["network", "ls", "-q", "--filter", "label=skynet=blackbox"],
+        [*inspect, "idle1"],
+        ["network", "rm", "idle1"],
+        [*inspect, "busy1"],
+        [*inspect, "idle2"],
+        ["network", "rm", "idle2"],
+    ]
+
+
+@pytest.mark.parametrize("fail", ["network ls", "network inspect", "network rm"])
+def test_remove_idle_sandbox_networks_logs_failures_and_continues(
+    fake_docker: tuple[str, Path], monkeypatch: pytest.MonkeyPatch, fail: str
+) -> None:
+    """A Docker refusal skips that step instead of stopping startup."""
+    binary, log = fake_docker
+    monkeypatch.setenv("FAKE_DOCKER_NETWORKS", "idle1,idle2")
+    monkeypatch.setenv("FAKE_DOCKER_FAIL", fail)
+
+    assert remove_idle_sandbox_networks(binary) == 0
+    assert len(_calls(log)) == {"network ls": 1, "network inspect": 3, "network rm": 5}[fail]
+
+
+def test_remove_idle_sandbox_networks_survives_a_missing_cli(tmp_path: Path) -> None:
+    """A missing Docker CLI is logged, not raised."""
+    assert remove_idle_sandbox_networks(str(tmp_path / "no-docker")) == 0
+
+
+@pytest.mark.parametrize("local_mode", [True, False])
+def test_worker_start_removes_idle_sandbox_networks_only_in_local_mode(
+    monkeypatch: pytest.MonkeyPatch, local_mode: bool
+) -> None:
+    """Clear leaked setup networks before the worker can open a box."""
+    events: list[str] = []
+
+    class _Worker:
+        """Record the start of a stand-in worker."""
+
+        def __init__(self, **kwargs: object) -> None:
+            """Accept the worker's settings."""
+
+        def start(self) -> None:
+            """Record the start."""
+            events.append("start")
+
+        def threads_alive(self) -> bool:
+            """Report the stand-in as alive.
+
+            Returns:
+                Always ``True``.
+            """
+            return True
+
+    monkeypatch.setattr(engine, "BackgroundWorker", _Worker)
+    monkeypatch.setattr(engine, "_worker", None)
+    monkeypatch.setattr(engine.settings, "local_mode", local_mode)
+    monkeypatch.setattr(engine, "remove_idle_sandbox_networks", lambda docker_bin: events.append("sweep") or 0)
+
+    engine.get_worker(job_store=None)  # type: ignore[arg-type]
+
+    assert events == (["sweep", "start"] if local_mode else ["start"])
 
 
 def test_session_commands_address_the_container(fake_docker: tuple[str, Path]) -> None:

@@ -31,6 +31,8 @@ _HEAD_LIMIT = 8192
 _HANDSHAKE_SECONDS = 30.0
 _CONNECT_SECONDS = 10.0
 _IDLE_SECONDS = 300.0
+# Each tunnel takes two threads; the sidecar runs under --pids-limit 256.
+MAX_CLIENTS = 64
 _FORBIDDEN = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 _BAD_GATEWAY = b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 _ESTABLISHED = b"HTTP/1.1 200 Connection Established\r\n\r\n"
@@ -177,34 +179,61 @@ def handle(client: socket.socket, allowed: frozenset[str]) -> None:
                 client.sendall(_BAD_GATEWAY)
                 return
             with upstream:
+                back = threading.Thread(target=_pipe, args=(upstream, client), daemon=True)
+                try:
+                    back.start()
+                except RuntimeError:
+                    return
                 client.sendall(_ESTABLISHED)
                 if rest:
                     upstream.sendall(rest)
                 client.settimeout(_IDLE_SECONDS)
-                back = threading.Thread(target=_pipe, args=(upstream, client), daemon=True)
-                back.start()
                 _pipe(client, upstream)
                 back.join()
         except OSError:
             return
 
 
-def serve(listener: socket.socket, allowed: frozenset[str]) -> None:
+def _handle_slot(client: socket.socket, allowed: frozenset[str], slots: threading.BoundedSemaphore) -> None:
+    """Serve one client, then free its slot.
+
+    Args:
+        client: The accepted connection.
+        allowed: Exact allowlisted host names.
+        slots: The semaphore that caps concurrent clients.
+    """
+    try:
+        handle(client, allowed)
+    finally:
+        slots.release()
+
+
+def serve(listener: socket.socket, allowed: frozenset[str], max_clients: int = MAX_CLIENTS) -> None:
     """Accept connections, one thread each, until the listener closes.
 
     A listener that fails stops the proxy, which leaves the box with no way
-    out rather than an unchecked one.
+    out rather than an unchecked one. A client beyond ``max_clients``, or one
+    whose thread cannot start, is closed, and the proxy keeps serving.
 
     Args:
         listener: A bound, listening socket.
         allowed: Exact allowlisted host names.
+        max_clients: Most clients served at the same time.
     """
+    slots = threading.BoundedSemaphore(max_clients)
     while True:
         try:
             client, _ = listener.accept()
         except OSError:
             return
-        threading.Thread(target=handle, args=(client, allowed), daemon=True).start()
+        if not slots.acquire(blocking=False):
+            client.close()
+            continue
+        try:
+            threading.Thread(target=_handle_slot, args=(client, allowed, slots), daemon=True).start()
+        except RuntimeError:
+            slots.release()
+            client.close()
 
 
 def main(argv: list[str]) -> None:
