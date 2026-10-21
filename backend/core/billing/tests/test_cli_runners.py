@@ -208,6 +208,75 @@ def test_codex_reads_the_event_stream(tmp_path: Path) -> None:
     assert not set(API_KEYS) & set(call["env"])
 
 
+def test_codex_runs_in_private_homes_and_keeps_a_refreshed_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Give codex a temporary HOME and CODEX_HOME with a login copy, and keep a login it refreshed."""
+    user_home = tmp_path / "user"
+    (user_home / ".codex").mkdir(parents=True)
+    (user_home / ".codex" / "auth.json").write_text("old-login", encoding="utf-8")
+    (user_home / ".codex" / "AGENTS.md").write_text("personal instructions", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.delenv("CODEX_HOME")
+    events = "\n".join(json.dumps(event) for event in CODEX_EVENTS)
+    fake_cli(
+        tmp_path,
+        "codex",
+        "auth = os.path.join(os.environ['CODEX_HOME'], 'auth.json')\n"
+        "assert open(auth).read() == 'old-login'\n"
+        "assert sorted(os.listdir(os.environ['CODEX_HOME'])) == ['auth.json']\n"
+        "open(auth, 'w').write('new-login')\n"
+        f"print({events!r})",
+    )
+    completion = cli_runners.run_codex("gpt-5.6-luna", "ping", None, local_settings(tmp_path), tmp_path)
+    assert completion.text == "pong"
+    [call] = calls(tmp_path, "codex")
+    assert call["env"]["HOME"] != str(user_home)
+    assert call["env"]["CODEX_HOME"] != str(user_home / ".codex")
+    for flag in ("--ignore-user-config", "--ignore-rules", "--ephemeral", "mcp_servers={}"):
+        assert flag in call["argv"]
+    assert (user_home / ".codex" / "auth.json").read_text(encoding="utf-8") == "new-login"
+    assert stat.S_IMODE((user_home / ".codex" / "auth.json").stat().st_mode) == 0o600
+    assert not Path(call["env"]["CODEX_HOME"]).exists()
+
+
+def test_droid_runs_in_a_private_home_with_its_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give droid a temporary HOME with its login copy and a link to the Keychain folder."""
+    user_home = tmp_path / "user"
+    (user_home / ".factory").mkdir(parents=True)
+    (user_home / ".factory" / "auth.v2.loginkeychain").write_bytes(b"sealed-login")
+    (user_home / ".factory" / "AGENTS.md").write_text("personal instructions", encoding="utf-8")
+    (user_home / "Library").mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    fake_cli(
+        tmp_path,
+        "droid",
+        "home = os.environ['HOME']\n"
+        "assert open(os.path.join(home, '.factory', 'auth.v2.loginkeychain'), 'rb').read() == b'sealed-login'\n"
+        "assert not os.path.exists(os.path.join(home, '.factory', 'AGENTS.md'))\n"
+        f"assert os.path.realpath(os.path.join(home, 'Library')) == {str((user_home / 'Library').resolve())!r}\n"
+        f"{printing(DROID_SUCCESS)}",
+    )
+    completion = cli_runners.run_droid("claude-haiku-4-5-20251001", "ping", None, local_settings(tmp_path), tmp_path)
+    assert completion.text == "pong"
+    [call] = calls(tmp_path, "droid")
+    assert call["env"]["HOME"] != str(user_home)
+    assert (user_home / "Library").is_dir()
+    assert (user_home / ".factory" / "auth.v2.loginkeychain").read_bytes() == b"sealed-login"
+
+
+def test_claude_keeps_the_real_home_for_its_keychain_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep claude's real HOME, because its Keychain login works only from its own config folder."""
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    fake_cli(tmp_path, "claude", printing(CLAUDE_SUCCESS))
+    cli_runners.run_claude("claude-haiku-4-5", "ping", None, local_settings(tmp_path), tmp_path)
+    [call] = calls(tmp_path, "claude")
+    assert call["env"]["HOME"] == str(user_home)
+    assert call["argv"][call["argv"].index("--setting-sources") + 1] == ""
+
+
 def test_codex_failed_turn_with_a_limit_is_a_rate_limit(tmp_path: Path) -> None:
     """Report a capped codex turn as a cap, not as a failed call."""
     failed = {

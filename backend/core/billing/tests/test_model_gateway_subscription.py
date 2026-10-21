@@ -148,6 +148,38 @@ def test_bound_capability_needs_a_route_token(gateway: ModelGateway) -> None:
 
 
 @pytest.mark.usefixtures("local")
+def test_capability_with_its_own_token_refuses_model_route_tokens(gateway: ModelGateway) -> None:
+    """Serve a capability bound to a dedicated token to that token only, over HTTP and the mailbox."""
+    received: list[bytes] = []
+
+    def handler(body: bytes, headers: dict[str, str]) -> ModelHTTPResult:
+        """Echo the request back."""
+        received.append(body)
+        return ModelHTTPResult(200, "application/json", body)
+
+    dedicated = "host-agent-capability-token"
+    gateway.bind_capability("/v1/_host_agent", handler, token=dedicated)
+    route = gateway.register_subscription(MODEL, "claude", "task")
+    assert _post(route["url"], dedicated, "/_host_agent", {"goal": "x"}).json() == {"goal": "x"}
+    with httpx.Client(trust_env=False) as client:
+        by_api_key = client.post(f"{route['url']}/_host_agent", json={"goal": "k"}, headers={"x-api-key": dedicated})
+    assert by_api_key.json() == {"goal": "k"}
+    assert json.loads(gateway.dispatch_guest(dedicated, "/v1/_host_agent", {"goal": "y"}, {}).body) == {"goal": "y"}
+    for token in (route["token"], "wrong", "t\u00e9"):
+        refused = _post(route["url"], token, "/_host_agent", {"goal": "x"}) if token.isascii() else None
+        if refused is not None:
+            assert refused.status_code == 403
+            assert refused.json()["error"]["code"] == "forbidden"
+        guest = gateway.dispatch_guest(token, "/v1/_host_agent", {"goal": "x"}, {})
+        assert guest.status == 403
+        assert json.loads(guest.body)["error"]["message"] == "This capability needs its own token."
+    assert len(received) == 3
+    assert _post(route["url"], dedicated, "/chat/completions", REQUEST).status_code == 401
+    with pytest.raises(ValueError):
+        gateway.dispatch_guest(dedicated, "/v1/chat/completions", REQUEST, {})
+
+
+@pytest.mark.usefixtures("local")
 def test_unbound_capability_is_not_found(gateway: ModelGateway) -> None:
     """Answer 404 for an unbound ``/v1/_`` path instead of sending it to a model route."""
     route = gateway.register_subscription(MODEL, "claude", "task")

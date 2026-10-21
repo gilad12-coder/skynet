@@ -216,6 +216,7 @@ class ModelGateway:
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
         self._routes: dict[str, OpenRouterDispatcher | CliDispatcher] = {}
         self._capabilities: dict[str, Callable[[bytes, dict[str, str]], ModelHTTPResult]] = {}
+        self._capability_tokens: dict[str, str] = {}
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
         self._evaluator: EvaluatorEndpoint | None = None
@@ -283,7 +284,10 @@ class ModelGateway:
                     return
                 route = self._route()
                 if self.path in gateway._capabilities:
-                    self._capability_request(route is not None)
+                    token = self.headers.get("Authorization", "").removeprefix("Bearer ")
+                    if not token:
+                        token = self.headers.get("x-api-key", "")
+                    self._capability_request(gateway._capability_refusal(self.path, token))
                     return
                 token = self.headers.get("Authorization", "").removeprefix("Bearer ")
                 is_tools = (
@@ -358,14 +362,15 @@ class ModelGateway:
                         502, "evaluator_unavailable", "The configured evaluator could not complete this request."
                     )
 
-            def _capability_request(self, authorized: bool) -> None:
+            def _capability_request(self, refusal: ModelHTTPResult | None) -> None:
                 """Pass a bound capability's raw request to its parent-side handler.
 
                 Args:
-                    authorized: Whether the caller presented a registered route token.
+                    refusal: The answer for a caller without the capability's
+                        token, or ``None`` when the caller may use it.
                 """
-                if not authorized:
-                    self._error(401, "unauthorized", "Unknown scoped model route.")
+                if refusal is not None:
+                    self._reply(refusal)
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
@@ -503,12 +508,21 @@ class ModelGateway:
         self._routes[token] = CliDispatcher(self.runtime, cli, model, role, app_config.settings)
         return {"url": self.url, "token": token, "model": model, "role": role}
 
-    def bind_capability(self, path: str, handler: Callable[[bytes, dict[str, str]], ModelHTTPResult]) -> None:
-        """Serve a parent-side endpoint to callers that hold a registered route token.
+    def bind_capability(
+        self,
+        path: str,
+        handler: Callable[[bytes, dict[str, str]], ModelHTTPResult],
+        *,
+        token: str | None = None,
+    ) -> None:
+        """Serve a parent-side endpoint to callers that hold its token.
 
         Args:
             path: Gateway path such as ``/v1/_host_agent``.
             handler: Takes the raw request body and lower-cased headers.
+            token: The only bearer that reaches the handler; a model route token
+                then gets 403. ``None`` admits any registered route token. The
+                token is not a model route: model paths still answer 401 for it.
 
         Raises:
             ValueError: When ``path`` is already bound or would shadow a built-in endpoint.
@@ -516,6 +530,32 @@ class ModelGateway:
         if path in self._capabilities or path in _BUILTIN_PATHS:
             raise ValueError(f"The gateway path {path!r} is already bound.")
         self._capabilities[path] = handler
+        if token is not None:
+            self._capability_tokens[path] = token
+
+    def _capability_refusal(self, path: str, token: str) -> ModelHTTPResult | None:
+        """Return the refusal for a caller of a bound capability, or ``None`` to admit it.
+
+        Args:
+            path: A bound capability path.
+            token: The caller's bearer token.
+
+        Returns:
+            ``None`` for the capability's own token (or, without one, any
+            registered route token); otherwise a 403 or 401 error response.
+        """
+        dedicated = self._capability_tokens.get(path)
+        if dedicated is not None:
+            # Bytes, because compare_digest refuses non-ASCII str from a hostile header.
+            if secrets.compare_digest(token.encode(), dedicated.encode()):
+                return None
+            code, status, message = "forbidden", 403, "This capability needs its own token."
+        elif token in self._routes:
+            return None
+        else:
+            code, status, message = "unauthorized", 401, "Unknown scoped model route."
+        error = {"error": {"type": code, "code": code, "message": message}}
+        return ModelHTTPResult(status, "application/json", json.dumps(error).encode())
 
     def _beat(self) -> None:
         """Report that an economy batch is still being awaited."""
@@ -615,8 +655,11 @@ class ModelGateway:
         """
         route = self._routes.get(token)
         if path in self._capabilities:
-            if route is None:
+            refusal = self._capability_refusal(path, token)
+            if refusal is not None and path not in self._capability_tokens:
                 raise ValueError("Unknown scoped model route.")
+            if refusal is not None:
+                return refusal
             body_bytes = json.dumps(dict(body)).encode()
             return self._capabilities[path](body_bytes, {name.lower(): value for name, value in headers.items()})
         is_tools = self._tools is not None and secrets.compare_digest(token, self._tool_token)

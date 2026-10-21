@@ -2,7 +2,8 @@
 
 Each runner starts the CLI once, without provider API keys in its environment,
 so the CLI bills the signed-in subscription and never a key a developer left
-in the shell. Each CLI runs as a plain completion: its host tools (shell, file
+in the shell. :func:`core.local.cli_isolation.isolated_cli` also keeps the
+user's own instructions, memory and MCP servers out of each call. Each CLI runs as a plain completion: its host tools (shell, file
 reads, web) are turned off, so a prompt cannot make it read the user's files.
 Each CLI runs in its own process group, and a timeout stops the whole group,
 including any child a wrapper script started.
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Settings
-from ..local import cli_probe
+from ..local import cli_isolation, cli_probe
 
 _LIMIT_TEXT = re.compile(
     r"usage limit|rate limit|rate-limit|hit your limit|limit reached|limit exceeded|quota|too many requests",
@@ -108,19 +109,6 @@ class CliRunError(Exception):
         self.transient = transient
 
 
-def cli_env(settings: Settings) -> dict[str, str]:
-    """Return this process's environment without provider API keys.
-
-    Args:
-        settings: Application settings (kept for a stable runner signature).
-
-    Returns:
-        A copy of ``os.environ`` without the keys in ``cli_probe.STRIPPED_ENV_KEYS``.
-    """
-    del settings
-    return cli_probe.cli_env()
-
-
 def parse_reset_at(text: str, *, now: datetime | None = None) -> datetime | None:
     """Read when a usage cap ends from a CLI's limit message.
 
@@ -198,13 +186,13 @@ def _int(value: Any) -> int:
     return int(value) if isinstance(value, int | float) and not isinstance(value, bool) and value > 0 else 0
 
 
-def _start(provider: str, argv: list[str], settings: Settings, cwd: Path) -> subprocess.Popen[str]:
+def _start(provider: str, argv: list[str], env: Mapping[str, str], cwd: Path) -> subprocess.Popen[str]:
     """Start a CLI in its own process group, with pipes for all three streams.
 
     Args:
         provider: The CLI, for error reports.
         argv: The full command.
-        settings: Application settings (environment).
+        env: The CLI's environment, from :func:`cli_isolation.isolated_cli`.
         cwd: The directory the CLI runs in.
 
     Returns:
@@ -221,7 +209,7 @@ def _start(provider: str, argv: list[str], settings: Settings, cwd: Path) -> sub
             stderr=subprocess.PIPE,
             text=True,
             cwd=cwd,
-            env=cli_env(settings),
+            env=dict(env),
             start_new_session=True,
         )
     except FileNotFoundError as error:
@@ -259,14 +247,17 @@ def _close(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=_KILL_GRACE_SECONDS)
 
 
-def _run(provider: str, argv: list[str], prompt: str | None, settings: Settings, cwd: Path) -> tuple[str, str]:
+def _run(
+    provider: str, argv: list[str], prompt: str | None, env: Mapping[str, str], settings: Settings, cwd: Path
+) -> tuple[str, str]:
     """Run a CLI once and return its stdout and stderr.
 
     Args:
         provider: The CLI, for error reports.
         argv: The full command.
         prompt: Text sent on stdin, or ``None`` for none.
-        settings: Application settings (environment and timeout).
+        env: The CLI's environment, from :func:`cli_isolation.isolated_cli`.
+        settings: Application settings (timeout).
         cwd: The directory the CLI runs in.
 
     Returns:
@@ -276,7 +267,7 @@ def _run(provider: str, argv: list[str], prompt: str | None, settings: Settings,
         CliRunError: When the binary is missing or the call times out. A
             timeout is not transient: a hung call would hang again.
     """
-    process = _start(provider, argv, settings, cwd)
+    process = _start(provider, argv, env, cwd)
     try:
         # communicate() ignores a broken stdin pipe, so a CLI that exits before
         # it reads a long prompt still reports its own stderr below.
@@ -342,27 +333,22 @@ def run_claude(
         SubscriptionRateLimitedError: When the subscription is capped.
         CliRunError: When the call fails.
     """
-    # Never ``--bare``: it ignores the subscription login and wants an API key.
-    # The isolation flags keep the user's own settings, MCP servers and skills
-    # out of the prompt; with them a large personal setup overflows the context.
-    argv = [
-        cli_probe.cli_binary("claude", settings),
-        "-p",
-        "--output-format",
-        "json",
-        "--tools",
-        "",
-        "--strict-mcp-config",
-        "--disable-slash-commands",
-        "--setting-sources",
-        "",
-        "--no-session-persistence",
-        "--model",
-        model_arg,
-    ]
-    if json_schema is not None:
-        argv += ["--json-schema", json.dumps(json_schema)]
-    stdout, stderr = _run("claude", argv, prompt, settings, cwd)
+    # Without the isolation flags a large personal setup overflows the context.
+    with cli_isolation.isolated_cli("claude") as isolation:
+        argv = [
+            cli_probe.cli_binary("claude", settings),
+            "-p",
+            "--output-format",
+            "json",
+            "--tools",
+            "",
+            *isolation.args,
+            "--model",
+            model_arg,
+        ]
+        if json_schema is not None:
+            argv += ["--json-schema", json.dumps(json_schema)]
+        stdout, stderr = _run("claude", argv, prompt, isolation.env, settings, cwd)
     raw = _json_object("claude", stdout, stderr)
     if raw.get("is_error"):
         raise _failure("claude", str(raw.get("result") or stderr))
@@ -403,7 +389,10 @@ def run_codex(
         SubscriptionRateLimitedError: When the subscription is capped.
         CliRunError: When the call fails.
     """
-    with tempfile.TemporaryDirectory(prefix="skynet-codex-") as scratch:
+    with (
+        tempfile.TemporaryDirectory(prefix="skynet-codex-") as scratch,
+        cli_isolation.isolated_cli("codex") as isolation,
+    ):
         argv = [
             cli_probe.cli_binary("codex", settings),
             "exec",
@@ -411,10 +400,9 @@ def run_codex(
             "--sandbox",
             "read-only",
             "--skip-git-repo-check",
+            *isolation.args,
             "-c",
             'web_search="disabled"',
-            "-c",
-            "mcp_servers={}",
             *(arg for feature in _CODEX_DISABLED_FEATURES for arg in ("--disable", feature)),
             "--model",
             model_arg,
@@ -424,15 +412,16 @@ def run_codex(
             schema_path.write_text(json.dumps(json_schema), encoding="utf-8")
             argv += ["--output-schema", str(schema_path)]
         argv.append("-")
-        return _stream_codex(argv, prompt, settings, cwd)
+        return _stream_codex(argv, prompt, isolation.env, settings, cwd)
 
 
-def _stream_codex(argv: list[str], prompt: str, settings: Settings, cwd: Path) -> CliCompletion:
+def _stream_codex(argv: list[str], prompt: str, env: Mapping[str, str], settings: Settings, cwd: Path) -> CliCompletion:
     """Run codex, time its events as they arrive, and read the last answer.
 
     Args:
         argv: The full command.
         prompt: Text sent on stdin.
+        env: The CLI's environment, from :func:`cli_isolation.isolated_cli`.
         settings: Application settings.
         cwd: The directory the CLI runs in.
 
@@ -443,7 +432,7 @@ def _stream_codex(argv: list[str], prompt: str, settings: Settings, cwd: Path) -
         SubscriptionRateLimitedError: When the subscription is capped.
         CliRunError: When the call fails.
     """
-    process = _start("codex", argv, settings, cwd)
+    process = _start("codex", argv, env, cwd)
     timed_out = threading.Event()
 
     def expire() -> None:
@@ -538,7 +527,10 @@ def run_droid(
     if json_schema is not None:
         # droid has no schema flag, so the schema travels in the prompt.
         prompt = f"{prompt}\n\nAnswer with only a JSON value that matches this JSON schema:\n{json.dumps(json_schema)}"
-    with tempfile.TemporaryDirectory(prefix="skynet-droid-") as scratch:
+    with (
+        tempfile.TemporaryDirectory(prefix="skynet-droid-") as scratch,
+        cli_isolation.isolated_cli("droid") as isolation,
+    ):
         prompt_path = Path(scratch) / "prompt.txt"
         prompt_path.write_text(prompt, encoding="utf-8")
         # No ``--auto``: droid then stays read-only. Its read-only mode still
@@ -548,7 +540,7 @@ def run_droid(
             "exec",
             "-o",
             "json",
-            "--disable-builtin-skills",
+            *isolation.args,
             "--only-tools",
             _DROID_ONLY_TOOLS,
             "--model",
@@ -556,7 +548,7 @@ def run_droid(
             "-f",
             str(prompt_path),
         ]
-        stdout, stderr = _run("droid", argv, None, settings, cwd)
+        stdout, stderr = _run("droid", argv, None, isolation.env, settings, cwd)
     raw = _json_object("droid", stdout, stderr)
     if raw.get("is_error"):
         raise _failure("droid", str(raw.get("result") or stderr))
