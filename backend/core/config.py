@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +44,41 @@ LEGACY_ENV_PREFIX = "SKYNET_"
 # Local mode must stay reachable from this machine only.
 LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DEFAULT_API_HOST = "0.0.0.0"
+
+# Hosted Skynet the Mac app links to (SKY-124). Gilad's Q2 decision: release
+# builds link to production, dev builds to staging, set at build time. The
+# release packaging writes ``production`` into this stamp file; without it the
+# build is a dev build. The production API origin is not decided yet, so a
+# release build refuses to link (``hosted_link.not_configured``) until it is set.
+HOSTED_TARGET_STAMP = Path(__file__).parent / "hosted_target.txt"
+HOSTED_TARGET_URLS = {
+    "production": ("https://skynet.app", ""),
+    "staging": ("https://frontend-staging-102e.up.railway.app", "https://backend-staging-6295.up.railway.app"),
+}
+
+
+def _is_safe_hosted_origin(url: str, *, allow_insecure: bool) -> bool:
+    """Return whether a hosted link URL is a plain origin the Mac may send tokens to.
+
+    Args:
+        url: The configured URL, without a trailing slash.
+        allow_insecure: Whether the dev override allows ``http`` on a loopback host.
+
+    Returns:
+        True for ``https://host[:port]`` with no user info, path, query or fragment,
+        and for ``http`` on a loopback host when the override is on.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        _ = parts.port
+    except ValueError:
+        return False
+    if not host or "@" in parts.netloc or parts.path or parts.query or parts.fragment:
+        return False
+    if parts.scheme == "https":
+        return True
+    return allow_insecure and parts.scheme == "http" and host in LOCAL_MODE_LOOPBACK_HOSTS
 
 
 def legacy_env_name(name: str) -> str:
@@ -209,6 +245,27 @@ class Settings(BaseSettings):
         default="local@skynet.local",
         validation_alias=AliasChoices("APP_LOCAL_USER_EMAIL", "SKYNET_LOCAL_USER_EMAIL"),
         description="Email of the single local-mode user.",
+    )
+    hosted_target: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_TARGET",
+        description="Hosted Skynet the Mac app links to: production or staging. Unset reads the build stamp; "
+        "no stamp means a dev build, which links to staging.",
+    )
+    hosted_app_url: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_APP_URL",
+        description="Hosted web app origin for the Mac account link. Unset uses the hosted target default.",
+    )
+    hosted_api_url: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_API_URL",
+        description="Hosted API origin for the Mac account link. Unset uses the hosted target default.",
+    )
+    hosted_allow_insecure_url: bool = Field(
+        default=False,
+        validation_alias="APP_HOSTED_ALLOW_INSECURE_URL",
+        description="Dev only: let local mode use an http hosted URL on a loopback host, for a local hosted stack.",
     )
     local_sandbox_image: str = Field(
         default="",
@@ -1496,6 +1553,37 @@ class Settings(BaseSettings):
             raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
         if self.api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
             raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {self.api_host!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_hosted_link(self) -> Settings:
+        """Fill the hosted link URLs from the build target and check them in local mode.
+
+        The Mac sends its desktop tokens to these URLs, so local mode accepts
+        only a plain ``https`` origin. The dev override opens ``http`` for a
+        loopback hosted stack only.
+
+        Returns:
+            The settings instance with the hosted target and URLs set.
+
+        Raises:
+            ValueError: When the target or the stamp names an unknown target,
+                or when local mode gets an unsafe hosted URL.
+        """
+        target = self.hosted_target.strip().lower()
+        if not target and HOSTED_TARGET_STAMP.is_file():
+            target = HOSTED_TARGET_STAMP.read_text(encoding="utf-8").strip().lower()
+        target = target or "staging"
+        if target not in HOSTED_TARGET_URLS:
+            raise ValueError(f"unknown hosted target {target!r}; expected production or staging")
+        self.hosted_target = target
+        app_default, api_default = HOSTED_TARGET_URLS[target]
+        self.hosted_app_url = (self.hosted_app_url.strip() or app_default).rstrip("/")
+        self.hosted_api_url = (self.hosted_api_url.strip() or api_default).rstrip("/")
+        if self.local_mode:
+            for name, url in (("APP_HOSTED_APP_URL", self.hosted_app_url), ("APP_HOSTED_API_URL", self.hosted_api_url)):
+                if url and not _is_safe_hosted_origin(url, allow_insecure=self.hosted_allow_insecure_url):
+                    raise ValueError(f"{name} must be a plain https origin, got {url!r}")
         return self
 
     @model_validator(mode="after")

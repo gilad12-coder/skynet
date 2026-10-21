@@ -425,6 +425,12 @@
     "continuous.review_ready": "הגרסה החדשה עקפה את הנוכחית על אותם מקרים. היא ממתינה לאישור שלכם.",
     "continuous.review_approved": "אישרתם את הגרסה החדשה. היא הגרסה הנוכחית מעכשיו.",
     "continuous.review_rejected": "דחיתם את הגרסה החדשה. הגרסה הקודמת נשארת.",
+    "hosted_link.not_configured": "בגרסה הזו של אפליקציית ה-Mac אין כתובת של {term.appName} המקוון, ולכן אי אפשר לקשר חשבון.",
+    "hosted_link.state_invalid": "בקשת הקישור לא תקינה או ישנה מדי. התחילו את הקישור שוב באפליקציית ה-Mac.",
+    "hosted_link.failed": "האתר של {term.appName} לא אישר את הקישור. התחילו את הקישור שוב.",
+    "hosted_link.unreachable": "אפליקציית ה-Mac לא מצליחה להתחבר לאתר של {term.appName}. בדקו את החיבור ונסו שוב.",
+    "hosted_link.revoked": "ה-Mac הזה כבר לא מקושר לחשבון {term.appName} שלכם. קשרו אותו שוב כדי להמשיך.",
+    "hosted_link.not_linked": "קשרו קודם את חשבון {term.appName} שלכם בהגדרות.",
     "local.not_available": "התכונה הזו זמינה רק באפליקציית {term.appName} ל-Mac.",
     "models.subscription_local_only": "מודלים של מנוי ומציעי CLI מקומיים פועלים רק באפליקציית {term.appName} ל-Mac.",
     "models.managed_unavailable_local": "אפליקציית ה-Mac לא יכולה להשתמש במודלים מנוהלים. בחר/י מודל של מנוי או מפתח ספק משלך."
