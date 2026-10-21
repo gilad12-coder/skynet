@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,7 +13,6 @@ import pytest
 from core.config import Settings
 from core.local import cli_probe
 from core.local.cli_probe import (
-    STRIPPED_ENV_KEYS,
     clear_probe_cache,
     cli_env,
     docker_status,
@@ -21,6 +21,83 @@ from core.local.cli_probe import (
     read_cli_limits,
     write_cli_limit,
 )
+
+# Every name from the review rounds, written out, plus unrelated backend
+# variables and NODE_OPTIONS: none may reach a CLI.
+DROPPED_LITERALS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "FACTORY_API_KEY",
+    "CODEX_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_BASE_URL",
+    "FACTORY_API_BASE_URL",
+    "FACTORY_API_BASE_URL_EU",
+    "FACTORY_HOME_OVERRIDE",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_USE_GATEWAY",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_CONFIG_DIR",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+    "ANTHROPIC_UNIX_SOCKET",
+    "OPENAI_FEDERATION_RULE_ID",
+    "OPENAI_IDENTITY_TOKEN_FILE",
+    "NODE_OPTIONS",
+    "DATABASE_URL",
+    "APP_SECRET_KEY",
+    "OPENROUTER_API_KEY",
+    "SKYNET_RANDOM_JUNK_7F3A",
+    "FACTORY_EXTRA_CA_CERTS",
+)
+# The allow-list, written out, so a change to it fails here.
+KEPT_LITERALS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "TERM",
+    "TZ",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "CODEX_CA_CERTIFICATE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "XDG_CONFIG_HOME",
+)
+
+
+# Shapes from claude 2.1.306 `auth status --json`, with personal fields removed.
+CLAUDE_SUBSCRIPTION = (
+    '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}'
+)
+CLAUDE_API_KEY_HELPER = (
+    '{"loggedIn": true, "authMethod": "api_key_helper", "apiProvider": "firstParty", "apiKeySource": "apiKeyHelper"}'
+)
+CLAUDE_OAUTH_TOKEN = '{"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"}'
 
 
 @pytest.fixture(autouse=True)
@@ -112,7 +189,7 @@ def test_logged_out_cli_is_reported(tmp_path: Path) -> None:
 def test_ready_clis_report_ok(tmp_path: Path) -> None:
     """Current, signed-in CLIs report their version and ``logged_in=True``."""
     codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out="Logged in using ChatGPT")
-    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": true}')
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out=CLAUDE_SUBSCRIPTION)
     settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
 
     statuses = probe_clis(settings)
@@ -121,6 +198,24 @@ def test_ready_clis_report_ok(tmp_path: Path) -> None:
     assert [status.version for status in statuses] == ["0.163.0", "2.1.306"]
     assert all(status.version_ok and status.logged_in for status in statuses)
     assert all(status.rate_limited_until is None for status in statuses)
+
+
+@pytest.mark.parametrize(
+    ("login_out", "expected"),
+    [(CLAUDE_SUBSCRIPTION, True), (CLAUDE_API_KEY_HELPER, False), (CLAUDE_OAUTH_TOKEN, False)],
+    ids=["claude.ai", "api_key_helper", "oauth_token"],
+)
+def test_claude_is_signed_in_only_with_a_claude_ai_login(tmp_path: Path, login_out: str, expected: bool) -> None:
+    """Count only a claude.ai login as signed in; other methods fail closed.
+
+    Args:
+        tmp_path: Directory for the fake binary.
+        login_out: The ``auth status --json`` output.
+        expected: The ``logged_in`` value the probe must report.
+    """
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out=login_out)
+
+    assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is expected
 
 
 def test_unreadable_login_output_is_unknown(tmp_path: Path) -> None:
@@ -137,12 +232,29 @@ def test_probe_strips_provider_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         tmp_path: Directory for the fake binary.
         monkeypatch: Pytest fixture used to set the keys.
     """
-    for key in STRIPPED_ENV_KEYS:
+    for key in DROPPED_LITERALS:
         monkeypatch.setenv(key, "fixture-not-a-key")
-    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out='{"loggedIn": true}')
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out=CLAUDE_SUBSCRIPTION)
 
     assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is True
-    assert not set(STRIPPED_ENV_KEYS) & set(cli_env())
+    assert not set(DROPPED_LITERALS) & set(cli_env())
+
+
+def test_cli_env_is_exactly_the_allow_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep only the allow-listed variables, from a parent that also has every dropped name.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the variables.
+    """
+    for key in list(os.environ):
+        monkeypatch.delenv(key)
+    for key in KEPT_LITERALS:
+        monkeypatch.setenv(key, f"kept-{key}")
+    for key in DROPPED_LITERALS:
+        monkeypatch.setenv(key, "fixture-not-a-key")
+    env = cli_env()
+    assert set(env) == set(KEPT_LITERALS)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "kept-CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def test_probe_results_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

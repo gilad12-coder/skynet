@@ -787,3 +787,84 @@ def test_parallel_submissions_with_their_own_keys_both_start(harness: _Harness) 
     assert [response.status_code for response in responses] == [201, 201], [r.text for r in responses]
     assert len({response.json()["optimization_id"] for response in responses}) == 2
     assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == 2
+
+
+def _check_models(harness: _Harness, models: dict[str, Any]) -> tuple[Any, str]:
+    """Run the wizard's Ready-to-run check with the given model roles.
+
+    Args:
+        harness: Funded real API fixture.
+        models: The unified ``models`` block to check.
+
+    Returns:
+        The HTTP response and the status of the check's durable row.
+    """
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="models")
+    payload = {
+        **_payload(),
+        "models": models,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+    response = harness.client.post(
+        "/wizard/preflight",
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    with Session(harness.store.engine) as session:
+        status = session.scalar(select(WizardPreflightModel.status))
+    return response, status
+
+
+def test_local_check_accepts_subscription_task_and_reflection_models(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finish a local Ready-to-run check whose roles both run on a subscription CLI.
+
+    Args:
+        harness: Real setup and wallet services.
+        monkeypatch: Turns local mode on.
+    """
+    monkeypatch.setattr(submissions.settings, "local_mode", True)
+    subscription = {"token_source": "subscription", "cli_provider": "claude"}
+    models = {
+        "reflection_model": {"name": "anthropic/claude-sonnet-4.6", **subscription},
+        "task_model": {"name": "anthropic/claude-haiku-4.5", **subscription},
+    }
+
+    response, status = _check_models(harness, models)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "succeeded", response.json()
+    assert status == "succeeded"
+    sent = harness.calls[0]["payload"]["models"]
+    assert {role: sent[role]["token_source"] for role in ("reflection_model", "task_model")} == {
+        "reflection_model": "subscription",
+        "task_model": "subscription",
+    }
+
+
+def test_unusable_model_credentials_fail_the_check_instead_of_leaving_it_running(harness: _Harness) -> None:
+    """Record a failed check, not a row stuck at running, when a role has no usable credentials.
+
+    Args:
+        harness: Real setup and wallet services.
+    """
+    models = {
+        "reflection_model": {"name": "fixture/text"},
+        "task_model": {"name": "bare-model", "token_source": "byok"},
+    }
+
+    response, status = _check_models(harness, models)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "failed"
+    assert status == "failed"
+    assert any("saved provider connection" in (check.get("message") or "") for check in body["checks"]), body
+    assert harness.calls == []
