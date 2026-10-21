@@ -622,5 +622,6 @@ def test_import_is_rate_limited(
     assert _import(hosted_store, bundle).status_code == 201
     resp = _import(hosted_store, bundle)
     assert resp.status_code == 429
-    assert resp.json()["detail"] == t_en("rate_limit.exceeded", retry_after=60)
+    # The window TTL counts down in real time, so a slow run can report 59 seconds.
+    assert resp.json()["detail"] in {t_en("rate_limit.exceeded", retry_after=s) for s in (59, 60)}
     assert _count(hosted_store, JobModel) == 1

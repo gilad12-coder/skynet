@@ -428,6 +428,7 @@
     "sync.invalid_bundle": "ملف التصدير تالف أو غير مكتمل.",
     "sync.bundle_too_large": "ملف التصدير أكبر من {max_mb} ميغابايت.",
     "sync.export_not_finished": "يمكن تصدير التشغيل المكتمل فقط. حالة هذا التشغيل '{status}'.",
-    "sync.unsupported_run_type": "لا يمكن تصدير عمليات التشغيل من النوع '{optimization_type}'."
+    "sync.unsupported_run_type": "لا يمكن تصدير عمليات التشغيل من النوع '{optimization_type}'.",
+    "serve.subscription_model_hosted": "استخدم هذا التشغيل نموذج اشتراك محليًا لا يعمل إلا في تطبيق {term.appName} لنظام Mac. لتشغيله هنا، اختر نموذجًا مُدارًا أو مفتاح المزوّد الخاص بك (BYOK)."
   }
 }

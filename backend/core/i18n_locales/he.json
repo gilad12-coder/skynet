@@ -428,7 +428,8 @@
     "sync.invalid_bundle": "קובץ הייצוא פגום או חלקי.",
     "sync.bundle_too_large": "קובץ הייצוא גדול מ-{max_mb} MB.",
     "sync.export_not_finished": "אפשר לייצא רק הרצה שהסתיימה. מצב ההרצה: '{status}'.",
-    "sync.unsupported_run_type": "אי אפשר לייצא הרצות מסוג '{optimization_type}'."
+    "sync.unsupported_run_type": "אי אפשר לייצא הרצות מסוג '{optimization_type}'.",
+    "serve.subscription_model_hosted": "ההרצה הזו השתמשה במודל של מנוי מקומי, שפועל רק באפליקציית {term.appName} ל-Mac. כדי להפעיל אותה כאן, בחר/י מודל מנוהל או מפתח ספק משלך (BYOK)."
   },
   "backend": {
     "constants": {

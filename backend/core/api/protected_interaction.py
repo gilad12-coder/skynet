@@ -27,7 +27,7 @@ from ..billing.protected_credentials import (
 from ..billing.protected_execution import bind_protected_sandbox
 from ..billing.runtime import BudgetRuntime, UsagePendingError
 from ..config import settings
-from ..constants import TOKEN_SOURCE_MANAGED
+from ..constants import TOKEN_SOURCE_MANAGED, TOKEN_SOURCE_SUBSCRIPTION
 from ..service_gateway.agents.generalist import get_approval_registry
 from ..storage.preflights import PreflightStore, WizardPreflightModel, preflight_document
 from ..worker.vercel_dspy import run_vercel_dspy
@@ -299,6 +299,14 @@ def run_protected_interaction(
     key = idempotency_key.strip()
     if not key:
         raise DomainError("budget.idempotency_required", status=400)
+    # An imported local run keeps its subscription model, which only the user's own
+    # CLI can run; refuse it here before any budget, sandbox, or model call.
+    if not settings.local_mode and payload_uses_token_source(
+        payload,
+        TOKEN_SOURCE_SUBSCRIPTION,
+        default_token_source=str(payload.get("token_source") or TOKEN_SOURCE_MANAGED),
+    ):
+        raise DomainError("serve.subscription_model_hosted", status=409)
     service = BudgetService(engine=engine)
     creation_key = _creation_key(kind, key)
     scope = json_fingerprint({"kind": kind, "key": key})[:24]

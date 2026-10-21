@@ -428,6 +428,7 @@
     "sync.invalid_bundle": "Bu dışa aktarma dosyası bozuk veya eksik.",
     "sync.bundle_too_large": "Dışa aktarma dosyası {max_mb} MB'tan büyük.",
     "sync.export_not_finished": "Yalnızca tamamlanmış bir çalıştırma dışa aktarılabilir. Bu çalıştırmanın durumu '{status}'.",
-    "sync.unsupported_run_type": "'{optimization_type}' türündeki çalıştırmalar dışa aktarılamaz."
+    "sync.unsupported_run_type": "'{optimization_type}' türündeki çalıştırmalar dışa aktarılamaz.",
+    "serve.subscription_model_hosted": "Bu çalıştırma yerel bir abonelik modeli kullandı; bu model yalnızca {term.appName} Mac uygulamasında çalışır. Burada sunmak için yönetilen bir model veya kendi sağlayıcı anahtarınızı (BYOK) seçin."
   }
 }

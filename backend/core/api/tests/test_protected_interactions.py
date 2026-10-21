@@ -238,3 +238,29 @@ def test_shared_caller_cannot_use_legacy_owner_tool_secret(
 
     assert caught.value.code == "serve.caller_tool_connection_required"
     assert state["calls"] == []
+
+
+def test_hosted_interaction_refuses_an_imported_subscription_run_before_any_charge(
+    interactions: tuple[_Harness, dict[str, Any]],
+) -> None:
+    """Give a clear 409 for a local subscription model and open no budget or sandbox."""
+    harness, state = interactions
+    payload = _payload()
+    payload["model_config"] = {"name": "claude/sonnet", "token_source": "subscription"}
+    payload["token_source"] = "subscription"
+
+    with pytest.raises(DomainError) as caught:
+        protected_interaction.run_protected_interaction(
+            payload,
+            kind="serve",
+            max_cost_cents=10,
+            idempotency_key="imported-subscription",
+            user=AuthenticatedUser("alice", "user", ()),
+            job_store=harness.store,
+        )
+
+    assert caught.value.code == "serve.subscription_model_hosted"
+    assert caught.value.status_code == 409
+    assert state["calls"] == state["bindings"] == []
+    assert harness.count(ExecutionBudgetModel) == 0
+    assert harness.count(ExecutionOperationModel) == 0

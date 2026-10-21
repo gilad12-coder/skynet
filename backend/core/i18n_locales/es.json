@@ -428,6 +428,7 @@
     "sync.invalid_bundle": "Este archivo de exportación está dañado o incompleto.",
     "sync.bundle_too_large": "El archivo de exportación supera los {max_mb} MB.",
     "sync.export_not_finished": "Solo se puede exportar una ejecución terminada. Esta ejecución está en '{status}'.",
-    "sync.unsupported_run_type": "No se pueden exportar ejecuciones de tipo '{optimization_type}'."
+    "sync.unsupported_run_type": "No se pueden exportar ejecuciones de tipo '{optimization_type}'.",
+    "serve.subscription_model_hosted": "Esta ejecución usó un modelo de suscripción local, que solo funciona en la app de {term.appName} para Mac. Para servirla aquí, elige un modelo gestionado o tu propia clave de proveedor (BYOK)."
   }
 }
