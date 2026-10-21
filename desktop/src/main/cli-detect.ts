@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { buildChildEnv } from "./shell-env";
 
-export type CliId = "codex" | "claude" | "droid";
-export const CLI_IDS: readonly CliId[] = ["claude", "codex", "droid"];
+export type CliId = "codex" | "claude";
+export const CLI_IDS: readonly CliId[] = ["claude", "codex"];
 
 /**
  * Version floors. These duplicate `backend/core/local/cli_catalog.MIN_VERSIONS`
@@ -14,19 +14,16 @@ export const CLI_IDS: readonly CliId[] = ["claude", "codex", "droid"];
 export const MIN_VERSIONS: Record<CliId, string> = {
   claude: "2.1.226",
   codex: "0.160.0",
-  droid: "0.0.0",
 };
 
 export const LOGIN_COMMANDS: Record<CliId, string> = {
   claude: "claude auth login",
   codex: "codex login",
-  droid: "droid",
 };
 
 export const UPGRADE_COMMANDS: Record<CliId, string> = {
   claude: "claude update",
   codex: "npm install -g @openai/codex@latest",
-  droid: "curl -fsSL https://app.factory.ai/cli | sh",
 };
 
 /** When set, every binary (docker and the CLIs) is looked up only in this directory. */
@@ -176,22 +173,12 @@ export async function checkLogin(id: CliId, bin: string, run: Runner, env: Recor
     }
     return false;
   }
-  if (id === "codex") {
-    const res = await run(bin, ["login", "status"], env);
-    const out = `${res.stdout}\n${res.stderr}`;
-    // "Not logged in" also contains "logged in"; the exit code rules that case out.
-    // "Logged in using an API key" bills the key, not the ChatGPT subscription.
-    if (!(res.code === 0 && /logged in/i.test(out) && !/api key/i.test(out))) return false;
-    return codexSubscriptionLogin(readCodexLoginFile(env));
-  }
-  const res = await run(bin, ["doctor", "--auth", "--json"], env);
-  try {
-    const parsed = JSON.parse(res.stdout) as { ok?: unknown } | null;
-    if (parsed && typeof parsed.ok === "boolean") return parsed.ok;
-  } catch {
-    // Unreadable output: unknown.
-  }
-  return null;
+  const res = await run(bin, ["login", "status"], env);
+  const out = `${res.stdout}\n${res.stderr}`;
+  // "Not logged in" also contains "logged in"; the exit code rules that case out.
+  // "Logged in using an API key" bills the key, not the ChatGPT subscription.
+  if (!(res.code === 0 && /logged in/i.test(out) && !/api key/i.test(out))) return false;
+  return codexSubscriptionLogin(readCodexLoginFile(env));
 }
 
 /** Probe one CLI: location, version against its floor, and login state. */

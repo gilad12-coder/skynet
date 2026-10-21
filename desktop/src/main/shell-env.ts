@@ -4,7 +4,7 @@ import os from "node:os";
 /**
  * The only variables a child inherits from the app's environment (§1.7). Every
  * other variable is dropped, so no provider key, base URL, profile, federation
- * id, socket or config switch reaches claude, codex, droid or the stack. The
+ * id, socket or config switch reaches claude, codex or the stack. The
  * stack gets its settings (APP_*, REMOTE_DB_URL, ports, secrets) as explicit
  * overrides from index.ts, never from the user's shell.
  * CLAUDE_CODE_OAUTH_TOKEN stays: it is the subscription login itself.
@@ -36,7 +36,6 @@ export const ALLOWED_ENV_KEYS = [
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
   "CODEX_CA_CERTIFICATE",
-  "FACTORY_EXTRA_CA_CERTS",
   "DOCKER_HOST",
   "DOCKER_CONTEXT",
   "DOCKER_CONFIG",
@@ -92,7 +91,7 @@ const defaultExec: ExecFileLike = (file, args, options) =>
 /**
  * Read PATH from the user's login shell. Apps opened from Finder inherit a
  * minimal launchd PATH that misses Homebrew, nvm and ~/.local/bin, which is
- * where docker, codex, claude and droid usually live.
+ * where docker, codex and claude usually live.
  */
 export async function loginShellPath(
   opts: { shell?: string; home?: string; exec?: ExecFileLike; timeoutMs?: number } = {},

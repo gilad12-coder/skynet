@@ -1,7 +1,7 @@
 # Skynet for Mac
 
 An Electron shell that runs the whole Skynet stack on your Mac. Jobs use the
-coding CLIs you already sign in to (Claude Code, Codex CLI, Factory Droid), not
+coding CLIs you already sign in to (Claude Code, Codex CLI), not
 API keys.
 
 On launch the app:
@@ -21,7 +21,7 @@ All services listen on `127.0.0.1` only (API 48100-48119, web 48120-48139, Postg
 Children inherit only an allow-list from the app's environment, so the CLIs run on your subscription and no child can bill a provider:
 `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `TERM`, `TZ`, `CLAUDE_CODE_OAUTH_TOKEN` (a subscription login),
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, upper and lower case),
-`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, `FACTORY_EXTRA_CA_CERTS`, the Docker daemon selectors
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, the Docker daemon selectors
 (`DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`) and every `LC_*` and `XDG_*` variable.
 All other variables (API keys, base URLs, profiles, `CLAUDE_CODE_USE_*`, `NODE_OPTIONS`, ...) are dropped.
 The CLI checks add only `PATH`. The API, worker and web server get their settings (`APP_*`, the database URL, ports, secrets) as explicit values from the app, never from your shell.
@@ -31,7 +31,7 @@ Quitting stops the web server, the API, Postgres and every `skynet.job` sandbox 
 
 - macOS on Apple silicon. CI also builds an Intel (x64) app, but nobody has run it on Intel hardware yet.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/), running, with "Use Rosetta for x86_64/amd64 emulation" turned on
-- One coding CLI, signed in: `claude` 2.1.226 or newer, `codex` 0.160.0 or newer, or `droid`
+- One coding CLI, signed in: `claude` 2.1.226 or newer, or `codex` 0.160.0 or newer
 - For `codex`: a ChatGPT sign-in kept in `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Skynet reads that file, so a login kept only in the macOS Keychain does not count. Set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login`.
 
 ## Install a downloaded build
@@ -106,7 +106,7 @@ These variables are for development and tests:
 
 | Variable | Effect |
 | --- | --- |
-| `SKYNET_DESKTOP_FAKE_CLI_DIR` | Look up `docker`, `claude`, `codex` and `droid` only in this directory. Put small shell scripts there to trigger each onboarding screen. |
+| `SKYNET_DESKTOP_FAKE_CLI_DIR` | Look up `docker`, `claude` and `codex` only in this directory. Put small shell scripts there to trigger each onboarding screen. |
 | `SKYNET_DESKTOP_DATA_DIR` | Use this directory instead of `~/Library/Application Support/Skynet`. Write `local/cli_limits.json` there to trigger the usage-limit screen. |
 | `SKYNET_DESKTOP_LANG` | `en` or `he`. Also sets Chromium's language, so the web app gets the same `Accept-Language` |
 | `SKYNET_DESKTOP_THEME` | `light` or `dark` |

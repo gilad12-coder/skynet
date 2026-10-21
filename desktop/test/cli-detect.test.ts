@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   childPath,
+  CLI_IDS,
   codexSubscriptionLogin,
   compareVersions,
   FAKE_CLI_DIR_ENV,
@@ -40,7 +41,7 @@ describe("version parsing and comparison", () => {
   it("extracts the version from real --version outputs", () => {
     expect(parseVersion("2.1.306 (Claude Code)")).toBe("2.1.306");
     expect(parseVersion("codex-cli 0.157.0")).toBe("0.157.0");
-    expect(parseVersion("droid v0.231.0\n")).toBe("0.231.0");
+    expect(parseVersion("v0.231.0\n")).toBe("0.231.0");
     expect(parseVersion("unknown")).toBeNull();
   });
 
@@ -55,11 +56,12 @@ describe("version parsing and comparison", () => {
     expect(meetsFloor("2.1.306", MIN_VERSIONS.claude)).toBe(true);
     expect(meetsFloor("0.157.0", MIN_VERSIONS.codex)).toBe(false);
     expect(meetsFloor("0.160.0", MIN_VERSIONS.codex)).toBe(true);
-    expect(meetsFloor(null, MIN_VERSIONS.droid)).toBe(false);
+    expect(meetsFloor(null, MIN_VERSIONS.codex)).toBe(false);
   });
 
   it("keeps the floors in step with backend MIN_VERSIONS", () => {
-    expect(MIN_VERSIONS).toEqual({ claude: "2.1.226", codex: "0.160.0", droid: "0.0.0" });
+    expect(MIN_VERSIONS).toEqual({ claude: "2.1.226", codex: "0.160.0" });
+    expect(CLI_IDS).toEqual(["claude", "codex"]);
   });
 });
 
@@ -83,8 +85,8 @@ describe("search paths", () => {
     fs.mkdirSync(path.join(dir, "claude"));
     expect(findExecutable("codex", [dir])).toBeNull();
     expect(findExecutable("claude", [dir])).toBeNull();
-    const droid = fake("droid", "echo 1.0.0");
-    expect(findExecutable("droid", ["/nonexistent", dir])).toBe(droid);
+    const docker = fake("docker", "echo 1.0.0");
+    expect(findExecutable("docker", ["/nonexistent", dir])).toBe(docker);
   });
 });
 
@@ -179,21 +181,16 @@ describe("probeCli with fake binaries", () => {
     expect(codexSubscriptionLogin(null)).toBe(false);
   });
 
-  it("reads ok from droid doctor --auth --json", async () => {
-    const droid = (out: string) => {
-      const runner: Runner = async (_file, args) => {
-        if (args[0] === "--version") return { code: 0, stdout: "0.231.0", stderr: "" };
-        expect(args).toEqual(["doctor", "--auth", "--json"]);
-        return { code: 0, stdout: out, stderr: "" };
-      };
-      return probeCli("droid", [dir], {}, runner);
-    };
+  it("probes only claude and codex, never droid", async () => {
     fake("droid", "exit 0");
-    expect(await droid('{"ok": true, "checks": []}')).toMatchObject({ versionOk: true, loggedIn: true });
-    expect(await droid('{"ok": false}')).toMatchObject({ loggedIn: false });
-    expect(await droid("Error: unknown command")).toMatchObject({ loggedIn: null });
-    expect(await droid('{"ok": "yes"}')).toMatchObject({ loggedIn: null });
-    expect(await droid("null")).toMatchObject({ loggedIn: null });
+    const ran: string[] = [];
+    const runner: Runner = async (file) => {
+      ran.push(path.basename(file));
+      return { code: 0, stdout: "1.0.0", stderr: "" };
+    };
+    const statuses = await probeClis([dir], {}, runner);
+    expect(statuses.map((s) => s.id)).toEqual(["claude", "codex"]);
+    expect(ran).not.toContain("droid");
   });
 
   it("probes with only the allowed environment", async () => {

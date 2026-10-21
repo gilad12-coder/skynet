@@ -24,7 +24,7 @@ const MISSING = { path: null, version: null, versionOk: false, loggedIn: null };
 function state(over: Partial<Inputs>) {
   return computeOnboardingState({
     docker: DOCKER_OK,
-    clis: [cli("claude"), cli("codex", MISSING), cli("droid", MISSING)],
+    clis: [cli("claude"), cli("codex", MISSING)],
     limits: {},
     now: NOW,
     acceptedRateCap: false,
@@ -39,7 +39,7 @@ describe("computeOnboardingState", () => {
   });
 
   it("asks for a CLI when none is installed", () => {
-    expect(state({ clis: [cli("claude", MISSING), cli("codex", MISSING), cli("droid", MISSING)] }).kind).toBe("no_cli");
+    expect(state({ clis: [cli("claude", MISSING), cli("codex", MISSING)] }).kind).toBe("no_cli");
   });
 
   it("asks for an upgrade when every installed CLI is too old", () => {
@@ -57,8 +57,8 @@ describe("computeOnboardingState", () => {
   });
 
   it("treats an unreadable login check as signed out", () => {
-    expect(state({ clis: [cli("claude", { loggedIn: false }), cli("droid", { loggedIn: null })] }).kind).toBe("not_logged_in");
-    expect(state({ clis: [cli("droid", { loggedIn: null }), cli("codex", { loggedIn: true })] }).kind).toBe("starting");
+    expect(state({ clis: [cli("claude", { loggedIn: false }), cli("codex", { loggedIn: null })] }).kind).toBe("not_logged_in");
+    expect(state({ clis: [cli("claude", { loggedIn: null }), cli("codex", { loggedIn: true })] }).kind).toBe("starting");
   });
 
   it("reports the earliest reset when every usable CLI is capped", () => {

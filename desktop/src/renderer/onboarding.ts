@@ -14,7 +14,7 @@ type Kind =
   | "error";
 
 interface Cli {
-  id: "claude" | "codex" | "droid";
+  id: "claude" | "codex";
   path: string | null;
   version: string | null;
   minVersion: string;
@@ -55,11 +55,10 @@ const messages: Record<string, string> = lang === "he" ? he : en;
 document.documentElement.lang = lang;
 document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
 
-const CLI_NAMES: Record<Cli["id"], string> = { claude: "Claude Code", codex: "Codex CLI", droid: "Factory Droid" };
+const CLI_NAMES: Record<Cli["id"], string> = { claude: "Claude Code", codex: "Codex CLI" };
 const INSTALL_COMMANDS: Record<Cli["id"], string> = {
   claude: "npm install -g @anthropic-ai/claude-code",
   codex: "npm install -g @openai/codex",
-  droid: "curl -fsSL https://app.factory.ai/cli | sh",
 };
 const STEPS = ["secrets", "runtime", "postgres", "sandbox", "python", "migrations", "api", "frontend"];
 
@@ -170,7 +169,7 @@ function panelBody(state: State): Node[] {
       nodes.push(actions(recheck));
       break;
     case "no_cli":
-      for (const id of ["claude", "codex", "droid"] as const) nodes.push(command(INSTALL_COMMANDS[id], CLI_NAMES[id]));
+      for (const id of ["claude", "codex"] as const) nodes.push(command(INSTALL_COMMANDS[id], CLI_NAMES[id]));
       nodes.push(actions(recheck));
       break;
     case "cli_too_old":
