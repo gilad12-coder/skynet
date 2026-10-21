@@ -112,6 +112,8 @@
     "accounts.last_sign_in_method": "Este é o seu único modo de iniciar sessão. Adicione primeiro uma palavra-passe ou chave de acesso.",
     "accounts.link_failed": "Não foi possível associar essa conta. Tente novamente.",
     "accounts.not_found": "Essa conta não existe.",
+    "blackbox.host_agent_failed": "O agente {cli} neste Mac não conseguiu concluir o turno: {detail}",
+    "blackbox.host_agent_rate_limited": "Sua assinatura do {cli} atingiu o limite de uso. Ele será redefinido em {reset_at}. Inicie a execução novamente após esse horário.",
     "blackbox.repo_target_unavailable": "Ainda não é possível otimizar um repositório.",
     "secrets.invalid_name": "\"{name}\" não pode ser o nome de um segredo. Use letras, dígitos e sublinhados, começando com uma letra ou sublinhado.",
     "secrets.invalid_value": "Um segredo precisa de um valor com no máximo {limit} bytes.",
