@@ -106,6 +106,7 @@ def test_sandbox_route_needs_a_budget(calls: list[Any]) -> None:
         response = client.post("/optimizations/contract-check", json={"spec": _spec(budget=False)})
 
     assert response.status_code == 402
+    assert response.json()["detail"] == t_locale("en", "submit.preflight.contract_budget_missing")
     assert calls == []
 
 

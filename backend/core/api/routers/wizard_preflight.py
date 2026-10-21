@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections.abc import Iterator
 from queue import Empty, Queue
 from threading import Thread
@@ -73,7 +74,35 @@ FIXED_MESSAGE_CODES = {
     "The account has no available funds for additional work.": "submit.preflight.no_funds_more",
     "The account has no funded wallet.": "submit.preflight.no_wallet",
     "The account cannot fund the next operation.": "submit.preflight.cannot_fund",
+    "The account has no available funds for a preview.": "submit.preflight.no_funds_preview",
+    "Setup checks are incomplete.": "submit.preflight.incomplete",
+    "Setup execution failed.": "submit.preflight.execution_failed",
+    "The runtime did not return setup evidence.": "submit.preflight.no_evidence",
+    "Setup did not return a complete set of readiness checks.": "submit.preflight.incomplete_checks",
 }
+# The one budget text with amounts in it (``billing.budgets._admit``); its
+# groups become the catalog message's params.
+BUDGET_LIMIT_MESSAGE = re.compile(
+    r"The next operation needs up to (?P<needed>\$[\d,]+\.\d{2}), but only "
+    r"(?P<remaining>\$[\d,]+\.\d{2}) of the (?P<limit>\$[\d,]+\.\d{2}) limit remain\."
+)
+BUDGET_LIMIT_CODE = "submit.preflight.budget_limit"
+
+
+def _message_code(message: str | None) -> tuple[str, dict[str, str]] | None:
+    """Find the catalog code and params behind a known English setup-check text.
+
+    Args:
+        message: A setup-check message as stored.
+
+    Returns:
+        The code and its params, or None when the text is not a known one.
+    """
+    code = FIXED_MESSAGE_CODES.get(message or "")
+    if code is not None:
+        return code, {}
+    match = BUDGET_LIMIT_MESSAGE.fullmatch(message or "")
+    return (BUDGET_LIMIT_CODE, match.groupdict()) if match else None
 
 
 def _contract_failure(contract: dict[str, Any], spec: UnifiedRunRequest | None) -> ContractCheckItem | None:
@@ -133,10 +162,13 @@ def _coded_check(check: WizardPreflightCheck, locale: str) -> WizardPreflightChe
         The check with its message in ``locale`` and its code attached, or the
         check unchanged when it already has a code or its text is not known.
     """
-    code = FIXED_MESSAGE_CODES.get(check.message or "")
-    if check.message_code is not None or code is None:
+    coded = _message_code(check.message)
+    if check.message_code is not None or coded is None:
         return check
-    return check.model_copy(update={"message": t_locale(locale, code), "message_code": code, "message_params": {}})
+    code, params = coded
+    return check.model_copy(
+        update={"message": t_locale(locale, code, **params), "message_code": code, "message_params": params}
+    )
 
 
 def _localized_contract(contract: dict[str, Any], spec: UnifiedRunRequest | None, locale: str) -> dict[str, Any]:
@@ -182,9 +214,10 @@ def localize_preflight(
     """
     update: dict[str, Any] = {"checks": [_coded_check(check, locale) for check in response.checks]}
     reason = response.pending_reason
-    if reason is not None and reason.message in FIXED_MESSAGE_CODES:
+    coded_reason = _message_code(reason.message) if reason is not None else None
+    if reason is not None and coded_reason is not None:
         update["pending_reason"] = reason.model_copy(
-            update={"message": t_locale(locale, FIXED_MESSAGE_CODES[reason.message])}
+            update={"message": t_locale(locale, coded_reason[0], **coded_reason[1])}
         )
     workflow = response.workflow_result or {}
     contract = workflow.get("contract")
@@ -353,14 +386,15 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 budget errors ``run_preflight`` raises.
         """
         enforce_submission_rate(user.username)
-        return in_locale(_sandboxed_check(request, user), locale)
+        return in_locale(_sandboxed_check(request, user, locale), locale)
 
-    def _sandboxed_check(request: ContractCheckRequest, user: AuthenticatedUser) -> ContractCheckResponse:
+    def _sandboxed_check(request: ContractCheckRequest, user: AuthenticatedUser, locale: str) -> ContractCheckResponse:
         """Run the static check, then the sampled one under the spec's budget.
 
         Args:
             request: The unified spec and how many samples to score.
             user: Authenticated owner whose budget pays for the check.
+            locale: The caller's locale tag, for the 402 detail and the setup error it quotes.
 
         Returns:
             Every check item and the scored samples, in the Hebrew base.
@@ -373,7 +407,7 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
         if not static.ok:
             return static
         if spec.execution_budget_id is None or spec.execution_budget_revision is None:
-            raise HTTPException(status_code=402, detail="Choose a spending budget before running the contract check.")
+            raise HTTPException(status_code=402, detail=t_locale(locale, "submit.preflight.contract_budget_missing"))
         result, _ = _checked_preflight(
             WizardPreflightRequest(
                 scope="evaluation",
@@ -391,6 +425,9 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             return checked.model_copy(update={"terminal": result.terminal})
         failure = next((check for check in result.checks if check.status != "succeeded"), None)
         error = failure.message if failure is not None and failure.message else result.status
+        coded = _message_code(error)
+        if coded is not None:
+            error = t_locale(locale, coded[0], **coded[1])
         # A spent budget is not a code mismatch; it is fixed by raising the limit.
         code = (
             "submit.unified.contract_budget"

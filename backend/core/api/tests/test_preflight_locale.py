@@ -341,3 +341,62 @@ def test_static_contract_check_uses_accept_language_then_english(monkeypatch: py
     assert failed["message"] != t(failed["message_code"], **failed["message_params"])
     hebrew_failed = next(item for item in hebrew["checks"] if item["key"] == failed["key"])
     assert hebrew_failed["message"] == t(failed["message_code"], **failed["message_params"])
+
+
+BUDGET_TEXT = "The next operation needs up to $1.35, but only $0.53 of the $0.53 limit remain."
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "The account has no available funds for a preview.",
+        "Setup checks are incomplete.",
+        "Setup execution failed.",
+        "The runtime did not return setup evidence.",
+        "Setup did not return a complete set of readiness checks.",
+    ],
+)
+def test_setup_fallback_texts_are_worded_in_the_callers_locale(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    """The setup fallback texts have catalog codes and read in Hebrew for a Hebrew caller."""
+    monkeypatch.setattr(wizard_preflight, "run_preflight", lambda *args: _fixed_text_response(message))
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    monkeypatch.setattr(wizard_preflight, "_materialize_unified_cases", lambda *args, **kwargs: None)
+
+    payload = _post("/wizard/preflight", _body(locale="he")).json()
+
+    usage = next(check for check in payload["checks"] if check["key"] == "usage")
+    code = wizard_preflight.FIXED_MESSAGE_CODES[message]
+    assert usage["message_code"] == code
+    assert usage["message"] == t_locale("he", code) != message
+
+
+def test_budget_limit_text_keeps_its_amounts_in_the_callers_locale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The spending limit text is coded with its amounts as params, on the check and the pending reason."""
+    monkeypatch.setattr(wizard_preflight, "run_preflight", lambda *args: _fixed_text_response(BUDGET_TEXT))
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    monkeypatch.setattr(wizard_preflight, "_materialize_unified_cases", lambda *args, **kwargs: None)
+
+    english = _post("/wizard/preflight", _body()).json()
+    hebrew = _post("/wizard/preflight", _body(locale="he")).json()
+
+    params = {"needed": "$1.35", "remaining": "$0.53", "limit": "$0.53"}
+    usage = next(check for check in english["checks"] if check["key"] == "usage")
+    assert (usage["message_code"], usage["message_params"]) == (wizard_preflight.BUDGET_LIMIT_CODE, params)
+    assert usage["message"] == BUDGET_TEXT
+    worded = t_locale("he", wizard_preflight.BUDGET_LIMIT_CODE, **params)
+    assert worded != BUDGET_TEXT
+    assert "$1.35" in worded
+    assert next(check for check in hebrew["checks"] if check["key"] == "usage")["message"] == worded
+    assert hebrew["pending_reason"]["message"] == worded
+
+
+def test_contract_check_without_a_budget_is_refused_in_the_callers_locale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 402 detail reads in English by default and follows ``Accept-Language``."""
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+
+    english = _post("/optimizations/contract-check", {"spec": _spec()})
+    hebrew = _post("/optimizations/contract-check", {"spec": _spec()}, headers={"Accept-Language": "he"})
+
+    assert english.status_code == hebrew.status_code == 402
+    assert english.json()["detail"] == "Choose a spending budget before running the contract check."
+    assert hebrew.json()["detail"] == t_locale("he", "submit.preflight.contract_budget_missing")
