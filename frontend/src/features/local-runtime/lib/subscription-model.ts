@@ -123,6 +123,17 @@ export function subscriptionCatalogModels(
   });
 }
 
+/**
+ * The 422 code the local backend returns for a turn with no model pick: it
+ * has no managed models, so it refuses instead of falling back to one.
+ */
+export const LOCAL_MODEL_REFUSED_CODE = "models.managed_unavailable_local";
+
+/** Whether an error code is the local backend's no-model refusal. */
+export function isLocalModelRefusal(code: string | null | undefined): boolean {
+  return code === LOCAL_MODEL_REFUSED_CODE;
+}
+
 /** A model config billed to the user's CLI subscription. */
 export function subscriptionModelConfig(name: string, cli: CliProvider): ModelConfig {
   return { name, token_source: "subscription", cli_provider: cli };

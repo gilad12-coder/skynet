@@ -272,7 +272,7 @@ function TaskInterviewPanel({
         <div className="flex items-center justify-between gap-3 border-t border-border/40 px-4 py-2.5">
           <p role={interview.error ? "alert" : undefined} className="text-xs text-destructive">
             {interview.error
-              ? msg("submit.code.interview.error")
+              ? (interview.errorMessage ?? msg("submit.code.interview.error"))
               : t("submit.v2.task.chat.stopped")}
           </p>
           <RetryIconButton label={msg("submit.code.interview.retry")} onClick={interview.retry} />

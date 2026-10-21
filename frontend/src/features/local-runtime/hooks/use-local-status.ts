@@ -2,9 +2,14 @@
 
 import * as React from "react";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
+import { tI18n } from "@/shared/lib/i18n";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
 import type { CliProvider } from "@/features/billing";
-import { resolveAgentModel, type LocalStatus } from "../lib/subscription-model";
+import {
+  isLocalModelRefusal,
+  resolveAgentModel,
+  type LocalStatus,
+} from "../lib/subscription-model";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -58,6 +63,14 @@ export async function localAgentModel(
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
   return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
+}
+
+/**
+ * The message for the local backend's no-model refusal, in the active locale,
+ * or null for any other error code.
+ */
+export function localModelRefusalMessage(code: string | null | undefined): string | null {
+  return code && isLocalModelRefusal(code) ? tI18n(code) : null;
 }
 
 /**

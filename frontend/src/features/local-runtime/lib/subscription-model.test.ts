@@ -5,6 +5,8 @@ const {
   cliState,
   defaultAgentCli,
   hostCliPatch,
+  isLocalModelRefusal,
+  LOCAL_MODEL_REFUSED_CODE,
   resolveAgentModel,
   parseSubscriptionModelId,
   subscriptionAgentModel,
@@ -175,6 +177,35 @@ test("a role with no CLI runs on the first ready CLI, never a managed model", as
     await resolveAgentModel("anthropic/claude-opus-4.1", null, failing, () => null),
     "subscription/claude/anthropic/claude-opus-4.1",
   );
+});
+
+test("a request with no model pick sends the first model of the signed-in CLI", async () => {
+  const loaded = status([cli({ id: "codex", logged_in: false }), cli()]);
+  assert.equal(
+    await resolveAgentModel(
+      null,
+      null,
+      async () => loaded,
+      () => null,
+    ),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+  // A CLI with no models leaves nothing to send; the backend then refuses
+  // with the no-model code, which the UI shows as its own message.
+  const empty = status([cli({ models: [] })]);
+  assert.equal(
+    await resolveAgentModel(
+      null,
+      null,
+      async () => empty,
+      () => null,
+    ),
+    null,
+  );
+  assert.equal(LOCAL_MODEL_REFUSED_CODE, "models.managed_unavailable_local");
+  assert.equal(isLocalModelRefusal("models.managed_unavailable_local"), true);
+  assert.equal(isLocalModelRefusal("billing.insufficient_funds"), false);
+  assert.equal(isLocalModelRefusal(undefined), false);
 });
 
 test("the default agent CLI prefers ready, then installed, then Claude Code", () => {

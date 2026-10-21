@@ -2,7 +2,11 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { localAgentModel, useLocalStatus } from "@/features/local-runtime";
+import {
+  localAgentModel,
+  localModelRefusalMessage,
+  useLocalStatus,
+} from "@/features/local-runtime";
 import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY } from "@/shared/lib/i18n";
@@ -694,11 +698,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
                 // Known machine codes get a localized message; anything else
                 // shows the backend's text as-is.
                 error:
-                  code === "context_too_long"
+                  localModelRefusalMessage(code) ??
+                  (code === "context_too_long"
                     ? msg("agent.error.context_too_long")
                     : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
                       ? msg("agent.error.insufficient_funds")
-                      : message,
+                      : message),
                 errorCode: code ?? null,
               });
               patchThinking(key, (segments) => closeThinking(segments, Date.now()));
