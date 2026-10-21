@@ -1,0 +1,110 @@
+name: desktop
+
+on:
+  push:
+    branches: [main, staging]
+    tags: ["desktop-v*"]
+    paths: ["desktop/**", "backend/**", "frontend/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: desktop · test + ad-hoc mac build
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            frontend/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        working-directory: desktop
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: desktop
+        run: npm test
+      - name: Build ad-hoc signed app
+        working-directory: desktop
+        env:
+          # Ad-hoc signing ("-" in electron-builder.yml) needs no certificate.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # electron-builder skips all signing on pull requests by default. Ad-hoc
+          # signing uses no secret, so it is safe here.
+          CSC_FOR_PULL_REQUEST: "true"
+        run: npm run build:mac
+      - name: Verify signatures
+        run: |
+          # The Electron binary already has a linker ad-hoc signature, so also check
+          # that electron-builder signed the bundle (identifier and hardened runtime).
+          for app in desktop/dist/mac-arm64/Skynet.app desktop/dist/mac/Skynet.app; do
+            info=$(codesign -dv "$app" 2>&1); echo "$info"
+            grep -q "Signature=adhoc" <<<"$info"
+            grep -q "Identifier=com.skynetml.desktop" <<<"$info"
+            grep -q "flags=.*runtime" <<<"$info"
+            codesign --verify --deep --strict "$app"
+          done
+          lipo -archs desktop/dist/mac/Skynet.app/Contents/MacOS/Skynet | grep -qx x86_64
+          lipo -archs desktop/dist/mac/Skynet.app/Contents/Resources/uv/uv | grep -qx x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skynet-desktop-mac
+          path: |
+            desktop/dist/Skynet-*-arm64.dmg
+            desktop/dist/Skynet-*-x64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: desktop · publish release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            frontend/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+      - name: Build and publish
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Developer ID certificate (.p12, base64) for electron-builder; notarization rejects ad-hoc signatures.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          # Notarization turns on only when the Apple secrets and a Developer ID
+          # certificate exist. Without them the release stays ad-hoc signed.
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$CSC_LINK" ]; then
+            npm run build && npm run bundle:stack
+            npx electron-builder --mac --publish always "-c.mac.identity=$APPLE_TEAM_ID" -c.mac.notarize=true
+          else
+            CSC_IDENTITY_AUTO_DISCOVERY=false npm run release:mac
+          fi
