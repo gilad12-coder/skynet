@@ -361,8 +361,10 @@ def confine(
     and ``hidden`` it may also read only ``writable`` and ``readable``;
     everything else there is denied. File metadata stays readable so path
     lookups and ``getcwd`` work. It cannot connect to any Unix socket (the
-    Docker daemon and the SSH agent act outside the sandbox) or run
-    ``launchctl``, which starts jobs outside it. Other reads outside ``home``
+    Docker daemon and the SSH agent act outside the sandbox), run
+    ``launchctl``, create a launchd job, open an app through LaunchServices
+    or send AppleEvents: each of these starts code outside the sandbox.
+    Other reads outside ``home``
     and the TCP network stay open: the CLI needs system libraries and its
     provider. macOS refuses a nested sandbox under a profile with deny rules,
     so this profile is the CLI's only sandbox.
@@ -370,7 +372,7 @@ def confine(
     Args:
         argv: The CLI command.
         home: The user's home directory.
-        writable: Directories and files the turn owns (the copy, temp space, its login).
+        writable: Directories the turn owns (the copy, its temp space and home).
         readable: The CLI's install directories.
         hidden: More directories to hide, such as the shared temp folder.
 
@@ -406,6 +408,12 @@ def confine(
         # Name lookups go through this socket; without it no provider host resolves.
         '(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))',
         '(deny process-exec (literal "/bin/launchctl"))',
+        # `open` asks LaunchServices to start an app outside this sandbox. It needs both
+        # services, so denying only one of them does not stop it.
+        '(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd")'
+        ' (global-name "com.apple.coreservices.quarantine-resolver"))',
+        "(deny job-creation)",
+        "(deny appleevent-send)",
     ]
     if read_rules:
         profile.append(f"(allow file-read-data file-read-xattr {' '.join(read_rules)})")
@@ -415,6 +423,7 @@ def confine(
     return [str(SANDBOX_EXEC), "-p", "\n".join(profile), *defines, *argv]
 
 
+TURN_MARKER_ENV = "SKYNET_HOST_TURN"
 _PROC_PIDVNODEPATHINFO = 9
 # struct proc_vnodepathinfo: the cwd's vnode_info (152 bytes), then its path.
 _VNODE_PATH_INFO_SIZE = 2352
@@ -448,6 +457,40 @@ def _cwd(pid: int) -> str | None:
     return buffer.raw[_CWD_PATH].split(b"\0", 1)[0].decode("utf-8", "replace") or None
 
 
+def _marked(marker: str) -> set[int]:
+    """Find this user's processes whose environment holds the turn marker.
+
+    macOS hides the environment of its own system binaries, so this finds
+    only some processes. It adds to the other rules and never replaces them.
+
+    Args:
+        marker: The ``NAME=value`` marker of the turn.
+
+    Returns:
+        Process ids.
+    """
+    found = set()
+    if sys.platform == "linux":
+        needle = marker.encode()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if needle in (entry / "environ").read_bytes().split(b"\0"):
+                    found.add(int(entry.name))
+            except OSError:
+                continue
+        return found
+    listing = subprocess.run(
+        ["/bin/ps", "-x", "-E", "-ww", "-o", "pid=,command="], capture_output=True, text=True, check=False
+    ).stdout
+    for line in listing.splitlines():
+        fields = line.split()
+        if fields and fields[0].isdigit() and marker in fields[1:]:
+            found.add(int(fields[0]))
+    return found
+
+
 def _process_table() -> list[tuple[int, int, int]]:
     """List this user's live processes with their parent and group.
 
@@ -478,23 +521,26 @@ def _process_table() -> list[tuple[int, int, int]]:
     return rows
 
 
-def _turn_processes(leader: int | None, root: Path) -> set[int]:
+def _turn_processes(leader: int | None, root: Path, marker: str) -> set[int]:
     """Find every live process of one turn, also those that left its group or session.
 
     A process belongs to the turn when it is the leader or its descendant,
     when it works inside the turn's folder (an escaped tool command keeps the
-    folder it started in), or when it shares a group with one that does.
+    folder it started in), when its environment holds the turn marker, or
+    when it shares a group with one that does.
 
     Args:
         leader: The CLI's own process while it is not reaped, else None.
         root: The turn's folder.
+        marker: The ``NAME=value`` marker in the turn's environment.
 
     Returns:
         Process ids, without this process.
     """
     rows = _process_table()
     real_root = _real(root)
-    found = set() if leader is None else {leader}
+    live = {pid for pid, _, _ in rows}
+    found = (set() if leader is None else {leader}) | (_marked(marker) & live)
     for pid, _, _ in rows:
         cwd = _cwd(pid)
         if cwd is not None and (cwd == real_root or cwd.startswith(real_root + os.sep)):
@@ -522,7 +568,7 @@ def _turn_processes(leader: int | None, root: Path) -> set[int]:
     return turn - {os.getpid()}
 
 
-def _stop_turn(process: subprocess.Popen[str], root: Path) -> None:
+def _stop_turn(process: subprocess.Popen[str], root: Path, marker: str) -> None:
     """Kill every process of one turn and every group they lead, until none is left.
 
     A CLI runs each tool command in a new session (``setsid``), so killing the
@@ -531,6 +577,7 @@ def _stop_turn(process: subprocess.Popen[str], root: Path) -> None:
     Args:
         process: The CLI, started in its own session.
         root: The turn's folder.
+        marker: The ``NAME=value`` marker in the turn's environment.
     """
     own_group = os.getpgid(0)
     with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -539,7 +586,7 @@ def _stop_turn(process: subprocess.Popen[str], root: Path) -> None:
         os.killpg(process.pid, signal.SIGKILL)
     for _ in range(50):
         # A reaped leader's pid can belong to another process by now.
-        pids = _turn_processes(process.pid if process.poll() is None else None, root)
+        pids = _turn_processes(process.pid if process.poll() is None else None, root, marker)
         if not pids:
             return
         for pid in pids:
@@ -578,10 +625,12 @@ def run_group(
         OSError: When the command could not start.
     """
     root = root or cwd
+    marker_value = uuid.uuid4().hex
+    marker = f"{TURN_MARKER_ENV}={marker_value}"
     process = subprocess.Popen(
         argv,
         cwd=cwd,
-        env=env,
+        env={**env, TURN_MARKER_ENV: marker_value},
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -592,14 +641,14 @@ def run_group(
     try:
         stdout, stderr = process.communicate(stdin, timeout=timeout)
     except subprocess.TimeoutExpired:
-        _stop_turn(process, root)
+        _stop_turn(process, root, marker)
         try:
             process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
         raise
     finally:
-        _stop_turn(process, root)
+        _stop_turn(process, root, marker)
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
@@ -739,14 +788,14 @@ def _error(code: str, message: str, *, reset_at: str | None = None, transcript: 
 
 
 def _login_paths(cli: CliProvider) -> list[str]:
-    """Return the files in the user's home a CLI must read for its subscription login.
+    """Return the paths in the user's home a CLI must read for its subscription login.
 
-    Codex gets a temporary home with a login copy from :func:`isolated_cli`, so
-    it needs nothing here. Claude Code reads its real config file and the login
-    Keychain. Both stay read-only: ``~/.claude.json`` holds the user's own MCP
-    servers, which the user's later sessions would start outside any sandbox,
-    and the Keychain service writes a refreshed login itself. ``~/.claude``
-    (other sessions' transcripts, the user's own instructions) stays hidden.
+    Codex gets its login copy in the turn's own home, so it needs nothing
+    here. Claude Code reads its login from the login Keychain, which stays
+    read-only because the Keychain service writes a refreshed login itself.
+    ``~/.claude.json`` (the user's own MCP servers, which the user's later
+    sessions start outside any sandbox) and ``~/.claude`` (other sessions'
+    transcripts, the user's own instructions) stay hidden.
 
     Args:
         cli: The CLI of the turn.
@@ -756,8 +805,50 @@ def _login_paths(cli: CliProvider) -> list[str]:
     """
     if cli != "claude":
         return []
-    home = Path.home()
-    return [str(home / ".claude.json"), str(home / "Library" / "Keychains")]
+    return [str(Path.home() / "Library" / "Keychains")]
+
+
+def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> None:
+    """Give the CLI a home inside the turn, so no change it makes reaches the user's.
+
+    Codex gets a copy of its login with an empty refresh token. The turn's
+    tool commands can read and write that copy, so a stolen refresh token
+    would give lasting access, and a changed copy must never go back over
+    the user's login. The access token in the copy expires by itself.
+    Claude Code gets an empty home whose ``Library`` links the real one, so
+    it still finds its Keychain login.
+
+    Args:
+        cli: The CLI of the turn.
+        env: The CLI's environment from :func:`isolated_cli`; updated in place.
+        turn: The turn's folder.
+
+    """
+    home = turn / "home"
+    home.mkdir()
+    env["HOME"] = str(home)
+    if cli == "codex":
+        codex_home = turn / "codex"
+        codex_home.mkdir()
+        raw = _read_no_follow(Path(env["CODEX_HOME"]) / CODEX_AUTH_FILE)
+        env["CODEX_HOME"] = str(codex_home)
+        try:
+            document = json.loads(raw) if raw is not None else None
+        except ValueError:
+            document = None
+        if not isinstance(document, dict):
+            # Codex then reports that it is not logged in, as it does without a login.
+            return
+        if isinstance(document.get("tokens"), dict) and "refresh_token" in document["tokens"]:
+            # Codex rejects a login file without the field, so it stays, but empty.
+            document["tokens"]["refresh_token"] = ""
+        descriptor = os.open(codex_home / CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            json.dump(document, handle)
+    elif cli == "claude":
+        library = Path.home() / "Library"
+        if library.is_dir():
+            (home / "Library").symlink_to(library)
 
 
 def _login_secrets(raw: bytes) -> tuple[str | None, set[str]]:
@@ -796,31 +887,6 @@ def _read_no_follow(path: Path) -> bytes | None:
         return None
     with os.fdopen(descriptor, "rb") as handle:
         return handle.read() if stat.S_ISREG(os.fstat(handle.fileno()).st_mode) else None
-
-
-def keep_valid_login(copy: Path, original: bytes) -> None:
-    """Undo a change to the codex login copy unless it is a real refresh.
-
-    :func:`isolated_cli` puts a changed copy back over the user's real login.
-    The turn's tool commands can write the copy, so only a valid login for the
-    same account may go back; anything else is replaced by the original bytes.
-
-    Args:
-        copy: The login copy in the turn's temporary codex home.
-        original: Its bytes before the turn.
-    """
-    current = _read_no_follow(copy)
-    if current == original:
-        return
-    account, _ = _login_secrets(original)
-    new_account, new_secrets = _login_secrets(current or b"")
-    if account is not None and new_account == account and new_secrets:
-        return
-    logger.warning("Host agent: refused a changed codex login from the turn")
-    copy.unlink(missing_ok=True)
-    descriptor = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(original)
 
 
 def _command(binary: str, env: dict[str, str]) -> str:
@@ -886,20 +952,18 @@ def run_host_agent(
             # Each turn gets its own temp folder; the shared one holds other apps' files.
             # Claude Code ignores TMPDIR and uses /tmp/claude-<uid> unless CLAUDE_CODE_TMPDIR is set.
             env.update({name: str(turn_tmp) for name in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR")})
-            login_copy = Path(env["CODEX_HOME"]) / CODEX_AUTH_FILE if cli == "codex" else None
-            login_original = (_read_no_follow(login_copy) if login_copy else None) or b""
-            _, secret_values = _login_secrets(login_original)
+            login = _read_no_follow(Path(env["CODEX_HOME"]) / CODEX_AUTH_FILE) if cli == "codex" else None
+            _, secret_values = _login_secrets(login or b"")
+            _turn_home(cli, env, turn)
             binary = _command(cli_binary(cli, settings), env)
             argv = host_cli_argv(
                 cli, permission, binary, workdir, _model_arg(cli, str(body.get("model") or "")), isolation.args
             )
             if permission == "workspace_only":
-                # Codex's temporary home (with its login copy) is the only shared-temp path it may use.
-                cli_home = [str(Path(env["CODEX_HOME"]).parent)] if login_copy else []
                 argv = confine(
                     argv,
                     home=Path.home(),
-                    writable=[str(turn), *cli_home],
+                    writable=[str(turn)],
                     readable=[*tool_roots(binary), *_login_paths(cli)],
                     hidden=(tempfile.gettempdir(), "/private/tmp"),
                 )
@@ -912,9 +976,6 @@ def run_host_agent(
                 return _error(FAILED_KEY, f"The {cli} turn ran longer than {settings.host_agent_timeout_seconds:.0f}s.")
             except OSError as error:
                 return _error(FAILED_KEY, f"The {cli} CLI could not start: {error}")
-            finally:
-                if login_copy is not None and login_original:
-                    keep_valid_login(login_copy, login_original)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         text, usage, cli_error = parse_cli_output(cli, completed.stdout)
         transcript = text or completed.stdout or completed.stderr

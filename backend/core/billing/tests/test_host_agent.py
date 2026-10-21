@@ -67,6 +67,10 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "home": os.environ.get("HOME"),
     "turn_env": {key: os.environ.get(key) for key in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR", "SSH_AUTH_SOCK")},
     "prompt": prompt,
+    "codex_home": os.environ.get("CODEX_HOME"),
+    "home_files": sorted(os.listdir(os.environ["HOME"])),
+    "home_library": os.path.realpath(Path(os.environ["HOME"]) / "Library"),
+    "login": (Path(os.environ["CODEX_HOME"]) / "auth.json").read_text() if cli == "codex" else None,
     "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
 if os.environ.get("FAKE_CLI_MODE") == "limit":
@@ -76,6 +80,9 @@ if os.environ.get("FAKE_CLI_MODE") == "limit":
     else:
         print("You've hit your usage limit. Try again later.", file=sys.stderr)
     sys.exit(1)
+if cli == "codex":
+    # A tool command can rewrite the login copy; this must never reach the user's login.
+    (Path(os.environ["CODEX_HOME"]) / "auth.json").write_text('{"tokens": {"refresh_token": "planted"}}')
 target = Path("solver.py")
 target.write_text(target.read_text() + "# improved\n")
 Path("stale.txt").unlink()
@@ -148,6 +155,11 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     for key in STRIPPED:
         monkeypatch.setenv(key, "parent-only-value")
     monkeypatch.setenv("FAKE_CLI_RECORD", str(tmp_path / "record.json"))
+    # Never the user's real codex login.
+    codex_home = tmp_path / "user-codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_bytes(_login("account-1", "A" * 32))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
     # The Seatbelt profile has its own macOS test; here the turn runs unwrapped so Linux CI covers it.
     monkeypatch.setattr(host_agent, "confine", lambda argv, **_: argv)
     # The CLI env is an allow-list; the fake CLI reads its test settings from FAKE_CLI_* variables.
@@ -245,8 +257,18 @@ def test_turn_edits_a_copy_with_stripped_keys(
         "CLAUDE_CODE_TMPDIR": turn_tmp,
         "SSH_AUTH_SOCK": None,
     }
+    assert Path(record["home"]).resolve() == copy.parent / "home"
     if cli == "codex":
-        assert record["home"] != os.environ["HOME"]
+        assert Path(record["codex_home"]).resolve() == copy.parent / "codex"
+        assert json.loads(record["login"]) == {
+            "tokens": {"account_id": "account-1", "access_token": "A" * 32, "refresh_token": ""}
+        }
+        assert (tmp_path / "user-codex" / "auth.json").read_bytes() == _login("account-1", "A" * 32)
+        assert record["home_files"] == []
+    else:
+        assert record["home_files"] == (["Library"] if (Path.home() / "Library").is_dir() else [])
+        if record["home_files"]:
+            assert record["home_library"] == os.path.realpath(Path.home() / "Library")
     assert record["prompt"] == "Improve solve()."
     files = _members(document["result_tar_b64"])
     assert files["solver.py"].endswith("# improved\n")
@@ -701,6 +723,72 @@ def test_workspace_only_cannot_reach_local_sockets_or_launchctl(tmp_path: Path) 
     assert launchctl.returncode != 0
 
 
+def test_timeout_kills_a_marked_process_that_left_the_turn(tmp_path: Path) -> None:
+    """A daemon that leaves the tree, the group and the turn folder still stops by its env marker."""
+    daemon_pid = tmp_path / "daemon.pid"
+    turn = tmp_path / "turn"
+    turn.mkdir()
+    script = f"""
+import os, time
+from pathlib import Path
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        os.chdir("/")
+        Path({str(daemon_pid)!r}).write_text(str(os.getpid()))
+        time.sleep(120)
+    os._exit(0)
+time.sleep(120)
+"""
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        host_agent.run_group([sys.executable, "-c", script], cwd=turn, env=dict(os.environ), stdin="", timeout=2)
+
+    assert _gone(int(daemon_pid.read_text()))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
+def test_workspace_only_cannot_start_an_app_through_launchservices(tmp_path: Path) -> None:
+    """Under the profile ``open`` cannot start an app, which would run outside the sandbox."""
+    home = tmp_path / "home"
+    turn = home / "turn"
+    executable = turn / "Probe.app" / "Contents" / "MacOS"
+    executable.mkdir(parents=True)
+    marker = tmp_path / "marker"
+    (turn / "Probe.app" / "Contents" / "Info.plist").write_text(
+        '<?xml version="1.0"?><plist version="1.0"><dict>'
+        "<key>CFBundleExecutable</key><string>probe</string>"
+        "<key>CFBundleIdentifier</key><string>dev.skynet.test.probe</string>"
+        "<key>LSUIElement</key><true/></dict></plist>"
+    )
+    (executable / "probe").write_text(f"#!/bin/sh\necho outside > '{marker}'\n")
+    (executable / "probe").chmod(0o755)
+    try:
+        opened = subprocess.run(
+            host_agent.confine(
+                ["/usr/bin/open", "-g", str(turn / "Probe.app")], home=home, writable=[str(turn)], readable=[]
+            ),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        time.sleep(5)
+    finally:
+        subprocess.run(
+            [
+                "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                "-u",
+                str(turn / "Probe.app"),
+            ],
+            capture_output=True,
+            check=False,
+        )
+
+    assert opened.returncode != 0
+    assert not marker.exists()
+
+
 def _login(account: str, token: str) -> bytes:
     """Build a codex login file.
 
@@ -712,43 +800,6 @@ def _login(account: str, token: str) -> bytes:
         The ``auth.json`` bytes.
     """
     return json.dumps({"tokens": {"account_id": account, "access_token": token, "refresh_token": token[::-1]}}).encode()
-
-
-@pytest.mark.parametrize(
-    ("change", "kept"),
-    [
-        ("refresh", True),
-        ("other_account", False),
-        ("not_json", False),
-        ("no_tokens", False),
-        ("deleted", False),
-        ("link", False),
-    ],
-)
-def test_only_a_same_account_refresh_reaches_the_users_login(change: str, kept: bool, tmp_path: Path) -> None:
-    """A turn may refresh the codex login, but cannot swap, break or redirect it."""
-    original = _login("account-1", "A" * 32)
-    copy = tmp_path / "auth.json"
-    copy.write_bytes(original)
-    target = tmp_path / "elsewhere.json"
-    target.write_text("{}")
-    changed = {
-        "refresh": _login("account-1", "B" * 32),
-        "other_account": _login("account-2", "C" * 32),
-        "not_json": b"not json",
-        "no_tokens": json.dumps({"tokens": {"account_id": "account-1"}}).encode(),
-    }
-    copy.unlink()
-    if change == "link":
-        copy.symlink_to(target)
-    elif change != "deleted":
-        copy.write_bytes(changed[change])
-
-    host_agent.keep_valid_login(copy, original)
-
-    assert not copy.is_symlink()
-    assert copy.read_bytes() == (changed[change] if kept else original)
-    assert target.read_text() == "{}"
 
 
 def test_result_drops_login_files_and_token_copies(tmp_path: Path) -> None:
