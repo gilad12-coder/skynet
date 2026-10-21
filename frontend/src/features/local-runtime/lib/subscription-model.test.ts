@@ -4,13 +4,16 @@ import test from "node:test";
 
 const {
   CLI_PROVIDERS,
+  agentEngineOptions,
   byokHintKey,
   runEstimateLabelKey,
   usageChargedKey,
   usageCostNoteKey,
   cliState,
   defaultAgentCli,
+  findCli,
   hostCliPatch,
+  isAgentEngine,
   isCliProvider,
   isLocalModelRefusal,
   LOCAL_MODEL_REFUSED_CODE,
@@ -256,15 +259,92 @@ test("a request with no model pick sends the first model of the signed-in CLI", 
 test("the default agent CLI prefers ready, then installed, then Claude Code", () => {
   const now = new Date("2026-10-21T10:00:00Z");
   const codex = cli({ id: "codex" });
-  assert.equal(defaultAgentCli(status([cli({ path: null }), codex]), now), "codex");
+  assert.equal(defaultAgentCli(status([cli({ path: null }), codex]), null, now), "codex");
   // A ready CLI wins over an installed one listed before it.
-  assert.equal(defaultAgentCli(status([{ ...codex, logged_in: false }, cli()]), now), "claude");
   assert.equal(
-    defaultAgentCli(status([cli({ path: null }), { ...codex, logged_in: false }]), now),
+    defaultAgentCli(status([{ ...codex, logged_in: false }, cli()]), null, now),
+    "claude",
+  );
+  assert.equal(
+    defaultAgentCli(status([cli({ path: null }), { ...codex, logged_in: false }]), null, now),
     "codex",
   );
-  assert.equal(defaultAgentCli(status([cli({ path: null })]), now), "claude");
-  assert.equal(defaultAgentCli(null, now), "claude");
+  assert.equal(defaultAgentCli(status([cli({ path: null })]), null, now), "claude");
+  assert.equal(defaultAgentCli(null, null, now), "claude");
+});
+
+test("a CLI agent engine is the default CLI for every role, even when not ready", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  const ready = status([cli(), cli({ id: "codex", logged_in: false })]);
+  assert.equal(defaultAgentCli(ready, "codex", now), "codex");
+  assert.equal(defaultAgentCli(null, "codex", now), "codex");
+  // A saved Droid engine is no longer a choice, so the CLI default stays.
+  assert.equal(defaultAgentCli(ready, "droid" as never, now), "claude");
+  assert.equal(isAgentEngine("droid"), false);
+  // OpenRouter cannot run local agents, so the CLI default stays.
+  assert.equal(defaultAgentCli(ready, "openrouter", now), "claude");
+  assert.equal(isAgentEngine("codex"), true);
+  assert.equal(isAgentEngine("openrouter"), true);
+  assert.equal(isAgentEngine("gemini"), false);
+  assert.equal(isAgentEngine(null), false);
+});
+
+test("the engine filters the agent menu to that CLI's models", () => {
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  const loaded = status([cli(), codex]);
+  const menu = subscriptionMenuModels(findCli(loaded, defaultAgentCli(loaded, "codex")), []);
+  assert.deepEqual(
+    menu.map((m) => m.value),
+    ["subscription/codex/openai/gpt-5"],
+  );
+});
+
+test("a role with no CLI runs on the engine; a role's own CLI overrides it", async () => {
+  const loaded = status([cli(), cli({ id: "codex", models: ["openai/gpt-5"] })]);
+  const load = async () => loaded;
+  assert.equal(
+    await resolveAgentModel(null, null, load, () => null, "codex"),
+    "subscription/codex/openai/gpt-5",
+  );
+  assert.equal(
+    await resolveAgentModel(null, "claude", load, () => null, "codex"),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+  // No engine keeps the first ready CLI.
+  assert.equal(
+    await resolveAgentModel(null, null, load, () => null, null),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+});
+
+test("hosted builds offer only OpenRouter; local builds offer ready CLIs", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  assert.deepEqual(agentEngineOptions(null, false, now), [
+    { engine: "openrouter", disabled: false },
+  ]);
+  const loaded = status([cli({ id: "codex" }), cli({ logged_in: false })]);
+  const local = agentEngineOptions(loaded, true, now);
+  assert.deepEqual(
+    local.map((o) => [o.engine, o.disabled]),
+    [
+      ["codex", false],
+      ["claude", true],
+      ["openrouter", true],
+    ],
+  );
+  const state = (engine: string) => {
+    const option = local.find((o) => o.engine === engine);
+    return option && "state" in option ? option.state : undefined;
+  };
+  assert.deepEqual(state("claude"), {
+    kind: "logged_out",
+    hint: "Run `claude auth login` in a terminal.",
+  });
+  // While the status loads, every CLI waits and none can be picked.
+  for (const option of agentEngineOptions(null, true, now)) {
+    assert.equal(option.disabled, true);
+    if ("state" in option) assert.equal(option.state, null);
+  }
 });
 
 test("Droid is not a CLI choice, even when an older backend still reports it", () => {
@@ -272,9 +352,9 @@ test("Droid is not a CLI choice, even when an older backend still reports it", (
   assert.deepEqual(CLI_PROVIDERS, ["codex", "claude"]);
   assert.equal(isCliProvider("droid"), false);
   const droid = { ...cli(), id: "droid" } as unknown as Cli;
-  assert.equal(defaultAgentCli(status([droid]), now), "claude");
+  assert.equal(defaultAgentCli(status([droid]), null, now), "claude");
   assert.equal(
-    defaultAgentCli(status([droid, cli({ id: "codex", logged_in: false })]), now),
+    defaultAgentCli(status([droid, cli({ id: "codex", logged_in: false })]), null, now),
     "codex",
   );
   assert.equal(parseSubscriptionModelId("subscription/droid/anthropic/claude-sonnet-4.5"), null);

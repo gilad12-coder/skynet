@@ -6,6 +6,7 @@ import {
   cliLabel,
   defaultAgentCli,
   isCliProvider,
+  useAgentEngine,
   useLocalStatus,
 } from "@/features/local-runtime";
 import { msg, type MessageKey } from "@/shared/lib/messages";
@@ -36,13 +37,14 @@ const ROLE_ROWS: Record<
 /**
  * Local desktop build only: per agent role, the CLI subscription it runs on.
  * The local backend has no managed models, so there is no "off": a role the
- * user never set shows the CLI it runs on by default.
+ * user never set shows the CLI it runs on by default, the agent engine's CLI.
  */
 export function AgentLocalRunSetting() {
   const { prefs, setPref } = useUserPrefs();
   const { status } = useLocalStatus();
+  const { engine } = useAgentEngine();
   const current = prefs.agentSubscription ?? {};
-  const fallback = defaultAgentCli(status);
+  const fallback = defaultAgentCli(status, engine);
 
   return (
     <div className="pt-3">
