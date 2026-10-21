@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "喺 Mac app 標註要用你自己嘅供應商金鑰。請喺「自備金鑰」揀一個模型。",
+  "submit.budget.local_note": "Mac app 冇消費上限。每次調用模型都由你嘅供應商金鑰或者 CLI 計劃支付。"
 }

@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "برچسب‌گذاری در برنامهٔ Mac به کلید ارائه‌دهندهٔ خودتان نیاز دارد. مدلی را زیر «کلید شخصی شما» انتخاب کنید.",
+  "submit.budget.local_note": "برنامهٔ Mac سقف هزینه ندارد. کلید ارائه‌دهنده یا طرح CLI شما هزینهٔ هر فراخوانی مدل را می‌پردازد."
 }

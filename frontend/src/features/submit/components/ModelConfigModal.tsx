@@ -56,6 +56,11 @@ interface ModelConfigModalProps {
   nameOnly?: boolean;
   /** Keep billing selection, but use the model's own sampling defaults. */
   modelDefaultsOnly?: boolean;
+  /**
+   * In the local build, offer only the user's own key: the caller's backend
+   * refuses managed models locally and cannot run subscription ones.
+   */
+  byokOnlyLocally?: boolean;
 }
 
 const TOKEN_SOURCE_SEGMENTS: Array<{
@@ -74,9 +79,24 @@ const LOCAL_TOKEN_SOURCE_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
   { mode: "subscription", icon: Desktop, labelKey: "subscription.mode" },
 ];
 
-/** The draft a config opens as: in the local build a managed model opens on the subscription source. */
-function initialDraft(config: ModelConfig, local: boolean): ModelConfig {
+const LOCAL_BYOK_ONLY_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
+];
+
+/**
+ * The draft a config opens as: in the local build a managed model opens on the
+ * subscription source, or on the user's own key where only that source runs.
+ */
+function initialDraft(config: ModelConfig, local: boolean, byokOnly = false): ModelConfig {
   const draft = withoutInlineConnection(config);
+  if (local && byokOnly && draft.token_source !== "byok") {
+    return withoutInlineConnection({
+      ...draft,
+      name: "",
+      token_source: "byok",
+      byok_provider: undefined,
+    });
+  }
   return local && draft.token_source === "managed"
     ? { ...draft, name: "", token_source: "subscription", cli_provider: null }
     : draft;
@@ -116,6 +136,7 @@ export function ModelConfigModal({
   onRemoveRecent,
   nameOnly = false,
   modelDefaultsOnly = false,
+  byokOnlyLocally = false,
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
@@ -131,7 +152,10 @@ export function ModelConfigModal({
     c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
   const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
   const localMode = isLocalMode();
-  const [draft, setDraft] = React.useState<ModelConfig>(() => initialDraft(config, localMode));
+  const byokOnly = localMode && byokOnlyLocally;
+  const [draft, setDraft] = React.useState<ModelConfig>(() =>
+    initialDraft(config, localMode, byokOnly),
+  );
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
   const local = useLocalStatus(localMode && open && mode === "subscription");
   const subscriptionModels = React.useMemo(
@@ -200,10 +224,10 @@ export function ModelConfigModal({
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
     if (open) {
-      setDraft(initialDraft(config, localMode));
+      setDraft(initialDraft(config, localMode, byokOnly));
       setParametersOpen(paramsFirstOpen || hasParams(config));
     }
-  }, [open, config, localMode]);
+  }, [open, config, localMode, byokOnly]);
 
   // The effort ladder is model-specific (providers reject levels outside
   // their documented set). "none" is expressed by the switch itself. An
@@ -372,18 +396,28 @@ export function ModelConfigModal({
                         }),
                       )
                     }
-                    options={(localMode ? LOCAL_TOKEN_SOURCE_SEGMENTS : TOKEN_SOURCE_SEGMENTS).map(
-                      ({ mode: value, icon: Icon, labelKey }) => ({
-                        value,
-                        label: msg(labelKey),
-                        icon: <Icon className="size-3.5" aria-hidden="true" />,
-                      }),
-                    )}
+                    options={(byokOnly
+                      ? LOCAL_BYOK_ONLY_SEGMENTS
+                      : localMode
+                        ? LOCAL_TOKEN_SOURCE_SEGMENTS
+                        : TOKEN_SOURCE_SEGMENTS
+                    ).map(({ mode: value, icon: Icon, labelKey }) => ({
+                      value,
+                      label: msg(labelKey),
+                      icon: <Icon className="size-3.5" aria-hidden="true" />,
+                    }))}
                   />
                 </div>
                 {mode === "managed" && (
                   <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
                     <span className="min-w-0 flex-1">{msg("billing.mode.managed_hint")}</span>
+                  </div>
+                )}
+                {byokOnly && (
+                  <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1" dir="auto">
+                      {msg("tagger.assist.local_key_needed")}
+                    </span>
                   </div>
                 )}
               </div>

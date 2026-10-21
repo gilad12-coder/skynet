@@ -4316,5 +4316,7 @@
   "settings.agent_local.role.generalist": "Assistant",
   "settings.agent_local.role.code": "Code agent",
   "settings.agent_local.role.interview": "Task interview",
-  "settings.agent_local.role.tagger": "Tagging interview"
+  "settings.agent_local.role.tagger": "Tagging interview",
+  "tagger.assist.local_key_needed": "Tagging in the Mac app needs your own provider key. Choose a model under Your own key.",
+  "submit.budget.local_note": "The Mac app sets no spending limit. Your provider key or your CLI plan pays for each model call."
 }

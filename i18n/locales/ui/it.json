@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "L'etichettatura nell'app Mac richiede la tua chiave del provider. Scegli un modello in «La tua chiave».",
+  "submit.budget.local_note": "L'app Mac non imposta un limite di spesa. Ogni chiamata al modello la paga la tua chiave del provider o il tuo piano CLI."
 }

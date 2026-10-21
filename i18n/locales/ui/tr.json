@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "Mac uygulamasında etiketleme için kendi sağlayıcı anahtarınız gerekir. «Kendi anahtarınız» altından bir model seçin.",
+  "submit.budget.local_note": "Mac uygulaması harcama limiti koymaz. Her model çağrısını sağlayıcı anahtarınız veya CLI planınız öder."
 }

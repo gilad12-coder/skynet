@@ -728,6 +728,7 @@ function RubricCard({
                 catalogModels={catalogModels ?? undefined}
                 recentConfigs={recentConfigs}
                 onRemoveRecent={removeRecentConfig}
+                byokOnlyLocally
               />
             </CardContent>
           </Card>
@@ -783,9 +784,13 @@ function RubricCard({
                     ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
                     : formatMsg("tagger.assist.rubric.start_copilot_round", { rows: copilotBatch })}
               </span>
-              {!generating && error === "synthesize" ? (
+              {!generating && (error === "synthesize" || error === "local_key") ? (
                 <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
-                  {msg("tagger.assist.synthesize_error")}
+                  {msg(
+                    error === "local_key"
+                      ? "tagger.assist.local_key_needed"
+                      : "tagger.assist.synthesize_error",
+                  )}
                 </span>
               ) : !taskValid ? (
                 <span className="text-xs font-normal text-primary-foreground/75" dir="auto">

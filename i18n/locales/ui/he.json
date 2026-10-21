@@ -4316,5 +4316,7 @@
   "settings.agent_local.role.generalist": "העוזר",
   "settings.agent_local.role.code": "סוכן הקוד",
   "settings.agent_local.role.interview": "ראיון המשימה",
-  "settings.agent_local.role.tagger": "ראיון התיוג"
+  "settings.agent_local.role.tagger": "ראיון התיוג",
+  "tagger.assist.local_key_needed": "תיוג באפליקציית ה-Mac צריך מפתח ספק משלכם. בחרו מודל תחת „המפתח שלך”.",
+  "submit.budget.local_note": "באפליקציית ה-Mac אין תקרת הוצאה. מפתח הספק שלכם או תוכנית ה-CLI שלכם משלמים על כל קריאה למודל."
 }

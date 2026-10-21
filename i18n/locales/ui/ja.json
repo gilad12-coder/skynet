@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "Mac アプリでのタグ付けには、ご自身のプロバイダーキーが必要です。「自分のキー」からモデルを選んでください。",
+  "submit.budget.local_note": "Mac アプリには支出上限がありません。各モデル呼び出しの料金は、ご自身のプロバイダーキーまたは CLI プランが支払います。"
 }

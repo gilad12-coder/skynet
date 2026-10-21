@@ -32,6 +32,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { RolePill } from "@/shared/ui/role-pill";
 import { msg, type MessageKey } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
@@ -594,13 +595,17 @@ export function RunOverview({
                       </bdi>
                     </Row>
                   )}
-                  <Row
-                    icon={<Coins className={ICON} aria-hidden />}
-                    label={msg("submit.economy.summary_label")}
-                    help={tip("submit.economy")}
-                  >
-                    {msg(meta.economyMode ? "submit.economy.label" : "submit.economy.summary_off")}
-                  </Row>
+                  {!isLocalMode() && (
+                    <Row
+                      icon={<Coins className={ICON} aria-hidden />}
+                      label={msg("submit.economy.summary_label")}
+                      help={tip("submit.economy")}
+                    >
+                      {msg(
+                        meta.economyMode ? "submit.economy.label" : "submit.economy.summary_off",
+                      )}
+                    </Row>
+                  )}
                 </>
               )}
               {current === "reward" && reward && (

@@ -4316,5 +4316,7 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid"
+  "subscription.cli.droid": "Droid",
+  "tagger.assist.local_key_needed": "Для разметки в приложении для Mac нужен ваш собственный ключ провайдера. Выберите модель в разделе «Ваш собственный ключ».",
+  "submit.budget.local_note": "Приложение для Mac не ставит лимит расходов. Каждый вызов модели оплачивает ваш ключ провайдера или тариф CLI."
 }

@@ -1,4 +1,4 @@
-import { localAgentModel } from "@/features/local-runtime";
+import { isLocalModelRefusal, localAgentModel } from "@/features/local-runtime";
 import { agentSubscriptionFor, readPref } from "@/features/settings";
 import type { ModelConfig } from "@/shared/types/api";
 import type {
@@ -223,4 +223,14 @@ export function initialAssistState(
     provenance: {},
     rounds: [],
   };
+}
+
+/**
+ * The assist error to show for a failed call: `local_key` when the local
+ * build refused the tagging model (it runs only the user's own key), else
+ * `fallback`. `failure` is a caught error or a server error code.
+ */
+export function assistFailureKind(failure: unknown, fallback: string): string {
+  const code = typeof failure === "string" ? failure : (failure as { code?: unknown } | null)?.code;
+  return typeof code === "string" && isLocalModelRefusal(code) ? "local_key" : fallback;
 }
