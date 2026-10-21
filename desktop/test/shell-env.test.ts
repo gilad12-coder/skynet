@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ALLOWED_ENV_KEYS, ALLOWED_ENV_PREFIXES, buildChildEnv, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
 
@@ -177,6 +179,14 @@ describe("buildChildEnv", () => {
   it("drops an inherited ELECTRON_RUN_AS_NODE but keeps an explicit one", () => {
     expect(buildChildEnv({ ELECTRON_RUN_AS_NODE: "1" })).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
     expect(buildChildEnv({}, { ELECTRON_RUN_AS_NODE: "1" }).ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("drops an inherited PORT, and the API env pins PORT to the API port", () => {
+    // The backend reads PORT before API_PORT, so a stray PORT would move the API.
+    expect(buildChildEnv({ PORT: "3000", HOME: "/Users/x" })).toEqual({ HOME: "/Users/x" });
+    expect(buildChildEnv({ PORT: "3000" }, { API_PORT: "48100", PORT: "48100" }).PORT).toBe("48100");
+    const index = fs.readFileSync(path.join(__dirname, "..", "src", "main", "index.ts"), "utf8");
+    expect(index).toMatch(/API_PORT: String\(ports\.api\),\s*(\/\/[^\n]*\n\s*)*PORT: String\(ports\.api\),/);
   });
 
   it("removes a key when the override is undefined", () => {

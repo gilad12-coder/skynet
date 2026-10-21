@@ -58,6 +58,41 @@ export async function startPostgres(ctx: DockerCtx, port: number, password: stri
     },
     { timeoutMs: 90_000, intervalMs: 1_000 },
   );
+  // pg_isready can pass on the entrypoint's short-lived init server, so the
+  // password step retries until it reaches the real server.
+  let lastError = "";
+  try {
+    await waitFor(
+      "The Postgres password",
+      async () => {
+        const res = await runCommand(ctx.docker, setPasswordArgs(), {
+          env: { ...ctx.env, [PG_PASSWORD_VAR]: password },
+          timeoutMs: 15_000,
+        });
+        if (res.code !== 0) lastError = lastLine(res.stderr);
+        return res.code === 0;
+      },
+      { timeoutMs: 60_000, intervalMs: 1_000 },
+    );
+  } catch (err) {
+    throw new Error(`${(err as Error).message}: ${lastError || "unknown error"}`);
+  }
+}
+
+export const PG_PASSWORD_VAR = "SKYNET_PG_PASSWORD";
+
+/**
+ * docker args that set the role password to the value of PG_PASSWORD_VAR.
+ * POSTGRES_PASSWORD acts only on an empty volume, so this step makes the
+ * volume match secrets.json on every start, also after new secrets replace
+ * lost or legacy ones. psql connects over the container's Unix socket, which
+ * the image trusts, so the old password is not needed. The password stays out
+ * of argv: `docker exec -e NAME` copies it from the docker CLI's environment,
+ * and psql reads it with \getenv and quotes it with :'pw'.
+ */
+export function setPasswordArgs(): string[] {
+  const script = `printf '%s\\n' '\\getenv pw ${PG_PASSWORD_VAR}' "ALTER ROLE CURRENT_USER PASSWORD :'pw';" | psql -X -q -v ON_ERROR_STOP=1 -U ${PG_USER} -d ${PG_DB}`;
+  return ["exec", "-e", PG_PASSWORD_VAR, PG_CONTAINER, "sh", "-c", script];
 }
 
 export async function stopPostgres(ctx: DockerCtx): Promise<void> {

@@ -152,8 +152,9 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   }
 
   step("secrets");
-  const { secrets, created } = loadOrCreateSecrets(dataDir);
+  const { secrets, created, replacedLegacy } = loadOrCreateSecrets(dataDir);
   log(created ? "created new local secrets" : "reused local secrets");
+  if (replacedLegacy) log("replaced the keychain-encrypted secrets.bin; Postgres gets the new password");
   const ports: PortPlan = await allocatePorts();
   log(`ports api=${ports.api} frontend=${ports.frontend} postgres=${ports.postgres}`);
 
@@ -177,6 +178,9 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     APP_LOCAL_MODE: "1",
     API_HOST: "127.0.0.1",
     API_PORT: String(ports.api),
+    // The backend reads PORT before API_PORT. buildChildEnv already drops an
+    // inherited PORT; this pins it to the chosen port anyway.
+    PORT: String(ports.api),
     WORKER_ENABLED: "true",
     REMOTE_DB_URL: databaseUrl(secrets.pgPassword, ports.postgres),
     BACKEND_AUTH_SECRET: secrets.backendAuthSecret,

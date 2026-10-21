@@ -79,14 +79,16 @@ npm start
 
 | Path | Contents |
 | --- | --- |
-| `~/Library/Application Support/Skynet/secrets.bin` | Postgres password and auth secrets, encrypted with the macOS keychain |
+| `~/Library/Application Support/Skynet/secrets.json` | Postgres password and auth secrets for the local stack (mode 0600) |
 | `~/Library/Application Support/Skynet/local/` | Local state for the backend, including `cli_limits.json` |
 | `~/Library/Application Support/Skynet/venv/` | Python environment |
 | `~/Library/Application Support/Skynet/runtime/` | The backend and frontend copied out of the app bundle |
 | `~/Library/Application Support/Skynet/stack.pids` | Process groups of the running API and web server; removed on a clean quit |
 | `~/Library/Application Support/Skynet/logs/` | `desktop.log`, `api.log`, `frontend.log`, `migrate.log`, `sandbox-build.log` |
 
-A rebuilt ad-hoc app has a new signature, so macOS can ask once for keychain access to `secrets.bin`. Choose "Always Allow".
+Skynet does not use the macOS keychain for these secrets. An ad-hoc app gets a new signature on every rebuild or update, so keychain access asked for the login password each time and blocked Quit while the prompt was open. The secrets protect only services on 127.0.0.1, and any process that runs as you can already read the Postgres volume, so a 0600 file is enough here.
+
+Earlier builds kept the secrets in a keychain-encrypted `secrets.bin`. Skynet does not decrypt it. On the first launch of a new build, Skynet creates `secrets.json`, deletes `secrets.bin`, and sets the new Postgres password on the existing volume, so your data stays. You sign in to the local web app once more. The old keychain item "Skynet Safe Storage" is no longer used. You can delete it in Keychain Access.
 
 To reset all local data, quit Skynet and run:
 
@@ -95,7 +97,7 @@ docker volume rm skynet-local-pgdata
 rm -rf ~/Library/Application\ Support/Skynet
 ```
 
-The Postgres password lives in both places, so remove them together.
+Skynet sets the Postgres password from `secrets.json` on every start, so removing only one of them also works.
 
 ## Testing onboarding
 
