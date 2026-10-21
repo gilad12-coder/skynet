@@ -30,6 +30,7 @@ export {
   isCliProvider,
   isLocalModelRefusal,
   parseSubscriptionModelId,
+  RETIRED_AUTO_MODEL,
   subscriptionAgentModel,
   subscriptionCatalogModels,
   subscriptionMenuModels,

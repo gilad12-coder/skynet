@@ -293,6 +293,10 @@ export function isOpenRouterModelId(model: string | null | undefined): boolean {
   return !!model && /^openrouter\/[^/]+\/[^/]/.test(model);
 }
 
+// The retired "Auto · Intelligent" entry; saved prefs and conversations may
+// still carry it. The composer menu and the local request both read it as no pick.
+export const RETIRED_AUTO_MODEL = "auto:intelligent";
+
 /**
  * The model id a local agent request sends, matching what the composer chip
  * shows. A subscription pick resolves on the CLI and waits for nothing else.
@@ -302,9 +306,6 @@ export function isOpenRouterModelId(model: string | null | undefined): boolean {
  * model list loads or failed, the chip shows the default label and nothing is
  * sent.
  */
-// The composer menu reads this retired pick as no pick, so the request must too.
-const RETIRED_AUTO_MODEL = "auto:intelligent";
-
 export async function resolveLocalAgentModel(
   model: string | null,
   cli: CliProvider | null | undefined,

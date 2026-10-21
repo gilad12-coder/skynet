@@ -94,3 +94,20 @@ const BYOK_TO_LITELLM_PROVIDER: Record<string, string> = {
 export function litellmProviderForByok(slug: string): string {
   return BYOK_TO_LITELLM_PROVIDER[slug] ?? slug;
 }
+
+/**
+ * Run `run` unless an earlier run held in `inFlight` is still pending; then
+ * return that pending run. Several mounted model menus retry a failed key
+ * list on the same timer, so they share one fetch instead of one each.
+ */
+export function joinInFlight(
+  inFlight: { current: Promise<void> | null },
+  run: () => Promise<void>,
+): Promise<void> {
+  if (inFlight.current) return inFlight.current;
+  const pending = run().finally(() => {
+    if (inFlight.current === pending) inFlight.current = null;
+  });
+  inFlight.current = pending;
+  return pending;
+}

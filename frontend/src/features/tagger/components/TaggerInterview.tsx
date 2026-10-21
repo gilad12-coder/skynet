@@ -494,6 +494,7 @@ function RubricCard({
   };
   const cleanedCategories = categories.filter((c) => c.label.trim());
 
+
   const taskValid = mode !== "multiclass" || cleanedCategories.length >= 2;
 
   // Copilot's launch commits to the opening batch: the AI tags it and the

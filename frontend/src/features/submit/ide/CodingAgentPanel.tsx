@@ -96,9 +96,7 @@ export function CodingAgentPanel({
               {agent.status === "error" && agent.error && (
                 <ChatErrorBanner
                   message={agent.error}
-                  retryLabel={
-                    agent.limitReached ? undefined : v2Msg("submit.v2.ide.agent.retry", guided)
-                  }
+                  retryLabel={agent.limitReached ? undefined : v2Msg("submit.v2.ide.agent.retry", guided)}
                   onRetry={agent.limitReached ? undefined : agent.retry}
                 />
               )}

@@ -10,7 +10,7 @@ import {
   type ProviderKeyResponse,
   type SaveProviderKeyOptions,
 } from "@/shared/lib/api";
-import { type KeyStatus, type ProviderKey } from "../lib/byok";
+import { joinInFlight, type KeyStatus, type ProviderKey } from "../lib/byok";
 import { invalidateByokModelCatalog } from "@/shared/lib/model-catalog";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 
@@ -126,6 +126,9 @@ export function ByokKeysProvider({
     };
   }, []);
 
+  // The pending reload, which concurrent reload calls share.
+  const reloading = React.useRef<Promise<void> | null>(null);
+
   const reload = React.useCallback(() => {
     const load = (): Promise<void> => {
       const gen = keysGen.current;
@@ -145,7 +148,7 @@ export function ByokKeysProvider({
           setFailed(true);
         });
     };
-    return load();
+    return joinInFlight(reloading, load);
   }, []);
 
   React.useEffect(() => {

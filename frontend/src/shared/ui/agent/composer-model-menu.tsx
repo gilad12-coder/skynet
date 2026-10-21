@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { RETIRED_AUTO_MODEL } from "@/features/local-runtime";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -45,10 +46,6 @@ interface ComposerModelMenuProps {
    */
   models?: CatalogModel[];
 }
-
-// The retired "Auto · Intelligent" entry; saved prefs and conversations may
-// still carry it, and the backend runs the default for it like for null.
-const RETIRED_AUTO_MODEL = "auto:intelligent";
 
 // Caps the fallback list when the catalog flags no featured models (a
 // listing that carries no release dates or benchmarks).
