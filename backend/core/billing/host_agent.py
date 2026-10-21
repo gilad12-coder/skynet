@@ -72,7 +72,6 @@ HOST_PERMISSIONS: tuple[HostPermission, ...] = ("workspace_only", "full_access")
 HOST_AGENT_TOKEN_KEY = "host_agent_token"
 SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
 # Agent sockets act outside the sandbox (the SSH agent signs with the user's keys).
-AGENT_SOCKET_ENV = frozenset({"SSH_AUTH_SOCK"})
 RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILED_KEY = "blackbox.host_agent_failed"
 RATE_LIMITED_KEY = "blackbox.host_agent_rate_limited"
@@ -883,7 +882,7 @@ def run_host_agent(
         turn_tmp = turn / "tmp"
         turn_tmp.mkdir()
         with isolated_cli(cli) as isolation:
-            env = {key: value for key, value in isolation.env.items() if key not in AGENT_SOCKET_ENV}
+            env = dict(isolation.env)
             # Each turn gets its own temp folder; the shared one holds other apps' files.
             # Claude Code ignores TMPDIR and uses /tmp/claude-<uid> unless CLAUDE_CODE_TMPDIR is set.
             env.update({name: str(turn_tmp) for name in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR")})

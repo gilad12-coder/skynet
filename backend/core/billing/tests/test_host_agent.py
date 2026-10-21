@@ -40,6 +40,7 @@ from core.billing.model_gateway import ModelGateway
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime
 from core.config import Settings, settings
+from core.local import cli_probe
 from core.local.cli_isolation import CLAUDE_ARGS, CODEX_ARGS
 from core.local.cli_probe import read_cli_limits
 from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
@@ -149,6 +150,8 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setenv("FAKE_CLI_RECORD", str(tmp_path / "record.json"))
     # The Seatbelt profile has its own macOS test; here the turn runs unwrapped so Linux CI covers it.
     monkeypatch.setattr(host_agent, "confine", lambda argv, **_: argv)
+    # The CLI env is an allow-list; the fake CLI reads its test settings from FAKE_CLI_* variables.
+    monkeypatch.setattr(cli_probe, "CLI_ENV_PREFIXES", (*cli_probe.CLI_ENV_PREFIXES, "FAKE_CLI_"))
     return settings.model_copy(
         update={
             "local_mode": True,
