@@ -312,20 +312,38 @@ test("the local usage note says nothing was billed only for a subscription run",
     unpriced_calls: 0,
     ...patch,
   });
+  const done = { final: true, pairIndex: null };
   const subscription = [row(), row({ calls: 3 })];
   const ownKey = [row({ billing: "byok", charged_cents: 1, provider_cents: 14 })];
   const mixed = [row(), ...ownKey];
   const credits = [row(), row({ calls: 0, charged_cents: 5 })];
-  assert.equal(usageCostNoteKey(true, subscription), "usage_tab.subscription_note_local");
-  assert.equal(usageCostNoteKey(true, ownKey), "usage_tab.api_rates_note_local");
-  assert.equal(usageCostNoteKey(true, mixed), "usage_tab.api_rates_note_local");
-  assert.equal(usageCostNoteKey(true, credits), null);
-  assert.equal(usageCostNoteKey(true, [row({ billing: "byok", unpriced_calls: 12 })]), null);
-  assert.equal(usageCostNoteKey(true, [row({ calls: 0 })]), null);
-  assert.equal(usageCostNoteKey(true, []), null);
+  assert.equal(usageCostNoteKey(true, subscription, done), "usage_tab.subscription_note_local");
+  assert.equal(usageCostNoteKey(true, ownKey, done), "usage_tab.api_rates_note_local");
+  assert.equal(usageCostNoteKey(true, mixed, done), "usage_tab.api_rates_note_local");
+  assert.equal(usageCostNoteKey(true, credits, done), null);
+  assert.equal(usageCostNoteKey(true, [row({ billing: "byok", unpriced_calls: 12 })], done), null);
+  assert.equal(usageCostNoteKey(true, [row({ calls: 0 })], done), null);
+  assert.equal(usageCostNoteKey(true, [], done), null);
   for (const rows of [subscription, ownKey, mixed, credits]) {
-    assert.equal(usageCostNoteKey(false, rows), null);
+    assert.equal(usageCostNoteKey(false, rows, done), null);
   }
+});
+
+test("the local subscription note waits for a final whole-run view", () => {
+  const row = {
+    billing: "skynet",
+    charged_cents: 0,
+    provider_cents: null,
+    calls: 12,
+    unpriced_calls: 0,
+  };
+  assert.equal(usageCostNoteKey(true, [row], { final: false, pairIndex: null }), null);
+  assert.equal(usageCostNoteKey(true, [row], { final: true, pairIndex: 0 }), null);
+  const ownKey = { ...row, billing: "byok", provider_cents: 14 };
+  assert.equal(
+    usageCostNoteKey(true, [ownKey], { final: false, pairIndex: 0 }),
+    "usage_tab.api_rates_note_local",
+  );
 });
 
 test("the local English texts name no fee and no Skynet charge", () => {

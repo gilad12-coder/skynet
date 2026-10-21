@@ -157,11 +157,13 @@ function Summary({
   usage,
   running,
   splitCost,
+  apiRatesNote,
 }: {
   job: OptimizationStatusResponse;
   usage: RunUsage;
   running: boolean;
   splitCost: boolean;
+  apiRatesNote: boolean;
 }) {
   const locale = getActiveIntlLocale();
   const budget = job.execution_budget ?? job.terminal_evidence?.execution_budget;
@@ -182,7 +184,7 @@ function Summary({
   items.push([spentLabel, formatCentsUsd(total.chargedCents, locale)]);
   if (splitCost && total.providerCents != null) {
     items.push([
-      msg("usage_tab.provider"),
+      `${msg("usage_tab.provider")}${apiRatesNote ? "*" : ""}`,
       formatCentsUsd(total.providerCents, locale),
       tip("usage_tab.provider"),
     ]);
@@ -485,13 +487,25 @@ export function UsageTab({
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
   const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
-  const costNoteKey = groups.length > 0 ? usageCostNoteKey(isLocalMode(), rows) : null;
+  const costNoteKey =
+    groups.length > 0
+      ? usageCostNoteKey(isLocalMode(), rows, {
+          final: !running && !usage.settling,
+          pairIndex,
+        })
+      : null;
 
   return (
     <FadeIn>
       <div className="space-y-4">
         {running && <BudgetPace job={job} spentCents={total.chargedCents} />}
-        <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
+        <Summary
+          job={job}
+          usage={usage}
+          running={running}
+          splitCost={splitCost}
+          apiRatesNote={costNoteKey === "usage_tab.api_rates_note_local"}
+        />
         <div
           className={cn("flex items-center gap-3", costNoteKey ? "justify-between" : "justify-end")}
         >

@@ -193,14 +193,20 @@ type UsageNoteRow = Pick<
  * the provider column are at API rates and the provider bills the user's key,
  * so that column gets an asterisk and this note. A run whose model calls drew
  * no charge and no provider spend ran on the subscription, so nothing was
- * billed. Any other run, and hosted mode, gets no note.
+ * billed. That claim is final, so it waits until the run stops and its ledger
+ * settles, and it applies only to the whole-run view. Any other run, and
+ * hosted mode, gets no note.
  */
 export function usageCostNoteKey(
   localMode: boolean,
   rows: readonly UsageNoteRow[],
+  view: { final: boolean; pairIndex: number | null },
 ): "usage_tab.api_rates_note_local" | "usage_tab.subscription_note_local" | null {
   if (!localMode) return null;
   if (rows.some((r) => r.provider_cents != null)) return "usage_tab.api_rates_note_local";
+  if (!view.final || view.pairIndex != null) return null;
+  // Local mode refuses managed models (models.managed_unavailable_local), so a
+  // local row with no charge and no own-key billing is a subscription call.
   const billed = rows.some(
     (r) =>
       r.charged_cents > 0 || r.unpriced_calls > 0 || r.billing === "byok" || r.billing === "direct",
