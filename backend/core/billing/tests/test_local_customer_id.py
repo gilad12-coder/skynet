@@ -1,7 +1,8 @@
 """Verify placeholder billing customer ids fit the column for any username length.
 
 ``billing_customers.stripe_customer_id`` is ``String(64)``. SQLite does not
-enforce that width, so each test asserts the stored length directly; PostgreSQL
+enforce that width, so each test asserts the stored length directly; with
+``APP_BUDGET_TEST_DB_URL`` set, the same tests also run on PostgreSQL, which
 rejects a longer value with ``StringDataRightTruncation``.
 """
 
@@ -9,31 +10,87 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session
 
 from core.billing.budgets import BudgetService
 from core.billing.pricing import ModelUsage
 from core.billing.service import LOCAL_CUSTOMER_PREFIX, StripeBillingService, local_customer_id
-from core.config import settings
-from core.storage.models import Base, BillingCustomerModel
+from core.config import app_env, settings
+from core.storage.models import (
+    Base,
+    BillingCustomerModel,
+    ExecutionBudgetModel,
+    ExecutionOperationModel,
+    ExecutionUsageEvidenceModel,
+    JobModel,
+    WalletLedgerModel,
+)
 
 COLUMN_WIDTH = 64
 DOMAIN = "@eegeupelae.resend.app"
 USERNAME_61 = "a" * (61 - len(DOMAIN)) + DOMAIN
 USERNAME_255 = "b" * (255 - len(DOMAIN)) + DOMAIN
-LONG_USERNAMES = [USERNAME_61, USERNAME_255]
+LONG_USERNAMES = [pytest.param(USERNAME_61, id="61-chars"), pytest.param(USERNAME_255, id="255-chars")]
 
 
-@pytest.fixture
-def engine() -> Iterator[Engine]:
-    """Yield an in-memory SQLite engine with the billing tables created."""
-    database = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(database)
-    yield database
-    database.dispose()
+PG_URL = app_env("APP_BUDGET_TEST_DB_URL")
+BILLING_TABLES = [
+    model.__table__
+    for model in (
+        BillingCustomerModel,
+        WalletLedgerModel,
+        ExecutionBudgetModel,
+        ExecutionOperationModel,
+        ExecutionUsageEvidenceModel,
+        JobModel,
+    )
+]
+
+
+@pytest.fixture(
+    params=[
+        "sqlite",
+        pytest.param(
+            "postgresql",
+            marks=pytest.mark.skipif(
+                not PG_URL or not PG_URL.startswith("postgresql"),
+                reason="Set APP_BUDGET_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
+            ),
+        ),
+    ]
+)
+def engine(request: pytest.FixtureRequest) -> Iterator[Engine]:
+    """Yield SQLite, and PostgreSQL when supplied, since only PostgreSQL enforces the column width.
+
+    Args:
+        request: Selects the database dialect.
+
+    Yields:
+        Engine with the billing tables created in an isolated database or schema.
+    """
+    if request.param == "sqlite":
+        database = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(database, tables=BILLING_TABLES)
+        yield database
+        database.dispose()
+        return
+    schema = f"local_customer_test_{uuid4().hex}"
+    admin = create_engine(PG_URL)
+    with admin.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    database = create_engine(PG_URL, connect_args={"options": f"-csearch_path={schema}"})
+    try:
+        Base.metadata.create_all(database, tables=BILLING_TABLES)
+        yield database
+    finally:
+        database.dispose()
+        with admin.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
 
 
 @pytest.fixture
@@ -71,8 +128,8 @@ def _assert_fits(customer_id: str) -> None:
 
 def test_fixture_usernames_exceed_the_old_limit() -> None:
     """The fixtures are long enough that ``local:`` plus the raw username overflowed."""
-    assert [len(name) for name in LONG_USERNAMES] == [61, 255]
-    assert all(len(f"{LOCAL_CUSTOMER_PREFIX}{name}") > COLUMN_WIDTH for name in LONG_USERNAMES)
+    assert [len(USERNAME_61), len(USERNAME_255)] == [61, 255]
+    assert len(f"{LOCAL_CUSTOMER_PREFIX}{USERNAME_61}") > COLUMN_WIDTH
 
 
 @pytest.mark.parametrize("username", LONG_USERNAMES)
