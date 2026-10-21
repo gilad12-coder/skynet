@@ -37,6 +37,7 @@ _SETTINGS_ENV_VARS = (
     "DEFAULT_TIMEOUT",
     "HOST",
     "PORT",
+    "API_PORT",
     "RELOAD",
     "ALLOWED_ORIGINS",
     "LOG_LEVEL",
