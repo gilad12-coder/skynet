@@ -67,12 +67,20 @@ const TOKEN_SOURCE_SEGMENTS: Array<{
   { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
 ];
 
-// The third source exists only in the local desktop build, where the user's
-// signed-in coding-agent CLIs can run models.
+// The local desktop build runs models on the user's signed-in coding-agent
+// CLIs or provider keys; it has no managed models, so it offers no managed source.
 const LOCAL_TOKEN_SOURCE_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
-  ...TOKEN_SOURCE_SEGMENTS,
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
   { mode: "subscription", icon: Desktop, labelKey: "subscription.mode" },
 ];
+
+/** The draft a config opens as: in the local build a managed model opens on the subscription source. */
+function initialDraft(config: ModelConfig, local: boolean): ModelConfig {
+  const draft = withoutInlineConnection(config);
+  return local && draft.token_source === "managed"
+    ? { ...draft, name: "", token_source: "subscription", cli_provider: null }
+    : draft;
+}
 
 /** The first CLI that can run models right now, as the subscription source's preselection. */
 function firstReadyCli(status: LocalStatus | null) {
@@ -122,9 +130,9 @@ export function ModelConfigModal({
   const hasParams = (c: ModelConfig) =>
     c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
   const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
-  const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
-  const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
   const localMode = isLocalMode();
+  const [draft, setDraft] = React.useState<ModelConfig>(() => initialDraft(config, localMode));
+  const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
   const local = useLocalStatus(localMode && open && mode === "subscription");
   const subscriptionModels = React.useMemo(
     () =>
@@ -192,10 +200,10 @@ export function ModelConfigModal({
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
     if (open) {
-      setDraft(withoutInlineConnection(config));
+      setDraft(initialDraft(config, localMode));
       setParametersOpen(paramsFirstOpen || hasParams(config));
     }
-  }, [open, config]);
+  }, [open, config, localMode]);
 
   // The effort ladder is model-specific (providers reject levels outside
   // their documented set). "none" is expressed by the switch itself. An

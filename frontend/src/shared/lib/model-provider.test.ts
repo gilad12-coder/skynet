@@ -53,3 +53,9 @@ test("fallback model prefers the requested flag, then is_default", () => {
   assert.equal(catalogFallbackModel([a], "is_interview_default"), a);
   assert.equal(catalogFallbackModel([{ value: "c" }], "is_interview_default"), null);
 });
+
+test("a local subscription id resolves to the brand of the model it names", () => {
+  assert.equal(modelProviderSlug("subscription/claude/anthropic/claude-sonnet-4.5"), "anthropic");
+  assert.equal(modelProviderSlug("subscription/codex/openai/gpt-5"), "openai");
+  assert.equal(modelDisplayName("subscription/codex/openai/gpt-5"), "gpt-5");
+});

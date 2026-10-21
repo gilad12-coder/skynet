@@ -124,6 +124,21 @@ export function subscriptionCatalogModels(
 }
 
 /**
+ * The composer menu's list for an agent role that runs on `cli`: the CLI's
+ * models as subscription ids, so the pick is the id the request sends.
+ */
+export function subscriptionMenuModels(
+  cli: CliStatus | undefined,
+  catalog: CatalogModel[] | undefined,
+): CatalogModel[] {
+  if (!cli) return [];
+  return subscriptionCatalogModels(cli, catalog).map((model) => ({
+    ...model,
+    value: subscriptionModelId(cli.id, model.value),
+  }));
+}
+
+/**
  * The 422 code the local backend returns for a turn with no model pick: it
  * has no managed models, so it refuses instead of falling back to one.
  */

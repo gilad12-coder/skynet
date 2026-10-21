@@ -3,11 +3,16 @@
 import * as React from "react";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
+import { cachedCatalog } from "@/shared/lib/model-catalog";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
 import type { CliProvider } from "@/features/billing";
+import type { CatalogModel } from "@/shared/types/api";
 import {
+  defaultAgentCli,
+  findCli,
   isLocalModelRefusal,
   resolveAgentModel,
+  subscriptionMenuModels,
   type LocalStatus,
 } from "../lib/subscription-model";
 
@@ -63,6 +68,27 @@ export async function localAgentModel(
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
   return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
+}
+
+/**
+ * The composer menu's models for an agent role on `cli` in the local build:
+ * only that CLI's models, since the local backend has no managed models and
+ * agent turns cannot bill a provider key. Hosted builds get undefined and keep
+ * the catalog.
+ */
+export function useLocalAgentMenuModels(cli: CliProvider | null): CatalogModel[] | undefined {
+  const local = isLocalMode();
+  const { status } = useLocalStatus(local);
+  return React.useMemo(
+    () =>
+      local
+        ? subscriptionMenuModels(
+            findCli(status, cli ?? defaultAgentCli(status)),
+            cachedCatalog()?.models,
+          )
+        : undefined,
+    [local, status, cli],
+  );
 }
 
 /**

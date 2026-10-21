@@ -4,6 +4,7 @@ export {
   peekLocalStatus,
   localAgentModel,
   localModelRefusalMessage,
+  useLocalAgentMenuModels,
 } from "./hooks/use-local-status";
 export {
   CLI_PROVIDERS,
@@ -16,6 +17,7 @@ export {
   parseSubscriptionModelId,
   subscriptionAgentModel,
   subscriptionCatalogModels,
+  subscriptionMenuModels,
   subscriptionModelConfig,
   subscriptionModelId,
   type CliState,

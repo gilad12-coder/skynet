@@ -11,6 +11,7 @@ const {
   parseSubscriptionModelId,
   subscriptionAgentModel,
   subscriptionCatalogModels,
+  subscriptionMenuModels,
   subscriptionModelConfig,
   subscriptionModelId,
 } = await import("./subscription-model.ts");
@@ -112,6 +113,38 @@ test("the picker lists the CLI's slugs, enriched from the catalog when it knows 
     ],
   );
   assert.deepEqual(subscriptionCatalogModels(undefined, []), []);
+});
+
+test("an agent menu lists only the CLI's models, as the ids the request sends", () => {
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  const models = subscriptionMenuModels(codex, [
+    {
+      value: "openrouter/openai/gpt-5",
+      label: "GPT-5",
+      provider: "openai",
+      supports_thinking: true,
+      supports_vision: true,
+      available: true,
+    },
+    {
+      value: "openrouter/google/gemini-3-pro",
+      label: "Gemini 3 Pro",
+      provider: "google",
+      supports_thinking: true,
+      supports_vision: true,
+      available: true,
+    },
+  ] as Parameters<typeof subscriptionMenuModels>[1]);
+  assert.deepEqual(
+    models.map((m) => [m.value, m.label]),
+    [["subscription/codex/openai/gpt-5", "GPT-5"]],
+  );
+  // The pick passes through the request unchanged.
+  assert.equal(
+    subscriptionAgentModel(models[0]!.value, "codex", status([codex])),
+    "subscription/codex/openai/gpt-5",
+  );
+  assert.deepEqual(subscriptionMenuModels(undefined, []), []);
 });
 
 test("a subscription model config names its CLI", () => {

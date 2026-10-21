@@ -45,6 +45,8 @@ import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import { ModelConfigModal, useRecentModelConfigs } from "@/features/submit";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatCentsUsd } from "@/features/billing";
+import { useLocalAgentMenuModels } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
@@ -136,6 +138,7 @@ export function TaggerInterview({
   onConfirmRubric,
 }: Props) {
   useCompletionNotification(busy, () => msg("notify.interview.turn"));
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("tagger"));
   const [draft, setDraft] = useState("");
   const done = assist.interview.done;
   // A synthetic session has no rows until the interview has specified them.
@@ -276,6 +279,7 @@ export function TaggerInterview({
                 effort={interviewComposerEffort(assist)}
                 onEffortChange={onSetInterviewEffort}
                 defaultFlag="is_interview_default"
+                models={localMenuModels}
               />
             }
           />
