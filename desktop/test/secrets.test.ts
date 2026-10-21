@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LEGACY_SECRETS_FILE, loadOrCreateSecrets, SECRETS_FILE } from "../src/main/secrets";
+import { ensurePrivateDir, LEGACY_SECRETS_FILE, loadOrCreateSecrets, SECRETS_FILE } from "../src/main/secrets";
 import { PG_PASSWORD_VAR, setPasswordArgs } from "../src/main/postgres";
 
 let dir: string;
@@ -64,10 +64,53 @@ describe("loadOrCreateSecrets", () => {
     expect(fs.readFileSync(file, "utf8")).toContain("short");
   });
 
+  it("refuses a corrupt or empty file with its path and a recovery hint, and keeps it", () => {
+    const file = path.join(dir, SECRETS_FILE);
+    for (const content of ["", "{not json"]) {
+      fs.writeFileSync(file, content, { mode: 0o600 });
+      let message = "";
+      try {
+        loadOrCreateSecrets(dir);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain(file);
+      expect(message).toContain("cannot be read");
+      expect(message).toMatch(/remove .*secrets\.json/);
+      expect(fs.readFileSync(file, "utf8")).toBe(content);
+    }
+  });
+
+  it("narrows an existing data folder to 0700", () => {
+    const data = path.join(dir, "Skynet");
+    fs.mkdirSync(data, { mode: 0o755 });
+    fs.chmodSync(data, 0o755);
+    loadOrCreateSecrets(data);
+    expect(mode(data)).toBe(0o700);
+  });
+
   it("ignores a stale temp file from a crashed write", () => {
     fs.writeFileSync(path.join(dir, `${SECRETS_FILE}.tmp`), "{");
     expect(loadOrCreateSecrets(dir).created).toBe(true);
     expect(fs.existsSync(path.join(dir, `${SECRETS_FILE}.tmp`))).toBe(false);
+  });
+});
+
+describe("ensurePrivateDir", () => {
+  it("creates a missing folder as 0700 and narrows a wider one", () => {
+    const fresh = path.join(dir, "a", "b");
+    ensurePrivateDir(fresh);
+    expect(mode(fresh)).toBe(0o700);
+    fs.chmodSync(fresh, 0o775);
+    ensurePrivateDir(fresh);
+    expect(mode(fresh)).toBe(0o700);
+  });
+
+  it("is called for the data folder before any other folder is made in it", () => {
+    const index = fs.readFileSync(path.join(__dirname, "..", "src", "main", "index.ts"), "utf8");
+    const first = index.indexOf("ensurePrivateDir(dataDir);");
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(index.indexOf("fs.mkdirSync(logsDir"));
   });
 });
 

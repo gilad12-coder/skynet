@@ -5,7 +5,7 @@ import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./
 import { allocatePorts, type PortPlan } from "./ports";
 import { databaseUrl, removeSandboxContainers, startPostgres, stopPostgres, type DockerCtx } from "./postgres";
 import { ensureSandboxImage } from "./sandbox-image";
-import { loadOrCreateSecrets } from "./secrets";
+import { ensurePrivateDir, loadOrCreateSecrets } from "./secrets";
 import { clearPids, psStartOf, recordPid, sweepOrphans } from "./stack-pids";
 import { buildChildEnv, loginShellPath } from "./shell-env";
 import {
@@ -22,6 +22,7 @@ import { startUpdateCheck } from "./updater";
 const dataDir = process.env.SKYNET_DESKTOP_DATA_DIR || app.getPath("userData");
 const logsDir = path.join(dataDir, "logs");
 const localStateDir = path.join(dataDir, "local");
+ensurePrivateDir(dataDir);
 fs.mkdirSync(logsDir, { recursive: true });
 fs.mkdirSync(localStateDir, { recursive: true });
 const desktopLog = fs.createWriteStream(path.join(logsDir, "desktop.log"), { flags: "a" });

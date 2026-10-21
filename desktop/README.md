@@ -86,7 +86,7 @@ npm start
 | `~/Library/Application Support/Skynet/stack.pids` | Process groups of the running API and web server; removed on a clean quit |
 | `~/Library/Application Support/Skynet/logs/` | `desktop.log`, `api.log`, `frontend.log`, `migrate.log`, `sandbox-build.log` |
 
-Skynet does not use the macOS keychain for these secrets. An ad-hoc app gets a new signature on every rebuild or update, so keychain access asked for the login password each time and blocked Quit while the prompt was open. The secrets protect only services on 127.0.0.1, and any process that runs as you can already read the Postgres volume, so a 0600 file is enough here.
+Skynet does not use the macOS keychain for these secrets. An ad-hoc app gets a new signature on every rebuild or update, so keychain access asked for the login password each time and blocked Quit while the prompt was open. The secrets protect only services on 127.0.0.1, and any process that runs as you can already read the Postgres volume, so a 0600 file is enough here. Skynet keeps the data folder at mode 0700. If `secrets.json` is damaged, Skynet stops with its path; remove the file and open Skynet again.
 
 Earlier builds kept the secrets in a keychain-encrypted `secrets.bin`. Skynet does not decrypt it. On the first launch of a new build, Skynet creates `secrets.json`, deletes `secrets.bin`, and sets the new Postgres password on the existing volume, so your data stays. You sign in to the local web app once more. The old keychain item "Skynet Safe Storage" is no longer used. You can delete it in Keychain Access.
 
