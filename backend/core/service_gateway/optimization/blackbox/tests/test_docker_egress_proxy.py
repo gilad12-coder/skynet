@@ -174,7 +174,8 @@ def test_proxy_tunnels_an_allowed_host_to_its_checked_address(
     with client, upstream:
         assert answer.startswith(b"HTTP/1.1 200 ")
         client.sendall(b"-late")
-        echoed = b""
+        # The echo of the early bytes can arrive in the same read as the head.
+        echoed = answer.partition(b"\r\n\r\n")[2]
         while len(echoed) < len(b"early-late"):
             echoed += client.recv(1024)
         assert echoed == b"EARLY-LATE"
