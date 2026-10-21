@@ -573,6 +573,17 @@ test("the key's menu rows are its OpenRouter models, featured first, else capped
   assert.deepEqual(keyMenuModels(undefined), []);
 });
 
+test("the key's menu lists only models the request sends as key models", () => {
+  const catalog: Catalog = [keyRow("openrouter/auto"), keyRow("openrouter/google/gemini-3-pro")];
+  assert.deepEqual(
+    keyMenuModels(catalog).map((m) => m.value),
+    ["openrouter/google/gemini-3-pro"],
+  );
+  assert.deepEqual(keyMenuModels(catalog, "openrouter/auto").map((m) => m.value), [
+    "openrouter/google/gemini-3-pro",
+  ]);
+});
+
 test("the local menu lists the CLI's models, then the key's, and waits only when it must", () => {
   const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
   const cliRows = subscriptionMenuModels(codex, [
@@ -808,6 +819,31 @@ test("no pick sends the model the chip shows", async () => {
       localDeps({ loadStatus: () => Promise.reject(new Error("down")) }),
     ),
     null,
+  );
+});
+
+test("a saved retired auto pick counts as no pick, as the chip shows", async () => {
+  const keyRows = () => [
+    keyRow("openrouter/google/gemini-3-pro"),
+    keyRow("openrouter/openai/gpt-5-mini"),
+  ];
+  // A CLI with no models: the chip shows the key's first menu row.
+  assert.equal(
+    await resolveLocalAgentModel(
+      "auto:intelligent",
+      "claude",
+      localDeps({ loadStatus: async () => status([cli({ path: null, models: [] })]), keyRows }),
+    ),
+    "openrouter/google/gemini-3-pro",
+  );
+  // No CLI entries at all: the same key row, not a CLI model.
+  assert.equal(
+    await resolveLocalAgentModel(
+      "auto:intelligent",
+      null,
+      localDeps({ loadStatus: async () => status([]), keyRows }),
+    ),
+    "openrouter/google/gemini-3-pro",
   );
 });
 

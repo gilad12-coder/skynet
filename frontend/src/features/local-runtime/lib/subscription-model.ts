@@ -162,7 +162,13 @@ const KEY_MENU_CAP = 50;
 
 /** Whether a BYOK catalog model runs on the saved OpenRouter key. */
 export function isLocalKeyModel(model: CatalogModel): boolean {
-  return model.byok_provider === LOCAL_KEY_PROVIDER && model.available !== false;
+  // Only an `openrouter/<vendor>/<model>` id is sent as a key model, so a
+  // row such as `openrouter/auto` would name a model the request does not run.
+  return (
+    model.byok_provider === LOCAL_KEY_PROVIDER &&
+    model.available !== false &&
+    isOpenRouterModelId(model.value)
+  );
 }
 
 /**
@@ -296,6 +302,9 @@ export function isOpenRouterModelId(model: string | null | undefined): boolean {
  * model list loads or failed, the chip shows the default label and nothing is
  * sent.
  */
+// The composer menu reads this retired pick as no pick, so the request must too.
+const RETIRED_AUTO_MODEL = "auto:intelligent";
+
 export async function resolveLocalAgentModel(
   model: string | null,
   cli: CliProvider | null | undefined,
@@ -310,6 +319,7 @@ export async function resolveLocalAgentModel(
     engine?: AgentEngine | null;
   },
 ): Promise<string | null> {
+  if (model === RETIRED_AUTO_MODEL) model = null;
   const engine = deps.engine ?? null;
   const viaCli = () => resolveAgentModel(model, cli, deps.loadStatus, deps.peekStatus, engine);
   if (isOpenRouterModelId(model)) {
