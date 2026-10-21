@@ -35,6 +35,7 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
@@ -48,9 +49,10 @@ from typing import Any, Literal, cast
 from ..config import Settings
 from ..i18n import t_locale
 from ..local.cli_catalog import CliProvider, cli_model_arg, parse_subscription_model_id
+from ..local.cli_isolation import isolated_cli
 from ..local.cli_probe import cli_binary, read_cli_limits, write_cli_limit
 from ..worker.host_agent_shim import excluded_path
-from .cli_runners import cli_env, limit_error
+from .cli_runners import limit_error
 from .model_dispatch import ModelHTTPResult
 from .model_gateway import ROUTE_KEY, ModelGateway
 from .operation_pricing import ChargePolicy, operation_quote
@@ -102,20 +104,18 @@ def host_cli_argv(
     binary: str,
     workdir: Path,
     model_arg: str | None,
-    prompt_file: Path | None = None,
+    isolation_args: tuple[str, ...] = (),
 ) -> list[str]:
-    """Build the CLI command for one turn.
-
-    Codex and Claude Code read the prompt on stdin; Droid reads ``prompt_file``.
+    """Build the CLI command for one turn; the prompt goes on stdin.
 
     Args:
-        cli: Which CLI runs the turn.
-        permission: ``workspace_only`` keeps edits inside ``workdir``;
-            ``full_access`` turns the CLI's own sandbox off.
+        cli: ``codex`` or ``claude``.
+        permission: ``workspace_only`` runs under :func:`confine`, which keeps
+            writes in the turn; ``full_access`` runs with no sandbox at all.
         binary: Resolved CLI executable.
         workdir: The copied workspace.
         model_arg: The CLI's own model name, or None for its default.
-        prompt_file: Prompt file outside ``workdir``, for Droid.
+        isolation_args: Flags that keep the user's own config out.
 
     Returns:
         The argv list.
@@ -127,18 +127,15 @@ def host_cli_argv(
         raise HostAgentRequestError(f"Unknown host permission {permission!r}.")
     full = permission == "full_access"
     if cli == "codex":
-        mode = ["--dangerously-bypass-approvals-and-sandbox"] if full else ["--sandbox", "workspace-write"]
+        # Under workspace_only the macOS profile from confine() is the sandbox:
+        # codex's own one cannot start inside it.
+        mode = ["--dangerously-bypass-approvals-and-sandbox"] if full else ["--sandbox", "danger-full-access"]
         # The copy is not a git checkout, and codex refuses to run outside one
         # without this flag.
-        argv = [binary, "exec", "--json", *mode, "--skip-git-repo-check", "-C", str(workdir)]
+        argv = [binary, "exec", *isolation_args, "--json", *mode, "--skip-git-repo-check", "-C", str(workdir)]
     elif cli == "claude":
         mode = "bypassPermissions" if full else "acceptEdits"
-        argv = [binary, "-p", "--output-format", "json", "--permission-mode", mode]
-    elif cli == "droid":
-        mode = ["--skip-permissions-unsafe"] if full else ["--auto", "low"]
-        argv = [binary, "exec", "-o", "json", *mode, "--cwd", str(workdir)]
-        if prompt_file is not None:
-            argv += ["-f", str(prompt_file)]
+        argv = [binary, *isolation_args, "-p", "--output-format", "json", "--permission-mode", mode]
     else:
         raise HostAgentRequestError(f"Unknown host CLI {cli!r}.")
     if model_arg:
@@ -302,15 +299,17 @@ def tool_roots(binary: str) -> list[str]:
 def confine(argv: list[str], *, home: Path | str, writable: list[str], readable: list[str]) -> list[str]:
     """Wrap a command in a macOS sandbox that hides the user's home.
 
-    Inside ``home`` the command may read and write only ``writable`` and read
-    only ``readable``; everything else there is denied. File metadata stays
-    readable so path lookups and ``getcwd`` work. Paths outside ``home`` and
-    the network stay open: the CLI needs system libraries and its provider.
+    The command may write only to ``writable`` (and devices). Inside ``home``
+    it may also read only ``writable`` and ``readable``; everything else there
+    is denied. File metadata stays readable so path lookups and ``getcwd``
+    work. Reads outside ``home`` and the network stay open: the CLI needs
+    system libraries and its provider. macOS refuses a nested sandbox under a
+    profile with deny rules, so this profile is the CLI's only sandbox.
 
     Args:
         argv: The CLI command.
         home: The user's home directory.
-        writable: Directories the turn owns (the copy, its temp home).
+        writable: Directories and files the turn owns (the copy, temp space, its login).
         readable: The CLI's install directories.
 
     Returns:
@@ -330,10 +329,13 @@ def confine(argv: list[str], *, home: Path | str, writable: list[str], readable:
     for index, path in enumerate(readable):
         params[f"R{index}"] = _real(path)
         read_rules.append(f'(subpath (param "R{index}"))')
+    # Later rules win, so each allow below opens a hole in the denies above it.
     profile = [
         "(version 1)",
         "(allow default)",
-        '(deny file-read-data file-read-xattr file-write* (subpath (param "HOME_DIR")))',
+        "(deny file-write*)",
+        '(deny file-read-data file-read-xattr (subpath (param "HOME_DIR")))',
+        '(allow file-write* (subpath "/dev"))',
     ]
     if read_rules:
         profile.append(f"(allow file-read-data file-read-xattr {' '.join(read_rules)})")
@@ -536,6 +538,27 @@ def _error(code: str, message: str, *, reset_at: str | None = None, transcript: 
     }
 
 
+def _login_paths(cli: CliProvider) -> list[str]:
+    """Return the files in the user's home a CLI needs for its subscription login.
+
+    Codex gets a temporary home with a login copy from :func:`isolated_cli`, so
+    it needs nothing here. Claude Code keeps its real config file, because its
+    login lives in the login Keychain, whose database the CLI opens itself and
+    may update when the login refreshes. ``~/.claude`` (other sessions'
+    transcripts, the user's own instructions) stays hidden.
+
+    Args:
+        cli: The CLI of the turn.
+
+    Returns:
+        Paths the turn may read and write under the user's home.
+    """
+    if cli != "claude":
+        return []
+    home = Path.home()
+    return [str(home / ".claude.json"), str(home / "Library" / "Keychains")]
+
+
 def _command(binary: str, env: dict[str, str]) -> str:
     """Resolve the CLI command to an absolute path.
 
@@ -588,39 +611,31 @@ def run_host_agent(
     turn = root / safe_job / uuid.uuid4().hex
     workdir = turn / "workspace"
     workdir.mkdir(parents=True)
-    # Kept beside the copy, not in it, so the prompt never lands in the result tree.
-    prompt_file = turn / "prompt.md"
     prompt = str(body.get("prompt") or "")
     try:
         _extract(archive, workdir)
         strip_agent_config(workdir)
-        env = cli_env(settings)
-        binary = _command(cli_binary(cli, settings), env)
-        if cli == "droid":
-            prompt_file.write_text(prompt, encoding="utf-8")
-        argv = host_cli_argv(
-            cli,
-            permission,
-            binary,
-            workdir,
-            _model_arg(cli, str(body.get("model") or "")),
-            prompt_file if cli == "droid" else None,
-        )
-        if permission == "workspace_only":
-            argv = confine(argv, home=Path.home(), writable=[str(turn)], readable=tool_roots(binary))
-        started = time.monotonic()
-        try:
-            completed = run_group(
-                argv,
-                cwd=workdir,
-                env=env,
-                stdin="" if cli == "droid" else prompt,
-                timeout=settings.host_agent_timeout_seconds,
+        with isolated_cli(cli) as isolation:
+            binary = _command(cli_binary(cli, settings), isolation.env)
+            argv = host_cli_argv(
+                cli, permission, binary, workdir, _model_arg(cli, str(body.get("model") or "")), isolation.args
             )
-        except subprocess.TimeoutExpired:
-            return _error(FAILED_KEY, f"The {cli} turn ran longer than {settings.host_agent_timeout_seconds:.0f}s.")
-        except OSError as error:
-            return _error(FAILED_KEY, f"The {cli} CLI could not start: {error}")
+            if permission == "workspace_only":
+                argv = confine(
+                    argv,
+                    home=Path.home(),
+                    writable=[str(turn), tempfile.gettempdir(), *_login_paths(cli)],
+                    readable=tool_roots(binary),
+                )
+            started = time.monotonic()
+            try:
+                completed = run_group(
+                    argv, cwd=workdir, env=isolation.env, stdin=prompt, timeout=settings.host_agent_timeout_seconds
+                )
+            except subprocess.TimeoutExpired:
+                return _error(FAILED_KEY, f"The {cli} turn ran longer than {settings.host_agent_timeout_seconds:.0f}s.")
+            except OSError as error:
+                return _error(FAILED_KEY, f"The {cli} CLI could not start: {error}")
         elapsed_ms = int((time.monotonic() - started) * 1000)
         text, usage, cli_error = parse_cli_output(cli, completed.stdout)
         transcript = text or completed.stdout or completed.stderr

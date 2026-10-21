@@ -38,6 +38,7 @@ from core.billing.model_gateway import ModelGateway
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime
 from core.config import Settings, settings
+from core.local.cli_isolation import CLAUDE_ARGS, CODEX_ARGS
 from core.local.cli_probe import read_cli_limits
 from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
 
@@ -59,6 +60,7 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "argv": argv,
     "cwd": os.getcwd(),
     "env": {key: os.environ.get(key) for key in __STRIPPED__},
+    "home": os.environ.get("HOME"),
     "prompt": prompt,
     "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
@@ -168,7 +170,11 @@ def guest(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     ("cli", "permission", "expected"),
     [
-        ("codex", "workspace_only", ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C"]),
+        (
+            "codex",
+            "workspace_only",
+            ["exec", "--json", "--sandbox", "danger-full-access", "--skip-git-repo-check", "-C"],
+        ),
         (
             "codex",
             "full_access",
@@ -176,15 +182,13 @@ def guest(tmp_path: Path) -> Path:
         ),
         ("claude", "workspace_only", ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"]),
         ("claude", "full_access", ["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"]),
-        ("droid", "workspace_only", ["exec", "-o", "json", "--auto", "low", "--cwd"]),
-        ("droid", "full_access", ["exec", "-o", "json", "--skip-permissions-unsafe", "--cwd"]),
     ],
 )
 def test_argv_follows_the_permission_table(cli: str, permission: str, expected: list[str], tmp_path: Path) -> None:
     """Each (cli, permission) pair builds exactly its documented command, never --add-dir or --bare."""
     workdir = tmp_path / "copy"
     argv = host_cli_argv(cli, permission, "bin", workdir, "m")  # type: ignore[arg-type]
-    tail = [str(workdir)] if cli != "claude" else []
+    tail = [str(workdir)] if cli == "codex" else []
     assert argv == ["bin", *expected, *tail, "--model", "m"]
     assert "--add-dir" not in argv
     assert "--bare" not in argv
@@ -215,12 +219,17 @@ def test_turn_edits_a_copy_with_stripped_keys(
 
     assert document["status"] == "ok", document
     record = json.loads((tmp_path / "record.json").read_text())
+    isolation = list(CODEX_ARGS if cli == "codex" else CLAUDE_ARGS)
+    start = 1 if cli == "codex" else 0
+    assert record["argv"][start : start + len(isolation)] == isolation
     copy = Path(record["cwd"]).resolve()
     workspaces = (tmp_path / "state" / "workspaces" / "job-1").resolve()
     assert copy.name == "workspace"
     assert copy.parent.parent == workspaces
     assert copy != guest.resolve()
     assert record["env"] == dict.fromkeys(STRIPPED)
+    if cli == "codex":
+        assert record["home"] != os.environ["HOME"]
     assert record["prompt"] == "Improve solve()."
     files = _members(document["result_tar_b64"])
     assert files["solver.py"].endswith("# improved\n")
@@ -429,7 +438,7 @@ def test_guest_cannot_choose_the_cli_or_its_permission(
 
     assert response.status_code == 200, response.text
     argv = json.loads((tmp_path / "record.json").read_text())["argv"]
-    assert argv[:2] == ["-p", "--output-format"]
+    assert argv[: len(CLAUDE_ARGS)] == list(CLAUDE_ARGS)
     assert "acceptEdits" in argv
     assert "bypassPermissions" not in argv
 
@@ -546,7 +555,7 @@ def test_timeout_kills_the_whole_process_group(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
 def test_workspace_only_cannot_read_the_users_home(tmp_path: Path) -> None:
-    """Under the profile a CLI reads its own turn but not another file in the home."""
+    """Under the profile a CLI reads its own turn, but no other home file, and writes nowhere else."""
     home = tmp_path / "home"
     turn = home / "turn"
     turn.mkdir(parents=True)
@@ -567,9 +576,19 @@ def test_workspace_only_cannot_read_the_users_home(tmp_path: Path) -> None:
 
     denied = run(home / "secret.txt")
     allowed = run(turn / "mine.txt")
+    outside = tmp_path / "outside.txt"
+    write = subprocess.run(
+        host_agent.confine(["/usr/bin/touch", str(outside)], home=home, writable=[str(turn)], readable=[]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
 
     assert denied.returncode != 0
     assert "private" not in denied.stdout
     assert "Operation not permitted" in denied.stderr
     assert allowed.returncode == 0
     assert allowed.stdout == "mine"
+    assert write.returncode != 0
+    assert not outside.exists()
