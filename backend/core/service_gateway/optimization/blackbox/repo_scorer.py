@@ -128,7 +128,11 @@ class RepoScorer:
                 result = session.run(
                     f"cd {shlex.quote(checkout.path)} && python3 {shlex.quote(f'{root}/{RUNNER_PATH}')}"
                     f" {shlex.quote(call_dir)}",
-                    env=self._workspace.secrets or None,
+                    # Importing a protected package would otherwise write
+                    # __pycache__ into it and fail the protected-path check.
+                    # Skipping the bytecode beats ignoring __pycache__, where a
+                    # version could plant a .pyc that the judge then loads.
+                    env={**self._workspace.secrets, "PYTHONDONTWRITEBYTECODE": "1"},
                     timeout_seconds=self._timeout_seconds,
                     on_output=sandbox_log.ignore_output,
                 )

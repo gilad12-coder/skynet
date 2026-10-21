@@ -152,6 +152,41 @@ def test_a_version_whose_code_rewrites_its_judge_gets_no_score(tmp_path: Path) -
         scorer.close()
 
 
+def test_a_judge_that_imports_its_protected_package_keeps_its_score(tmp_path: Path) -> None:
+    """Score a version whose judge imports a protected package, which must not leave bytecode there."""
+    archive = _archive(
+        tmp_path,
+        {"src/app.py": "pass\n", "eval/__init__.py": "", "eval/metric.py": "def value():\n    return 0.5\n"},
+    )
+    judge = (
+        "import os, sys\n"
+        "def score(repo_path):\n"
+        "    sys.path.insert(0, repo_path)\n"
+        "    from eval.metric import value\n"
+        "    return {'score': value(), 'feedback': 'judged'}\n"
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            # A Vercel box writes bytecode by default; the local runtime does not.
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True, env={"PYTHONDONTWRITEBYTECODE": ""}),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        judge,
+        timeout_seconds=60,
+    )
+    try:
+        assert scorer.score("")["score"] == pytest.approx(0.5)
+        assert scorer.score("")["score"] == pytest.approx(0.5)
+    finally:
+        scorer.close()
+
+
 def test_dispatch_answers_the_guest(scored: tuple[RepoScorer, Path, Path]) -> None:
     """The evaluator capability returns the score, or 422 with the reason."""
     scorer, archive, root = scored
