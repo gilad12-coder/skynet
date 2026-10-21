@@ -121,7 +121,9 @@ def list_grants_for_user_all(session: Session, username: str) -> dict[str, str]:
     return {grant.session_id: grant.role for grant in rows}
 
 
-def get_grant(session: Session, session_id: str, username: str) -> TaggingSessionShareGrantModel | None:
+def get_grant(
+    session: Session, session_id: str, username: str
+) -> TaggingSessionShareGrantModel | None:
     """Return a specific user's grant on a tagger session, if one exists.
 
     Args:
@@ -149,11 +151,15 @@ def session_owner(session: Session, session_id: str) -> str | None:
         The owner's lowercased username, or ``None`` when the session is
         unknown.
     """
-    owner = session.scalars(select(TaggingSessionModel.username).where(TaggingSessionModel.id == session_id)).first()
+    owner = session.scalars(
+        select(TaggingSessionModel.username).where(TaggingSessionModel.id == session_id)
+    ).first()
     return _normalize_username(owner) if owner is not None else None
 
 
-def resolve_effective_role(session: Session, session_id: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_effective_role(
+    session: Session, session_id: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve a logged-in caller's effective role on a tagger session, token-free.
 
     The owner/admin/member-grant core of :func:`resolve_share_access`, factored
@@ -179,7 +185,9 @@ def resolve_effective_role(session: Session, session_id: str, user: Authenticate
     return None
 
 
-def resolve_share_access(session: Session, token: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_share_access(
+    session: Session, token: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve the effective role a caller has on a shared tagger session.
 
     The caller gets the *highest* tier any applicable rule grants, assembled
@@ -214,7 +222,9 @@ def resolve_share_access(session: Session, token: str, user: AuthenticatedUser) 
     return max(candidates, key=role_rank)
 
 
-def require_role(session: Session, session_id: str, user: AuthenticatedUser, minimum: ShareRole) -> ShareRole:
+def require_role(
+    session: Session, session_id: str, user: AuthenticatedUser, minimum: ShareRole
+) -> ShareRole:
     """Resolve and enforce a minimum effective role on a tagger session.
 
     The single access gate the logged-in session and sharing routes share. A

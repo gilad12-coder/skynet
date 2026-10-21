@@ -173,7 +173,9 @@ def list_grants(session: Session, optimization_id: str) -> list[OptimizationShar
     )
 
 
-def list_grants_for_user(session: Session, optimization_ids: list[str], username: str) -> dict[str, str]:
+def list_grants_for_user(
+    session: Session, optimization_ids: list[str], username: str
+) -> dict[str, str]:
     """Map ``optimization_id -> role`` for one user's grants among given ids.
 
     A single batched query backing tier checks over a set of ids (bulk
@@ -198,7 +200,9 @@ def list_grants_for_user(session: Session, optimization_ids: list[str], username
     return {grant.optimization_id: grant.role for grant in rows}
 
 
-def get_grant(session: Session, optimization_id: str, username: str) -> OptimizationShareGrantModel | None:
+def get_grant(
+    session: Session, optimization_id: str, username: str
+) -> OptimizationShareGrantModel | None:
     """Return a specific user's grant on an optimization, if one exists.
 
     Args:
@@ -231,7 +235,9 @@ def _job_owner_for(session: Session, optimization_id: str) -> str | None:
         unknown or carries no owner.
     """
     row = session.execute(
-        select(JobModel.payload, JobModel.payload_overview).where(JobModel.optimization_id == optimization_id)
+        select(JobModel.payload, JobModel.payload_overview).where(
+            JobModel.optimization_id == optimization_id
+        )
     ).first()
     if row is None:
         return None
@@ -239,7 +245,9 @@ def _job_owner_for(session: Session, optimization_id: str) -> str | None:
     return job_owner({"payload": payload, "payload_overview": payload_overview})
 
 
-def resolve_effective_role(session: Session, optimization_id: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_effective_role(
+    session: Session, optimization_id: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve a logged-in caller's effective role on an optimization, token-free.
 
     The owner/admin/member-grant core of :func:`resolve_share_access`, factored
@@ -267,7 +275,9 @@ def resolve_effective_role(session: Session, optimization_id: str, user: Authent
     return None
 
 
-def resolve_share_access(session: Session, token: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_share_access(
+    session: Session, token: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve the effective role a caller has on a shared optimization.
 
     The caller gets the *highest* tier any applicable rule grants (Google

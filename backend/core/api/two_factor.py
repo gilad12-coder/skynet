@@ -68,7 +68,9 @@ def verify_totp(secret: str, code: str) -> bool:
 def generate_recovery_codes() -> list[str]:
     """Return a fresh set of plaintext recovery codes (shown to the user once)."""
     return [
-        "-".join("".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(4)) for _ in range(2))
+        "-".join(
+            "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(4)) for _ in range(2)
+        )
         for _ in range(_RECOVERY_CODE_COUNT)
     ]
 
@@ -222,7 +224,9 @@ def enforce_second_factor(
         if consume_recovery_code(row, recovery_code):
             return
     else:
-        raise DomainError("accounts.two_factor_required", status=401, methods=" ".join(methods))
+        raise DomainError(
+            "accounts.two_factor_required", status=401, methods=" ".join(methods)
+        )
     # Persist the failed-attempt counter (and any consumed state) before the
     # error unwinds past the caller's commit.
     session.commit()

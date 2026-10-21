@@ -26,9 +26,7 @@ def _catalog_with(*model_ids: str, default: str | None = None) -> ModelCatalogRe
     )
 
 
-@pytest.mark.parametrize(
-    "model", [None, "", "  ", "auto:intelligent"], ids=["none", "empty", "whitespace", "retired_sentinel"]
-)
+@pytest.mark.parametrize("model", [None, "", "  ", "auto:intelligent"], ids=["none", "empty", "whitespace", "retired_sentinel"])
 def test_no_pick_runs_catalog_default(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
     """No pick, and the retired Auto sentinel, run the catalog's flagged default."""
     monkeypatch.setattr(
@@ -62,7 +60,9 @@ def test_route_survives_catalog_failure(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_route_menu_model_passes_catalog_id_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit catalog id is validated and returned as-is."""
-    monkeypatch.setattr(model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5"))
+    monkeypatch.setattr(
+        model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5")
+    )
     assert route_menu_model("openai/gpt-5.5") == "openai/gpt-5.5"
     assert route_agent_model("openai/gpt-5.5").name == "openai/gpt-5.5"
 
@@ -70,15 +70,15 @@ def test_route_menu_model_passes_catalog_id_through(monkeypatch: pytest.MonkeyPa
 def test_route_menu_model_routes_removed_model_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """A withdrawn model id from a stale pref runs the default instead of raising."""
     monkeypatch.setattr(mr, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5", default=_DEFAULT_ID))
-    monkeypatch.setattr(
-        model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5", default=_DEFAULT_ID)
-    )
+    monkeypatch.setattr(model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5", default=_DEFAULT_ID))
     assert route_menu_model("openrouter/x-ai/grok-build") == _DEFAULT_ID
 
 
 def test_route_menu_model_rejects_unknown_id(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-catalog id is refused before any LLM spend."""
-    monkeypatch.setattr(model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5"))
+    monkeypatch.setattr(
+        model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5")
+    )
     with pytest.raises(DomainError) as err:
         route_menu_model("openai/not-a-model")
     assert err.value.status_code == 422

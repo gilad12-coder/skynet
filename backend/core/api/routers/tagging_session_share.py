@@ -149,7 +149,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
         require_role(session, session_id, user, ShareRole.owner)
         return session_owner(session, session_id)
 
-    def _sharing_state(session: Session, session_id: str, owner: str | None) -> TaggingSessionSharingState:
+    def _sharing_state(
+        session: Session, session_id: str, owner: str | None
+    ) -> TaggingSessionSharingState:
         """Assemble the current :class:`TaggingSessionSharingState` for a session.
 
         Args:
@@ -178,7 +180,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
             members=members,
         )
 
-    def _ensure_link(session: Session, session_id: str, created_by: str) -> TaggingSessionShareLinkModel:
+    def _ensure_link(
+        session: Session, session_id: str, created_by: str
+    ) -> TaggingSessionShareLinkModel:
         """Return the active link, minting one if none exists.
 
         Args:
@@ -202,7 +206,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
             session.add(link)
         return link
 
-    def _sync_link_memberships(session: Session, session_id: str, link: TaggingSessionShareLinkModel) -> None:
+    def _sync_link_memberships(
+        session: Session, session_id: str, link: TaggingSessionShareLinkModel
+    ) -> None:
         """Reconcile link-derived memberships with the link's current policy.
 
         Drive-style live propagation: an ``anyone`` link re-points every link
@@ -233,7 +239,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
         response_model=TaggingSessionSharingState,
         summary="Get the sharing config (general access + members) for a session",
     )
-    def get_sharing(session_id: str, current_user: AuthenticatedUserDep) -> TaggingSessionSharingState:
+    def get_sharing(
+        session_id: str, current_user: AuthenticatedUserDep
+    ) -> TaggingSessionSharingState:
         """Return the session's sharing config for its owner.
 
         Args:
@@ -400,7 +408,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
                 raise DomainError("tagger.session.share.cannot_modify_self", status=400)
             grant = get_grant(session, session_id, grantee)
             if grant is None:
-                raise DomainError("tagger.session.share.member_not_found", status=404, username=grantee)
+                raise DomainError(
+                    "tagger.session.share.member_not_found", status=404, username=grantee
+                )
             grant.role = req.role
             session.commit()
             return _sharing_state(session, session_id, owner)
@@ -410,7 +420,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
         response_model=TaggingSessionSharingState,
         summary="Remove a member's grant",
     )
-    def remove_member(session_id: str, username: str, current_user: AuthenticatedUserDep) -> TaggingSessionSharingState:
+    def remove_member(
+        session_id: str, username: str, current_user: AuthenticatedUserDep
+    ) -> TaggingSessionSharingState:
         """Remove a member's grant from the session.
 
         Args:
@@ -433,7 +445,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
                 raise DomainError("tagger.session.share.cannot_modify_self", status=400)
             grant = get_grant(session, session_id, grantee)
             if grant is None:
-                raise DomainError("tagger.session.share.member_not_found", status=404, username=grantee)
+                raise DomainError(
+                    "tagger.session.share.member_not_found", status=404, username=grantee
+                )
             session.delete(grant)
             session.commit()
             return _sharing_state(session, session_id, owner)
@@ -477,7 +491,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
                 raise DomainError("tagger.session.share.cannot_grant_self", status=400)
             grant = get_grant(session, session_id, new_owner)
             if grant is None:
-                raise DomainError("tagger.session.share.member_not_found", status=404, username=new_owner)
+                raise DomainError(
+                    "tagger.session.share.member_not_found", status=404, username=new_owner
+                )
             row = session.get(TaggingSessionModel, session_id)
             if row is None:
                 raise DomainError("tagger.session.not_found", status=404)
@@ -505,7 +521,9 @@ def create_tagging_session_share_router(*, job_store) -> APIRouter:
         response_model=ClaimTaggingSessionResponse,
         summary="Redeem a share link: record a link membership and return the session",
     )
-    def claim_shared_session(token: str, current_user: AuthenticatedUserDep) -> ClaimTaggingSessionResponse:
+    def claim_shared_session(
+        token: str, current_user: AuthenticatedUserDep
+    ) -> ClaimTaggingSessionResponse:
         """Redeem a share link, joining the caller to it, then point them at it.
 
         Opening an ``anyone`` link records a link membership for the signed-in

@@ -56,7 +56,9 @@ class _FakeStorageStore:
         """Return a stable fake footprint for the user."""
         return _FakeUsage(total=self.used_by_user)
 
-    def set_user_storage_quota_override(self, username: str, quota_bytes: int, updated_by: str | None = None) -> None:
+    def set_user_storage_quota_override(
+        self, username: str, quota_bytes: int, updated_by: str | None = None
+    ) -> None:
         """Store an override."""
         self.overrides[username] = quota_bytes
 
@@ -115,7 +117,9 @@ def test_storage_quota_routes_reject_missing_bearer(client: TestClient) -> None:
 
 def test_storage_quota_routes_reject_non_admin_group(client: TestClient) -> None:
     """Signed users without an admin group cannot manage storage budgets."""
-    response = client.get("/admin/storage-quotas", headers={"Authorization": f"Bearer {_token(groups=['other'])}"})
+    response = client.get(
+        "/admin/storage-quotas", headers={"Authorization": f"Bearer {_token(groups=['other'])}"}
+    )
 
     assert response.status_code == 403
 

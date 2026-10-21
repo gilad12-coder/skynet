@@ -72,7 +72,9 @@ def verify_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dic
         sent.append({"to": to, "subject": subject, "body": body})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     UserModel.__table__.create(engine)
     EmailVerificationCodeModel.__table__.create(engine)
     store = _Store(engine)
@@ -90,7 +92,9 @@ def _register(client: TestClient, email: str, password: str) -> None:
         email: Account email.
         password: Initial password.
     """
-    created = client.post("/auth/register", json={"email": email, "password": password}, headers=_AUTH_HEADER)
+    created = client.post(
+        "/auth/register", json={"email": email, "password": password}, headers=_AUTH_HEADER
+    )
     assert created.status_code == 201
 
 
@@ -119,7 +123,9 @@ def _login(client: TestClient, email: str, password: str) -> Any:
     Returns:
         The raw login response.
     """
-    return client.post("/auth/login", json={"email": email, "password": password}, headers=_AUTH_HEADER)
+    return client.post(
+        "/auth/login", json={"email": email, "password": password}, headers=_AUTH_HEADER
+    )
 
 
 def test_register_emails_code_and_blocks_login_until_confirmed(
@@ -217,7 +223,9 @@ def test_resend_request_sends_fresh_code(
         row = session.get(EmailVerificationCodeModel, "gus@example.com")
         row.sent_at = datetime.now(UTC) - timedelta(minutes=5)
         session.commit()
-    res = client.post("/auth/email-verify/request", json={"email": "gus@example.com"}, headers=_AUTH_HEADER)
+    res = client.post(
+        "/auth/email-verify/request", json={"email": "gus@example.com"}, headers=_AUTH_HEADER
+    )
     assert res.status_code == 200
     assert len(sent) == 2
     code = _last_code(sent)
@@ -234,7 +242,9 @@ def test_resend_is_silent_for_unknown_and_verified(
 ) -> None:
     """An unknown or already-verified address gets the same 200 with no send."""
     client, sent = verify_client
-    unknown = client.post("/auth/email-verify/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER)
+    unknown = client.post(
+        "/auth/email-verify/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER
+    )
     assert unknown.status_code == 200
     assert sent == []
 
@@ -246,7 +256,9 @@ def test_resend_is_silent_for_unknown_and_verified(
         headers=_AUTH_HEADER,
     )
     before = len(sent)
-    verified = client.post("/auth/email-verify/request", json={"email": "hal@example.com"}, headers=_AUTH_HEADER)
+    verified = client.post(
+        "/auth/email-verify/request", json={"email": "hal@example.com"}, headers=_AUTH_HEADER
+    )
     assert verified.status_code == 200
     assert len(sent) == before
 
@@ -258,7 +270,9 @@ def test_resend_cooldown_suppresses_second_send(
     client, sent = verify_client
     _register(client, "ida@example.com", "originalpass1")
     assert len(sent) == 1
-    again = client.post("/auth/email-verify/request", json={"email": "ida@example.com"}, headers=_AUTH_HEADER)
+    again = client.post(
+        "/auth/email-verify/request", json={"email": "ida@example.com"}, headers=_AUTH_HEADER
+    )
     assert again.status_code == 200
     assert len(sent) == 1
 
@@ -269,7 +283,9 @@ def test_resend_without_smtp_is_422(
     """With no SMTP relay the resend is refused for every address alike."""
     client, _ = verify_client
     monkeypatch.setattr(settings, "smtp_host", None)
-    res = client.post("/auth/email-verify/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER)
+    res = client.post(
+        "/auth/email-verify/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER
+    )
     assert res.status_code == 422
 
 
@@ -278,9 +294,14 @@ def test_endpoints_require_internal_secret(
 ) -> None:
     """Both verification routes reject callers without the shared internal secret."""
     client, _ = verify_client
-    assert client.post("/auth/email-verify/request", json={"email": "amy@example.com"}).status_code == 403
     assert (
-        client.post("/auth/email-verify/confirm", json={"email": "amy@example.com", "code": "123456"}).status_code
+        client.post("/auth/email-verify/request", json={"email": "amy@example.com"}).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/auth/email-verify/confirm", json={"email": "amy@example.com", "code": "123456"}
+        ).status_code
         == 403
     )
 

@@ -99,7 +99,9 @@ def create_account_data_router(*, job_store) -> APIRouter:
         response_model=AccountDeletionResult,
         summary="Irreversibly delete the caller's account and all its data",
     )
-    def delete_my_account(body: DeleteAccountRequest, user: AuthenticatedUserDep) -> AccountDeletionResult:
+    def delete_my_account(
+        body: DeleteAccountRequest, user: AuthenticatedUserDep
+    ) -> AccountDeletionResult:
         """Permanently delete the caller's account and everything it owns.
 
         Local (email/password) accounts must re-confirm with their current
@@ -124,6 +126,8 @@ def create_account_data_router(*, job_store) -> APIRouter:
                 raise DomainError("accounts.invalid_credentials", status=401)
             summary = delete_account(session, user.username)
             session.commit()
-        return AccountDeletionResult(deleted_rows=summary.deleted_rows, anonymized_rows=summary.anonymized_rows)
+        return AccountDeletionResult(
+            deleted_rows=summary.deleted_rows, anonymized_rows=summary.anonymized_rows
+        )
 
     return router

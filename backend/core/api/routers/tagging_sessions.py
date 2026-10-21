@@ -316,7 +316,11 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
                 )
             shared_roles = list_grants_for_user_all(session, user.username)
             owned_ids = {item.id for item in items}
-            shared_ids = [sid for sid, role in shared_roles.items() if role in MEMBER_ROLES and sid not in owned_ids]
+            shared_ids = [
+                sid
+                for sid, role in shared_roles.items()
+                if role in MEMBER_ROLES and sid not in owned_ids
+            ]
             total = int(total) + len(shared_ids)
             # Shared-in rows are appended only on the first page — repeating
             # them at every offset would duplicate cards while paging. Same
@@ -370,7 +374,9 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
         status_code=201,
         summary="Create (save) a tagger session from the current annotation state",
     )
-    def create_tagging_session(req: TaggingSessionCreateRequest, user: AuthenticatedUserDep) -> TaggingSessionDetail:
+    def create_tagging_session(
+        req: TaggingSessionCreateRequest, user: AuthenticatedUserDep
+    ) -> TaggingSessionDetail:
         """Persist a new tagger session owned by the caller.
 
         The caller's unstarted sessions idle past ``UNSTARTED_TTL`` are deleted
@@ -426,7 +432,9 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
         response_model=TaggingSessionDetail,
         summary="Fetch one session with its full state (restore)",
     )
-    def get_tagging_session(session_id: str, user: AuthenticatedUserDep) -> TaggingSessionDetail:
+    def get_tagging_session(
+        session_id: str, user: AuthenticatedUserDep
+    ) -> TaggingSessionDetail:
         """Return a single accessible session with everything needed to resume.
 
         Args:
@@ -541,7 +549,9 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
         "/tagging-sessions/{session_id}",
         summary="Permanently delete a session",
     )
-    def delete_tagging_session(session_id: str, user: AuthenticatedUserDep) -> dict[str, Any]:
+    def delete_tagging_session(
+        session_id: str, user: AuthenticatedUserDep
+    ) -> dict[str, Any]:
         """Delete an owned session row.
 
         Returns a small JSON body (rather than 204) so the browser client's

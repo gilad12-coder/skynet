@@ -73,7 +73,9 @@ def reset_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict
         sent.append({"to": to, "subject": subject, "body": body, "html": html_body or ""})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     UserModel.__table__.create(engine)
     PasswordResetCodeModel.__table__.create(engine)
     EmailVerificationCodeModel.__table__.create(engine)
@@ -84,7 +86,9 @@ def reset_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict
     return TestClient(app), sent
 
 
-def _register(client: TestClient, sent: list[dict[str, str]], email: str, password: str) -> None:
+def _register(
+    client: TestClient, sent: list[dict[str, str]], email: str, password: str
+) -> None:
     """Register an account, mark it verified, and clear the email recorder.
 
     Under a configured SMTP relay ``register`` creates the account unverified
@@ -99,7 +103,9 @@ def _register(client: TestClient, sent: list[dict[str, str]], email: str, passwo
         email: Account email.
         password: Initial password.
     """
-    created = client.post("/auth/register", json={"email": email, "password": password}, headers=_AUTH_HEADER)
+    created = client.post(
+        "/auth/register", json={"email": email, "password": password}, headers=_AUTH_HEADER
+    )
     assert created.status_code == 201
     with Session(client.app.state.job_store.engine) as session:
         session.get(UserModel, email).email_verified = True
@@ -128,7 +134,9 @@ def test_request_then_confirm_resets_password(
     client, sent = reset_client
     _register(client, sent, "amy@example.com", "originalpass1")
 
-    requested = client.post("/auth/password-reset/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER)
+    requested = client.post(
+        "/auth/password-reset/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER
+    )
     assert requested.status_code == 200
     assert len(sent) == 1
     code = _last_code(sent)
@@ -165,7 +173,9 @@ def test_request_unknown_email_is_404_and_silent(
 ) -> None:
     """An unknown address is refused with ``accounts.not_found`` and no email is sent."""
     client, sent = reset_client
-    res = client.post("/auth/password-reset/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER)
+    res = client.post(
+        "/auth/password-reset/request", json={"email": "ghost@example.com"}, headers=_AUTH_HEADER
+    )
     assert res.status_code == 404
     assert res.json()["detail"] == t_en("accounts.not_found")
     assert sent == []
@@ -177,7 +187,9 @@ def test_request_without_smtp_is_422(
     """With no SMTP relay the request is refused for every address alike."""
     client, _ = reset_client
     monkeypatch.setattr(settings, "smtp_host", None)
-    res = client.post("/auth/password-reset/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER)
+    res = client.post(
+        "/auth/password-reset/request", json={"email": "amy@example.com"}, headers=_AUTH_HEADER
+    )
     assert res.status_code == 422
 
 
@@ -187,8 +199,12 @@ def test_request_cooldown_suppresses_second_send(
     """A second request inside the cooldown returns 200 without re-sending."""
     client, sent = reset_client
     _register(client, sent, "cara@example.com", "originalpass1")
-    first = client.post("/auth/password-reset/request", json={"email": "cara@example.com"}, headers=_AUTH_HEADER)
-    second = client.post("/auth/password-reset/request", json={"email": "cara@example.com"}, headers=_AUTH_HEADER)
+    first = client.post(
+        "/auth/password-reset/request", json={"email": "cara@example.com"}, headers=_AUTH_HEADER
+    )
+    second = client.post(
+        "/auth/password-reset/request", json={"email": "cara@example.com"}, headers=_AUTH_HEADER
+    )
     assert first.status_code == 200
     assert second.status_code == 200
     assert len(sent) == 1
@@ -200,7 +216,9 @@ def test_confirm_wrong_code_is_422(
     """A wrong code is rejected and does not change the password."""
     client, sent = reset_client
     _register(client, sent, "dan@example.com", "originalpass1")
-    client.post("/auth/password-reset/request", json={"email": "dan@example.com"}, headers=_AUTH_HEADER)
+    client.post(
+        "/auth/password-reset/request", json={"email": "dan@example.com"}, headers=_AUTH_HEADER
+    )
     res = client.post(
         "/auth/password-reset/confirm",
         json={"email": "dan@example.com", "code": "000000", "new_password": "brandnewpass9"},
@@ -237,7 +255,9 @@ def test_confirm_weak_password_is_422_and_keeps_code(
     """A weak new password is rejected before the code is spent, so retry works."""
     client, sent = reset_client
     _register(client, sent, "eli@example.com", "originalpass1")
-    client.post("/auth/password-reset/request", json={"email": "eli@example.com"}, headers=_AUTH_HEADER)
+    client.post(
+        "/auth/password-reset/request", json={"email": "eli@example.com"}, headers=_AUTH_HEADER
+    )
     code = _last_code(sent)
     weak = client.post(
         "/auth/password-reset/confirm",
@@ -259,7 +279,9 @@ def test_confirm_expired_code_is_422(
     """An expired code is rejected even when the digits are correct."""
     client, sent = reset_client
     _register(client, sent, "fay@example.com", "originalpass1")
-    client.post("/auth/password-reset/request", json={"email": "fay@example.com"}, headers=_AUTH_HEADER)
+    client.post(
+        "/auth/password-reset/request", json={"email": "fay@example.com"}, headers=_AUTH_HEADER
+    )
     code = _last_code(sent)
     engine = client.app.state.job_store.engine
     with Session(engine) as session:
@@ -284,7 +306,9 @@ def test_confirm_leaves_second_factor_intact(
     with Session(engine) as session:
         session.get(UserModel, "gus@example.com").email_2fa_enabled = True
         session.commit()
-    client.post("/auth/password-reset/request", json={"email": "gus@example.com"}, headers=_AUTH_HEADER)
+    client.post(
+        "/auth/password-reset/request", json={"email": "gus@example.com"}, headers=_AUTH_HEADER
+    )
     code = _last_code(sent)
     client.post(
         "/auth/password-reset/confirm",
@@ -300,7 +324,12 @@ def test_endpoints_require_internal_secret(
 ) -> None:
     """Both reset routes reject callers without the shared internal secret."""
     client, _ = reset_client
-    assert client.post("/auth/password-reset/request", json={"email": "amy@example.com"}).status_code == 403
+    assert (
+        client.post(
+            "/auth/password-reset/request", json={"email": "amy@example.com"}
+        ).status_code
+        == 403
+    )
     assert (
         client.post(
             "/auth/password-reset/confirm",

@@ -173,8 +173,12 @@ def create_agent_history_router(*, job_store) -> APIRouter:
                     }
                     ordered = [rows_by_id[i] for i in page_ids if i in rows_by_id]
                     previews = _fetch_previews(session, list(rows_by_id.keys()))
-                    return [_row_to_summary(r, previews.get(cast(str, r.id))) for r in ordered]
-            query = session.query(AgentConversationModel).filter(AgentConversationModel.username == user.username)
+                    return [
+                        _row_to_summary(r, previews.get(cast(str, r.id))) for r in ordered
+                    ]
+            query = session.query(AgentConversationModel).filter(
+                AgentConversationModel.username == user.username
+            )
             if pinned is not None:
                 query = query.filter(AgentConversationModel.pinned == pinned)
             if query_clean:
@@ -342,7 +346,9 @@ def create_agent_history_router(*, job_store) -> APIRouter:
         response_model=BulkDeleteByIdsResponse,
         summary="Delete many of the caller's conversations in one request",
     )
-    def bulk_delete_conversations(body: BulkDeleteByIdsRequest, user: AuthenticatedUserDep) -> BulkDeleteByIdsResponse:
+    def bulk_delete_conversations(
+        body: BulkDeleteByIdsRequest, user: AuthenticatedUserDep
+    ) -> BulkDeleteByIdsResponse:
         """Delete a batch of the caller's conversations, reporting per-id outcomes.
 
         Duplicate ids are deduplicated. Ownership is enforced per id by

@@ -282,7 +282,9 @@ class ProgramArtifact(BaseModel):
             self.optimized_component_srcs = {
                 path: state["module_src"]
                 for path, state in self.program_state_json.items()
-                if isinstance(state, dict) and isinstance(state.get("module_src"), str) and state["module_src"].strip()
+                if isinstance(state, dict)
+                and isinstance(state.get("module_src"), str)
+                and state["module_src"].strip()
             }
         return self
 

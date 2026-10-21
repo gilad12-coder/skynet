@@ -37,7 +37,9 @@ def _derive(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
     Returns:
         The derived key bytes.
     """
-    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=_MAXMEM, dklen=_KEY_BYTES)
+    return hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=_MAXMEM, dklen=_KEY_BYTES
+    )
 
 
 def hash_password(password: str) -> str:

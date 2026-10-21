@@ -212,7 +212,12 @@ def test_other_user_cannot_access_session() -> None:
     bob_client, _ = _client(_BOB, store=store)
 
     assert bob_client.get(f"/tagging-sessions/{sid}").status_code == 404
-    assert bob_client.put(f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}).status_code == 404
+    assert (
+        bob_client.put(
+            f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}
+        ).status_code
+        == 404
+    )
     assert bob_client.patch(f"/tagging-sessions/{sid}", json={"pinned": True}).status_code == 404
     assert bob_client.delete(f"/tagging-sessions/{sid}").status_code == 404
     # Bob's own list never sees Alice's session.

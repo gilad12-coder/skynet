@@ -162,7 +162,9 @@ def test_get_staged_dataset_is_scoped_to_owner(
 ) -> None:
     """A dataset staged by another user is invisible (404), not readable."""
     client, store = staged_client
-    staged_id = store.stage_dataset(username="mallory", dataset_filename="d.json", rows=[{"q": "x", "a": "y"}])
+    staged_id = store.stage_dataset(
+        username="mallory", dataset_filename="d.json", rows=[{"q": "x", "a": "y"}]
+    )
 
     resp = client.get(f"/datasets/staged/{staged_id}")
 
@@ -212,7 +214,9 @@ def test_profile_inline_dataset_ignores_staged_id(
 ) -> None:
     """An inline dataset wins; a staged id alongside it is not rehydrated."""
     client, store = staged_client
-    staged_id = store.stage_dataset(username="alice", dataset_filename="d.json", rows=[{"q": "x", "a": "y"}])
+    staged_id = store.stage_dataset(
+        username="alice", dataset_filename="d.json", rows=[{"q": "x", "a": "y"}]
+    )
 
     resp = client.post(
         "/datasets/profile",

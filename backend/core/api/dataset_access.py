@@ -144,7 +144,9 @@ def list_grants_for_user_all(session: Session, username: str) -> dict[str, str]:
     return {grant.dataset_id: grant.role for grant in rows}
 
 
-def get_grant(session: Session, dataset_id: str, username: str) -> DatasetShareGrantModel | None:
+def get_grant(
+    session: Session, dataset_id: str, username: str
+) -> DatasetShareGrantModel | None:
     """Return a specific user's grant on a dataset, if one exists.
 
     Args:
@@ -172,11 +174,15 @@ def dataset_owner(session: Session, dataset_id: str) -> str | None:
         The owner's lowercased username, or ``None`` when the dataset is
         unknown.
     """
-    owner = session.scalars(select(DatasetModel.owner_username).where(DatasetModel.id == dataset_id)).first()
+    owner = session.scalars(
+        select(DatasetModel.owner_username).where(DatasetModel.id == dataset_id)
+    ).first()
     return _normalize_username(owner) if owner is not None else None
 
 
-def resolve_effective_role(session: Session, dataset_id: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_effective_role(
+    session: Session, dataset_id: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve a logged-in caller's effective role on a dataset, token-free.
 
     The owner/admin/member-grant core of :func:`resolve_share_access`, factored
@@ -202,7 +208,9 @@ def resolve_effective_role(session: Session, dataset_id: str, user: Authenticate
     return None
 
 
-def resolve_share_access(session: Session, token: str, user: AuthenticatedUser) -> ShareRole | None:
+def resolve_share_access(
+    session: Session, token: str, user: AuthenticatedUser
+) -> ShareRole | None:
     """Resolve the effective role a caller has on a shared dataset.
 
     The caller gets the *highest* tier any applicable rule grants, assembled
@@ -237,7 +245,9 @@ def resolve_share_access(session: Session, token: str, user: AuthenticatedUser) 
     return max(candidates, key=role_rank)
 
 
-def require_role(session: Session, dataset_id: str, user: AuthenticatedUser, minimum: ShareRole) -> ShareRole:
+def require_role(
+    session: Session, dataset_id: str, user: AuthenticatedUser, minimum: ShareRole
+) -> ShareRole:
     """Resolve and enforce a minimum effective role on a dataset, token-free.
 
     The single access gate the logged-in library and sharing routes share. A

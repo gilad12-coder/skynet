@@ -52,8 +52,6 @@ class PublicDashboardPoint(BaseModel):
     module_name: str | None = None
     optimizer_name: str | None = None
     created_at: str | None = None
-
-
 class PublicDashboardResponse(BaseModel):
     """Envelope for ``GET /dashboard/public`` — the cross-user optimization corpus."""
 
@@ -269,11 +267,15 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             HTTPException: When a scope is set but the request is
                 unauthenticated or targets a different user than the session.
         """
-        resolved_owner = _resolve_owner_username(http_request, owner_username, authorization)
+        resolved_owner = _resolve_owner_username(
+            http_request, owner_username, authorization
+        )
         resolved_shared = (
             None
             if resolved_owner is not None
-            else _resolve_owner_username(http_request, shared_with_username, authorization)
+            else _resolve_owner_username(
+                http_request, shared_with_username, authorization
+            )
         )
         data = fetch_corpus_facets(
             job_store=job_store,
@@ -327,11 +329,15 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
                 unauthenticated or targets a different user than the session.
         """
         sort = request.sort if request.sort in SEARCH_SORTS else SEARCH_SORT_RELEVANCE
-        owner_username = _resolve_owner_username(http_request, request.owner_username, authorization)
+        owner_username = _resolve_owner_username(
+            http_request, request.owner_username, authorization
+        )
         shared_with_username = (
             None
             if owner_username is not None
-            else _resolve_owner_username(http_request, request.shared_with_username, authorization)
+            else _resolve_owner_username(
+                http_request, request.shared_with_username, authorization
+            )
         )
         data = search_optimizations(
             job_store=job_store,
@@ -387,13 +393,17 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             A :class:`PopularQueriesResponse` ranked by occurrence count, most
             popular first. Empty until the public corpus has been searched.
         """
-        rows = fetch_popular_queries(job_store=job_store, limit=POPULAR_QUERIES_LIMIT_DEFAULT)
+        rows = fetch_popular_queries(
+            job_store=job_store, limit=POPULAR_QUERIES_LIMIT_DEFAULT
+        )
         return PopularQueriesResponse(queries=[PopularQuery(**r) for r in rows])
 
     return router
 
 
-def _resolve_owner_username(request: Request, requested: str | None, authorization: str | None) -> str | None:
+def _resolve_owner_username(
+    request: Request, requested: str | None, authorization: str | None
+) -> str | None:
     """Verify a requested user-scope matches the authenticated session.
 
     Backs both the ``owner_username`` (mine) and ``shared_with_username``

@@ -328,7 +328,11 @@ def _dataset_sharing(
         ``grants`` is a sorted list of ``(grantee, role, created_by)`` triples.
     """
     with Session(store._engine) as db:
-        link_row = db.query(DatasetShareLinkModel).filter_by(dataset_id=dataset_id, revoked_at=None).one_or_none()
+        link_row = (
+            db.query(DatasetShareLinkModel)
+            .filter_by(dataset_id=dataset_id, revoked_at=None)
+            .one_or_none()
+        )
         link = (
             None
             if link_row is None

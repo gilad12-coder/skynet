@@ -33,7 +33,9 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 class ApiTokenInfo(BaseModel):
     last4: str = Field(description="Last four characters of the active token, for display.")
     created_at: datetime = Field(description="When the active token was generated.")
-    last_used_at: datetime | None = Field(default=None, description="When the token was last presented to the API.")
+    last_used_at: datetime | None = Field(
+        default=None, description="When the token was last presented to the API."
+    )
 
 
 # Returned exactly once, at creation — carries the full plaintext token.
@@ -74,7 +76,9 @@ def create_api_tokens_router(*, job_store) -> APIRouter:
             row = session.get(ApiTokenModel, user.username)
             if row is None:
                 return None
-            return ApiTokenInfo(last4=row.last4, created_at=row.created_at, last_used_at=row.last_used_at)
+            return ApiTokenInfo(
+                last4=row.last4, created_at=row.created_at, last_used_at=row.last_used_at
+            )
 
     @router.post(
         "/settings/api-token",
