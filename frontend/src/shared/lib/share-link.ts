@@ -9,7 +9,10 @@
  */
 
 import { isLocalMode } from "@/shared/lib/runtime-env";
-import { getSiteUrl } from "@/shared/lib/site-config";
+
+// The Mac app build does not set NEXT_PUBLIC_SITE_URL, and that fallback is not
+// the hosted app, so the sign-in link uses its own origin.
+const FALLBACK_HOSTED_APP_URL = "https://skynetml.com";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -21,10 +24,10 @@ export function shareLinkUrl(path: string): string | null {
 
 /**
  * Sign-in page of the hosted app, for the Mac app share notice. Null when the
- * configured site URL is a loopback origin, so the notice never links to this
- * computer.
+ * configured hosted app URL is a loopback origin, so the notice never links to
+ * this computer.
  */
 export function hostedSignInUrl(): string | null {
-  const url = new URL("/login", getSiteUrl());
+  const url = new URL("/login", process.env.NEXT_PUBLIC_HOSTED_APP_URL ?? FALLBACK_HOSTED_APP_URL);
   return LOOPBACK_HOSTS.has(url.hostname) ? null : url.toString();
 }

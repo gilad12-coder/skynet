@@ -24,7 +24,7 @@ void describe("LocalShareNotice", () => {
     const links = [...html.matchAll(/<a\s[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gs)];
     assert.equal(links.length, 1);
     const [tag = "", href, label = ""] = links[0] ?? [];
-    assert.equal(href, "https://skynet.app/login");
+    assert.equal(href, "https://skynetml.com/login");
     assert.match(label, /Sign in on the web/);
     assert.match(tag, /target="_blank"/);
     assert.match(tag, /rel="noopener noreferrer"/);
@@ -39,15 +39,15 @@ void describe("LocalShareNotice", () => {
     assert.match(html, /התחברות באתר/);
   });
 
-  void it("offers no sign-in link when the site URL is a loopback origin", () => {
+  void it("offers no sign-in link when the hosted app URL is a loopback origin", () => {
     setServerMessages(buildActiveCatalog("en"), "en");
-    process.env.NEXT_PUBLIC_SITE_URL = "http://127.0.0.1:53001";
+    process.env.NEXT_PUBLIC_HOSTED_APP_URL = "http://127.0.0.1:53001";
     try {
       const html = renderToStaticMarkup(<LocalShareNotice />);
       assert.match(html, /Sign in to a hosted account to share/);
       assert.doesNotMatch(html, /<a\s|127\.0\.0\.1/);
     } finally {
-      delete process.env.NEXT_PUBLIC_SITE_URL;
+      delete process.env.NEXT_PUBLIC_HOSTED_APP_URL;
     }
   });
 });
@@ -137,18 +137,24 @@ void describe("shareLinkUrl", () => {
 
 void describe("hostedSignInUrl", () => {
   afterEach(() => {
+    delete process.env.NEXT_PUBLIC_HOSTED_APP_URL;
     delete process.env.NEXT_PUBLIC_SITE_URL;
   });
 
   void it("points at the hosted sign-in page", () => {
-    assert.equal(hostedSignInUrl(), "https://skynet.app/login");
-    process.env.NEXT_PUBLIC_SITE_URL = "https://app.example.com";
+    assert.equal(hostedSignInUrl(), "https://skynetml.com/login");
+    process.env.NEXT_PUBLIC_HOSTED_APP_URL = "https://app.example.com";
     assert.equal(hostedSignInUrl(), "https://app.example.com/login");
+  });
+
+  void it("does not use the site URL of this deployment", () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://site.example.com";
+    assert.equal(hostedSignInUrl(), "https://skynetml.com/login");
   });
 
   void it("never returns a loopback URL", () => {
     for (const site of ["http://127.0.0.1:53001", "http://localhost:3000", "http://[::1]:3000"]) {
-      process.env.NEXT_PUBLIC_SITE_URL = site;
+      process.env.NEXT_PUBLIC_HOSTED_APP_URL = site;
       assert.equal(hostedSignInUrl(), null);
     }
   });
