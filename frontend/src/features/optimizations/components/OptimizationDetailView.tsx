@@ -1216,7 +1216,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         job.status === "success" &&
         job.blackbox_result &&
         isNotHeldOut(job.blackbox_result.split_counts) && (
-          <FadeIn delay={0.1} className="-mb-3">
+          <FadeIn delay={0.1} className="mb-3">
             <HeldOutNotice splitCounts={job.blackbox_result.split_counts} />
           </FadeIn>
         )}
