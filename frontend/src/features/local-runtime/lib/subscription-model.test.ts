@@ -17,6 +17,9 @@ const {
   isCliProvider,
   isLocalModelRefusal,
   keyMenuModels,
+  KEY_RETRY_MAX_MS,
+  keyRetryDelayMs,
+  localKeyRows,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
   isOpenRouterModelId,
@@ -592,6 +595,87 @@ test("the local menu lists the CLI's models, then the key's, and waits only when
   assert.deepEqual(localMenuModels(cliRows, null, keyPick), []);
   assert.deepEqual(localMenuModels(cliRows, null, cliPick), cliRows);
   assert.deepEqual(localMenuModels(cliRows, null, null), cliRows);
+});
+
+test("a saved key pick the key lists stays in the menu when the shortlist leaves it out", () => {
+  const pick = "openrouter/anthropic/claude-opus-4.7";
+  const catalog: Catalog = [
+    keyRow("openrouter/anthropic/claude-opus-4.8", { featured: true }),
+    keyRow(pick),
+  ];
+  assert.deepEqual(
+    keyMenuModels(catalog, pick).map((m) => m.value),
+    ["openrouter/anthropic/claude-opus-4.8", pick],
+  );
+  // Past the 50-row cap of a listing with no featured rows.
+  const many = Array.from({ length: 80 }, (_, i) => keyRow(`openrouter/lab/model-${i}`));
+  const late = "openrouter/lab/model-70";
+  const rows = keyMenuModels(many, late);
+  assert.equal(rows.length, 51);
+  assert.equal(rows.at(-1)!.value, late);
+  // A pick already in the shortlist is not listed twice.
+  assert.equal(keyMenuModels(many, "openrouter/lab/model-3").length, 50);
+  // A pick the key no longer lists gets no row, so the menu can judge it stale.
+  assert.deepEqual(
+    keyMenuModels(catalog, "openrouter/x/gone").map((m) => m.value),
+    ["openrouter/anthropic/claude-opus-4.8"],
+  );
+});
+
+test("a failed key list or key model list keeps the key rows unknown, so a saved pick survives", () => {
+  const cliRows = [
+    keyRow("subscription/claude/anthropic/claude-sonnet-4.6", { byok_provider: null }),
+  ];
+  const pick = "openrouter/anthropic/claude-opus-4.7";
+  const rows = [keyRow(pick), keyRow("openrouter/x/other", { byok_provider: "openai" })];
+  const base = {
+    keysLoading: false,
+    keysFailed: false,
+    stamp: "k1:t1",
+    loaded: null,
+    cached: null,
+  };
+  // The composer clears a pick when a non-empty list omits it.
+  const stale = (listed: CatalogRow[]) =>
+    listed.length > 0 && !listed.some((m) => m.value === pick);
+  const menu = (state: Parameters<typeof localKeyRows>[0]) => {
+    const keyRows = localKeyRows(state);
+    return localMenuModels(cliRows, keyRows && keyMenuModels(keyRows, pick), pick);
+  };
+
+  // GET /billing/byok/keys failed: the provider has no keys, but that is not "no key".
+  const keysFailed = { ...base, keysFailed: true, stamp: null };
+  assert.equal(localKeyRows(keysFailed), null);
+  assert.equal(stale(menu(keysFailed)), false);
+  // GET /billing/byok/models failed for a verified key, with no earlier catalog.
+  const modelsFailed = { ...base, loaded: { stamp: "k1:t1", models: null } };
+  assert.equal(localKeyRows(modelsFailed), null);
+  assert.equal(stale(menu(modelsFailed)), false);
+  // Still loading: unknown too.
+  assert.equal(localKeyRows({ ...base, keysLoading: true }), null);
+  assert.equal(localKeyRows(base), null);
+
+  // A later successful load lists the key's models and keeps the pick.
+  const loaded = { ...base, loaded: { stamp: "k1:t1", models: rows } };
+  assert.deepEqual(localKeyRows(loaded), [rows[0]]);
+  assert.equal(stale(menu(loaded)), false);
+  // A load for an older key does not count; the cached catalog stands in.
+  assert.deepEqual(
+    localKeyRows({ ...base, loaded: { stamp: "k0:t0", models: [] }, cached: rows }),
+    [rows[0]],
+  );
+  // Both lists loaded and the key no longer lists the pick: stale, so it clears.
+  const gone = { ...base, loaded: { stamp: "k1:t1", models: [keyRow("openrouter/x/other")] } };
+  assert.equal(stale(menu(gone)), true);
+  // No verified key, with a key list that loaded: no key rows.
+  assert.deepEqual(localKeyRows({ ...base, stamp: null }), []);
+});
+
+test("failed key loads retry with a growing, capped delay", () => {
+  assert.equal(keyRetryDelayMs(0), 2_000);
+  assert.equal(keyRetryDelayMs(1), 4_000);
+  assert.ok(keyRetryDelayMs(2) > keyRetryDelayMs(1));
+  assert.equal(keyRetryDelayMs(50), KEY_RETRY_MAX_MS);
 });
 
 test("only openrouter/<vendor>/<model> ids count as key picks", () => {

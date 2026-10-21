@@ -13,7 +13,9 @@ import {
   findCli,
   isLocalModelRefusal,
   keyMenuModels,
+  keyRetryDelayMs,
   LOCAL_KEY_PROVIDER,
+  localKeyRows,
   localMenuModels,
   resolveLocalAgentModel,
   subscriptionMenuModels,
@@ -102,35 +104,61 @@ export async function localAgentModel(
 }
 
 /**
- * The saved OpenRouter key's menu rows in the local build: empty with no
- * verified key, `null` while the key list or its models still load.
+ * All the saved OpenRouter key's rows in the local build: empty with no
+ * verified key, `null` while the key list or its models still load or failed
+ * to load. A failed load retries with a growing delay.
  */
 function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
-  const { keyFor, loading } = useByokKeys();
+  const { keyFor, loading, failed, reload } = useByokKeys();
   const key = keyFor(LOCAL_KEY_PROVIDER);
   // A new or re-verified key changes this stamp, which fetches its models again.
   const stamp = enabled && key?.status === "verified" ? `${key.id}:${key.addedAt}` : null;
-  const [loaded, setLoaded] = React.useState<{ stamp: string; models: CatalogModel[] } | null>(
-    null,
-  );
+  const [loaded, setLoaded] = React.useState<{
+    stamp: string;
+    models: CatalogModel[] | null;
+  } | null>(null);
+  const [modelTries, setModelTries] = React.useState(0);
+  const [keyTries, setKeyTries] = React.useState(0);
 
   React.useEffect(() => {
     if (!stamp) return;
     let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     void getByokModelCatalog().then((catalog) => {
-      if (active) setLoaded({ stamp, models: keyMenuModels(catalog.models) });
+      if (!active) return;
+      // A failed load resolves an empty catalog and leaves the cache unset.
+      const ok = cachedByokCatalog() !== null;
+      setLoaded({ stamp, models: ok ? catalog.models : null });
+      if (!ok) retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));
     });
     return () => {
       active = false;
+      clearTimeout(retry);
     };
-  }, [stamp]);
+  }, [stamp, modelTries]);
+
+  React.useEffect(() => {
+    if (!enabled || !failed) return;
+    let active = true;
+    const retry = setTimeout(() => {
+      void reload().finally(() => {
+        if (active) setKeyTries((n) => n + 1);
+      });
+    }, keyRetryDelayMs(keyTries));
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [enabled, failed, reload, keyTries]);
 
   if (!enabled) return [];
-  if (loading) return null;
-  if (!stamp) return [];
-  if (loaded?.stamp === stamp) return loaded.models;
-  const cached = cachedByokCatalog();
-  return cached ? keyMenuModels(cached.models) : null;
+  return localKeyRows({
+    keysLoading: loading,
+    keysFailed: failed,
+    stamp,
+    loaded,
+    cached: cachedByokCatalog()?.models ?? null,
+  });
 }
 
 /**
@@ -158,7 +186,7 @@ export function useLocalAgentMenuModels(
                   cachedCatalog()?.models,
                 )
               : null,
-            keyModels,
+            keyModels && keyMenuModels(keyModels, pick),
             pick,
           )
         : undefined,

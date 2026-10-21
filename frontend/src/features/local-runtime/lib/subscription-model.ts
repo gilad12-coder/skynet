@@ -167,12 +167,52 @@ export function isLocalKeyModel(model: CatalogModel): boolean {
 
 /**
  * The composer menu rows for the saved OpenRouter key: the featured models,
- * or the first ones when the listing flags none.
+ * or the first ones when the listing flags none. A `pick` the key lists but
+ * the shortlist leaves out gets its row too, so the menu never judges a
+ * listed pick stale.
  */
-export function keyMenuModels(catalog: CatalogModel[] | undefined): CatalogModel[] {
+export function keyMenuModels(
+  catalog: CatalogModel[] | undefined,
+  pick?: string | null,
+): CatalogModel[] {
   const rows = (catalog ?? []).filter(isLocalKeyModel);
   const featured = rows.filter((model) => model.featured);
-  return featured.length ? featured : rows.slice(0, KEY_MENU_CAP);
+  const menu = featured.length ? featured : rows.slice(0, KEY_MENU_CAP);
+  const kept =
+    pick && !menu.some((model) => model.value === pick)
+      ? rows.find((model) => model.value === pick)
+      : undefined;
+  return kept ? [...menu, kept] : menu;
+}
+
+/**
+ * All the saved key's rows in the local build: empty with no verified key,
+ * `null` while unknown. Unknown covers a key list or key model list that
+ * still loads or failed to load, since an empty list there would make a
+ * saved key pick look stale and clear it.
+ */
+export function localKeyRows(state: {
+  keysLoading: boolean;
+  keysFailed: boolean;
+  /** Identifies the verified OpenRouter key; null when there is none. */
+  stamp: string | null;
+  /** The last model load; `models` is null when that load failed. */
+  loaded: { stamp: string; models: CatalogModel[] | null } | null;
+  /** The cached key catalog, or null before a load succeeds. */
+  cached: CatalogModel[] | null;
+}): CatalogModel[] | null {
+  if (state.keysLoading || state.keysFailed) return null;
+  if (!state.stamp) return [];
+  const models = (state.loaded?.stamp === state.stamp ? state.loaded.models : null) ?? state.cached;
+  return models ? models.filter(isLocalKeyModel) : null;
+}
+
+/** The longest wait between retries of a failed key list or key model list. */
+export const KEY_RETRY_MAX_MS = 30_000;
+
+/** The wait before retry number `attempt` (from 0) of a failed key load. */
+export function keyRetryDelayMs(attempt: number): number {
+  return Math.min(2_000 * 2 ** attempt, KEY_RETRY_MAX_MS);
 }
 
 /**
