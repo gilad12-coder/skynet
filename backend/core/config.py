@@ -229,11 +229,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_CLAUDE_BIN", "SKYNET_CLAUDE_BIN"),
         description="Claude Code CLI used for subscription calls in local mode.",
     )
-    droid_bin: str = Field(
-        default="droid",
-        validation_alias=AliasChoices("APP_DROID_BIN", "SKYNET_DROID_BIN"),
-        description="Factory Droid CLI used for subscription calls in local mode.",
-    )
     cli_max_concurrency: int = Field(
         default=2,
         ge=1,

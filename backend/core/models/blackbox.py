@@ -15,10 +15,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .artifacts import ProgramArtifact
-from .common import ModelConfig
+from .common import ModelConfig, refuse_removed_cli
 from .results import LMActivity, ModelTokenUsage
 from .scorer_dependencies import ScorerDependencyLock
 
@@ -281,8 +281,10 @@ class BlackboxProposer(BaseModel):
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
     max_tool_calls: int = Field(default=100, ge=1, le=1000)
-    host_cli: Literal["codex", "claude", "droid"] | None = None
+    host_cli: Literal["codex", "claude"] | None = None
     host_permission: Literal["workspace_only", "full_access"] = "workspace_only"
+
+    _refuse_removed_cli = field_validator("host_cli", mode="before")(refuse_removed_cli)
 
     @model_validator(mode="after")
     def _ensure_launchable(self) -> BlackboxProposer:

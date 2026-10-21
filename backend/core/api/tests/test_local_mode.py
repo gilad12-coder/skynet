@@ -67,7 +67,7 @@ def local_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         test turns it on.
     """
     monkeypatch.setattr(settings, "backend_auth_secret", SecretStr(_SECRET))
-    for name in ("codex_bin", "claude_bin", "droid_bin", "docker_bin"):
+    for name in ("codex_bin", "claude_bin", "docker_bin"):
         monkeypatch.setattr(settings, name, "/nonexistent/skynet-test-binary")
     clear_probe_cache()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -162,7 +162,7 @@ def test_local_status_reports_docker_and_clis(local_client: TestClient, monkeypa
     assert body["docker"]["available"] is False
     assert "Docker CLI not found" in body["docker"]["error"]
     assert body["sandbox_image"] is None
-    assert [cli["id"] for cli in body["clis"]] == ["codex", "claude", "droid"]
+    assert [cli["id"] for cli in body["clis"]] == ["codex", "claude"]
     assert all(cli["path"] is None for cli in body["clis"])
 
 
@@ -232,6 +232,22 @@ def test_local_subscription_run_creates_an_uncapped_budget(monkeypatch: pytest.M
     payload = store._jobs[resp.json()["optimization_id"]]["payload"]
     assert payload["token_source"] == "subscription"
     assert payload["execution_budget_id"] == budget.id
+
+
+def test_local_subscription_run_naming_droid_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run that names Droid gets 422 with a clear message and creates no job.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    models = {"reflection_model": {**_SUBSCRIPTION_MODELS["reflection_model"], "cli_provider": "droid"}}
+
+    resp = client.post("/optimize", json=unified_payload(token_source="subscription", models=models))
+
+    assert resp.status_code == 422, resp.text
+    assert "Droid is no longer supported" in resp.text
+    assert store.created_ids() == []
 
 
 def test_subscription_run_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:

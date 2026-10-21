@@ -60,7 +60,7 @@ def _settings(tmp_path: Path, **bins: str) -> Settings:
 
     Args:
         tmp_path: Directory used as the local state directory.
-        **bins: ``codex_bin``/``claude_bin``/``droid_bin``/``docker_bin`` overrides.
+        **bins: ``codex_bin``/``claude_bin``/``docker_bin`` overrides.
 
     Returns:
         Settings with the overrides applied.
@@ -69,7 +69,6 @@ def _settings(tmp_path: Path, **bins: str) -> Settings:
     update = {
         "codex_bin": missing,
         "claude_bin": missing,
-        "droid_bin": missing,
         "docker_bin": missing,
         "local_state_dir": str(tmp_path / "state"),
         **bins,
@@ -105,23 +104,21 @@ def test_logged_out_cli_is_reported(tmp_path: Path) -> None:
     """Each CLI's own status command decides the login answer."""
     codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_exit=1, login_out="Not logged in")
     claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": false}')
-    droid = _fake_cli(tmp_path, "droid", version="0.231.0", login_out='{"ok": false}')
-    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude), droid_bin=str(droid))
+    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
 
-    assert [status.logged_in for status in probe_clis(settings)] == [False, False, False]
+    assert [status.logged_in for status in probe_clis(settings)] == [False, False]
 
 
 def test_ready_clis_report_ok(tmp_path: Path) -> None:
     """Current, signed-in CLIs report their version and ``logged_in=True``."""
     codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out="Logged in using ChatGPT")
     claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": true}')
-    droid = _fake_cli(tmp_path, "droid", version="droid 0.231.0", login_out='{"ok": true}')
-    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude), droid_bin=str(droid))
+    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
 
     statuses = probe_clis(settings)
 
-    assert [status.id for status in statuses] == ["codex", "claude", "droid"]
-    assert [status.version for status in statuses] == ["0.163.0", "2.1.306", "0.231.0"]
+    assert [status.id for status in statuses] == ["codex", "claude"]
+    assert [status.version for status in statuses] == ["0.163.0", "2.1.306"]
     assert all(status.version_ok and status.logged_in for status in statuses)
     assert all(status.rate_limited_until is None for status in statuses)
 
@@ -177,7 +174,7 @@ def test_probe_results_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     probe_clis(settings)
     probe_clis(settings)
 
-    assert calls == ["codex", "claude", "droid"]
+    assert calls == ["codex", "claude"]
 
 
 def test_rate_limit_round_trips_and_expires(tmp_path: Path) -> None:

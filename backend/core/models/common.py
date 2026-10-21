@@ -11,10 +11,29 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .constants import REMOVED_CLI_PROVIDER, REMOVED_CLI_PROVIDER_MESSAGE
 
 OptimizationType = Literal["run", "grid_search", "blackbox"]
 Composition = Literal["single", "workflow"]
+
+
+def refuse_removed_cli(value: Any) -> Any:
+    """Raise a clear error when a CLI field names the removed Droid CLI.
+
+    Args:
+        value: The raw field value before type checks.
+
+    Returns:
+        ``value`` unchanged when it does not name Droid.
+
+    Raises:
+        ValueError: When ``value`` is the string ``"droid"`` in any case.
+    """
+    if isinstance(value, str) and value.strip().lower() == REMOVED_CLI_PROVIDER:
+        raise ValueError(REMOVED_CLI_PROVIDER_MESSAGE)
+    return value
 
 
 class ColumnMapping(BaseModel):
@@ -61,11 +80,13 @@ class ModelConfig(BaseModel):
     name: str
     token_source: Literal["managed", "byok", "subscription"] | None = None
     byok_provider: str | None = None
-    cli_provider: Literal["codex", "claude", "droid"] | None = None
+    cli_provider: Literal["codex", "claude"] | None = None
     base_url: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1)
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    _refuse_removed_cli = field_validator("cli_provider", mode="before")(refuse_removed_cli)
 
     @model_validator(mode="after")
     def _require_cli_for_subscription(self) -> ModelConfig:
@@ -79,7 +100,7 @@ class ModelConfig(BaseModel):
                 ``cli_provider`` is unset.
         """
         if self.token_source == "subscription" and self.cli_provider is None:
-            raise ValueError("A subscription model needs cli_provider (codex, claude or droid).")
+            raise ValueError("A subscription model needs cli_provider (codex or claude).")
         return self
 
     def normalized_identifier(self) -> str:

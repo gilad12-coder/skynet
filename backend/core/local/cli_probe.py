@@ -22,11 +22,11 @@ from pathlib import Path
 from core.config import Settings
 from core.local.cli_catalog import CLI_MODELS, MIN_VERSIONS, CliProvider
 
-CLI_IDS: tuple[CliProvider, ...] = ("codex", "claude", "droid")
+CLI_IDS: tuple[CliProvider, ...] = ("codex", "claude")
 
 # Each key makes a CLI bill an API account instead of the user's
-# subscription; FACTORY_API_KEY does the same for droid.
-STRIPPED_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "FACTORY_API_KEY")
+# subscription.
+STRIPPED_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
 
 CLI_LIMITS_FILENAME = "cli_limits.json"
 
@@ -37,7 +37,6 @@ _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _LOGIN_HINTS: dict[CliProvider, str] = {
     "codex": "Run `codex login` in a terminal.",
     "claude": "Run `claude auth login` in a terminal.",
-    "droid": "Run `droid` in a terminal and sign in.",
 }
 
 _cache_lock = threading.Lock()
@@ -79,7 +78,7 @@ def cli_binary(cli: CliProvider, settings: Settings) -> str:
     Returns:
         The command name or path from settings.
     """
-    return {"codex": settings.codex_bin, "claude": settings.claude_bin, "droid": settings.droid_bin}[cli]
+    return {"codex": settings.codex_bin, "claude": settings.claude_bin}[cli]
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str] | None:
@@ -136,8 +135,7 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
         if result is None:
             return None
         return result.returncode == 0 and "logged in" in (result.stdout + result.stderr).lower()
-    args = [path, "auth", "status"] if cli == "claude" else [path, "doctor", "--auth", "--json"]
-    result = _run(args)
+    result = _run([path, "auth", "status"])
     if result is None:
         return None
     try:
@@ -146,7 +144,7 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
         return None
     if not isinstance(payload, dict):
         return None
-    flag = payload.get("loggedIn") if cli == "claude" else payload.get("ok")
+    flag = payload.get("loggedIn")
     return flag if isinstance(flag, bool) else None
 
 
@@ -226,7 +224,7 @@ def _cache_key(settings: Settings) -> tuple[str, ...]:
     Returns:
         The binary commands and state directory.
     """
-    return (settings.codex_bin, settings.claude_bin, settings.droid_bin, settings.local_state_dir)
+    return (settings.codex_bin, settings.claude_bin, settings.local_state_dir)
 
 
 def probe_clis(settings: Settings) -> list[CliStatus]:

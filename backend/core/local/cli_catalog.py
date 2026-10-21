@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
-CliProvider = Literal["codex", "claude", "droid"]
+CliProvider = Literal["codex", "claude"]
 
 SUBSCRIPTION_MODEL_PREFIX = "subscription/"
 
@@ -19,12 +19,10 @@ SUBSCRIPTION_MODEL_PREFIX = "subscription/"
 MIN_VERSIONS: dict[CliProvider, str] = {
     "claude": "2.1.226",
     "codex": "0.160.0",
-    "droid": "0.0.0",
 }
 
-# Model ids come from each CLI's own model list (``codex debug models``,
-# ``droid exec --help``) and the Claude API model ids that ``claude --model``
-# accepts. Every key is a slug in the public OpenRouter catalog.
+# Model ids come from Codex's own model list (``codex debug models``) and the
+# Claude API model ids that ``claude --model`` accepts. Every key is a slug in the public OpenRouter catalog.
 CLI_MODELS: dict[CliProvider, dict[str, str]] = {
     "codex": {
         "openai/gpt-6.1-sol": "gpt-6.1-sol",
@@ -50,40 +48,6 @@ CLI_MODELS: dict[CliProvider, dict[str, str]] = {
         "anthropic/claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
         "anthropic/claude-haiku-5.5": "claude-haiku-5-5",
         "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
-    },
-    "droid": {
-        "anthropic/claude-fable-5.1": "claude-fable-5.1",
-        "anthropic/claude-fable-5": "claude-fable-5",
-        "anthropic/claude-opus-5.5": "claude-opus-5-5",
-        "anthropic/claude-opus-5": "claude-opus-5",
-        "anthropic/claude-opus-4.8": "claude-opus-4-8",
-        "anthropic/claude-opus-4.7": "claude-opus-4-7",
-        "anthropic/claude-opus-4.6": "claude-opus-4-6",
-        "anthropic/claude-opus-4.5": "claude-opus-4-5-20251101",
-        "anthropic/claude-sonnet-5": "claude-sonnet-5",
-        "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
-        "anthropic/claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
-        "anthropic/claude-haiku-4.5": "claude-haiku-4-5-20251001",
-        "openai/gpt-6-sol": "gpt-6-sol",
-        "openai/gpt-6-astra": "gpt-6-astra",
-        "openai/gpt-5.6-sol": "gpt-5.6-sol",
-        "openai/gpt-5.6-terra": "gpt-5.6-terra",
-        "openai/gpt-5.6-luna": "gpt-5.6-luna",
-        "openai/gpt-5.5": "gpt-5.5",
-        "openai/gpt-5.4": "gpt-5.4",
-        "openai/gpt-5.4-mini": "gpt-5.4-mini",
-        "openai/gpt-5.3-codex": "gpt-5.3-codex",
-        "google/gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
-        "google/gemini-3.8-flash": "gemini-3.8-flash",
-        "google/gemini-3.7-flash": "gemini-3.7-flash",
-        "google/gemini-3.6-flash": "gemini-3.6-flash",
-        "google/gemini-3.5-flash": "gemini-3.5-flash",
-        "google/gemini-3-flash-preview": "gemini-3-flash-preview",
-        "z-ai/glm-5.3": "glm-5.3",
-        "z-ai/glm-5.3-flash": "glm-5.3-flash",
-        "z-ai/glm-5.2": "glm-5.2",
-        "moonshotai/kimi-k3": "kimi-k3",
-        "x-ai/grok-4.7": "grok-4.7",
     },
 }
 

@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.config import Settings, local_bind_host
+from core.models.blackbox import BlackboxProposer
 from core.models.common import ModelConfig
 
 _ENV_VARS = (
@@ -133,6 +134,38 @@ def test_subscription_model_needs_a_cli() -> None:
 
     config = ModelConfig(name="anthropic/claude-sonnet-4.6", token_source="subscription", cli_provider="claude")
     assert config.cli_provider == "claude"
+
+
+@pytest.mark.parametrize("cli", ["droid", "Droid", " DROID "])
+def test_model_config_naming_droid_is_refused_with_a_clear_error(cli: str) -> None:
+    """A saved model or stored run that names Droid fails with a message that says why.
+
+    Args:
+        cli: A ``cli_provider`` value that names Droid.
+    """
+    with pytest.raises(ValidationError, match="Droid is no longer supported"):
+        ModelConfig(name="anthropic/claude-sonnet-4.6", token_source="subscription", cli_provider=cli)
+
+
+def test_proposer_naming_droid_is_refused_with_a_clear_error() -> None:
+    """A saved proposer that names Droid as its host CLI fails with the same message."""
+    with pytest.raises(ValidationError, match="Droid is no longer supported"):
+        BlackboxProposer(host_cli="droid")
+
+    assert BlackboxProposer(host_cli="claude").host_cli == "claude"
+
+
+def test_old_droid_bin_env_var_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A machine that still sets ``APP_DROID_BIN`` starts, and the setting is gone.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+    """
+    monkeypatch.setenv("APP_DROID_BIN", "/usr/local/bin/droid")
+
+    loaded = Settings(_env_file=None)
+
+    assert not hasattr(loaded, "droid_bin")
 
 
 def _dockerfile_bind(env: dict[str, str]) -> str:
