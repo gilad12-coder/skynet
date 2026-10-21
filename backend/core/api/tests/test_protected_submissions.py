@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -609,3 +610,180 @@ def test_legacy_commitment_is_counted_once_during_protected_submission(harness: 
     job = harness.store.get_job(response.json()["optimization_id"])
     assert job["execution_budget_id"] is not None
     assert StripeBillingService(engine=harness.store.engine).spendable_cents("alice") == 39
+
+
+class _HeldCheck:
+    """Hold the paid setup check open until the test releases it."""
+
+    def __init__(self, harness: _Harness) -> None:
+        """Wrap the harness's measured setup adapter.
+
+        Args:
+            harness: Real API fixture whose setup check is held.
+        """
+        self.started = threading.Event()
+        self.release = threading.Event()
+        verify = harness.verify
+
+        def held(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            """Signal the check started, then wait for the release."""
+            self.started.set()
+            assert self.release.wait(timeout=30)
+            return verify(*args, **kwargs)
+
+        harness.verify = held
+
+
+def test_same_key_retry_during_running_check_returns_the_original_run(harness: _Harness) -> None:
+    """Join a dropped request's running check instead of refusing or paying for a second one.
+
+    Args:
+        harness: Real persistence with a held setup check.
+    """
+    held = _HeldCheck(harness)
+    headers = {"Idempotency-Key": "dropped"}
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(harness.client.post, ROUTE, json=_payload(), headers=headers)
+        assert held.started.wait(timeout=10)
+        with ThreadPoolExecutor(max_workers=1) as retrying:
+            retry = retrying.submit(harness.client.post, ROUTE, json=_payload(), headers=headers)
+            held.release.set()
+            retried = retry.result(timeout=30)
+        original = first.result(timeout=30)
+
+    assert original.status_code == retried.status_code == 201, (original.text, retried.text)
+    assert retried.json()["optimization_id"] == original.json()["optimization_id"]
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == harness.count(WizardPreflightModel) == 1
+
+
+def test_slow_check_answers_202_and_a_same_key_retry_collects_the_run(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Answer before a proxy timeout, then hand the finished run to the client's retry.
+
+    Args:
+        harness: Real persistence with a held setup check.
+        monkeypatch: Shorten the in-request wait.
+    """
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 0.2)
+    held = _HeldCheck(harness)
+    headers = {"Idempotency-Key": "slow"}
+    try:
+        accepted = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    finally:
+        held.release.set()
+
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.headers["Retry-After"] == "5"
+    assert accepted.json()["code"] == "submission.in_progress"
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 30.0)
+    collected = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    assert collected.status_code == 201, collected.text
+    replayed = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    assert replayed.status_code == 201, replayed.text
+    assert replayed.json()["optimization_id"] == collected.json()["optimization_id"]
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == 1
+
+
+def test_failed_check_after_202_is_reported_to_the_retry_without_running_again(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deliver a background check's failure to the retry instead of paying for the check twice.
+
+    Args:
+        harness: Real persistence with a held, failing setup check.
+        monkeypatch: Shorten the in-request wait.
+    """
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 0.2)
+    harness.result_status = "failed"
+    held = _HeldCheck(harness)
+    headers = {"Idempotency-Key": "fails"}
+    try:
+        accepted = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    finally:
+        held.release.set()
+
+    assert accepted.status_code == 202, accepted.text
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 30.0)
+    refused = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"].startswith("Payload validation failed")
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == 0
+
+
+def test_keyless_failed_check_after_202_is_reported_to_an_identical_retry(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deliver a keyless request's background failure to its identical retry without a second check.
+
+    Args:
+        harness: Real persistence with a held, failing setup check.
+        monkeypatch: Shorten the in-request wait.
+    """
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 0.2)
+    harness.result_status = "failed"
+    held = _HeldCheck(harness)
+    try:
+        accepted = harness.client.post(ROUTE, json=_payload())
+    finally:
+        held.release.set()
+
+    assert accepted.status_code == 202, accepted.text
+    monkeypatch.setattr(submissions, "_SUBMISSION_WAIT_SECONDS", 30.0)
+    refused = harness.client.post(ROUTE, json=_payload())
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"].startswith("Payload validation failed")
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == 0
+
+
+def test_same_key_retry_on_another_replica_answers_202_while_the_check_runs(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Report a check another process still runs as in progress, not a refusal or a duplicate.
+
+    Args:
+        harness: Real persistence with a held setup check.
+        monkeypatch: Give the retry its own process-local submission registry.
+    """
+    held = _HeldCheck(harness)
+    headers = {"Idempotency-Key": "replica"}
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(harness.client.post, ROUTE, json=_payload(), headers=headers)
+        assert held.started.wait(timeout=10)
+        monkeypatch.setattr(submissions, "_IN_FLIGHT_SUBMISSIONS", submissions._InFlightSubmissions())
+        try:
+            elsewhere = harness.client.post(ROUTE, json=_payload(), headers=headers)
+        finally:
+            held.release.set()
+        original = first.result(timeout=30)
+
+    assert elsewhere.status_code == 202, elsewhere.text
+    assert original.status_code == 201, original.text
+    collected = harness.client.post(ROUTE, json=_payload(), headers=headers)
+    assert collected.json()["optimization_id"] == original.json()["optimization_id"]
+    assert len(harness.calls) == 1
+    assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == 1
+
+
+def test_parallel_submissions_with_their_own_keys_both_start(harness: _Harness) -> None:
+    """Start two different simultaneous submissions from one account without a server error.
+
+    Args:
+        harness: Real persistence with measured setup execution.
+    """
+    other = {**_payload(), "name": "other"}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda body_key: harness.client.post(ROUTE, json=body_key[0], headers={"Idempotency-Key": body_key[1]}),
+                [(_payload(), "one"), (other, "two")],
+            )
+        )
+
+    assert [response.status_code for response in responses] == [201, 201], [r.text for r in responses]
+    assert len({response.json()["optimization_id"] for response in responses}) == 2
+    assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == 2

@@ -17,7 +17,7 @@ from sqlalchemy import Engine, create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from core.billing.budgets import BudgetConflictError, BudgetInFlightError, BudgetService
-from core.config import app_env
+from core.config import app_env, settings
 from core.storage.models import (
     Base,
     BillingCustomerModel,
@@ -109,6 +109,28 @@ def test_parallel_admission_cannot_overcommit(database: Engine, shared_budget: b
     assert sorted(outcomes) == ["contended", "reserved"]
     with Session(database) as session:
         assert session.scalar(select(func.count()).select_from(ExecutionOperationModel)) == 1
+
+
+def test_parallel_first_budgets_of_a_new_account_share_one_wallet(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fund every first budget of a new preview account when they race to create its wallet."""
+    monkeypatch.setattr(settings, "preview_grant_cents", 1000)
+    monkeypatch.setattr(settings, "railway_environment_name", "skynet-pr-87")
+    service = BudgetService(engine=database)
+    barrier = Barrier(8)
+
+    def run(index: int) -> int:
+        """Create one budget at the same moment as the others."""
+        barrier.wait(timeout=5)
+        return service.create("carol", 10, idempotency_key=f"first-{index}").total_cents
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        totals = list(executor.map(run, range(8)))
+    assert totals == [10] * 8
+    with Session(database) as session:
+        assert session.get(BillingCustomerModel, "carol").grant_remaining == 1000
+        assert session.scalar(select(func.count()).select_from(ExecutionBudgetModel)) == 8
 
 
 def test_parallel_duplicate_attempt_has_one_physical_dispatch(database: Engine) -> None:

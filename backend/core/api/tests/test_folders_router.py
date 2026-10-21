@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import Base, JobModel, RunFolderItemModel, RunFolderModel
+from ...storage.models import Base, JobModel, OptimizationShareGrantModel, RunFolderItemModel, RunFolderModel
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers._helpers import grant_roles_for
@@ -203,7 +203,7 @@ def test_viewer_cannot_file_runs_or_create_subfolders() -> None:
 
 
 def test_cannot_move_someone_elses_unfiled_run() -> None:
-    """Only a run's owner can file it when it is not in a folder yet."""
+    """Only a run's owner can file it; a stranger cannot tell the run from a missing one."""
     store = _MemStore()
     _seed_job(store, "alice-run")
     bob = _client(store, "bob")
@@ -212,7 +212,7 @@ def test_cannot_move_someone_elses_unfiled_run() -> None:
     body = resp.json()
     assert body["updated"] == []
     assert {s["optimization_id"]: s["reason"] for s in body["skipped"]} == {
-        "alice-run": "forbidden",
+        "alice-run": "not_found",
         "missing": "not_found",
     }
 
@@ -352,3 +352,50 @@ def test_transfer_ownership_keeps_old_owner_as_editor() -> None:
     assert body["owner"] == "bob"
     assert body["role"] == "editor"
     assert body["members"] == [{"username": "alice", "role": "editor"}]
+
+
+def test_moving_a_run_to_where_it_already_is_still_checks_access() -> None:
+    """A no-op move of someone else's run is refused, so it cannot show the run exists or is unfiled."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    bob = _client(store, "bob")
+    body = bob.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
+    assert body["updated"] == []
+    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "not_found"}]
+    alice = _client(store)
+    assert alice.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()[
+        "updated"
+    ] == ["alice-run"]
+
+
+def test_a_viewer_is_told_a_move_is_forbidden() -> None:
+    """A caller who can already see the run gets ``forbidden``, not ``not_found``."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    alice = _client(store)
+    folder = _create(alice, "Shared")
+    alice.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": folder})
+    _share(alice, folder, "bob", "viewer")
+    body = (
+        _client(store, "bob").post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": None}).json()
+    )
+    assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
+
+
+def test_a_direct_run_grant_does_not_allow_a_move() -> None:
+    """A direct grant on the run itself, even editor, lets the caller see it but not move it."""
+    store = _MemStore()
+    _seed_job(store, "alice-run")
+    with Session(store.engine) as session:
+        session.add(
+            OptimizationShareGrantModel(
+                optimization_id="alice-run", grantee_username="bob", role="editor", created_by="alice"
+            )
+        )
+        session.commit()
+    bob = _client(store, "bob")
+    folder = _create(bob, "Mine")
+    for destination in (folder, None):
+        body = bob.post("/folders/items", json={"optimization_ids": ["alice-run"], "folder_id": destination}).json()
+        assert body["updated"] == []
+        assert body["skipped"] == [{"optimization_id": "alice-run", "reason": "forbidden"}]
