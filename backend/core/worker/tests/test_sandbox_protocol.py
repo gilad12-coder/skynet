@@ -19,6 +19,7 @@ from core.worker.sandbox_protocol import SANDBOX_PROTOCOL
 # protocol bump (so stale images are refused) and a new entry here.
 REQUEST_SHAPES: dict[int, dict[str, str]] = {
     4: {"unified": "5245d5cd8aff52e8", "blackbox": "0ad0fe1fd5d08de1"},
+    5: {"unified": "050df068b08e8f68", "blackbox": "a9426b30dbab5aa1"},
 }
 
 
