@@ -272,8 +272,9 @@ class _UnsettledRuntime(_Runtime):
     [
         UsagePendingError("The cloud sandbox has not reported final network transfer."),
         BudgetBoundExceededError("The run budget bound is exceeded."),
+        RuntimeError("Vercel usage ledger write failed: database is locked."),
     ],
-    ids=["usage-pending", "budget"],
+    ids=["usage-pending", "budget", "unexpected"],
 )
 @pytest.mark.parametrize(
     ("cutoff", "setup", "expected"),
@@ -287,7 +288,7 @@ def test_settlement_error_on_close_keeps_the_setup_error(
     expected: type[Exception],
     close_error: Exception,
 ) -> None:
-    """Show the setup or cutoff failure, and log the settlement error, when the failed box closes."""
+    """Show the setup or cutoff failure, and log only the close error type, when the failed box closes."""
     archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
     runtime = _UnsettledRuntime(cutoff, close_error)
     space = _space(archive, runtime, setup=setup)
@@ -300,6 +301,7 @@ def test_settlement_error_on_close_keeps_the_setup_error(
     assert len(warnings) == 1
     assert type(close_error).__name__ in warnings[0].getMessage()
     assert str(close_error) not in warnings[0].getMessage()
+    assert "vercel" not in warnings[0].getMessage().lower()
 
 
 def test_a_box_that_cannot_switch_its_network_off_is_refused(tmp_path: Path) -> None:

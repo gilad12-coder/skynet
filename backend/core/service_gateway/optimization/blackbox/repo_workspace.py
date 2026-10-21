@@ -21,8 +21,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ....billing.budgets import BudgetError
-from ....billing.runtime import UsagePendingError
 from .repo_tree import archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
@@ -245,14 +243,15 @@ class RepoWorkspace:
         except BaseException as error:
             self._failure = error
             # Unsettled usage stays in the ledger for reconciliation; the setup
-            # error is what the user can act on, so it must not be replaced.
-            # Only the type is logged: settlement texts can name the provider.
+            # error is what the user can act on, so no close error may replace
+            # it. Only the type is logged: settlement and ledger texts can name
+            # the provider.
             try:
                 session.close()
-            except (UsagePendingError, BudgetError) as settlement:
+            except Exception as close_error:
                 logger.warning(
-                    "Repository setup failed; sandbox usage was not settled on close (%s)",
-                    type(settlement).__name__,
+                    "Repository setup failed; the sandbox did not close cleanly (%s)",
+                    type(close_error).__name__,
                 )
             raise
         self._session = session
