@@ -92,3 +92,11 @@ test("only the notifications actually shown are confirmed", () => {
   const shown = showClaimed([note("a"), note("b"), note("c")], (item) => item.id !== "b");
   assert.deepEqual(shown, ["a", "c"]);
 });
+
+test("an item whose show throws is not confirmed, and the rest still are", () => {
+  const shown = showClaimed([note("a"), note("b"), note("c")], (item) => {
+    if (item.id === "b") throw new TypeError("Illegal constructor");
+    return true;
+  });
+  assert.deepEqual(shown, ["a", "c"]);
+});

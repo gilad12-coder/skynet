@@ -14,7 +14,7 @@ from core.notifications import channels as channels_module
 from core.notifications.catalog import CHANNELS, DEFAULT_GRID, MACOS
 from core.notifications.channels import Delivery, EmailChannel, MacOSChannel, get_channel
 from core.notifications.dispatch import notify
-from core.notifications.native import CLAIM_BATCH, CLAIM_LEASE, claim_native, confirm_native
+from core.notifications.native import CLAIM_BATCH, CLAIM_LEASE, EXPIRE_BATCH, claim_native, confirm_native
 from core.notifications.preferences import configure_notification_preferences, default_grid, merge_grid
 
 from ...storage.models import Base, NotificationModel, NotificationPreferenceModel
@@ -221,6 +221,44 @@ def test_claim_native_expires_queued_rows_older_than_a_day(engine, local_mode: N
     assert [item.id for item in claimed] == [fresh]
     assert _macos_state(engine, stale)["state"] == "expired"
     assert _macos_state(engine, leased)["state"] == "expired"
+
+
+def test_claim_native_keeps_a_row_whose_lease_is_still_active_past_a_day(engine, local_mode: None) -> None:
+    """A row shown just before it turns a day old keeps its lease, so the app's confirm still marks it sent."""
+    notification_id = notify(_USER, "finished", "opt-1", title="Ticket triage", now=_T0)
+    shown_at = _T0 + timedelta(days=1) - timedelta(seconds=10)
+    assert [item.id for item in claim_native(engine, _USER, now=shown_at)] == [notification_id]
+
+    assert claim_native(engine, _USER, now=shown_at + timedelta(seconds=11)) == []
+    assert _macos_state(engine, notification_id)["state"] == "claimed"
+    assert confirm_native(engine, _USER, [notification_id], now=shown_at + timedelta(seconds=12)) == 1
+    assert _macos_state(engine, notification_id)["state"] == "sent"
+
+
+def test_claim_native_expires_a_stale_row_once_its_lease_runs_out(engine, local_mode: None) -> None:
+    """A stale claimed row that the app never confirmed expires after its lease ends."""
+    notification_id = notify(_USER, "finished", "opt-1", title="Ticket triage", now=_T0)
+    shown_at = _T0 + timedelta(days=1) - timedelta(seconds=10)
+    claim_native(engine, _USER, now=shown_at)
+
+    assert claim_native(engine, _USER, now=shown_at + CLAIM_LEASE + timedelta(seconds=1)) == []
+    assert _macos_state(engine, notification_id)["state"] == "expired"
+
+
+def test_claim_native_expires_at_most_one_batch_per_poll(engine, local_mode: None) -> None:
+    """One poll expires at most ``EXPIRE_BATCH`` stale rows; the next poll expires the rest."""
+    stale = [
+        notify(_USER, "finished", f"opt-{i}", title="Old", dedupe_key=f"s{i}", now=_T0) for i in range(EXPIRE_BATCH + 3)
+    ]
+    later = _T0 + timedelta(days=2)
+
+    claim_native(engine, _USER, now=later)
+    states = [_macos_state(engine, notification_id)["state"] for notification_id in stale]
+    assert states.count("expired") == EXPIRE_BATCH
+    assert states.count("queued") == 3
+
+    claim_native(engine, _USER, now=later)
+    assert {_macos_state(engine, notification_id)["state"] for notification_id in stale} == {"expired"}
 
 
 def test_claim_native_reaches_queued_rows_behind_many_handled_ones(engine, local_mode: None) -> None:
