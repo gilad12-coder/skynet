@@ -13,17 +13,20 @@ starts from a copy of that prepared tree and runs no setup of its own.
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
 import shlex
 import threading
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ....billing.budgets import BudgetError
 from ....billing.runtime import UsagePendingError
 from .repo_tree import archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
+
+logger = logging.getLogger(__name__)
 
 REPO_DIR = ".app-repo"
 BASE_DIR = f"{REPO_DIR}/base"
@@ -241,10 +244,16 @@ class RepoWorkspace:
                 self._cut_network(session)
         except BaseException as error:
             self._failure = error
-            # Pending usage stays reserved for reconciliation; the setup error
-            # is what the user can act on, so it must not be replaced.
-            with contextlib.suppress(UsagePendingError):
+            # Unsettled usage stays in the ledger for reconciliation; the setup
+            # error is what the user can act on, so it must not be replaced.
+            # Only the type is logged: settlement texts can name the provider.
+            try:
                 session.close()
+            except (UsagePendingError, BudgetError) as settlement:
+                logger.warning(
+                    "Repository setup failed; sandbox usage was not settled on close (%s)",
+                    type(settlement).__name__,
+                )
             raise
         self._session = session
         return session
