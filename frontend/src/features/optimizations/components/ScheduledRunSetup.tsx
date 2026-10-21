@@ -33,23 +33,28 @@ const MODEL_SWITCHES: Array<{ role: keyof ContinuousPermitted; label: MessageKey
 /**
  * Walks the scheduled-run settings one screen at a time, like the submit
  * wizard: which models may switch to a better one, then the schedule.
+ * `initial` reopens a saved plan, so editing it keeps a switch the user
+ * turned off.
  */
 export function ScheduledRunSetup({
   busy = false,
   finishLabel,
   onFinish,
   idPrefix,
+  initial = null,
 }: {
   busy?: boolean;
   finishLabel: MessageKey;
   onFinish: (body: ContinuousEnableRequest) => void;
   idPrefix: string;
+  initial?: ContinuousEnableRequest | null;
 }) {
-  const [permitted, setPermitted] = useState<ContinuousPermitted>({
-    task_model: true,
-    reflection_model: true,
-  });
-  const [schedule, setSchedule] = useState<ScheduleRule>(() => defaultRule(browserTimeZone()));
+  const [permitted, setPermitted] = useState<ContinuousPermitted>(
+    () => initial?.permitted ?? { task_model: true, reflection_model: true },
+  );
+  const [schedule, setSchedule] = useState<ScheduleRule>(
+    () => initial?.schedule ?? defaultRule(browserTimeZone()),
+  );
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const reduceMotion = useReducedMotion();

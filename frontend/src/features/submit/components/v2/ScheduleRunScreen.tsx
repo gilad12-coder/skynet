@@ -112,6 +112,7 @@ export function ScheduleRunScreen() {
             <ScheduledRunSetup
               idPrefix="wizard-schedule"
               finishLabel="continuous_tab.walk.save"
+              initial={scheduledRun}
               onFinish={(body) => {
                 setScheduledRun(body);
                 setEditing(false);
