@@ -548,3 +548,12 @@ def test_pin_and_rename_keep_imported_storage(hosted_store: _SQLiteJobStore, bun
         optimization_id, ("success",), result=hosted_store.get_job(optimization_id)["result"]
     )
     assert hosted_store.get_job(optimization_id)["stored_bytes"] >= 2 * len(blob)
+
+
+def test_imported_run_test_results_is_404(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """An imported run has no stored payload, so its test results give 404, not 500."""
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    r = _client(hosted_store, HOSTED_USER).get(f"/optimizations/{resp.json()['optimization_id']}/test-results")
+    assert r.status_code == 404
+    assert r.json()["detail"] == t_en("optimization.payload_unavailable")

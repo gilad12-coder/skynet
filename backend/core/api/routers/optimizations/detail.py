@@ -778,7 +778,9 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         except ValidationError:
             raise DomainError("optimization.corrupt_result", status=500) from None
 
-        payload = job_data.get("payload", {})
+        payload = job_data.get("payload")
+        if not isinstance(payload, dict):
+            raise DomainError("optimization.payload_unavailable", status=404)
         dataset = payload.get("dataset", [])
         total = len(dataset)
         fractions_raw = payload.get("split_fractions", {})
@@ -1073,7 +1075,9 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
                 pair_index=pair_index,
             )
 
-        payload = job_data.get("payload", {})
+        payload = job_data.get("payload")
+        if not isinstance(payload, dict):
+            raise DomainError("optimization.payload_unavailable", status=404)
         dataset = payload.get("dataset", [])
         total = len(dataset)
         fractions_raw = payload.get("split_fractions", {})
