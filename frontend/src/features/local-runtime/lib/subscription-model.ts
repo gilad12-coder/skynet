@@ -185,7 +185,7 @@ export function usageChargedKey(
 
 type UsageNoteRow = Pick<
   RunUsageRow,
-  "billing" | "charged_cents" | "provider_cents" | "calls" | "unpriced_calls"
+  "billing" | "charged_cents" | "provider_cents" | "api_rate_cents" | "calls" | "unpriced_calls"
 >;
 
 /**
@@ -194,14 +194,19 @@ type UsageNoteRow = Pick<
  * so that column gets an asterisk and this note. A run whose model calls drew
  * no charge and no provider spend ran on the subscription, so nothing was
  * billed. That claim is final, so it waits until the run stops and its ledger
- * settles, and it applies only to the whole-run view. Any other run, and
- * hosted mode, gets no note.
+ * settles, and it applies only to the whole-run view. When the backend priced
+ * the subscription's tokens at API rates, the note also explains the "*"
+ * amounts. Any other run, and hosted mode, gets no note.
  */
 export function usageCostNoteKey(
   localMode: boolean,
   rows: readonly UsageNoteRow[],
   view: { final: boolean; pairIndex: number | null },
-): "usage_tab.api_rates_note_local" | "usage_tab.subscription_note_local" | null {
+):
+  | "usage_tab.api_rates_note_local"
+  | "usage_tab.subscription_note_local"
+  | "usage_tab.subscription_api_rates_note_local"
+  | null {
   if (!localMode) return null;
   if (rows.some((r) => r.provider_cents != null)) return "usage_tab.api_rates_note_local";
   if (!view.final || view.pairIndex != null) return null;
@@ -212,7 +217,10 @@ export function usageCostNoteKey(
       r.charged_cents > 0 || r.unpriced_calls > 0 || r.billing === "byok" || r.billing === "direct",
   );
   const calls = rows.reduce((n, r) => n + r.calls, 0);
-  return calls > 0 && !billed ? "usage_tab.subscription_note_local" : null;
+  if (calls === 0 || billed) return null;
+  return rows.some((r) => r.api_rate_cents != null)
+    ? "usage_tab.subscription_api_rates_note_local"
+    : "usage_tab.subscription_note_local";
 }
 
 /** A model config billed to the user's CLI subscription. */

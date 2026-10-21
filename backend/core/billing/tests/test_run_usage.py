@@ -14,10 +14,12 @@ from sqlalchemy.orm import Session
 
 from core.api.routers.optimizations.usage import run_usage
 from core.billing.budget_amounts import cent_units
+from core.billing.pricing import ModelUsage, known_token_prices, usage_cost_usd
 from core.billing.run_usage import (
     BILLING_BYOK,
     BILLING_DIRECT,
     BILLING_SKYNET,
+    BILLING_SUBSCRIPTION,
     ROLE_PROPOSER,
     ROLE_REFLECTION,
     ROLE_ROUNDING,
@@ -37,6 +39,7 @@ from core.storage.models import Base, ExecutionBudgetModel, ExecutionOperationMo
 
 _MANAGED = {"kind": "managed_model", "byok_fee_fraction": "0.05"}
 _BYOK = {"kind": "byok_model", "byok_fee_fraction": "0.05"}
+_SUBSCRIPTION = {"kind": "subscription_model"}
 
 
 def _op(
@@ -130,6 +133,37 @@ def test_byok_calls_report_the_provider_charge_behind_the_fee() -> None:
     assert row.provider_cents == Decimal(10)
 
 
+def test_subscription_calls_show_their_api_rate_without_a_charge() -> None:
+    """Price subscription tokens at the model's API rate, apart from any charge or provider spend."""
+    evidence = {**_call(), "provider": "subscription", "cli": "codex"}
+    rows = aggregate(
+        [
+            _op(policy=_SUBSCRIPTION, cents="0", evidence=evidence),
+            _op(policy=_SUBSCRIPTION, cents="0", evidence=evidence),
+        ],
+        proposer=False,
+    )
+    (row,) = rows
+    assert (row.billing, row.calls, row.charged_units, row.provider_cents) == (BILLING_SUBSCRIPTION, 2, 0, None)
+    expected = Decimal(str(usage_cost_usd(ModelUsage("openai/gpt-4o-mini", 100, 20)))) / Decimal("0.01")
+    assert row.api_rate_cents == 2 * expected
+    assert row.api_rate_cents > 0
+    assert row.unpriced_calls == 0
+    assert with_rounding(rows, 0) == rows
+
+
+def test_subscription_call_on_a_model_without_an_api_price_gets_no_amount() -> None:
+    """Show no API-rate amount, and not the fallback rate, for a model no price table knows."""
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_call("acme/no-such-model-xyz"))], proposer=False)
+    assert (row.billing, row.calls, row.api_rate_cents, row.unpriced_calls) == (BILLING_SUBSCRIPTION, 1, None, 0)
+
+
+def test_only_subscription_calls_get_an_api_rate() -> None:
+    """Leave managed and BYOK rows without an API-rate amount."""
+    rows = aggregate([_op(evidence=_call()), _op(policy=_BYOK, cents="0.5", evidence=_call())], proposer=False)
+    assert [row.api_rate_cents for row in rows] == [None, None]
+
+
 def test_unsettled_and_undispatched_calls() -> None:
     """Count in-flight calls as pending, and never count a reservation that sent nothing as a call."""
     (row,) = aggregate(
@@ -192,7 +226,12 @@ def test_serialize_renders_cents() -> None:
     (document,) = serialize(aggregate([_op(cents="1.23456789", evidence=_call())], proposer=False))
     assert document["charged_cents"] == 1.2346
     assert document["provider_cents"] is None
+    assert document["api_rate_cents"] is None
     assert document["billing"] == BILLING_SKYNET
+    (subscription,) = serialize(aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_call())], proposer=False))
+    assert subscription["charged_cents"] == 0
+    assert isinstance(subscription["api_rate_cents"], float)
+    assert subscription["api_rate_cents"] > 0
 
 
 _LEGACY_RESULT: dict[str, Any] = {
@@ -346,3 +385,9 @@ def test_load_records_merges_evidence_per_operation(engine: Engine) -> None:
     assert record.wallet_units == cent_units(2)
     assert record.evidence["tags"] == {"stage": "training"}
     assert "generation" in record.evidence
+
+
+def test_known_token_prices_skips_the_fallback_rate() -> None:
+    """Return a priced model's rates, and ``None`` where pricing would fall back to the default."""
+    assert known_token_prices("openai/gpt-4o-mini") is not None
+    assert known_token_prices("acme/no-such-model-xyz") is None

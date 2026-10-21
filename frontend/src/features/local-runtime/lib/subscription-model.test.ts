@@ -346,6 +346,30 @@ test("the local subscription note waits for a final whole-run view", () => {
   );
 });
 
+test("a final subscription run with an API-rate amount gets the API-rates subscription note", () => {
+  const row = {
+    billing: "subscription",
+    charged_cents: 0,
+    provider_cents: null,
+    api_rate_cents: 3.2,
+    calls: 12,
+    unpriced_calls: 0,
+  };
+  const done = { final: true, pairIndex: null };
+  assert.equal(usageCostNoteKey(true, [row], done), "usage_tab.subscription_api_rates_note_local");
+  assert.equal(
+    usageCostNoteKey(true, [row, { ...row, api_rate_cents: null }], done),
+    "usage_tab.subscription_api_rates_note_local",
+  );
+  assert.equal(
+    usageCostNoteKey(true, [{ ...row, api_rate_cents: null }], done),
+    "usage_tab.subscription_note_local",
+  );
+  assert.equal(usageCostNoteKey(true, [row], { final: false, pairIndex: null }), null);
+  assert.equal(usageCostNoteKey(true, [row], { final: true, pairIndex: 1 }), null);
+  assert.equal(usageCostNoteKey(false, [row], done), null);
+});
+
 test("the local English texts name no fee and no Skynet charge", () => {
   const en = JSON.parse(
     readFileSync(new URL("../../../../../i18n/locales/ui/en.json", import.meta.url), "utf8"),
@@ -356,6 +380,9 @@ test("the local English texts name no fee and no Skynet charge", () => {
     "tooltip.usage_tab.charged_local",
     "usage_tab.api_rates_note_local",
     "usage_tab.subscription_note_local",
+    "usage_tab.subscription_api_rates_note_local",
+    "usage_tab.api_rate",
+    "tooltip.usage_tab.api_rate",
   ]) {
     assert.ok(en[key], key);
     assert.doesNotMatch(en[key], /platform fee|term\.appName|Skynet/, key);

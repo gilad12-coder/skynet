@@ -4035,6 +4035,7 @@
   "tooltip.usage_tab.role.other": "Diğer rollerin hiçbirine uymayan model çağrıları.",
   "tooltip.usage_tab.charged": "{term.appName}'in cüzdanınızdan tahsil ettiği tutar. Kendi anahtarlarınızda bu, platform ücretidir.",
   "tooltip.usage_tab.provider": "Sağlayıcınızın bu çağrılar için kendi anahtarınızdan aldığı ücret. Bu bir tahmindir ve faturayı sağlayıcınız keser.",
+  "tooltip.usage_tab.api_rate": "Bu çağrıların API ücretleriyle ne kadar tutacağı. Aboneliğiniz bunları karşıladı, bu yüzden hiçbir ücret alınmadı.",
   "tooltip.usage_tab.not_priced": "Bu modelin kayıtlı bir fiyatı yok; çağrıları ve token'ları sayılır ama maliyeti gösterilemez.",
   "tooltip.usage_tab.unattributed": "Bir rolle etiketlenmemiş model çağrıları. Yine de toplama dahil edilir.",
   "usage_tab.role.rounding": "Tam sente yuvarlama",
@@ -4323,5 +4324,7 @@
   "usage_tab.charged_local": "Mac uygulaması bakiyesi",
   "tooltip.usage_tab.charged_local": "Bu çağrıların ücretsiz Mac uygulaması bakiyesinden aldığı tutar. Gerçek para değildir. Sağlayıcınız ücreti kendi anahtarınıza yansıtır.",
   "usage_tab.api_rates_note_local": "* API ücretleriyle. Sağlayıcınız bu tutarları kendi anahtarınıza yansıtır.",
-  "usage_tab.subscription_note_local": "Bu çalıştırmayı aboneliğiniz karşıladı, bu yüzden hiçbir ücret alınmadı."
+  "usage_tab.subscription_note_local": "Bu çalıştırmayı aboneliğiniz karşıladı, bu yüzden hiçbir ücret alınmadı.",
+  "usage_tab.subscription_api_rates_note_local": "Bu çalıştırmayı aboneliğiniz karşıladı, bu yüzden hiçbir ücret alınmadı. * Tutarlar, bu çalıştırmanın API ücretleriyle ne kadar tutacağını gösterir.",
+  "usage_tab.api_rate": "API ücretleriyle"
 }

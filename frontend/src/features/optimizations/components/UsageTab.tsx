@@ -158,12 +158,14 @@ function Summary({
   running,
   splitCost,
   apiRatesNote,
+  apiRateEquivalent,
 }: {
   job: OptimizationStatusResponse;
   usage: RunUsage;
   running: boolean;
   splitCost: boolean;
   apiRatesNote: boolean;
+  apiRateEquivalent: boolean;
 }) {
   const locale = getActiveIntlLocale();
   const budget = job.execution_budget ?? job.terminal_evidence?.execution_budget;
@@ -187,6 +189,13 @@ function Summary({
       `${msg("usage_tab.provider")}${apiRatesNote ? "*" : ""}`,
       formatCentsUsd(total.providerCents, locale),
       tip("usage_tab.provider"),
+    ]);
+  }
+  if (apiRateEquivalent && total.apiRateCents != null) {
+    items.push([
+      `${msg("usage_tab.api_rate")}*`,
+      formatCentsUsd(total.apiRateCents, locale),
+      tip("usage_tab.api_rate"),
     ]);
   }
   if (budget) {
@@ -484,6 +493,8 @@ export function UsageTab({
     );
   const provider = (g: UsageGroup) =>
     g.providerCents == null ? empty : formatCentsUsd(g.providerCents, locale);
+  const apiRate = (g: UsageGroup) =>
+    g.apiRateCents == null ? empty : formatCentsUsd(g.apiRateCents, locale);
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
   const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
@@ -494,6 +505,8 @@ export function UsageTab({
           pairIndex,
         })
       : null;
+  // Display only: a settled subscription run's tokens priced at API rates, never billed.
+  const showApiRate = costNoteKey === "usage_tab.subscription_api_rates_note_local";
 
   return (
     <FadeIn>
@@ -505,6 +518,7 @@ export function UsageTab({
           running={running}
           splitCost={splitCost}
           apiRatesNote={costNoteKey === "usage_tab.api_rates_note_local"}
+          apiRateEquivalent={showApiRate}
         />
         <div
           className={cn("flex items-center gap-3", costNoteKey ? "justify-between" : "justify-end")}
@@ -519,6 +533,7 @@ export function UsageTab({
                 "name",
                 "charged_usd",
                 ...(splitCost ? ["provider_usd_estimate"] : []),
+                ...(showApiRate ? ["api_rate_usd_estimate"] : []),
                 "calls",
                 "input_tokens",
                 "output_tokens",
@@ -528,6 +543,7 @@ export function UsageTab({
                 name: groupLabel(g, activeGrouping),
                 charged_usd: g.chargedCents / 100,
                 provider_usd_estimate: g.providerCents == null ? "" : g.providerCents / 100,
+                api_rate_usd_estimate: g.apiRateCents == null ? "" : g.apiRateCents / 100,
                 calls: g.calls,
                 input_tokens: g.inputTokens,
                 output_tokens: g.outputTokens,
@@ -560,6 +576,13 @@ export function UsageTab({
                         <HelpTip text={tip("usage_tab.provider")}>
                           {msg("usage_tab.provider")}
                           {costNoteKey === "usage_tab.api_rates_note_local" && "*"}
+                        </HelpTip>
+                      </TableHead>
+                    )}
+                    {showApiRate && (
+                      <TableHead className="text-end" collapse="sm">
+                        <HelpTip text={tip("usage_tab.api_rate")}>
+                          {msg("usage_tab.api_rate")}*
                         </HelpTip>
                       </TableHead>
                     )}
@@ -601,6 +624,11 @@ export function UsageTab({
                             {provider(g)}
                           </TableCell>
                         )}
+                        {showApiRate && (
+                          <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
+                            {apiRate(g)}
+                          </TableCell>
+                        )}
                         <TableCell className="text-end tabular-nums">
                           {activity(g, formatCount(g.calls))}
                         </TableCell>
@@ -631,6 +659,11 @@ export function UsageTab({
                     {splitCost && (
                       <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
                         {provider(total)}
+                      </TableCell>
+                    )}
+                    {showApiRate && (
+                      <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
+                        {apiRate(total)}
                       </TableCell>
                     )}
                     <TableCell className="text-end tabular-nums">

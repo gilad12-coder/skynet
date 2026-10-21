@@ -4035,6 +4035,7 @@
   "tooltip.usage_tab.role.other": "Chamadas ao modelo que não se enquadram em nenhuma das outras funções.",
   "tooltip.usage_tab.charged": "O que a {term.appName} cobrou à sua carteira. Com as suas próprias chaves, é a taxa da plataforma.",
   "tooltip.usage_tab.provider": "O que o seu fornecedor cobra à sua própria chave por estas chamadas. É uma estimativa, e é o seu fornecedor que a fatura.",
+  "tooltip.usage_tab.api_rate": "Quanto custariam estas chamadas às tarifas da API. A sua subscrição cobriu-as, por isso nada foi cobrado.",
   "tooltip.usage_tab.not_priced": "Este modelo não tem preço registado, por isso as chamadas e os tokens contam, mas o custo não pode ser mostrado.",
   "tooltip.usage_tab.unattributed": "Chamadas ao modelo que não foram marcadas com uma função. Continuam a contar para o total.",
   "usage_tab.role.rounding": "Arredondamento ao cêntimo",
@@ -4323,5 +4324,7 @@
   "usage_tab.charged_local": "Saldo da app para Mac",
   "tooltip.usage_tab.charged_local": "O que estas chamadas usaram do saldo gratuito da app para Mac. Não é dinheiro real. O seu fornecedor cobra na sua própria chave.",
   "usage_tab.api_rates_note_local": "* Às tarifas da API. O seu fornecedor cobra estes valores na sua própria chave.",
-  "usage_tab.subscription_note_local": "A sua subscrição cobriu esta execução, por isso nada foi cobrado."
+  "usage_tab.subscription_note_local": "A sua subscrição cobriu esta execução, por isso nada foi cobrado.",
+  "usage_tab.subscription_api_rates_note_local": "A sua subscrição cobriu esta execução, por isso nada foi cobrado. * Os valores mostram quanto custaria esta execução às tarifas da API.",
+  "usage_tab.api_rate": "Às tarifas da API"
 }

@@ -150,6 +150,19 @@ def model_token_prices(model_id: str) -> TokenPrices:
     return TokenPrices(prompt=FALLBACK_INPUT_COST_PER_TOKEN, completion=FALLBACK_OUTPUT_COST_PER_TOKEN)
 
 
+def known_token_prices(model_id: str) -> TokenPrices | None:
+    """Return a model's per-token USD prices only when a price table knows the model.
+
+    Args:
+        model_id: The model id as recorded.
+
+    Returns:
+        Live OpenRouter prices, else LiteLLM's static prices, else ``None``
+        (never the fallback rates, which exist to bill safely, not to estimate).
+    """
+    return live_prices(model_id) or _static_prices(model_id)
+
+
 def model_token_costs(model_id: str) -> tuple[float, float]:
     """Return a model's ``(input, output)`` per-token cost in USD, at cost.
 

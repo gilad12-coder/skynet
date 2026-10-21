@@ -3775,6 +3775,7 @@
   "tooltip.usage_tab.role.other": "קריאות מודל שלא שייכות לאף אחד מהתפקידים האחרים.",
   "tooltip.usage_tab.charged": "הסכום ש-{term.appName} חייב מהארנק שלך. במפתחות שלך, זו עמלת הפלטפורמה.",
   "tooltip.usage_tab.provider": "מה שהספק שלך גובה מהמפתח שלך על הקריאות האלה. זו הערכה, והחיוב מגיע מהספק.",
+  "tooltip.usage_tab.api_rate": "כמה הקריאות האלה היו עולות לפי תעריפי ה-API. המנוי שלכם כיסה אותן, ולכן שום דבר לא חויב.",
   "tooltip.usage_tab.not_priced": "אין מחיר רשום למודל הזה, ולכן הקריאות והטוקנים נספרים אבל העלות לא מוצגת.",
   "tooltip.usage_tab.unattributed": "קריאות מודל שלא סומנו באחד מהם. הן עדיין נספרות בסה״כ.",
   "usage_tab.role.rounding": "עיגול לסנטים שלמים",
@@ -4323,5 +4324,7 @@
   "usage_tab.charged_local": "יתרת אפליקציית ה-Mac",
   "tooltip.usage_tab.charged_local": "מה שהקריאות האלה לקחו מהיתרה החינמית של אפליקציית ה-Mac. זה לא כסף אמיתי. הספק שלכם מחייב את המפתח שלכם.",
   "usage_tab.api_rates_note_local": "* לפי תעריפי ה-API. הספק שלכם מחייב את הסכומים האלה במפתח שלכם.",
-  "usage_tab.subscription_note_local": "המנוי שלכם כיסה את ההרצה הזו, ולכן שום דבר לא חויב."
+  "usage_tab.subscription_note_local": "המנוי שלכם כיסה את ההרצה הזו, ולכן שום דבר לא חויב.",
+  "usage_tab.subscription_api_rates_note_local": "המנוי שלכם כיסה את ההרצה הזו, ולכן שום דבר לא חויב. * הסכומים מראים כמה ההרצה הזו הייתה עולה לפי תעריפי ה-API.",
+  "usage_tab.api_rate": "לפי תעריפי ה-API"
 }

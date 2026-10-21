@@ -4035,6 +4035,7 @@
   "tooltip.usage_tab.role.other": "Modellaufrufe, die zu keiner der anderen Rollen passen.",
   "tooltip.usage_tab.charged": "Was {term.appName} deinem Wallet belastet hat. Bei eigenen Schlüsseln ist das die Plattformgebühr.",
   "tooltip.usage_tab.provider": "Was dein Anbieter deinem eigenen Schlüssel für diese Aufrufe berechnet. Es ist eine Schätzung, und dein Anbieter rechnet sie ab.",
+  "tooltip.usage_tab.api_rate": "Was diese Aufrufe zu API-Preisen kosten würden. Dein Abo hat sie abgedeckt, daher wurde nichts berechnet.",
   "tooltip.usage_tab.not_priced": "Für dieses Modell ist kein Preis hinterlegt. Seine Aufrufe und Tokens zählen, aber seine Kosten können nicht angezeigt werden.",
   "tooltip.usage_tab.unattributed": "Modellaufrufe ohne Rollen-Tag. Sie zählen trotzdem zur Gesamtsumme.",
   "usage_tab.role.rounding": "Rundung auf ganze Cent",
@@ -4323,5 +4324,7 @@
   "usage_tab.charged_local": "Mac-App-Guthaben",
   "tooltip.usage_tab.charged_local": "Was diese Aufrufe vom kostenlosen Mac-App-Guthaben abgezogen haben. Es ist kein echtes Geld. Dein Anbieter rechnet über deinen eigenen Schlüssel ab.",
   "usage_tab.api_rates_note_local": "* Zu API-Preisen. Dein Anbieter rechnet diese Beträge über deinen eigenen Schlüssel ab.",
-  "usage_tab.subscription_note_local": "Dein Abo hat diesen Lauf abgedeckt, daher wurde nichts berechnet."
+  "usage_tab.subscription_note_local": "Dein Abo hat diesen Lauf abgedeckt, daher wurde nichts berechnet.",
+  "usage_tab.subscription_api_rates_note_local": "Dein Abo hat diesen Lauf abgedeckt, daher wurde nichts berechnet. * Die Beträge zeigen, was dieser Lauf zu API-Preisen kosten würde.",
+  "usage_tab.api_rate": "Zu API-Preisen"
 }

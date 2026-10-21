@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..storage.models import ExecutionBudgetModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
 from .budget_amounts import CENT_SCALE, cents_from_units
-from .pricing import CENT_USD_VALUE, ModelUsage, usage_cost_usd
+from .pricing import CENT_USD_VALUE, ModelUsage, known_token_prices, usage_cost_usd
 from .usage_tags import CALLER_PROPOSER, CALLER_REFLECTION
 
 ROLE_TASK = "task"
@@ -34,6 +34,7 @@ ROLE_ROUNDING = "rounding"
 BILLING_SKYNET = "skynet"
 BILLING_BYOK = "byok"
 BILLING_DIRECT = "direct"
+BILLING_SUBSCRIPTION = "subscription"
 
 _CALL_STATES = ("dispatched", "pending", "settled")
 _UNSETTLED_STATES = ("reserved", "dispatched", "pending")
@@ -52,6 +53,7 @@ class UsageRow:
     kind: str | None = None
     charged_units: int = 0
     provider_cents: Decimal | None = None
+    api_rate_cents: Decimal | None = None
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -173,8 +175,10 @@ def aggregate(
             continue
         model_call = record.cost_kind == "model"
         byok = record.policy.get("kind") == "byok_model"
+        subscription = record.policy.get("kind") == "subscription_model"
         model = (str(record.evidence.get("model") or record.quoted_model or "") or None) if model_call else None
-        row = row_for(_role(record, proposer=proposer), model, tags, BILLING_BYOK if byok else BILLING_SKYNET)
+        billing = BILLING_BYOK if byok else BILLING_SUBSCRIPTION if subscription else BILLING_SKYNET
+        row = row_for(_role(record, proposer=proposer), model, tags, billing)
         row.charged_units += record.wallet_units
         if byok:
             provider = _byok_provider_cents(record)
@@ -190,6 +194,11 @@ def aggregate(
         input_tokens, output_tokens = _tokens(record.evidence.get("usage"))
         row.input_tokens += input_tokens
         row.output_tokens += output_tokens
+        # Display only: what the subscription's tokens would cost at API rates. It never enters
+        # charged_units, so credit totals, spend caps and the ledger stay unaffected.
+        if subscription and model is not None and known_token_prices(model) is not None:
+            usd = usage_cost_usd(ModelUsage(model, input_tokens, output_tokens))
+            row.api_rate_cents = (row.api_rate_cents or Decimal(0)) + Decimal(str(usd)) / Decimal(str(CENT_USD_VALUE))
         latency = record.evidence.get("latency_ms")
         if isinstance(latency, int) and latency >= 0:
             row.latency_ms_total += latency
@@ -497,5 +506,7 @@ def serialize(rows: Iterable[UsageRow]) -> list[dict[str, Any]]:
         document["charged_cents"] = float(round(cents_from_units(document.pop("charged_units")), 4))
         provider = document.pop("provider_cents")
         document["provider_cents"] = None if provider is None else float(round(provider, 4))
+        api_rate = document.pop("api_rate_cents")
+        document["api_rate_cents"] = None if api_rate is None else float(round(api_rate, 4))
         result.append(document)
     return result
