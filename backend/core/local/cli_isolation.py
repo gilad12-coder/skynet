@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cli_catalog import CliProvider
-from .cli_probe import is_stripped
+from .cli_probe import cli_child_env
 
 CLAUDE_ARGS = (
     "--strict-mcp-config",
@@ -223,11 +223,11 @@ def isolated_cli(cli: CliProvider, *, base_env: Mapping[str, str] | None = None)
         base_env: The environment to start from; ``os.environ`` by default.
 
     Yields:
-        The environment (without provider keys or provider switches) and the flags to add to the
+        The allow-listed environment and the flags to add to the
         CLI's command. Temporary homes exist until the block ends.
     """
     source = os.environ if base_env is None else base_env
-    env = {key: value for key, value in source.items() if not is_stripped(key)}
+    env = cli_child_env(source)
     if cli == "claude":
         yield CliIsolation(env=env, args=CLAUDE_ARGS)
         return

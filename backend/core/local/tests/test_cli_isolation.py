@@ -13,8 +13,9 @@ import pytest
 from core.local import cli_isolation
 from core.local.cli_isolation import isolated_cli
 
-# Written out, so a shortened strip list fails here.
-STRIPPED_LITERALS = (
+# Every name from the review rounds, written out, plus unrelated backend
+# variables and NODE_OPTIONS: none may reach a CLI.
+DROPPED_LITERALS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "OPENAI_API_KEY",
@@ -33,8 +34,51 @@ STRIPPED_LITERALS = (
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
     "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_USE_GATEWAY",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_CONFIG_DIR",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+    "ANTHROPIC_UNIX_SOCKET",
+    "OPENAI_FEDERATION_RULE_ID",
+    "OPENAI_IDENTITY_TOKEN_FILE",
+    "NODE_OPTIONS",
+    "DATABASE_URL",
+    "APP_SECRET_KEY",
+    "OPENROUTER_API_KEY",
+    "SKYNET_RANDOM_JUNK_7F3A",
 )
-KEPT = ("CLAUDE_CODE_OAUTH_TOKEN", "PATH")
+# The allow-list, written out, so a change to it fails here.
+KEPT_LITERALS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "TERM",
+    "TZ",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "CODEX_CA_CERTIFICATE",
+    "FACTORY_EXTRA_CA_CERTS",
+    "LC_ALL",
+    "LC_CTYPE",
+    "XDG_CONFIG_HOME",
+)
 
 
 def _user_home(tmp_path: Path) -> Path:
@@ -49,10 +93,10 @@ def _user_home(tmp_path: Path) -> Path:
 def test_keys_are_stripped_and_the_temporary_homes_are_removed(tmp_path: Path) -> None:
     """Drop provider keys, copy only the login, and remove the temporary homes after the call."""
     home = _user_home(tmp_path)
-    base = {"HOME": str(home), "PATH": "/usr/bin", **dict.fromkeys(STRIPPED_LITERALS, "secret")}
+    base = {"HOME": str(home), "PATH": "/usr/bin", **dict.fromkeys(DROPPED_LITERALS, "secret")}
     with isolated_cli("codex", base_env=base) as isolation:
         codex_home = Path(isolation.env["CODEX_HOME"])
-        assert not set(STRIPPED_LITERALS) & set(isolation.env)
+        assert not set(DROPPED_LITERALS) & set(isolation.env)
         assert isolation.env["PATH"] == "/usr/bin"
         assert Path(isolation.env["HOME"]) != home
         assert sorted(path.name for path in codex_home.iterdir()) == ["auth.json"]
@@ -174,18 +218,23 @@ def test_claude_keeps_its_home_and_gets_the_isolation_flags(tmp_path: Path, flag
 def test_the_default_environment_is_this_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Start from ``os.environ`` when no base environment is given."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("SKYNET_ISOLATION_MARK", "1")
+    monkeypatch.setenv("TZ", "Asia/Jerusalem")
     with isolated_cli("claude") as isolation:
-        assert isolation.env["SKYNET_ISOLATION_MARK"] == "1"
+        assert isolation.env["TZ"] == "Asia/Jerusalem"
         assert isolation.env["HOME"] == os.environ["HOME"]
 
 
 @pytest.mark.parametrize("cli", ["claude", "codex", "droid"])
-@pytest.mark.parametrize("key", STRIPPED_LITERALS)
-def test_every_cli_loses_each_provider_switch(tmp_path: Path, cli: str, key: str) -> None:
-    """Drop each key or switch that moves a CLI off the subscription, and keep the OAuth token and PATH."""
-    base = {"HOME": str(tmp_path), key: "fixture-not-a-key", **{name: f"kept-{name}" for name in KEPT}}
+def test_every_cli_gets_only_the_allow_listed_environment(tmp_path: Path, cli: str) -> None:
+    """Pass exactly the allow-listed variables; drop provider switches, backend secrets and NODE_OPTIONS."""
+    home = _user_home(tmp_path)
+    base = {
+        **{name: f"kept-{name}" for name in KEPT_LITERALS},
+        **dict.fromkeys(DROPPED_LITERALS, "fixture-not-a-key"),
+        "HOME": str(home),
+        "CODEX_HOME": str(home / ".codex"),
+    }
     with isolated_cli(cli, base_env=base) as isolation:  # type: ignore[arg-type]
-        assert key not in isolation.env
-        for name in KEPT:
+        assert set(isolation.env) == set(KEPT_LITERALS)
+        for name in ("CLAUDE_CODE_OAUTH_TOKEN", "PATH", "USER", "HTTPS_PROXY", "no_proxy", "SSL_CERT_FILE"):
             assert isolation.env[name] == f"kept-{name}"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,8 +22,9 @@ from core.local.cli_probe import (
     write_cli_limit,
 )
 
-# Written out, so a shortened strip list fails here.
-STRIPPED_LITERALS = (
+# Every name from the review rounds, written out, plus unrelated backend
+# variables and NODE_OPTIONS: none may reach a CLI.
+DROPPED_LITERALS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "OPENAI_API_KEY",
@@ -41,8 +43,51 @@ STRIPPED_LITERALS = (
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
     "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_USE_GATEWAY",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_CONFIG_DIR",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+    "ANTHROPIC_UNIX_SOCKET",
+    "OPENAI_FEDERATION_RULE_ID",
+    "OPENAI_IDENTITY_TOKEN_FILE",
+    "NODE_OPTIONS",
+    "DATABASE_URL",
+    "APP_SECRET_KEY",
+    "OPENROUTER_API_KEY",
+    "SKYNET_RANDOM_JUNK_7F3A",
 )
-KEPT = ("CLAUDE_CODE_OAUTH_TOKEN", "PATH")
+# The allow-list, written out, so a change to it fails here.
+KEPT_LITERALS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "TERM",
+    "TZ",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "CODEX_CA_CERTIFICATE",
+    "FACTORY_EXTRA_CA_CERTS",
+    "LC_ALL",
+    "LC_CTYPE",
+    "XDG_CONFIG_HOME",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -159,28 +204,29 @@ def test_probe_strips_provider_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         tmp_path: Directory for the fake binary.
         monkeypatch: Pytest fixture used to set the keys.
     """
-    for key in STRIPPED_LITERALS:
+    for key in DROPPED_LITERALS:
         monkeypatch.setenv(key, "fixture-not-a-key")
     claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out='{"loggedIn": true}')
 
     assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is True
-    assert not set(STRIPPED_LITERALS) & set(cli_env())
+    assert not set(DROPPED_LITERALS) & set(cli_env())
 
 
-@pytest.mark.parametrize("key", STRIPPED_LITERALS)
-def test_cli_env_strips_each_provider_switch(key: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop every key or switch that moves a CLI off the subscription, and keep the OAuth token and PATH.
+def test_cli_env_is_exactly_the_allow_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep only the allow-listed variables, from a parent that also has every dropped name.
 
     Args:
-        key: One stripped variable.
         monkeypatch: Pytest fixture used to set the variables.
     """
-    monkeypatch.setenv(key, "fixture-not-a-key")
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "fixture-oauth")
+    for key in list(os.environ):
+        monkeypatch.delenv(key)
+    for key in KEPT_LITERALS:
+        monkeypatch.setenv(key, f"kept-{key}")
+    for key in DROPPED_LITERALS:
+        monkeypatch.setenv(key, "fixture-not-a-key")
     env = cli_env()
-    assert key not in env
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "fixture-oauth"
-    assert "PATH" in env
+    assert set(env) == set(KEPT_LITERALS)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "kept-CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def test_probe_results_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

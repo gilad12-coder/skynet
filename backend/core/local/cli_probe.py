@@ -1,8 +1,8 @@
 """Detect the coding CLIs and Docker that local mode depends on.
 
-Every probe runs the real binary with a short timeout and an environment that
-has no provider API keys, so a probe never bills an account and a key in the
-shell never makes a CLI look logged in.
+Every probe runs the real binary with a short timeout and an allow-listed
+environment, so a probe never bills an account and a key in the shell never
+makes a CLI look logged in.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,24 +25,40 @@ from core.local.cli_catalog import CLI_MODELS, MIN_VERSIONS, CliProvider
 
 CLI_IDS: tuple[CliProvider, ...] = ("codex", "claude")
 
-# Each key makes a CLI bill an API account, or send calls to another
-# provider or endpoint, instead of the user's subscription.
-STRIPPED_ENV_KEYS = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "CODEX_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "FACTORY_API_KEY",
-    "FACTORY_API_BASE_URL",
-    "FACTORY_API_BASE_URL_EU",
-    "FACTORY_HOME_OVERRIDE",
+# An allow-list, not a deny-list: each CLI has many variables that move it to
+# an API account, a cloud provider or another endpoint (three review rounds
+# found new ones), so a CLI gets only what it needs to run, sign in with the
+# user's subscription, and reach the network through the user's proxy and CA.
+CLI_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "LANG",
+        "TERM",
+        "TZ",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        "CODEX_CA_CERTIFICATE",
+        "FACTORY_EXTRA_CA_CERTS",
+    }
 )
-# CLAUDE_CODE_USE_BEDROCK, _VERTEX, _FOUNDRY and the like move claude to a cloud provider.
-STRIPPED_ENV_PREFIXES = ("CLAUDE_CODE_USE_",)
+CLI_ENV_PREFIXES = ("LC_", "XDG_")
 
 CLI_LIMITS_FILENAME = "cli_limits.json"
 
@@ -74,26 +91,25 @@ class CliStatus:
     models: list[str]
 
 
-def is_stripped(key: str) -> bool:
-    """Return whether an environment variable must not reach a CLI.
+def cli_child_env(source: Mapping[str, str]) -> dict[str, str]:
+    """Return the allow-listed part of an environment for a CLI subprocess.
 
     Args:
-        key: The variable name.
+        source: The environment to copy from.
 
     Returns:
-        ``True`` for a name in ``STRIPPED_ENV_KEYS`` or one that starts with
-        a prefix in ``STRIPPED_ENV_PREFIXES``.
+        The variables in ``CLI_ENV_KEYS`` or with a prefix in ``CLI_ENV_PREFIXES``.
     """
-    return key in STRIPPED_ENV_KEYS or key.startswith(STRIPPED_ENV_PREFIXES)
+    return {key: value for key, value in source.items() if key in CLI_ENV_KEYS or key.startswith(CLI_ENV_PREFIXES)}
 
 
 def cli_env() -> dict[str, str]:
-    """Return this process's environment without provider keys and provider switches.
+    """Return the allow-listed part of this process's environment.
 
     Returns:
-        A copy of ``os.environ`` without the variables :func:`is_stripped` names.
+        :func:`cli_child_env` of ``os.environ``.
     """
-    return {key: value for key, value in os.environ.items() if not is_stripped(key)}
+    return cli_child_env(os.environ)
 
 
 def cli_binary(cli: CliProvider, settings: Settings) -> str:
