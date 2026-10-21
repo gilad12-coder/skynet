@@ -5,20 +5,33 @@ import os from "node:os";
  * Keys removed from every child environment (§1.7). With none of these keys
  * present, no child can bill OpenRouter, Anthropic, OpenAI, Factory, Vercel or
  * Stripe, and the backend's hosted-safety validator cannot see a Railway
- * environment. FACTORY_API_KEY would make droid bill an API account (and its
- * `doctor --auth` check report signed in from the key, not the subscription).
+ * environment. The CLI keys match the set the backend strips (SKY-112): each
+ * one moves a claude, codex or droid call off the user's subscription, to an
+ * API account, another endpoint (base URLs, Bedrock) or another config home.
+ * CLAUDE_CODE_OAUTH_TOKEN stays: it is the subscription login itself.
  */
 export const DELETED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "AWS_BEARER_TOKEN_BEDROCK",
   "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "CODEX_API_KEY",
+  "CODEX_ACCESS_TOKEN",
   "FACTORY_API_KEY",
+  "FACTORY_API_BASE_URL",
+  "FACTORY_API_BASE_URL_EU",
+  "FACTORY_HOME_OVERRIDE",
   "VERCEL_TOKEN",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "RAILWAY_ENVIRONMENT_NAME",
 ] as const;
+
+/** Every key with one of these prefixes is removed too (CLAUDE_CODE_USE_BEDROCK, _VERTEX, _FOUNDRY, ...). */
+export const DELETED_ENV_PREFIXES = ["CLAUDE_CODE_USE_"] as const;
 
 export const LOGIN_SHELL_TIMEOUT_MS = 10_000;
 
@@ -82,7 +95,8 @@ export async function loginShellPath(
 }
 
 /**
- * Build a child process environment: the base env minus DELETED_ENV_KEYS,
+ * Build a child process environment: the base env minus DELETED_ENV_KEYS and
+ * DELETED_ENV_PREFIXES,
  * plus overrides. The keys are deleted again after the overrides so a caller
  * can never reintroduce a provider credential by accident.
  */
@@ -102,5 +116,8 @@ export function buildChildEnv(
     else env[key] = value;
   }
   for (const key of DELETED_ENV_KEYS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (DELETED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) delete env[key];
+  }
   return env;
 }

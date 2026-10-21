@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChildEnv, DELETED_ENV_KEYS, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
+import { buildChildEnv, DELETED_ENV_KEYS, DELETED_ENV_PREFIXES, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
 
 describe("parseEnvNul", () => {
   it("parses NUL-separated records, including values with = and newlines", () => {
@@ -64,8 +64,16 @@ describe("buildChildEnv", () => {
       [
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "CODEX_ACCESS_TOKEN",
+        "CODEX_API_KEY",
+        "FACTORY_API_BASE_URL",
+        "FACTORY_API_BASE_URL_EU",
         "FACTORY_API_KEY",
+        "FACTORY_HOME_OVERRIDE",
         "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
         "OPENROUTER_API_KEY",
         "RAILWAY_ENVIRONMENT_NAME",
         "STRIPE_SECRET_KEY",
@@ -73,6 +81,21 @@ describe("buildChildEnv", () => {
         "VERCEL_TOKEN",
       ].sort(),
     );
+  });
+
+  it("removes every CLAUDE_CODE_USE_ key but keeps the subscription token and PATH", () => {
+    expect(DELETED_ENV_PREFIXES).toEqual(["CLAUDE_CODE_USE_"]);
+    const env = buildChildEnv(
+      {
+        PATH: "/opt/homebrew/bin:/bin",
+        CLAUDE_CODE_OAUTH_TOKEN: "subscription",
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        CLAUDE_CODE_USE_VERTEX: "1",
+        CLAUDE_CODE_USE_FOUNDRY: "1",
+      },
+      { CLAUDE_CODE_USE_BEDROCK: "again" },
+    );
+    expect(env).toEqual({ PATH: "/opt/homebrew/bin:/bin", CLAUDE_CODE_OAUTH_TOKEN: "subscription" });
   });
 
   it("drops an inherited ELECTRON_RUN_AS_NODE but keeps an explicit one", () => {
