@@ -538,6 +538,92 @@ def test_refresh_reuse_after_successor_was_used_revokes_the_link(harness: Any) -
     assert client.get("/desktop/v1/whoami", headers=_bearer(third["access_token"])).status_code == 401
 
 
+@pytest.fixture
+def mailbox(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str]]:
+    """Capture the security notices the router sends.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        The list that collects ``(to, subject, body)`` per sent notice.
+    """
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(desktop_link, "email_configured", lambda: True)
+    monkeypatch.setattr(desktop_link, "send_email", lambda to, subject, body: sent.append((to, subject, body)))
+    return sent
+
+
+def test_new_link_sends_a_notice(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """A new link emails the account owner with the Mac name."""
+    client, _, _ = harness
+    _link(client)
+    assert len(mailbox) == 1
+    to, subject, body = mailbox[0]
+    assert to == "alice@example.test"
+    assert "linked" in subject.lower()
+    assert "Alice's MacBook Pro" in body
+    assert "skyl_" not in body
+
+
+def test_reuse_revocation_sends_a_notice(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """Revoking a link for refresh-token reuse emails the account owner."""
+    client, _, _ = harness
+    pair = _link(client)
+    second = _refresh(client, pair["refresh_token"]).json()
+    _refresh(client, second["refresh_token"])
+    mailbox.clear()
+    assert _refresh(client, pair["refresh_token"]).status_code == 401
+    assert len(mailbox) == 1
+    to, subject, body = mailbox[0]
+    assert to == "alice@example.test"
+    assert "removed" in subject.lower()
+    assert "Alice's MacBook Pro" in body
+
+
+def test_refresh_retry_inside_grace_sends_no_notice(harness: Any, mailbox: list[tuple[str, str, str]]) -> None:
+    """Normal rotation and a retry inside 30 s send no email."""
+    client, _, _ = harness
+    pair = _link(client)
+    mailbox.clear()
+    _refresh(client, pair["refresh_token"])
+    assert _refresh(client, pair["refresh_token"]).status_code == 200
+    assert mailbox == []
+
+
+def test_notice_failure_does_not_fail_the_call(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An SMTP failure is logged, and the token call still succeeds."""
+    client, _, _ = harness
+
+    def _broken(to: str, subject: str, body: str) -> None:
+        """Fail like an unreachable relay.
+
+        Args:
+            to: Recipient.
+            subject: Subject line.
+            body: Message body.
+
+        Raises:
+            OSError: Always.
+        """
+        raise OSError("relay down")
+
+    monkeypatch.setattr(desktop_link, "email_configured", lambda: True)
+    monkeypatch.setattr(desktop_link, "send_email", _broken)
+    pair = _link(client)
+    assert client.get("/desktop/v1/whoami", headers=_bearer(pair["access_token"])).status_code == 200
+
+
+def test_no_notice_without_smtp(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without an SMTP relay the router does not try to send."""
+    client, _, _ = harness
+    sent: list[str] = []
+    monkeypatch.setattr(desktop_link, "email_configured", lambda: False)
+    monkeypatch.setattr(desktop_link, "send_email", lambda to, subject, body: sent.append(to))
+    _link(client)
+    assert sent == []
+
+
 @pytest.mark.parametrize("bad", ["skyl_rt_unknown", "not-a-token", ""])
 def test_refresh_rejects_unknown_tokens(harness: Any, bad: str) -> None:
     """An unknown refresh token fails with invalid_grant."""

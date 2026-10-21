@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -41,8 +42,11 @@ from ..desktop_auth import (
     get_desktop_principal,
     link_is_live,
 )
+from ..email_sender import email_configured, send_email
 from ..errors import DomainError
 from ..rate_limit import RateLimiter, shared_redis_client
+
+logger = logging.getLogger(__name__)
 
 DESKTOP_CLIENT_ID = "skynet-desktop"
 LINK_CODE_TTL = timedelta(seconds=60)
@@ -245,6 +249,57 @@ def _revoke_link(session: Session, link_id: str, now: datetime) -> None:
     )
 
 
+def _send_notice(to: str, subject: str, body: str) -> None:
+    """Email the account owner a link security notice, best effort.
+
+    A notice must never fail or change the token call that caused it.
+
+    Args:
+        to: Account email.
+        subject: Subject line.
+        body: Plain-text body.
+    """
+    if not email_configured():
+        return
+    try:
+        send_email(to, subject, body)
+    except Exception:  # A failed notice must not fail the token call.
+        logger.warning("desktop link notice was not sent", exc_info=True)
+
+
+def _link_created_notice(link: DesktopLinkModel) -> tuple[str, str, str]:
+    """Build the notice for a new link.
+
+    Args:
+        link: The new link.
+
+    Returns:
+        The ``(to, subject, body)`` of the notice.
+    """
+    body = (
+        f'The Mac "{link.device_name}" is now linked to your Skynet account.\n\n'
+        "If you did not link this Mac, open Settings > Linked Macs on the Skynet website and remove it."
+    )
+    return link.username, "A Mac was linked to your Skynet account", body
+
+
+def _link_reuse_notice(link: DesktopLinkModel) -> tuple[str, str, str]:
+    """Build the notice for a link revoked for refresh-token reuse.
+
+    Args:
+        link: The revoked link.
+
+    Returns:
+        The ``(to, subject, body)`` of the notice.
+    """
+    body = (
+        f'Skynet removed the link to the Mac "{link.device_name}". '
+        "An old sign-in token of this Mac was used again. Someone can have a copy of it.\n\n"
+        "To continue, link the Mac again from the Skynet app."
+    )
+    return link.username, "Skynet removed a linked Mac", body
+
+
 def _account(session: Session, username: str) -> LinkAccount:
     """Return the account email and display name for ``username``.
 
@@ -322,12 +377,13 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
     router = APIRouter()
     billing = StripeBillingService(engine=job_store.engine)
 
-    def exchange_code(body: CodeGrantRequest, request: Request) -> LinkTokenResponse:
+    def exchange_code(body: CodeGrantRequest, request: Request, tasks: BackgroundTasks) -> LinkTokenResponse:
         """Exchange a link code and PKCE verifier for a new link and token pair.
 
         Args:
             body: Code grant.
             request: Incoming request, for the per-address limit.
+            tasks: Response background tasks; the link notice goes there.
 
         Returns:
             The new token pair.
@@ -373,6 +429,7 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             code.link_id = link.id
             response = _mint_pair(session, link, None, now)
             session.commit()
+            tasks.add_task(_send_notice, *_link_created_notice(link))
         return response
 
     def refresh_pair(body: RefreshGrantRequest) -> LinkTokenResponse:
@@ -412,6 +469,8 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
                 if successor_used or now - as_utc(row.used_at) > REFRESH_REUSE_GRACE:
                     _revoke_link(session, link.id, now)
                     session.commit()
+                    # Sent inline: background tasks do not run when the route raises.
+                    _send_notice(*_link_reuse_notice(link))
                     raise DomainError("desktop.link_revoked", status=401)
                 # The Mac lost the response: the pair it never got must die.
                 lost = session.scalars(
@@ -486,18 +545,20 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
     def link_token(
         body: Annotated[CodeGrantRequest | RefreshGrantRequest, Body(discriminator="grant_type")],
         request: Request,
+        tasks: BackgroundTasks,
     ) -> LinkTokenResponse:
         """Run the ``authorization_code`` or ``refresh_token`` grant.
 
         Args:
             body: The grant.
             request: Incoming request.
+            tasks: Response background tasks.
 
         Returns:
             A new token pair.
         """
         if isinstance(body, CodeGrantRequest):
-            return exchange_code(body, request)
+            return exchange_code(body, request, tasks)
         return refresh_pair(body)
 
     @router.post("/desktop/link/revoke", summary="Revoke the link that owns a desktop token")
