@@ -8,7 +8,6 @@ the ``ServiceRegistry`` and the FastAPI ``app`` object, and exposes
 from __future__ import annotations
 
 import contextlib
-import os
 from pathlib import Path
 
 import dspy
@@ -53,8 +52,7 @@ app = create_app(registry=registry)
 def run_server() -> None:
     """Boot the FastAPI application using Uvicorn, honouring API_HOST / API_PORT."""
     host = settings.api_host
-    port = int(os.getenv("API_PORT", "8000"))
-    uvicorn.run("main:app", host=host, port=port, reload=False)
+    uvicorn.run("main:app", host=host, port=settings.port, reload=False)
 
 
 if __name__ == "__main__":

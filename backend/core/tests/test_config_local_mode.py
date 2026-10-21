@@ -22,6 +22,8 @@ _ENV_VARS = (
     "API_HOST",
     "APP_LOCAL_SANDBOX_IMAGE",
     "APP_CLI_MAX_CONCURRENCY",
+    "PORT",
+    "API_PORT",
 )
 
 
@@ -195,3 +197,34 @@ def test_env_file_local_mode_without_a_host_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="loopback"):
         Settings(_env_file=env_file)
+
+
+def test_api_port_sets_the_mcp_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The agent's MCP URL uses the API_PORT that main.run_server binds.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+    """
+    monkeypatch.setenv("APP_LOCAL_MODE", "1")
+    monkeypatch.setenv("API_HOST", "127.0.0.1")
+    monkeypatch.setenv("API_PORT", "48100")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.port == 48100
+    assert settings.generalist_agent_mcp_url == "http://127.0.0.1:48100/mcp/"
+
+
+def test_platform_port_wins_over_api_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted image binds PORT, so PORT stays the port when both are set.
+
+    Args:
+        monkeypatch: Pytest fixture used to set the environment.
+    """
+    monkeypatch.setenv("PORT", "9090")
+    monkeypatch.setenv("API_PORT", "48100")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.port == 9090
+    assert settings.generalist_agent_mcp_url == "http://127.0.0.1:9090/mcp/"

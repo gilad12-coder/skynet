@@ -898,7 +898,16 @@ class Settings(BaseSettings):
         description="Address main.run_server and the local-mode image command bind",
         validation_alias="API_HOST",
     )
-    port: int = Field(default=8000, ge=1024, le=65535, description="Server port")
+    # One port source for the bind and the agent's MCP self-dial URL. PORT
+    # comes first because the hosted image binds the platform PORT; main.py
+    # (local runs and the desktop app) sets API_PORT. SKY-111 D2.
+    port: int = Field(
+        default=8000,
+        ge=1024,
+        le=65535,
+        description="Server port",
+        validation_alias=AliasChoices("PORT", "API_PORT"),
+    )
     reload: bool = Field(default=False, description="Enable auto-reload on code changes (dev only)")
 
     cors_origins: str = Field(
