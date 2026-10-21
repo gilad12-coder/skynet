@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import math
 from typing import Any, Literal
 
@@ -56,6 +57,8 @@ from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import enforce_local_mode_sources, enforce_raw_local_mode_sources, normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
+
+logger = logging.getLogger(__name__)
 
 
 class WizardPreflightRequest(BaseModel):
@@ -507,18 +510,30 @@ def _run_preflight(
                 # route, and the guest falls back to a gateway only the backend has.
                 source = copy.deepcopy(source)
                 alias_unified_model_roles(source)
-            parent_payload = resolve_execution_credentials(
-                source,
-                username=user.username,
-                binding_id=request.execution_budget_id,
-                vault=credential_vault,
-            )
-            parent_payload = prepare_protected_credentials(
-                parent_payload,
-                username=user.username,
-                vault=ProviderKeyVault(engine=job_store.engine),
-                default_token_source=str(parent_payload.get("token_source") or "managed"),
-            )
+            try:
+                parent_payload = resolve_execution_credentials(
+                    source,
+                    username=user.username,
+                    binding_id=request.execution_budget_id,
+                    vault=credential_vault,
+                )
+                parent_payload = prepare_protected_credentials(
+                    parent_payload,
+                    username=user.username,
+                    vault=ProviderKeyVault(engine=job_store.engine),
+                    default_token_source=str(parent_payload.get("token_source") or "managed"),
+                )
+            except (TypeError, ValueError) as error:
+                # Finish the claimed row here: an escaped error would leave it at
+                # "running" until its lease ran out, behind a generic wizard error.
+                logger.warning("setup check %s has unusable credentials: %s", claim.document["id"], error)
+                document = evidence.finish(
+                    claim.document["id"],
+                    claim_token=claim.token,
+                    status="failed",
+                    result={"checks": [_check("setup", "failed", str(error))]},
+                )
+                return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
             if terminal is not None:
                 terminal.redact(check_terminal.secret_values(parent_payload))
             parent_request = request.model_copy(update={"payload": parent_payload})

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from core.billing.tests.test_cli_runners import CLAUDE_SUCCESS, fake_cli, local_
 from core.exceptions import ServiceError
 from core.models import ModelConfig
 from core.service_gateway import language_models
+from core.service_gateway.agents import generalist
 from core.service_gateway.language_models import LmUsageTotals, build_language_model
 from core.service_gateway.optimization.blackbox.workspace_harness import attempt_record
 
@@ -90,6 +92,69 @@ def test_router_accepts_subscription_ids_in_local_mode() -> None:
     with pytest.raises(DomainError) as caught:
         model_router.route_menu_model("subscription/codex/anthropic/claude-haiku-4.5")
     assert (caught.value.status_code, caught.value.code) == (422, "billing.subscription_unmapped_model")
+
+
+MANAGED_DEFAULT = "openrouter/z-ai/glm-5.3-flash"
+
+
+@pytest.mark.usefixtures("local")
+@pytest.mark.parametrize("model", [None, "", "auto:intelligent"], ids=["none", "empty", "retired_sentinel"])
+@pytest.mark.parametrize(
+    "route",
+    [model_router.route_menu_model, model_router.route_interview_model, model_router.route_agent_model],
+    ids=["menu", "interview", "agent"],
+)
+def test_local_mode_never_falls_back_to_a_managed_model(
+    monkeypatch: pytest.MonkeyPatch, route: object, model: str | None
+) -> None:
+    """Refuse a turn with no subscription pick instead of sending it to managed OpenRouter.
+
+    Args:
+        monkeypatch: Gives the catalog and interview a managed default.
+        route: The composer router under test.
+        model: A request that picks no model.
+    """
+    monkeypatch.setattr(model_router, "default_model_id", lambda: MANAGED_DEFAULT)
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: MANAGED_DEFAULT)
+    with pytest.raises(DomainError) as caught:
+        route(model)
+    assert (caught.value.status_code, caught.value.code) == (422, "models.managed_unavailable_local")
+
+
+@pytest.mark.parametrize(
+    "route", [model_router.route_menu_model, model_router.route_interview_model], ids=["menu", "interview"]
+)
+def test_hosted_mode_still_falls_back_to_the_managed_default(monkeypatch: pytest.MonkeyPatch, route: object) -> None:
+    """Keep the managed default for a hosted turn with no pick.
+
+    Args:
+        monkeypatch: Keeps local mode off and gives a managed default.
+        route: The composer router under test.
+    """
+    monkeypatch.setattr(model_router.settings, "local_mode", False)
+    monkeypatch.setattr(model_router, "default_model_id", lambda: MANAGED_DEFAULT)
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: MANAGED_DEFAULT)
+    assert route(None) == MANAGED_DEFAULT
+
+
+async def test_local_mode_labels_no_thinking_on_a_managed_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip the managed thinking-summary side call in local mode.
+
+    Args:
+        monkeypatch: Turns local mode on and fails any summary model build.
+    """
+
+    def managed_lm() -> None:
+        """Fail the test if a managed summary model is built."""
+        raise AssertionError("local mode built the managed summary model")
+
+    monkeypatch.setattr(generalist.settings, "local_mode", True)
+    monkeypatch.setattr(generalist, "_build_summary_lm", managed_lm)
+    sink: list = []
+    summaries = generalist._thinking_summaries("English", asyncio.Queue(), sink)
+
+    assert await summaries._summarize("Reading the dataset columns.") is None
+    assert sink == []
 
 
 def test_router_ignores_subscription_ids_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
