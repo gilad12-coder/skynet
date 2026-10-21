@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { localAgentModel } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "@/features/settings";
 import { useCodeAgent, type AgentMessage, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/types/unified-run";
@@ -12,6 +14,9 @@ import { firstChangedLine } from "./open-file";
 const NO_COLUMNS: Record<string, never> = {};
 // The wizard checks the workspace with its own Check; the agent checks inside its turn with verify_code.
 const noValidation = async () => null;
+// Reads the role's CLI at send time, so a Settings change applies to the next turn.
+const resolveCodeModel = (model: string | null) =>
+  localAgentModel(model, agentSubscriptionFor("code"));
 
 export interface IdeCodingAgent {
   agent: CodeAgentState;
@@ -141,6 +146,7 @@ export function useIdeCodingAgent(options: {
     setFile: writeFile,
     onOpenFile: openFile,
     model,
+    resolveModel: resolveCodeModel,
     reasoningEffort: effort,
     initialMessages: options.initialMessages,
   });

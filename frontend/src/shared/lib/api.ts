@@ -4049,7 +4049,8 @@ export interface TaskInterviewHandlers {
   /** The server is retrying a failed attempt; drop streamed partial text. */
   onReset?: () => void;
   onDone: (result: TaskInterviewTurnResult) => void;
-  onError: (message: string) => void;
+  /** `code` is the backend's error code when the turn was refused before it started. */
+  onError: (message: string, code?: string) => void;
 }
 
 function parseCandidate(raw: unknown): string | Record<string, string> | null {
@@ -4126,7 +4127,11 @@ export async function streamTaskInterviewTurn(
     },
   });
   if (result.status === "aborted") return null;
-  if (!outcome && !failed) handlers.onError(msg("submit.code.interview.error"));
+  if (!outcome && !failed) {
+    const refused = result.status === "failed" ? result.response : undefined;
+    const code = refused ? parseError(await refused.text().catch(() => "")).code : undefined;
+    handlers.onError(msg("submit.code.interview.error"), code);
+  }
   return outcome;
 }
 

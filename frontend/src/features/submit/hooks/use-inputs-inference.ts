@@ -3,7 +3,9 @@
 import * as React from "react";
 import { toast } from "react-toastify";
 
-import { getDatasetRows, inferInputs } from "@/shared/lib/api";
+import { localAgentModel, localModelRefusalMessage } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "@/features/settings";
+import { ApiError, getDatasetRows, inferInputs } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
@@ -47,6 +49,8 @@ export interface InputsInferenceState {
   loading: boolean;
   inferring: boolean;
   inferError: boolean;
+  /** A specific message for `inferError`, such as the local backend's no-model refusal. */
+  inferErrorMessage: string | null;
   /** The last inference, for its warnings and held-out suggestion. */
   inference: InputsInferenceResponse | null;
   heldOut: HeldOutCounts;
@@ -77,6 +81,7 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
   const [loading, setLoading] = React.useState(false);
   const [inferring, setInferring] = React.useState(false);
   const [inferError, setInferError] = React.useState(false);
+  const [inferErrorMessage, setInferErrorMessage] = React.useState<string | null>(null);
   const [inference, setInference] = React.useState<InputsInferenceResponse | null>(null);
   const [libraryOpen, setLibraryOpen] = React.useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
@@ -96,7 +101,12 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
       abortRef.current = controller;
       setInferring(true);
       setInferError(false);
+      setInferErrorMessage(null);
       try {
+        // The local backend has no managed models, so it refuses an
+        // inference with no model; hosted builds keep the server default.
+        const model = await localAgentModel(null, agentSubscriptionFor("interview"));
+        if (controller.signal.aborted) return;
         const res = await inferInputs(
           {
             objective: task.objective,
@@ -108,6 +118,7 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
             row_count: data.rows.length,
             user_note: "",
             locale: getActiveLocale(),
+            ...(model ? { model } : {}),
           },
           controller.signal,
         );
@@ -129,9 +140,10 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
             rationale: res.rationale,
           });
         }
-      } catch {
+      } catch (err) {
         if (controller.signal.aborted) return;
         setInferError(true);
+        setInferErrorMessage(err instanceof ApiError ? localModelRefusalMessage(err.code) : null);
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
@@ -263,6 +275,7 @@ export function useInputsInference(ctx: WizardV2Context): InputsInferenceState {
     loading,
     inferring,
     inferError,
+    inferErrorMessage,
     inference,
     heldOut,
     libraryOpen,
