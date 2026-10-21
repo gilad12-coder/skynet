@@ -65,7 +65,10 @@ export function guardClippingInside(root: HTMLElement): () => void {
     const focused = box.ownerDocument.activeElement;
     // Only a box that holds the focus was moved by the browser to reveal it;
     // VS Code's own scrollers are `auto` or move their content by script.
-    if (!focused || !box.contains(focused) || !clipsButScrolls(getComputedStyle(box))) return;
+    // The focused node itself is skipped: Monaco's hidden input textarea sets
+    // its own scroll offsets to place the caret and IME composition text.
+    if (!focused || box === focused || !box.contains(focused)) return;
+    if (!clipsButScrolls(getComputedStyle(box))) return;
     if (box.scrollTop !== 0) box.scrollTop = 0;
     if (box.scrollLeft !== 0) box.scrollLeft = 0;
   };
