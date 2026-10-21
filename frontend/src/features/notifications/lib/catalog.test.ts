@@ -1,15 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import type { NotificationItem } from "@/shared/lib/api";
+import type { LocalNotificationChannels, NotificationItem } from "@/shared/lib/api";
 
 import {
   CHANNELS,
   EVENT_TYPES,
+  LOCAL_CHANNELS,
   appendPage,
   cellEditable,
   cellExists,
   itemLine,
+  localOffReason,
+  maybeLocalHost,
   mergeHead,
   type FactFormatters,
 } from "./catalog.ts";
@@ -112,4 +115,49 @@ test("a refreshed head keeps older items loaded by scrolling", () => {
     mergeHead([head[1]!, old], head).map((i) => i.id),
     ["new", "mid", "old"],
   );
+});
+
+function localState(
+  over: Partial<LocalNotificationChannels["channels"]> = {},
+): LocalNotificationChannels {
+  return {
+    channels: { email: false, chrome: false, slack: false, macos: true, ...over },
+    macos: Object.fromEntries(
+      EVENT_TYPES.map((e) => [e, false]),
+    ) as LocalNotificationChannels["macos"],
+  };
+}
+
+test("the Mac app keeps every hosted column and adds macOS last", () => {
+  assert.deepEqual(LOCAL_CHANNELS, [...CHANNELS, "macos"]);
+});
+
+test("in the Mac app an unset hosted channel is off with a reason, macOS and inbox stay on", () => {
+  const local = localState();
+  assert.equal(localOffReason("email", local), "notifications.local.not_configured");
+  assert.equal(localOffReason("chrome", local), "notifications.local.not_configured");
+  assert.equal(localOffReason("slack", local), "notifications.local.not_configured");
+  assert.equal(localOffReason("macos", local), null);
+  assert.equal(localOffReason("inbox", local), null);
+  assert.equal(cellEditable("finished", "email", true, local), false);
+  assert.equal(cellEditable("finished", "macos", false, local), true);
+  assert.equal(cellEditable("product_news", "macos", false, local), false);
+});
+
+test("in the Mac app a hosted channel set up on this Mac stays editable", () => {
+  const local = localState({ email: true });
+  assert.equal(localOffReason("email", local), null);
+  assert.equal(cellEditable("finished", "email", false, local), true);
+});
+
+test("on a hosted server nothing is reported off by the local rules", () => {
+  assert.equal(localOffReason("email", null), null);
+  assert.equal(cellEditable("finished", "slack", false, null), false);
+});
+
+test("only loopback pages probe the local-only routes", () => {
+  assert.equal(maybeLocalHost("127.0.0.1"), true);
+  assert.equal(maybeLocalHost("localhost"), true);
+  assert.equal(maybeLocalHost("[::1]"), true);
+  assert.equal(maybeLocalHost("app.example.com"), false);
 });

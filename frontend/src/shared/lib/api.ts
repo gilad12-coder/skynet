@@ -1044,6 +1044,52 @@ export function updateNotificationPreferences(patch: NotificationPreferencesPatc
   });
 }
 
+export interface LocalNotificationChannels {
+  /** Delivery channel -> whether this Mac can deliver on it now. */
+  channels: Record<NotificationHeldChannel | "macos", boolean>;
+  /** Event type -> whether it shows as a macOS notification. */
+  macos: Record<NotificationEventType, boolean>;
+}
+
+/** One queued macOS notification for the Mac app to show. */
+export interface NativeNotification {
+  id: string;
+  title: string;
+  body: string;
+  /** App path the notification opens. */
+  url: string;
+  tag: string;
+}
+
+/**
+ * Read the Mac app's channel states and macOS cells. Hosted servers answer
+ * 404 on this local-only route; that resolves to null so callers keep the
+ * hosted UI.
+ */
+export async function getLocalNotificationChannels(): Promise<LocalNotificationChannels | null> {
+  try {
+    return await request<LocalNotificationChannels>("/local/notifications/channels");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Change macOS cells in the Mac app; untouched cells keep their value. */
+export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType, boolean>>) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ grid }),
+  });
+}
+
+/** Take the queued macOS notifications; each one is handed out once. */
+export function claimNativeNotifications() {
+  return request<{ items: NativeNotification[] }>("/local/notifications/native/claim", {
+    method: "POST",
+  });
+}
+
 export type NotificationTab = "focused" | "everything";
 
 export interface NotificationFacts {

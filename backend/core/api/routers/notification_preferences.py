@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ...notifications.catalog import MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
+from ...notifications.catalog import CHANNELS, MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
 from ...notifications.preferences import clean_held_channels, merge_grid, settings_from_row
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -62,8 +62,10 @@ def _response(row: NotificationPreferenceModel | None) -> NotificationPreference
         The effective preferences.
     """
     settings = settings_from_row(row)
+    # Local-only columns (macOS) have their own route, so this contract is the hosted one.
+    grid = {event: {ch: on for ch, on in cells.items() if ch in CHANNELS} for event, cells in settings.grid.items()}
     return NotificationPreferencesResponse(
-        grid=settings.grid,
+        grid=grid,
         hold_minutes=settings.hold_minutes,
         held_channels=list(settings.held_channels),
         stuck_fraction=settings.stuck_fraction,

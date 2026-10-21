@@ -25,7 +25,7 @@ from ..config import settings
 from ..i18n import t_locale
 from ..storage.models import PushSubscriptionModel, SlackConnectionModel
 from . import slack
-from .catalog import CHROME, EMAIL, SLACK
+from .catalog import CHROME, EMAIL, MACOS, SLACK
 from .comms import resolve_email, send_mail
 from .email_render import EVENT_TYPES as EMAIL_EVENT_TYPES
 from .email_render import FRONTEND_URL, render_notification_email
@@ -33,7 +33,8 @@ from .preferences import notification_engine
 
 logger = logging.getLogger(__name__)
 
-DeliveryState = Literal["sent", "failed", "unavailable"]
+# ``queued`` waits for the Mac app to claim it; see :mod:`.native`.
+DeliveryState = Literal["sent", "failed", "unavailable", "queued"]
 
 # Keys of ``Delivery.facts`` the email fact row understands; the rest
 # (``detail``, ``body``) are carried as text, not as facts.
@@ -301,6 +302,28 @@ class SlackChannel(NotificationChannel):
         return "sent"
 
 
+class MacOSChannel(NotificationChannel):
+    """Native macOS notifications, shown by the Mac app (local mode only).
+
+    The backend cannot reach the Mac's notification center itself, so a send
+    only marks the delivery ``queued``; the open app claims it through
+    ``POST /local/notifications/native/claim`` and shows it.
+    """
+
+    name = MACOS
+
+    def send(self, delivery: Delivery) -> DeliveryState:
+        """Queue the notification for the Mac app.
+
+        Args:
+            delivery: The notification to deliver.
+
+        Returns:
+            ``"queued"`` in local mode, ``"unavailable"`` on a hosted server.
+        """
+        return "queued" if settings.local_mode else "unavailable"
+
+
 _REGISTRY: dict[str, NotificationChannel] = {}
 
 
@@ -325,5 +348,5 @@ def get_channel(name: str) -> NotificationChannel | None:
     return _REGISTRY.get(name)
 
 
-for _channel in (EmailChannel(), ChromeChannel(), SlackChannel()):
+for _channel in (EmailChannel(), ChromeChannel(), SlackChannel(), MacOSChannel()):
     register_channel(_channel)

@@ -5,6 +5,7 @@
  */
 
 import type {
+  LocalNotificationChannels,
   NotificationChannel,
   NotificationEventType,
   NotificationHeldChannel,
@@ -26,17 +27,43 @@ export const EVENT_TYPES: readonly NotificationEventType[] = [
 
 export const CHANNELS: readonly NotificationChannel[] = ["inbox", "email", "chrome", "slack"];
 
+/** A grid column: the hosted channels, plus macOS in the Mac app. */
+export type GridChannel = NotificationChannel | "macos";
+
+/** The Mac app's columns: every hosted channel stays, macOS is added. */
+export const LOCAL_CHANNELS: readonly GridChannel[] = [...CHANNELS, "macos"];
+
 export const HELD_CHANNELS: readonly NotificationHeldChannel[] = ["email", "chrome", "slack"];
 
 /*
  * Channels every server delivers on. Slack is live only where the server has
  * a Slack app set up; elsewhere its column stays visible and disabled.
  */
-export const LIVE_CHANNELS: ReadonlySet<NotificationChannel> = new Set(["inbox", "email", "chrome"]);
+export const LIVE_CHANNELS: ReadonlySet<GridChannel> = new Set(["inbox", "email", "chrome"]);
 
 /** Whether a channel's column is usable on this server. */
-export function channelLive(channel: NotificationChannel, slackConfigured: boolean): boolean {
+export function channelLive(channel: GridChannel, slackConfigured: boolean): boolean {
   return channel === "slack" ? slackConfigured : LIVE_CHANNELS.has(channel);
+}
+
+/**
+ * In the Mac app, why a channel's column is off: the column stays visible
+ * and disabled with this reason. Null when it works, or on a hosted server.
+ */
+export function localOffReason(
+  channel: GridChannel,
+  local: LocalNotificationChannels | null,
+): MessageKey | null {
+  if (!local || channel === "inbox") return null;
+  return local.channels[channel] === false ? "notifications.local.not_configured" : null;
+}
+
+/**
+ * Whether the page may be the Mac app. Local mode binds only to loopback, so
+ * a hosted page never probes the local-only routes.
+ */
+export function maybeLocalHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
 }
 
 /** Urgent events skip the hold and go out at once on every enabled channel. */
@@ -53,18 +80,20 @@ export const FOCUSED_EVENTS: ReadonlySet<NotificationEventType> = new Set([
 ]);
 
 /** Whether a grid cell exists at all: product news only ever lands in the inbox. */
-export function cellExists(event: NotificationEventType, channel: NotificationChannel): boolean {
+export function cellExists(event: NotificationEventType, channel: GridChannel): boolean {
   return event !== "product_news" || channel === "inbox";
 }
 
 /** Whether the user may flip a grid cell now. */
 export function cellEditable(
   event: NotificationEventType,
-  channel: NotificationChannel,
+  channel: GridChannel,
   slackConfigured = false,
+  local: LocalNotificationChannels | null = null,
 ): boolean {
   // News is always in the inbox: the backend adds every entry for every user.
   if (event === "product_news") return false;
+  if (local) return localOffReason(channel, local) === null;
   return channelLive(channel, slackConfigured);
 }
 
@@ -88,11 +117,12 @@ export const EVENT_KEYS: Record<NotificationEventType, { label: MessageKey; tip:
   },
 };
 
-export const CHANNEL_KEYS: Record<NotificationChannel, MessageKey> = {
+export const CHANNEL_KEYS: Record<GridChannel, MessageKey> = {
   inbox: "notifications.channel.inbox",
   email: "notifications.channel.email",
   chrome: "notifications.channel.chrome",
   slack: "notifications.channel.slack",
+  macos: "notifications.channel.macos",
 };
 
 /** How the item's numbers are rendered; injected so this module stays pure. */

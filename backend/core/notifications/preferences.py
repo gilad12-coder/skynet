@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ..config import settings as app_settings
 from ..storage.models import NotificationPreferenceModel
 from .catalog import (
     CHANNELS,
@@ -19,6 +20,8 @@ from .catalog import (
     DELIVERY_CHANNELS,
     INBOX,
     INBOX_ONLY_EVENTS,
+    LOCAL_CHANNELS,
+    LOCAL_DEFAULT_CELLS,
     MAX_HOLD_MINUTES,
     MIN_HOLD_MINUTES,
 )
@@ -30,13 +33,36 @@ _engine: Engine | None = None
 Grid = dict[str, dict[str, bool]]
 
 
+def grid_channels() -> tuple[str, ...]:
+    """Return the grid's channel columns on this deployment.
+
+    Returns:
+        The hosted channels, plus the Mac app's own channels in local mode.
+    """
+    return (*CHANNELS, *LOCAL_CHANNELS) if app_settings.local_mode else CHANNELS
+
+
+def delivery_channels() -> tuple[str, ...]:
+    """Return the channels :func:`core.notifications.dispatch.notify` routes to on this deployment.
+
+    Returns:
+        The hosted delivery channels, plus the Mac app's own channels in local mode.
+    """
+    return (*DELIVERY_CHANNELS, *LOCAL_CHANNELS) if app_settings.local_mode else DELIVERY_CHANNELS
+
+
 def default_grid() -> Grid:
     """Return a fresh copy of the default event x channel grid.
 
     Returns:
-        A mutable ``{event_type: {channel: enabled}}`` mapping.
+        A mutable ``{event_type: {channel: enabled}}`` mapping, with the
+        local channels' default cells in local mode.
     """
-    return {event: dict(row) for event, row in DEFAULT_GRID.items()}
+    grid = {event: dict(row) for event, row in DEFAULT_GRID.items()}
+    if app_settings.local_mode:
+        for event, cells in LOCAL_DEFAULT_CELLS.items():
+            grid[event].update(cells)
+    return grid
 
 
 def merge_grid(stored: Mapping[str, Any] | None) -> Grid:
@@ -53,15 +79,16 @@ def merge_grid(stored: Mapping[str, Any] | None) -> Grid:
         The complete effective grid.
     """
     grid = default_grid()
+    channels = grid_channels()
     if isinstance(stored, Mapping):
         for event, row in stored.items():
             if event not in grid or not isinstance(row, Mapping):
                 continue
             for channel, enabled in row.items():
-                if channel in CHANNELS and isinstance(enabled, bool):
+                if channel in channels and isinstance(enabled, bool):
                     grid[event][channel] = enabled
     for event in INBOX_ONLY_EVENTS:
-        grid[event] = {channel: channel == INBOX for channel in CHANNELS}
+        grid[event] = {channel: channel == INBOX for channel in channels}
     return grid
 
 

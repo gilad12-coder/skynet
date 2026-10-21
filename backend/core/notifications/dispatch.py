@@ -21,9 +21,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..storage.models import NotificationModel
-from .catalog import DELIVERY_CHANNELS, INBOX, URGENT_EVENTS
+from .catalog import INBOX, URGENT_EVENTS
 from .channels import Delivery, get_channel
-from .preferences import NotificationSettings, notification_engine, notification_settings
+from .preferences import NotificationSettings, delivery_channels, notification_engine, notification_settings
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _route(event_type: str, settings: NotificationSettings) -> tuple[list[str], 
     """
     immediate: list[str] = []
     held: list[str] = []
-    for channel in DELIVERY_CHANNELS:
+    for channel in delivery_channels():
         if not settings.enabled(event_type, channel):
             continue
         if event_type not in URGENT_EVENTS and settings.hold_minutes > 0 and channel in settings.held_channels:
