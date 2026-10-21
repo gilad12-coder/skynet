@@ -1,6 +1,7 @@
 "use client";
 
 import { msg } from "@/shared/lib/messages";
+import { hostedSignInUrl } from "@/shared/lib/share-link";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { CircleNotch, SignIn } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -9,9 +10,12 @@ import { Button } from "@/shared/ui/primitives/button";
  * Share-dialog body in the Mac app. Its UI and single-user backend live on
  * this computer only, so no link from there can work for another person. The
  * share dialogs show this notice in local mode in place of the link and people
- * controls (see shareDialogPlan); hosted mode never renders it.
+ * controls (see shareDialogPlan); hosted mode never renders it. Its sign-in
+ * link opens the hosted sign-in page in the browser; linking that account to
+ * the Mac app is SKY-140.
  */
 export function LocalShareNotice() {
+  const signInUrl = hostedSignInUrl();
   return (
     <EmptyState
       variant="compact"
@@ -20,7 +24,15 @@ export function LocalShareNotice() {
       title={msg("share.local.title")}
       description={msg("share.local.body")}
       className="px-6 py-10"
-    />
+    >
+      {signInUrl && (
+        <Button variant="outline" size="sm" asChild>
+          <a href={signInUrl} target="_blank" rel="noopener noreferrer">
+            {msg("share.local.sign_in")}
+          </a>
+        </Button>
+      )}
+    </EmptyState>
   );
 }
 
@@ -49,7 +61,7 @@ export function LocalVisibilityStatus({
   }
   return (
     <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-      <CircleNotch className="size-4 animate-spin" />
+      <CircleNotch className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
       {msg("share.loading")}
     </div>
   );

@@ -1938,6 +1938,7 @@
   "share.loading": "Loading…",
   "share.local.title": "Sign in to a hosted account to share",
   "share.local.body": "Share links come from a hosted {term.appName} account. Items in this app stay on this computer, so other people cannot open a link to them.",
+  "share.local.sign_in": "Sign in on the web",
   "share.member_added": "User added",
   "share.member_removed": "User removed",
   "share.member_updated": "Role updated",

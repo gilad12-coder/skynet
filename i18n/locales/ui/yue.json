@@ -2657,6 +2657,7 @@
   "share.loading": "載入中…",
   "share.local.title": "登入雲端帳戶先可以分享",
   "share.local.body": "分享連結嚟自雲端 {term.appName} 帳戶。呢個 app 入面嘅項目只係儲存喺呢部電腦，所以其他人打唔開佢哋嘅連結。",
+  "share.local.sign_in": "喺網頁登入",
   "share.member_added": "已新增使用者",
   "share.member_removed": "已移除用戶",
   "share.member_updated": "已更新角色",

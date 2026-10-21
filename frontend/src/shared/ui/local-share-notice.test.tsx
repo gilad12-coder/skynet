@@ -10,25 +10,45 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { setServerMessages } from "@/shared/lib/runtime-messages";
-import { shareLinkUrl } from "@/shared/lib/share-link";
+import { hostedSignInUrl, shareLinkUrl } from "@/shared/lib/share-link";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 const { LocalShareNotice, LocalVisibilityStatus } = await import("./local-share-notice");
 
 void describe("LocalShareNotice", () => {
-  void it("asks for a hosted account and shows no link", () => {
+  void it("asks for a hosted account, offers sign-in, and shows no share link", () => {
     setServerMessages(buildActiveCatalog("en"), "en");
     const html = renderToStaticMarkup(<LocalShareNotice />);
     assert.match(html, /Sign in to a hosted account to share/);
+    const links = [...html.matchAll(/<a\s[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gs)];
+    assert.equal(links.length, 1);
+    const [tag = "", href, label = ""] = links[0] ?? [];
+    assert.equal(href, "https://skynet.app/login");
+    assert.match(label, /Sign in on the web/);
+    assert.match(tag, /target="_blank"/);
+    assert.match(tag, /rel="noopener noreferrer"/);
     assert.doesNotMatch(html, /127\.0\.0\.1|localhost|\/share\//);
-    assert.doesNotMatch(html, /<a\s|<input/);
+    assert.doesNotMatch(html, /<input/);
   });
 
   void it("has the Hebrew copy", () => {
     setServerMessages(buildActiveCatalog("he"), "he");
     const html = renderToStaticMarkup(<LocalShareNotice />);
     assert.match(html, /התחבר\/י לחשבון בענן כדי לשתף/);
+    assert.match(html, /התחברות באתר/);
+  });
+
+  void it("offers no sign-in link when the site URL is a loopback origin", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    process.env.NEXT_PUBLIC_SITE_URL = "http://127.0.0.1:53001";
+    try {
+      const html = renderToStaticMarkup(<LocalShareNotice />);
+      assert.match(html, /Sign in to a hosted account to share/);
+      assert.doesNotMatch(html, /<a\s|127\.0\.0\.1/);
+    } finally {
+      delete process.env.NEXT_PUBLIC_SITE_URL;
+    }
   });
 });
 
@@ -38,6 +58,9 @@ void describe("LocalVisibilityStatus", () => {
     const html = renderToStaticMarkup(<LocalVisibilityStatus failed={false} onRetry={() => {}} />);
     assert.match(html, /role="status"/);
     assert.match(html, /Loading…/);
+    const spinner = html.match(/<svg[^>]*>/)?.[0] ?? "";
+    assert.match(spinner, /aria-hidden="true"/);
+    assert.match(spinner, /motion-reduce:animate-none/);
     assert.doesNotMatch(html, /<button/);
   });
 
@@ -109,5 +132,24 @@ void describe("shareLinkUrl", () => {
 
   void it("returns no link while rendering on the server", () => {
     assert.equal(shareLinkUrl("/share/t"), null);
+  });
+});
+
+void describe("hostedSignInUrl", () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+  });
+
+  void it("points at the hosted sign-in page", () => {
+    assert.equal(hostedSignInUrl(), "https://skynet.app/login");
+    process.env.NEXT_PUBLIC_SITE_URL = "https://app.example.com";
+    assert.equal(hostedSignInUrl(), "https://app.example.com/login");
+  });
+
+  void it("never returns a loopback URL", () => {
+    for (const site of ["http://127.0.0.1:53001", "http://localhost:3000", "http://[::1]:3000"]) {
+      process.env.NEXT_PUBLIC_SITE_URL = site;
+      assert.equal(hostedSignInUrl(), null);
+    }
   });
 });

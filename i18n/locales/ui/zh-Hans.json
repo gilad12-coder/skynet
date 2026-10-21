@@ -3025,6 +3025,7 @@
   "share.loading": "加载中…",
   "share.local.title": "登录云端账户后即可分享",
   "share.local.body": "分享链接来自云端 {term.appName} 账户。此应用中的项目仅保存在这台电脑上，因此其他人无法打开指向它们的链接。",
+  "share.local.sign_in": "在网页上登录",
   "share.member_added": "用户已添加",
   "share.member_removed": "用户已移除",
   "share.member_updated": "角色已更新",

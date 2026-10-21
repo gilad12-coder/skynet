@@ -9,9 +9,22 @@
  */
 
 import { isLocalMode } from "@/shared/lib/runtime-env";
+import { getSiteUrl } from "@/shared/lib/site-config";
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 /** Absolute share URL for `path` (e.g. `/share/<token>`), or null when no link can work. */
 export function shareLinkUrl(path: string): string | null {
   if (typeof window === "undefined" || isLocalMode()) return null;
   return `${window.location.origin}${path}`;
+}
+
+/**
+ * Sign-in page of the hosted app, for the Mac app share notice. Null when the
+ * configured site URL is a loopback origin, so the notice never links to this
+ * computer.
+ */
+export function hostedSignInUrl(): string | null {
+  const url = new URL("/login", getSiteUrl());
+  return LOOPBACK_HOSTS.has(url.hostname) ? null : url.toString();
 }

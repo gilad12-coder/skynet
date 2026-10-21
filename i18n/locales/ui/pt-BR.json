@@ -129,6 +129,7 @@
   "share.loading": "Carregando…",
   "share.local.title": "Entre em uma conta hospedada para compartilhar",
   "share.local.body": "Os links de compartilhamento vêm de uma conta {term.appName} hospedada. Os itens deste app ficam neste computador, então outras pessoas não conseguem abrir um link para eles.",
+  "share.local.sign_in": "Entrar na web",
   "share.visibility.load_failed": "Não foi possível carregar a configuração de visibilidade pública.",
   "share.visibility.retry": "Tentar novamente",
   "share.member_added": "Usuário adicionado",

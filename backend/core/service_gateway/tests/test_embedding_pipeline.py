@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 
 from core.service_gateway.embedding_pipeline import core as pipeline
 
@@ -673,8 +673,13 @@ def _embedding_row(store: SimpleNamespace) -> tuple[Any, ...]:
 def test_set_embedding_privacy_skips_without_embedding_table() -> None:
     """The Mac app database has no ``job_embeddings`` table, so the sync is a no-op, not an error."""
     store = _sqlite_store(with_embedding_table=False)
-    with patch.object(pipeline.settings, "embeddings_enabled", False):
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", False),
+        patch.object(pipeline, "Session") as session_cls,
+    ):
         pipeline.set_embedding_privacy(store, "opt-1", True)
+    session_cls.assert_not_called()
+    assert not inspect(store.engine).has_table("job_embeddings")
 
 
 def test_set_embedding_privacy_updates_kept_table_with_embeddings_off() -> None:
@@ -688,7 +693,10 @@ def test_set_embedding_privacy_updates_kept_table_with_embeddings_off() -> None:
 def test_set_embedding_task_name_skips_without_embedding_table() -> None:
     """A rename in the Mac app must not fail on the missing ``job_embeddings`` table."""
     store = _sqlite_store(with_embedding_table=False)
-    pipeline.set_embedding_task_name(store, "opt-1", "new")
+    with patch.object(pipeline, "Session") as session_cls:
+        pipeline.set_embedding_task_name(store, "opt-1", "new")
+    session_cls.assert_not_called()
+    assert not inspect(store.engine).has_table("job_embeddings")
 
 
 def test_set_embedding_task_name_updates_row_with_embedding_table() -> None:

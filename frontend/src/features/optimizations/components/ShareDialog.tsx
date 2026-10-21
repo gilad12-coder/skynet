@@ -103,8 +103,8 @@ export function ShareDialog({
     onOpenChange?.(next);
   };
   const [state, setState] = useState<SharingState | null>(null);
-  // Set when getSharing fails, so the effect does not refetch in a loop. The
-  // retry button clears it; closing the dialog clears it so a re-open retries.
+  // Set when getSharing fails. Clearing it (the retry button, or closing the
+  // dialog) runs the load effect again.
   const [loadFailed, setLoadFailed] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
@@ -717,7 +717,10 @@ function InvitePeople({
             className="shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0"
           >
             {inviting ? (
-              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              <CircleNotch
+                className="animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
             ) : (
               <UserPlus className="size-4" />
             )}

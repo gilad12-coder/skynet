@@ -3025,6 +3025,7 @@
   "share.loading": "A carregar…",
   "share.local.title": "Inicie sessão numa conta alojada para partilhar",
   "share.local.body": "Os links de partilha vêm de uma conta {term.appName} alojada. Os itens desta app ficam neste computador, por isso outras pessoas não conseguem abrir um link para eles.",
+  "share.local.sign_in": "Iniciar sessão na web",
   "share.member_added": "Utilizador adicionado",
   "share.member_removed": "Utilizador removido",
   "share.member_updated": "Função atualizada",

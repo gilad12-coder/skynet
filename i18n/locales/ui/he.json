@@ -2051,6 +2051,7 @@
   "share.loading": "טוען…",
   "share.local.title": "התחבר/י לחשבון בענן כדי לשתף",
   "share.local.body": "קישורי שיתוף מגיעים מחשבון {term.appName} בענן. הפריטים באפליקציה הזו נשמרים במחשב הזה, ולכן אנשים אחרים לא יכולים לפתוח קישור אליהם.",
+  "share.local.sign_in": "התחברות באתר",
   "share.member_added": "המשתמש נוסף",
   "share.member_removed": "המשתמש הוסר",
   "share.member_updated": "התפקיד עודכן",
