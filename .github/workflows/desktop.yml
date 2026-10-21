@@ -43,7 +43,6 @@ jobs:
         env:
           # Ad-hoc signing ("-" in electron-builder.yml) needs no certificate.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          SKYNET_DESKTOP_ARCHS: arm64,x64
         run: npm run build:mac
       - name: Verify signatures
         run: |
@@ -85,7 +84,6 @@ jobs:
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SKYNET_DESKTOP_ARCHS: arm64,x64
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

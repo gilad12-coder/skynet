@@ -117,8 +117,8 @@ function stageFrontend() {
 }
 
 function stageUv() {
-  const archs = (process.env.SKYNET_DESKTOP_ARCHS || os.arch()).split(",").map((a) => a.trim());
-  for (const arch of archs) {
+  // electron-builder.yml always builds arm64 and x64, so each app needs its own uv.
+  for (const arch of Object.keys(UV_ASSETS)) {
     const asset = UV_ASSETS[arch];
     if (!asset) throw new Error(`no uv asset for arch ${arch}`);
     const dest = path.join(stageDir, "uv", arch);

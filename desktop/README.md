@@ -53,7 +53,7 @@ npm run build:mac
 `build:mac` compiles the shell, builds the frontend (`next build`, standalone output) when
 `frontend/.next/standalone` is missing, stages the tracked backend files, downloads the pinned
 `uv` release and checks its SHA-256, then writes `dist/Skynet-<version>-arm64.dmg` and
-`dist/mac-arm64/Skynet.app` (plus `-x64.dmg` and `dist/mac/Skynet.app` when `SKYNET_DESKTOP_ARCHS=arm64,x64`). Set `SKYNET_DESKTOP_REBUILD_FRONTEND=1` to force a fresh frontend build.
+`dist/mac-arm64/Skynet.app`, plus `dist/Skynet-<version>-x64.dmg` and `dist/mac/Skynet.app`. Set `SKYNET_DESKTOP_REBUILD_FRONTEND=1` to force a fresh frontend build.
 
 Check the signature:
 
@@ -66,7 +66,7 @@ A locally built app is not quarantined, so it opens without the `xattr` step.
 To run without packaging:
 
 ```sh
-SKYNET_DESKTOP_ARCHS=arm64 npm run bundle:stack   # once, or after backend/frontend changes
+npm run bundle:stack   # once, or after backend/frontend changes
 npm start
 ```
 
