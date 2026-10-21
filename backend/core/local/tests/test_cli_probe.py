@@ -218,6 +218,24 @@ def test_claude_is_signed_in_only_with_a_claude_ai_login(tmp_path: Path, login_o
     assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is expected
 
 
+@pytest.mark.parametrize(
+    ("login_out", "expected"),
+    [("Logged in using ChatGPT", True), ("Logged in using an API key - sk-proj-***", False)],
+    ids=["chatgpt", "api_key"],
+)
+def test_codex_is_signed_in_only_with_a_chatgpt_login(tmp_path: Path, login_out: str, expected: bool) -> None:
+    """Count only a ChatGPT login as signed in; an API key bills the user's API account.
+
+    Args:
+        tmp_path: Directory for the fake binary.
+        login_out: The ``login status`` output.
+        expected: The ``logged_in`` value the probe must report.
+    """
+    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out=login_out)
+
+    assert probe_cli("codex", _settings(tmp_path, codex_bin=str(codex))).logged_in is expected
+
+
 def test_unreadable_login_output_is_unknown(tmp_path: Path) -> None:
     """Login output that is not the expected JSON gives ``None``, not ``False``."""
     claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out="something went wrong")

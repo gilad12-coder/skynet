@@ -73,6 +73,9 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "login": (Path(os.environ["CODEX_HOME"]) / "auth.json").read_text() if cli == "codex" else None,
     "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
+if os.environ.get("FAKE_CLI_MODE") == "expired":
+    print(json.dumps({"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized"}}))
+    sys.exit(1)
 if os.environ.get("FAKE_CLI_MODE") == "limit":
     if cli == "claude":
         print(json.dumps({"type": "result", "subtype": "success", "is_error": True,
@@ -199,7 +202,11 @@ def guest(tmp_path: Path) -> Path:
             "full_access",
             ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C"],
         ),
-        ("claude", "workspace_only", ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"]),
+        (
+            "claude",
+            "workspace_only",
+            ["-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--disallowedTools", "Bash"],
+        ),
         ("claude", "full_access", ["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"]),
     ],
 )
@@ -299,6 +306,93 @@ def test_usage_cap_reports_reset_and_records_the_limit(
     reset = datetime.fromtimestamp(RESET_EPOCH, UTC).isoformat()
     assert document["error"]["reset_at"] == reset
     assert read_cli_limits(local)["claude"]["reset_at"] == reset
+
+
+def _codex_events(*events: dict) -> str:
+    """Print codex ``exec --json`` events.
+
+    Args:
+        *events: The events in order.
+
+    Returns:
+        One JSON line per event.
+    """
+    return "\n".join(json.dumps(event) for event in events)
+
+
+def test_codex_stream_retry_before_a_completed_turn_is_ok() -> None:
+    """A "Reconnecting" error event that a completed turn follows is not a failure."""
+    stdout = _codex_events(
+        {"type": "thread.started", "thread_id": "t"},
+        {"type": "error", "message": "Reconnecting... 1/5 (stream disconnected before completion)"},
+        {"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "done"}},
+        {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}},
+    )
+
+    text, usage, error = host_agent.parse_cli_output("codex", stdout)
+
+    assert (text, usage["prompt_tokens"], error) == ("done", 10, None)
+
+
+@pytest.mark.parametrize(
+    "last",
+    [
+        {"type": "error", "message": "stream disconnected"},
+        {"type": "turn.failed", "error": {"message": "stream disconnected"}},
+    ],
+)
+def test_codex_error_without_a_completed_turn_after_it_fails(last: dict) -> None:
+    """An error or failed turn after the last completed turn fails the turn.
+
+    Args:
+        last: The final event.
+    """
+    stdout = _codex_events({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}, last)
+
+    assert host_agent.parse_cli_output("codex", stdout)[2] == "stream disconnected"
+
+
+def test_expired_codex_login_tells_the_user_to_refresh_it(
+    local: Settings, guest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A codex 401 names the fix: run codex once to refresh the login."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    monkeypatch.setenv("FAKE_CLI_MODE", "expired")
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="codex", permission="workspace_only")
+
+    assert document["status"] == "error"
+    assert document["error"]["message"].startswith(host_agent.CODEX_EXPIRED_HINT)
+    assert "401" in document["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "login",
+    [
+        {"auth_mode": "apikey", "OPENAI_API_KEY": "sk-" + "x" * 40, "tokens": None},
+        {"OPENAI_API_KEY": "sk-" + "x" * 40, "tokens": {"account_id": "a", "access_token": "A" * 32}},
+        {"tokens": {"account_id": "a"}},
+    ],
+    ids=["api_key_mode", "api_key_beside_tokens", "no_access_token"],
+)
+def test_codex_api_key_login_is_refused(
+    login: dict, local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a ChatGPT login runs a codex turn; an API key would bill the user's API account.
+
+    Args:
+        login: The user's ``auth.json``.
+    """
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    (tmp_path / "user-codex" / "auth.json").write_text(json.dumps(login))
+    body = {"model": "", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli="codex", permission="workspace_only")
+
+    assert document["status"] == "error"
+    assert document["error"]["message"] == host_agent.CODEX_SUBSCRIPTION_HINT
+    assert not (tmp_path / "record.json").exists()
 
 
 def test_archive_that_escapes_the_copy_is_refused(local: Settings, tmp_path: Path) -> None:

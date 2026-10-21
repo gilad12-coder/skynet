@@ -74,6 +74,12 @@ SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
 # Agent sockets act outside the sandbox (the SSH agent signs with the user's keys).
 RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILED_KEY = "blackbox.host_agent_failed"
+CODEX_SUBSCRIPTION_HINT = (
+    "Codex is not signed in with a ChatGPT subscription. Run `codex login` and sign in with ChatGPT."
+)
+CODEX_EXPIRED_HINT = "Your Codex login expired. Run `codex` once in a terminal to refresh it, then retry."
+# The turn's login copy has no refresh token, so these mean an expired access token.
+_CODEX_AUTH_FAILURES = ("401", "unauthorized", "refresh")
 RATE_LIMITED_KEY = "blackbox.host_agent_rate_limited"
 # The guest relay and the gateway refuse larger request bodies, so a bigger
 # archive could never have arrived; the bound keeps a compressed bomb small too.
@@ -139,6 +145,10 @@ def host_cli_argv(
     elif cli == "claude":
         mode = "bypassPermissions" if full else "acceptEdits"
         argv = [binary, *isolation_args, "-p", "--output-format", "json", "--permission-mode", mode]
+        if not full:
+            # The profile must let claude run /usr/bin/security for its own login, so a
+            # shell command could read decrypted Keychain items. Without Bash it cannot.
+            argv += ["--disallowedTools", "Bash"]
     else:
         raise HostAgentRequestError(f"Unknown host CLI {cli!r}.")
     if model_arg:
@@ -698,6 +708,8 @@ def parse_cli_output(cli: CliProvider, stdout: str) -> tuple[str, dict[str, Any]
     model_ms: int | None = None
     documents = _json_documents(stdout)
     if cli == "codex":
+        # Codex prints an "error" event for a stream retry ("Reconnecting... 1/5")
+        # and goes on; only an error that no completed turn follows is a failure.
         for event in documents:
             kind = event.get("type")
             item = event.get("item") or {}
@@ -707,6 +719,7 @@ def parse_cli_output(cli: CliProvider, stdout: str) -> tuple[str, dict[str, Any]
                 usage = event.get("usage") or {}
                 prompt_tokens += int(usage.get("input_tokens") or 0)
                 completion_tokens += int(usage.get("output_tokens") or 0)
+                error = None
             elif kind == "turn.failed":
                 error = str((event.get("error") or {}).get("message") or "The turn failed.")
             elif kind == "error":
@@ -791,8 +804,13 @@ def _login_paths(cli: CliProvider) -> list[str]:
     """Return the paths in the user's home a CLI must read for its subscription login.
 
     Codex gets its login copy in the turn's own home, so it needs nothing
-    here. Claude Code reads its login from the login Keychain, which stays
-    read-only because the Keychain service writes a refreshed login itself.
+    here. Claude Code reads its login from the login Keychain with
+    ``/usr/bin/security``. The profile cannot tell claude from its children,
+    so any process of a claude turn that can run ``security`` can read
+    decrypted Keychain items (the claude login, other apps' tokens).
+    :func:`host_cli_argv` removes claude's Bash tool under workspace_only as
+    the mitigation. The Keychain files stay read-only, because the Keychain
+    service writes a refreshed login itself.
     ``~/.claude.json`` (the user's own MCP servers, which the user's later
     sessions start outside any sandbox) and ``~/.claude`` (other sessions'
     transcripts, the user's own instructions) stay hidden.
@@ -823,6 +841,8 @@ def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> None:
         env: The CLI's environment from :func:`isolated_cli`; updated in place.
         turn: The turn's folder.
 
+    Raises:
+        HostAgentRequestError: When codex has no ChatGPT subscription login.
     """
     home = turn / "home"
     home.mkdir()
@@ -836,9 +856,17 @@ def _turn_home(cli: CliProvider, env: dict[str, str], turn: Path) -> None:
             document = json.loads(raw) if raw is not None else None
         except ValueError:
             document = None
-        if not isinstance(document, dict):
-            # Codex then reports that it is not logged in, as it does without a login.
-            return
+        tokens = document.get("tokens") if isinstance(document, dict) else None
+        if (
+            not isinstance(document, dict)
+            or document.get("auth_mode", "chatgpt") != "chatgpt"
+            or document.get("OPENAI_API_KEY")
+            or not isinstance(tokens, dict)
+            or not tokens.get("access_token")
+        ):
+            # An API-key login bills the user's API account, and a host turn must
+            # cost nothing beyond the subscription.
+            raise HostAgentRequestError(CODEX_SUBSCRIPTION_HINT)
         if isinstance(document.get("tokens"), dict) and "refresh_token" in document["tokens"]:
             # Codex rejects a login file without the field, so it stays, but empty.
             document["tokens"]["refresh_token"] = ""
@@ -991,7 +1019,10 @@ def run_host_agent(
                     except (OSError, ValueError):
                         logger.warning("Host agent: could not record the %s usage cap", cli, exc_info=True)
                 return _error(RATE_LIMITED_CODE, capped.message, reset_at=reset_at, transcript=transcript)
-            return _error(FAILED_KEY, cli_error[:2000], transcript=transcript)
+            detail = cli_error[:2000]
+            if cli == "codex" and any(word in cli_error.lower() for word in _CODEX_AUTH_FAILURES):
+                detail = f"{CODEX_EXPIRED_HINT} ({detail})"
+            return _error(FAILED_KEY, detail, transcript=transcript)
         return {
             "status": "ok",
             "result_tar_b64": base64.b64encode(_pack(workdir, secret_values)).decode("ascii"),

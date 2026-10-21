@@ -177,7 +177,9 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
         result = _run([path, "login", "status"])
         if result is None:
             return None
-        return result.returncode == 0 and "logged in" in (result.stdout + result.stderr).lower()
+        status = (result.stdout + result.stderr).lower()
+        # An API-key login bills the user's API account; only a ChatGPT login is a subscription.
+        return result.returncode == 0 and "logged in" in status and "api key" not in status
     result = _run([path, "auth", "status"])
     if result is None:
         return None
