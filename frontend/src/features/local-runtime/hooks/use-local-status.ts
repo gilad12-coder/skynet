@@ -15,6 +15,7 @@ import {
   subscriptionMenuModels,
   type LocalStatus,
 } from "../lib/subscription-model";
+import { loadAgentEngine, useAgentEngine } from "./use-agent-engine";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -59,35 +60,38 @@ export function peekLocalStatus(): LocalStatus | null {
 /**
  * The model id an agent request sends for a role set to run on `cli`. It waits
  * for `/local/status`, since the CLI's models decide the id. A local role with
- * no CLI runs on the default CLI, since the local backend has no managed
- * models. Hosted builds send the composer's choice unchanged.
+ * no CLI runs on the agent engine's CLI, else the default CLI, since the local
+ * backend has no managed models. Hosted builds send the composer's choice
+ * unchanged.
  */
 export async function localAgentModel(
   model: string | null,
   cli: CliProvider | null,
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
-  return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
+  const engine = cli ? null : await loadAgentEngine();
+  return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus, engine);
 }
 
 /**
  * The composer menu's models for an agent role on `cli` in the local build:
- * only that CLI's models, since the local backend has no managed models and
- * agent turns cannot bill a provider key. Hosted builds get undefined and keep
- * the catalog.
+ * only that CLI's models (the agent engine's CLI when the role has none),
+ * since the local backend has no managed models and agent turns cannot bill a
+ * provider key. Hosted builds get undefined and keep the catalog.
  */
 export function useLocalAgentMenuModels(cli: CliProvider | null): CatalogModel[] | undefined {
   const local = isLocalMode();
   const { status } = useLocalStatus(local);
+  const { engine } = useAgentEngine();
   return React.useMemo(
     () =>
       local
         ? subscriptionMenuModels(
-            findCli(status, cli ?? defaultAgentCli(status)),
+            findCli(status, cli ?? defaultAgentCli(status, engine)),
             cachedCatalog()?.models,
           )
         : undefined,
-    [local, status, cli],
+    [local, status, cli, engine],
   );
 }
 

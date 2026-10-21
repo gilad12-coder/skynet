@@ -13,6 +13,18 @@ export const CLI_PROVIDERS: readonly CliProvider[] = ["codex", "claude"];
 
 export const SUBSCRIPTION_MODEL_PREFIX = "subscription/";
 
+/**
+ * Which engine runs agent turns that pick no model (`/account/agent-engine`):
+ * OpenRouter (managed models) or a subscription CLI on this computer.
+ */
+export type AgentEngine = "openrouter" | CliProvider;
+
+export const OPENROUTER_ENGINE = "openrouter" as const;
+
+export function isAgentEngine(value: unknown): value is AgentEngine {
+  return value === OPENROUTER_ENGINE || isCliProvider(value);
+}
+
 /** One coding-agent CLI as `GET /local/status` reports it. */
 export interface CliStatus {
   id: CliProvider;
@@ -252,14 +264,17 @@ export function subscriptionAgentModel(
 }
 
 /**
- * The CLI an agent role runs on when the user picked none. The local build
- * has no managed models, so every role needs a CLI: the first ready one, else
- * the first installed one, else Claude Code.
+ * The CLI an agent role runs on when the user picked none for it. A CLI agent
+ * engine wins. Otherwise, since the local build has no managed models and
+ * every role needs a CLI: the first ready one, else the first installed one,
+ * else Claude Code.
  */
 export function defaultAgentCli(
   status: LocalStatus | null | undefined,
+  engine: AgentEngine | null = null,
   now: Date = new Date(),
 ): CliProvider {
+  if (isCliProvider(engine)) return engine;
   // An older backend may still report a CLI the app no longer offers.
   const clis = (status?.clis ?? []).filter((cli) => isCliProvider(cli.id));
   const ready = clis.find((cli) => cliState(cli, now).kind === "ok");
@@ -270,17 +285,47 @@ export function defaultAgentCli(
 /**
  * The agent model for a role, resolved against a loaded status: the CLI's
  * slugs decide what the request sends, so the request waits for the status.
- * A role with no CLI runs on `defaultAgentCli`. A failed load falls back to
- * the last status any caller loaded.
+ * A role with no CLI runs on `defaultAgentCli` for the agent engine. A failed
+ * load falls back to the last status any caller loaded.
  */
 export async function resolveAgentModel(
   model: string | null,
   cli: CliProvider | null | undefined,
   load: () => Promise<LocalStatus>,
   peek: () => LocalStatus | null,
+  engine: AgentEngine | null = null,
 ): Promise<string | null> {
   const status = await load().catch(() => peek());
-  return subscriptionAgentModel(model, cli ?? defaultAgentCli(status), status);
+  return subscriptionAgentModel(model, cli ?? defaultAgentCli(status, engine), status);
+}
+
+/**
+ * One choice in the Settings "Agent engine" select. A CLI carries its state
+ * (null while the status loads); only a ready CLI can be chosen.
+ */
+export type AgentEngineOption =
+  | { engine: typeof OPENROUTER_ENGINE; disabled: boolean }
+  | { engine: CliProvider; disabled: boolean; state: CliState | null };
+
+/**
+ * The "Agent engine" choices. Hosted builds run every agent on OpenRouter, so
+ * that is the only choice. The local build lists the CLIs first, enabled only
+ * when ready, then OpenRouter, which it cannot use (it has no managed key).
+ */
+export function agentEngineOptions(
+  status: LocalStatus | null | undefined,
+  localMode: boolean,
+  now: Date = new Date(),
+): AgentEngineOption[] {
+  if (!localMode) return [{ engine: OPENROUTER_ENGINE, disabled: false }];
+  const clis = CLI_PROVIDERS.map((cli): AgentEngineOption => {
+    const entry = findCli(status, cli);
+    let state: CliState | null = null;
+    if (entry) state = cliState(entry, now);
+    else if (status) state = { kind: "missing" };
+    return { engine: cli, disabled: state?.kind !== "ok", state };
+  });
+  return [...clis, { engine: OPENROUTER_ENGINE, disabled: true }];
 }
 
 /**
