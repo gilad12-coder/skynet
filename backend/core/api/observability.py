@@ -478,11 +478,9 @@ class OrphanRecoverySweeper:
             try:
                 # The owner can resume a stopped run before this pass; the
                 # fence leaves its notification to the worker that runs it.
-                if not self._job_store.claim_completion_notification(
-                    optimization_id, statuses=("failed", "stopped"), expected_generation=generation
-                ):
+                job = self._job_store.claim_ended_orphan_notification(optimization_id, generation)
+                if job is None:
                     continue
-                job = self._job_store.get_job(optimization_id, include_payload=False)
                 username = job.get("username") or ""
                 status = job.get("status") or "failed"
                 notify_job_completed(optimization_id, username, status, message=job.get("message"))

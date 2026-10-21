@@ -749,13 +749,7 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def claim_completion_notification(
-        self,
-        optimization_id: str,
-        *,
-        statuses: tuple[str, ...] | None = None,
-        expected_generation: int | None = None,
-    ) -> bool:
+    def claim_completion_notification(self, optimization_id: str) -> bool:
         """Atomically claim the right to send the completion notification.
 
         Multiple paths can converge on a single job's completion: the worker
@@ -768,30 +762,64 @@ class RemoteDBJobStore:
 
         Args:
             optimization_id: ID of the job whose notification is being sent.
-            statuses: Statuses the job must still have, or ``None`` for any.
-            expected_generation: Execution generation the job must still
-                have, or ``None`` for any.
 
         Returns:
             ``True`` if the caller won the race and should send the message,
-            ``False`` when a prior attempt already notified, the job moved on
-            from the expected status or generation, or the job is missing.
+            ``False`` when a prior attempt already notified (or the job is
+            missing — there is nothing to notify about).
         """
         now = datetime.now(UTC)
         session = self._get_session()
         try:
-            query = (
+            rows = (
                 session.query(JobModel)
                 .filter(JobModel.optimization_id == optimization_id)
                 .filter(JobModel.notified_at.is_(None))
+                .update({JobModel.notified_at: now}, synchronize_session=False)
             )
-            if statuses is not None:
-                query = query.filter(JobModel.status.in_(statuses))
-            if expected_generation is not None:
-                query = query.filter(JobModel.execution_generation == expected_generation)
-            rows = query.update({JobModel.notified_at: now}, synchronize_session=False)
             session.commit()
             return rows > 0
+        finally:
+            session.close()
+
+    def claim_ended_orphan_notification(self, optimization_id: str, generation: int) -> JobRecord | None:
+        """Claim the notification of a run that a sweep ended and read it in the same transaction.
+
+        The read happens before the commit, while the claim's row lock is
+        held, so an owner resume cannot change the run between the claim and
+        the snapshot that the notification describes.
+
+        Args:
+            optimization_id: ID of the run that the sweep failed or stopped.
+            generation: Execution generation that the sweep ended.
+
+        Returns:
+            The run as it was when the claim matched, without its payload, or
+            ``None`` when a prior attempt already notified, the run left the
+            ``failed``/``stopped`` state or the generation, or it is missing.
+        """
+        session = self._get_session()
+        try:
+            rows = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .filter(JobModel.notified_at.is_(None))
+                .filter(JobModel.status.in_(("failed", "stopped")))
+                .filter(JobModel.execution_generation == generation)
+                .update({JobModel.notified_at: datetime.now(UTC)}, synchronize_session=False)
+            )
+            if rows == 0:
+                session.rollback()
+                return None
+            job = (
+                session.query(JobModel)
+                .options(defer(JobModel.payload))
+                .filter(JobModel.optimization_id == optimization_id)
+                .one()
+            )
+            snapshot = self._job_to_dict(job, include_payload=False)
+            session.commit()
+            return snapshot
         finally:
             session.close()
 

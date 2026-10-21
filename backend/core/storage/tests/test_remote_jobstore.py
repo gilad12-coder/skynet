@@ -1275,6 +1275,79 @@ def test_orphan_sweeper_skips_a_stopped_run_that_its_owner_resumed(
     assert store.claim_completion_notification("raised") is True
 
 
+def test_orphan_sweeper_reports_the_stop_it_claimed_when_the_owner_resumes_right_after(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resume that lands after the sweeper's claim cannot change the stop the notification describes.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to stop the budget, resume the run and capture notifications.
+    """
+    sent: list[str] = []
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        observability_mod,
+        "notify_job_completed",
+        lambda optimization_id, username, status, message=None: sent.append(status),
+    )
+    monkeypatch.setattr(observability_mod, "record_server_event", lambda engine, **kwargs: events.append(kwargs))
+    store.create_job("raced")
+    store.update_job(
+        "raced",
+        status="running",
+        recovery={"state": "recovering", "phase": "requeue", "cause": WORKER_RESTART_CAUSE},
+    )
+    service = _fund_checkpoint(store, "raced", monkeypatch)
+    budget = service.get(store.get_job("raced")["execution_budget_id"], "resume-owner")
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            BudgetService,
+            "get",
+            lambda self, budget_id, username, **kwargs: replace(
+                budget, available_cents=0, blocked_reason="budget_reached"
+            ),
+        )
+        assert store.recover_orphaned_jobs() == 0
+    generation = store.get_job("raced")["execution_generation"]
+    original_get_job = store.get_job
+
+    def resume_then_get_job(optimization_id: str, **kwargs: Any) -> Any:
+        """Resume the run just before any later read, as an owner resume would.
+
+        Args:
+            optimization_id: Run to read.
+            **kwargs: Passed through to the real read.
+
+        Returns:
+            The real read after the resume.
+        """
+        store.update_job(optimization_id, status="pending", execution_generation=generation + 1)
+        return original_get_job(optimization_id, **kwargs)
+
+    monkeypatch.setattr(store, "get_job", resume_then_get_job)
+    original_claim = store.claim_ended_orphan_notification
+
+    def claim_then_resume(optimization_id: str, claimed_generation: int) -> Any:
+        """Claim the notification, then resume the run before the sweeper continues.
+
+        Args:
+            optimization_id: Run to claim.
+            claimed_generation: Generation the sweep ended.
+
+        Returns:
+            The snapshot of the real claim.
+        """
+        snapshot = original_claim(optimization_id, claimed_generation)
+        store.update_job(optimization_id, status="pending", execution_generation=generation + 1)
+        return snapshot
+
+    monkeypatch.setattr(store, "claim_ended_orphan_notification", claim_then_resume)
+    observability_mod.OrphanRecoverySweeper(store, interval_seconds=60)._notify_ended_orphans()
+    assert sent == ["stopped"]
+    assert [(event["name"], event["properties"]["status"]) for event in events] == [("run_stopped", "stopped")]
+
+
 @pytest.mark.parametrize("status", ["running", "validating"])
 def test_orphan_sweeper_notifies_the_owner_of_a_run_it_ends(
     store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch, status: str
