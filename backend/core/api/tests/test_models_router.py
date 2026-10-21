@@ -5,6 +5,7 @@ from __future__ import annotations
 import urllib.error
 from decimal import Decimal
 from email.message import Message
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -14,9 +15,15 @@ from fastapi.testclient import TestClient
 
 from ...billing.operation_pricing import ChargePolicy
 from ...billing.vercel_usage import sandbox_hold_cents
+from ...local.cli_catalog import CLI_MODELS
+from ...local.cli_probe import clear_probe_cache
+from ...local.tests.test_cli_probe import CLAUDE_SUBSCRIPTION, _fake_cli
+from ...local.tests.test_cli_probe import _settings as _probe_settings
 from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
 from ...service_gateway.optimization.blackbox.sandbox import COVERAGE_SLICE_SECONDS
+from .. import model_router
 from ..model_catalog import CatalogModel, CatalogProvider, ModelCatalogResponse
+from ..routers import models as models_router_module
 from ..routers.models import _validate_discover_url, create_models_router
 from .conftest import bypass_auth
 
@@ -300,3 +307,56 @@ def test_call_holds_report_the_boxes_open_before_the_first_call() -> None:
     slice_cents = sandbox_hold_cents(lifetime_ms=COVERAGE_SLICE_SECONDS * 1000, vcpus=2)
     assert resp.json()["box_hold_cents"] == float(2 * slice_cents)
     assert resp.json()["box_hold_cents"] > 0
+
+
+def _local_agent_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Build a local-mode models router: a signed-in claude, a signed-out codex, no droid.
+
+    Args:
+        tmp_path: Where the fake CLIs and the state folder go.
+        monkeypatch: Turns local mode on for the router and the model router.
+
+    Returns:
+        A ``TestClient`` over the models router with auth bypassed.
+    """
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out=CLAUDE_SUBSCRIPTION)
+    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_exit=1, login_out="Not logged in")
+    local = _probe_settings(tmp_path, claude_bin=str(claude), codex_bin=str(codex)).model_copy(
+        update={"local_mode": True}
+    )
+    monkeypatch.setattr(models_router_module, "settings", local)
+    monkeypatch.setattr(model_router, "settings", local)
+    clear_probe_cache()
+    app = FastAPI()
+    app.include_router(create_models_router())
+    bypass_auth(app)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_agent_models_in_local_mode_are_the_signed_in_subscriptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """List only the signed-in CLIs' subscription ids in local mode, never the managed catalog."""
+    client = _local_agent_client(tmp_path, monkeypatch)
+    managed = _make_catalog("openai/gpt-4o-mini")
+    with patch("core.api.routers.models.get_catalog_cached", return_value=managed):
+        body = client.get("/models/for-agent").json()
+    names = [row["name"] for row in body["models"]]
+    assert names == [f"subscription/claude/{slug}" for slug in sorted(CLI_MODELS["claude"])]
+    assert body["models"][0]["provider"] == "anthropic"
+    assert all(model_router.route_menu_model(name) == name for name in names)
+
+
+def test_agent_models_in_local_mode_filter_by_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apply the name filter to the subscription ids."""
+    client = _local_agent_client(tmp_path, monkeypatch)
+    body = client.get("/models/for-agent", params={"query": "HAIKU-4.5"}).json()
+    assert [row["name"] for row in body["models"]] == ["subscription/claude/anthropic/claude-haiku-4.5"]
+
+
+def test_agent_models_in_hosted_mode_are_the_catalog(models_client: TestClient) -> None:
+    """Keep the managed catalog for a hosted agent."""
+    fake_catalog = _make_catalog("openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-20241022")
+    with patch("core.api.routers.models.get_catalog_cached", return_value=fake_catalog):
+        body = models_client.get("/models/for-agent", params={"query": "gpt"}).json()
+    assert [row["name"] for row in body["models"]] == ["openai/gpt-4o-mini"]

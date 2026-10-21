@@ -287,7 +287,7 @@ class LmUsageTotals:
     reasoning_tokens: int = 0
     model_ms: int = 0
 
-    def add_split(self, usage: object, split: tuple[int, int]) -> None:
+    def add_split(self, usage: object, split: tuple[int, int], *, subscription: bool = False) -> None:
         """Fold one call's input/output split and its cost evidence into the totals.
 
         A call whose provider reported its own cost adds that cost and marks its
@@ -297,12 +297,14 @@ class LmUsageTotals:
         Args:
             usage: The call's ``usage`` block.
             split: The call's ``(input_tokens, output_tokens)``.
+            subscription: The user's own CLI subscription paid for the call, so
+                it is folded at zero cost whatever its ``usage`` carries.
         """
         self.input_tokens += split[0]
         self.output_tokens += split[1]
         self.split_found = True
         self.model_ms += _count(_field(usage, "model_ms"))
-        cost = _usage_reported_cost(usage)
+        cost = 0.0 if subscription else _usage_reported_cost(usage)
         if cost is not None:
             self.reported_cost_usd += cost
             self.reported_input_tokens += split[0]
@@ -420,6 +422,7 @@ class MeteredLM(dspy.LM):
         """Construct the LM and attach a fresh usage aggregate."""
         super().__init__(*args, **kwargs)
         self.usage_totals = LmUsageTotals()
+        self.subscription = False
         self.last_request_model: str | None = None
         self.last_response_model: str | None = None
         registry = _job_lm_registry
@@ -497,7 +500,7 @@ class MeteredLM(dspy.LM):
                 totals.total_tokens += total
                 totals.total_found = True
             if split is not None:
-                totals.add_split(usage, split)
+                totals.add_split(usage, split, subscription=self.subscription)
 
 
 def lm_call_count(language_model: object) -> int | None:
@@ -625,6 +628,9 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         raise ServiceError(f"Failed to build language model '{config.name}': {exc}") from exc
 
     language_model.budget_route = budget_route
+    # LiteLLM rebuilds a streamed call's usage and drops the gateway's
+    # ``token_source`` mark, so the LM itself carries the zero-cost flag.
+    language_model.subscription = config.token_source == "subscription"
     return language_model
 
 

@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+from decimal import Decimal
 from pathlib import Path
 
+import dspy
 import pytest
 
 from core import config
 from core.api import model_router
 from core.api.errors import DomainError
 from core.billing import cli_dispatch
+from core.billing.metering import estimate_run_cents
 from core.billing.tests.test_cli_runners import CLAUDE_SUCCESS, fake_cli, local_settings, printing
 from core.exceptions import ServiceError
 from core.models import ModelConfig
 from core.service_gateway import language_models
 from core.service_gateway.agents import generalist
-from core.service_gateway.language_models import LmUsageTotals, build_language_model
+from core.service_gateway.language_models import LmUsageTotals, MeteredLM, build_language_model
 from core.service_gateway.optimization.blackbox.workspace_harness import attempt_record
 
 MODEL = "anthropic/claude-haiku-4.5"
@@ -56,6 +59,109 @@ def test_subscription_model_answers_through_dspy() -> None:
     assert lm.usage_totals.calls == 1
     assert lm.usage_totals.reported_cost_usd == 0.0
     assert lm.usage_totals.model_ms == 1326
+
+
+# Haiku 4.5's public price per token, so the gateway reports a non-zero list price.
+LIST_PRICES = (Decimal("0.000001"), Decimal("0.000005"))
+
+
+def _priced_subscription_lm(monkeypatch: pytest.MonkeyPatch) -> MeteredLM:
+    """Build a subscription LM whose calls carry the model's list price in ``usage.cost``.
+
+    Args:
+        monkeypatch: Gives the gateway a list price without a network read.
+
+    Returns:
+        The subscription LM, routed through the loopback CLI gateway.
+    """
+    monkeypatch.setattr(cli_dispatch, "_list_prices", lambda model: LIST_PRICES)
+    return build_language_model(model_router.route_agent_model(SUBSCRIPTION_ID), disable_cache=True)
+
+
+@pytest.mark.usefixtures("local")
+def test_non_streamed_subscription_turn_bills_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Price a plain subscription call at 0 cents though its usage carries a list price."""
+    lm = _priced_subscription_lm(monkeypatch)
+    assert lm("ping") == ["pong"]
+    assert lm.usage_totals.input_tokens > 0
+    assert lm.usage_totals.reported_cost_usd == 0.0
+    assert estimate_run_cents([lm]) == 0
+
+
+@pytest.mark.usefixtures("local")
+def test_streamed_subscription_turn_bills_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Price a streamed subscription call at 0 cents.
+
+    LiteLLM rebuilds a streamed call's usage from the chunks: it keeps
+    ``cost`` (the list price) and drops the gateway's ``token_source`` mark.
+    Agent, interview, tagger and serve turns all stream.
+    """
+    answer = "[[ ## answer ## ]]\npong\n\n[[ ## completed ## ]]"
+    fake_cli(tmp_path, "claude", printing({**CLAUDE_SUCCESS, "result": answer}))
+    lm = _priced_subscription_lm(monkeypatch)
+    seen: list[object] = []
+    update_history = MeteredLM.update_history
+
+    def spy(self: MeteredLM, entry: object) -> None:
+        """Record each call's usage block, then fold it as usual."""
+        seen.append(entry.get("usage") if isinstance(entry, dict) else None)
+        update_history(self, entry)
+
+    monkeypatch.setattr(MeteredLM, "update_history", spy)
+
+    class Answer(dspy.Signature):
+        """Answer the question."""
+
+        question: str = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    program = dspy.streamify(
+        dspy.Predict(Answer),
+        stream_listeners=[dspy.streaming.StreamListener(signature_field_name="answer")],
+        async_streaming=True,
+    )
+
+    async def run() -> list[object]:
+        """Drain the stream.
+
+        Returns:
+            Every streamed item.
+        """
+        with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
+            return [item async for item in program(question="ping")]
+
+    items = asyncio.run(run())
+    assert isinstance(items[-1], dspy.Prediction)
+    assert items[-1].answer == "pong"
+    assert len(seen) == 1
+    usage = seen[0]
+    assert isinstance(usage, dict)
+    assert usage.get("cost")
+    assert usage.get("token_source") is None
+    assert lm.usage_totals.input_tokens > 0
+    assert lm.usage_totals.reported_cost_usd == 0.0
+    assert estimate_run_cents([lm]) == 0
+
+
+def test_subscription_lm_bills_nothing_without_a_usage_mark() -> None:
+    """Fold a subscription LM's call at zero cost; a managed LM keeps paying the reported cost."""
+    entry = {"model": MODEL, "usage": {"prompt_tokens": 2000, "completion_tokens": 50, "cost": 0.25}}
+    subscription = MeteredLM(model=f"litellm_proxy/{MODEL}")
+    subscription.subscription = True
+    managed = MeteredLM(model=f"litellm_proxy/{MODEL}")
+    subscription.update_history(entry)
+    managed.update_history(entry)
+    assert (subscription.usage_totals.reported_cost_usd, subscription.usage_totals.reported_input_tokens) == (0.0, 2000)
+    assert estimate_run_cents([subscription]) == 0
+    assert managed.usage_totals.reported_cost_usd == 0.25
+    assert estimate_run_cents([managed]) > 0
+
+
+def test_only_a_subscription_config_marks_the_lm() -> None:
+    """Mark only subscription configs; managed and BYOK LMs keep billing."""
+    assert build_language_model(ModelConfig(name="openrouter/openai/gpt-4o-mini")).subscription is False
+    byok = ModelConfig(name="openai/gpt-4o-mini", token_source="byok", extra={"api_key": "sk-test"})
+    assert build_language_model(byok).subscription is False
 
 
 def test_subscription_config_outside_local_mode_fails(monkeypatch: pytest.MonkeyPatch) -> None:
