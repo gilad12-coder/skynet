@@ -9,7 +9,7 @@ On launch the app:
 1. Reads your login shell `PATH` so it finds Homebrew, nvm and `~/.local/bin` tools.
 2. Checks Docker, then a coding CLI: installed, new enough, signed in, and not at its usage limit.
    Each failed check shows an onboarding screen with the command to fix it.
-3. Stops any API or web server that a crashed earlier session left running (recorded in `stack.pids`),
+3. Stops any API or web server that a crashed earlier session left running (recorded in `stack.pids` by process group and start time),
    removes leftover `skynet.job` containers, then starts Postgres (`pgvector/pgvector:pg16`, container `skynet-local-postgres`, volume `skynet-local-pgdata`).
 4. Builds the job sandbox image `skynet-local-sandbox:<bundle id>` from `backend/Dockerfile` once per packaged build
    (the bundle id is version, commit and build time) and removes the tags of older builds.

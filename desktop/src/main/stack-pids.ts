@@ -14,13 +14,17 @@ export interface PidEntry {
   role: string;
   /** Process group id; the group leader has this pid. */
   pgid: number;
-  /** The leader's command line as `ps -o command=` prints it. */
-  command: string;
+  /**
+   * The leader's start time as `ps -o lstart=` prints it. A pid plus its start
+   * time names one process; the command line does not, because next-server
+   * renames its process title after it starts.
+   */
+  started: string;
 }
 
 export interface SweepDeps {
-  /** The current command line of a pid, or null when no such process exists. */
-  commandOf(pid: number): string | null;
+  /** The start time of a pid, or null when no such process exists. */
+  startOf(pid: number): string | null;
   kill(target: number, signal: NodeJS.Signals): void;
   sleep(ms: number): Promise<void>;
   log(line: string): void;
@@ -38,8 +42,8 @@ export function readPids(dataDir: string): PidEntry[] {
         typeof e.role === "string" &&
         Number.isInteger(e.pgid) &&
         e.pgid > 1 &&
-        typeof e.command === "string" &&
-        e.command.length > 0,
+        typeof e.started === "string" &&
+        e.started.length > 0,
     );
   } catch {
     return [];
@@ -56,14 +60,13 @@ export function clearPids(dataDir: string): void {
   fs.rmSync(path.join(dataDir, PIDS_FILE), { force: true });
 }
 
-/** The command line that `ps -o command=` shows for a spawned file and args. */
-export function commandLine(file: string, args: string[]): string {
-  return [file, ...args].join(" ");
-}
-
-export function psCommandOf(pid: number): string | null {
+export function psStartOf(pid: number): string | null {
   try {
-    const out = execFileSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
+    const out = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: 5_000,
+      env: { ...process.env, LC_ALL: "C" },
+    });
     return out.trim() || null;
   } catch {
     return null;
@@ -71,12 +74,12 @@ export function psCommandOf(pid: number): string | null {
 }
 
 /**
- * Stop each recorded group whose leader still runs the recorded command, then
- * delete the file. A pid that is gone, or that now belongs to another program,
+ * Stop each recorded group whose leader still has the recorded start time,
+ * then delete the file. A pid that is gone, or that now belongs to another program,
  * is left alone: only processes this app started are signalled.
  */
 export async function sweepOrphans(dataDir: string, deps: SweepDeps): Promise<number> {
-  const live = readPids(dataDir).filter((e) => deps.commandOf(e.pgid) === e.command);
+  const live = readPids(dataDir).filter((e) => deps.startOf(e.pgid) === e.started);
   for (const e of live) {
     deps.log(`stopping leftover ${e.role} (pgid ${e.pgid}) from an earlier session`);
     signalGroup(e.pgid, "SIGTERM", deps);
@@ -85,7 +88,7 @@ export async function sweepOrphans(dataDir: string, deps: SweepDeps): Promise<nu
   let remaining = live;
   while (remaining.length && Date.now() < deadline) {
     await deps.sleep(250);
-    remaining = remaining.filter((e) => deps.commandOf(e.pgid) === e.command);
+    remaining = remaining.filter((e) => deps.startOf(e.pgid) === e.started);
   }
   for (const e of remaining) signalGroup(e.pgid, "SIGKILL", deps);
   // The leader can exit before its children (uv before python); sweep each group once more.

@@ -6,7 +6,7 @@ import { allocatePorts, type PortPlan } from "./ports";
 import { databaseUrl, removeSandboxContainers, startPostgres, stopPostgres, type DockerCtx } from "./postgres";
 import { ensureSandboxImage } from "./sandbox-image";
 import { loadOrCreateSecrets } from "./secrets";
-import { clearPids, commandLine, psCommandOf, recordPid, sweepOrphans } from "./stack-pids";
+import { clearPids, psStartOf, recordPid, sweepOrphans } from "./stack-pids";
 import { buildChildEnv, loginShellPath } from "./shell-env";
 import {
   computeOnboardingState,
@@ -100,7 +100,7 @@ async function check(): Promise<void> {
       // Before stopStack, which deletes the pid file. Ports held by a crashed session are freed before allocatePorts.
       sweptOrphans = true;
       await sweepOrphans(dataDir, {
-        commandOf: psCommandOf,
+        startOf: psStartOf,
         kill: (target, sig) => process.kill(target, sig),
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         log,
@@ -211,7 +211,7 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     logFile: path.join(logsDir, "api.log"),
   });
   api.start();
-  if (api.pid) recordPid(dataDir, { role: "api", pgid: api.pid, command: commandLine(uvBin, apiArgs) });
+  recordStarted("api", api.pid);
   const apiProc = api;
   await waitFor("The API", async () => (await httpStatus(`${apiOrigin}/health`)) === 200, {
     timeoutMs: 180_000,
@@ -236,7 +236,7 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     logFile: path.join(logsDir, "frontend.log"),
   });
   frontend.start();
-  if (frontend.pid) recordPid(dataDir, { role: "frontend", pgid: frontend.pid, command: commandLine(process.execPath, ["server.js"]) });
+  recordStarted("frontend", frontend.pid);
   const feProc = frontend;
   await waitFor("The web app", async () => (await httpStatus(`${feOrigin}/api/auth/session`)) === 200, {
     timeoutMs: 120_000,
@@ -263,6 +263,11 @@ function watchForCrash(proc: ManagedProcess, label: string): void {
 }
 
 /** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
+function recordStarted(role: string, pid: number | undefined): void {
+  const started = pid ? psStartOf(pid) : null;
+  if (pid && started) recordPid(dataDir, { role, pgid: pid, started });
+}
+
 async function stopStack(): Promise<void> {
   killActiveCommands();
   const fe = frontend;
