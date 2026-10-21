@@ -1,9 +1,10 @@
 """The per-user agent engine: which engine runs an agent turn that picks no model.
 
 Hosted mode always runs on OpenRouter, so it never reads the stored setting.
-Local mode runs agent turns on a subscription CLI: the one the user chose, or
-else the first CLI that is ready on this machine. A CLI engine never falls back
-to OpenRouter.
+Local mode runs agent turns on the engine the user chose: a subscription CLI,
+or OpenRouter with the user's verified key. With no choice, it runs them on the
+first CLI that is ready on this machine. A CLI engine never falls back to
+OpenRouter.
 """
 
 from __future__ import annotations
