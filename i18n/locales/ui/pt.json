@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "Não foi possível verificar os ambientes de execução. Atualize esta página para tentar novamente.",
   "submit.runtime.loading": "Verificando os ambientes de execução disponíveis…",
   "submit.runtime.docker": "Este Mac",
-  "submit.runtime.vercel": "Sandbox na nuvem do {term.appName}",
+  "submit.runtime.vercel": "Infraestrutura do {term.appName}",
   "workflow.dryrun.setup_sample": "Testa um exemplo de treinamento ou validação escolhido pelo servidor, dentro do orçamento compartilhado de configuração. Os dados reservados para o teste final nunca são usados.",
   "optimizations.serve.request_spent": "Usado {cents}",
   "submit.validation.progress.title": "Verificando sua configuração",

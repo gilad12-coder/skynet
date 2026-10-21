@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "無法確認執行環境。請重新整理呢個頁面再試。",
   "submit.runtime.loading": "正在檢查可用嘅執行環境…",
   "submit.runtime.docker": "呢部 Mac",
-  "submit.runtime.vercel": "{term.appName} 雲端沙盒",
+  "submit.runtime.vercel": "{term.appName} 基礎設施",
   "workflow.dryrun.setup_sample": "喺共用設定預算內，測試由伺服器揀選嘅一個訓練或驗證例子。唔會使用預留畀最終測試嘅資料。",
   "optimizations.serve.request_spent": "已用 {cents}",
   "submit.validation.progress.title": "正在檢查設定",

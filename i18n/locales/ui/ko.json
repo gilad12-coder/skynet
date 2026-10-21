@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "실행 환경을 확인하지 못했습니다. 이 페이지를 새로고침하여 다시 시도하세요.",
   "submit.runtime.loading": "사용 가능한 실행 환경 확인 중…",
   "submit.runtime.docker": "이 Mac",
-  "submit.runtime.vercel": "{term.appName} 클라우드 샌드박스",
+  "submit.runtime.vercel": "{term.appName} 인프라",
   "workflow.dryrun.setup_sample": "공유 설정 예산 내에서 서버가 선택한 학습 또는 검증 예제 하나를 테스트합니다. 최종 테스트용으로 분리된 데이터는 사용하지 않습니다.",
   "optimizations.serve.request_spent": "{cents} 사용됨",
   "submit.validation.progress.title": "설정을 확인하고 있습니다",

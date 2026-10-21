@@ -3294,7 +3294,7 @@
   "submit.runtime.failed": "לא ניתן היה לאמת את סביבות ההרצה. יש לרענן את הדף כדי לנסות שוב.",
   "submit.runtime.loading": "בודק אילו סביבות הרצה זמינות…",
   "submit.runtime.docker": "ה-Mac הזה",
-  "submit.runtime.vercel": "סביבת הענן של {term.appName}",
+  "submit.runtime.vercel": "התשתית של {term.appName}",
   "workflow.dryrun.setup_sample": "בודק דוגמה אחת מנתוני האימון או האימות שנבחרת בשרת, במסגרת תקציב ההגדרה המשותף. נתוני הבדיקה הסופית אינם משמשים כאן.",
   "optimizations.serve.request_spent": "נוצלו {cents}",
   "submit.validation.progress.title": "בודקים את ההגדרות שלך",

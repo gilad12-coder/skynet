@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "تعذّر التحقق من بيئات التشغيل. حدّث هذه الصفحة للمحاولة مجددًا.",
   "submit.runtime.loading": "جارٍ التحقق من بيئات التشغيل المتاحة…",
   "submit.runtime.docker": "جهاز Mac هذا",
-  "submit.runtime.vercel": "بيئة {term.appName} السحابية",
+  "submit.runtime.vercel": "البنية التحتية لـ {term.appName}",
   "workflow.dryrun.setup_sample": "يختبر مثال تدريب أو تحقق واحدًا يختاره الخادم، ضمن ميزانية الإعداد المشتركة. لا تُستخدم بيانات الاختبار النهائي المحجوزة أبدًا.",
   "optimizations.serve.request_spent": "استُخدم {cents}",
   "submit.validation.progress.title": "جارٍ التحقق من الإعداد",

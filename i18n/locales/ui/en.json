@@ -3294,7 +3294,7 @@
   "submit.runtime.failed": "Execution environments could not be verified. Refresh this page to try again.",
   "submit.runtime.loading": "Checking available execution environments…",
   "submit.runtime.docker": "This Mac",
-  "submit.runtime.vercel": "{term.appName} cloud sandbox",
+  "submit.runtime.vercel": "{term.appName} infrastructure",
   "workflow.dryrun.setup_sample": "Tests one training or validation example selected by the server, within your shared setup budget. Held-out test data is never used.",
   "optimizations.serve.request_spent": "Used {cents}",
   "submit.validation.progress.title": "Checking your setup",

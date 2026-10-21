@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "无法验证执行环境。请刷新此页面后重试。",
   "submit.runtime.loading": "正在检查可用的执行环境…",
   "submit.runtime.docker": "这台 Mac",
-  "submit.runtime.vercel": "{term.appName} 云沙箱",
+  "submit.runtime.vercel": "{term.appName} 基础设施",
   "workflow.dryrun.setup_sample": "在共享设置预算内，测试由服务器选择的一个训练或验证样本。绝不使用为最终测试预留的数据。",
   "optimizations.serve.request_spent": "已使用 {cents}",
   "submit.validation.progress.title": "正在检查配置",

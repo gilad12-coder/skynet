@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "Не вдалося перевірити середовища виконання. Оновіть сторінку, щоб спробувати знову.",
   "submit.runtime.loading": "Перевірка доступних середовищ виконання…",
   "submit.runtime.docker": "Цей Mac",
-  "submit.runtime.vercel": "Хмарна пісочниця {term.appName}",
+  "submit.runtime.vercel": "Інфраструктура {term.appName}",
   "workflow.dryrun.setup_sample": "Перевіряє один навчальний або валідаційний приклад, вибраний сервером, у межах спільного бюджету налаштування. Відкладені тестові дані ніколи не використовуються.",
   "optimizations.serve.request_spent": "Використано {cents}",
   "submit.validation.progress.title": "Перевіряємо налаштування",

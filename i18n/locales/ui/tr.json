@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "Çalıştırma ortamları doğrulanamadı. Tekrar denemek için bu sayfayı yenileyin.",
   "submit.runtime.loading": "Kullanılabilir çalıştırma ortamları kontrol ediliyor…",
   "submit.runtime.docker": "Bu Mac",
-  "submit.runtime.vercel": "{term.appName} bulut sandbox'ı",
+  "submit.runtime.vercel": "{term.appName} altyapısı",
   "workflow.dryrun.setup_sample": "Ortak kurulum bütçeniz kapsamında sunucunun seçtiği bir eğitim veya doğrulama örneğini test eder. Son test için ayrılmış veriler asla kullanılmaz.",
   "optimizations.serve.request_spent": "{cents} kullanıldı",
   "submit.validation.progress.title": "Kurulumunuz denetleniyor",

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { runtimeLabelKey } from "./runtime-label.ts";
 
-test("the cloud runtime shows the Skynet cloud sandbox label", () => {
+test("the cloud runtime shows the Skynet infrastructure label", () => {
   assert.equal(runtimeLabelKey("vercel"), "submit.runtime.vercel");
 });
 

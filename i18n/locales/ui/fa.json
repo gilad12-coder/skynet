@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "محیط‌های اجرا قابل تأیید نبودند. برای تلاش دوباره این صفحه را تازه‌سازی کنید.",
   "submit.runtime.loading": "در حال بررسی محیط‌های اجرای موجود…",
   "submit.runtime.docker": "همین Mac",
-  "submit.runtime.vercel": "محیط ابری {term.appName}",
+  "submit.runtime.vercel": "زیرساخت {term.appName}",
   "workflow.dryrun.setup_sample": "یک نمونهٔ آموزش یا اعتبارسنجی انتخاب‌شده توسط سرور را در چارچوب بودجهٔ مشترک تنظیمات آزمایش می‌کند. داده‌های کنارگذاشته‌شده برای آزمون نهایی هرگز استفاده نمی‌شوند.",
   "optimizations.serve.request_spent": "مصرف‌شده {cents}",
   "submit.validation.progress.title": "در حال بررسی تنظیمات",

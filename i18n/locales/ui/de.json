@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "Die Ausführungsumgebungen konnten nicht geprüft werden. Lade diese Seite neu, um es erneut zu versuchen.",
   "submit.runtime.loading": "Verfügbare Ausführungsumgebungen werden geprüft…",
   "submit.runtime.docker": "Dieser Mac",
-  "submit.runtime.vercel": "{term.appName} Cloud-Sandbox",
+  "submit.runtime.vercel": "{term.appName}-Infrastruktur",
   "workflow.dryrun.setup_sample": "Prüft ein vom Server ausgewähltes Trainings- oder Validierungsbeispiel innerhalb deines gemeinsamen Konfigurationsbudgets. Zurückgehaltene Testdaten werden nie verwendet.",
   "optimizations.serve.request_spent": "{cents} verbraucht",
   "submit.validation.progress.title": "Einrichtung wird geprüft",

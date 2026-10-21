@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "Не удалось проверить среды выполнения. Обновите страницу, чтобы повторить попытку.",
   "submit.runtime.loading": "Проверка доступных сред выполнения…",
   "submit.runtime.docker": "Этот Mac",
-  "submit.runtime.vercel": "Облачная песочница {term.appName}",
+  "submit.runtime.vercel": "Инфраструктура {term.appName}",
   "workflow.dryrun.setup_sample": "Проверяет один обучающий или валидационный пример, выбранный сервером, в пределах общего бюджета настройки. Отложенные тестовые данные никогда не используются.",
   "optimizations.serve.request_spent": "Использовано {cents}",
   "submit.validation.progress.title": "Проверяем настройки",

@@ -1,4 +1,4 @@
-/** User-visible copy never names the vendor behind Skynet's cloud sandbox. */
+/** User-visible copy never names the vendor behind Skynet infrastructure. */
 
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -3818,7 +3818,7 @@
   "submit.runtime.failed": "निष्पादन वातावरण सत्यापित नहीं हो सके। दोबारा कोशिश करने के लिए यह पेज रीफ़्रेश करें।",
   "submit.runtime.loading": "उपलब्ध निष्पादन वातावरण जाँचे जा रहे हैं…",
   "submit.runtime.docker": "यह Mac",
-  "submit.runtime.vercel": "{term.appName} क्लाउड सैंडबॉक्स",
+  "submit.runtime.vercel": "{term.appName} इन्फ्रास्ट्रक्चर",
   "workflow.dryrun.setup_sample": "साझा सेटअप बजट में सर्वर द्वारा चुने गए एक प्रशिक्षण या सत्यापन उदाहरण की जाँच करता है। अंतिम परीक्षण के लिए अलग रखे गए डेटा का उपयोग कभी नहीं होता।",
   "optimizations.serve.request_spent": "{cents} उपयोग किए गए",
   "submit.validation.progress.title": "आपके सेटअप की जाँच हो रही है",
