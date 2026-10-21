@@ -8,7 +8,7 @@ import { OPENROUTER_ENGINE, isAgentEngine, type AgentEngine } from "../lib/subsc
 // With no stored engine the backend picks the first ready CLI, which changes
 // when a CLI signs out or hits its cap. So each CLI status refresh marks the
 // engine stale (refreshAgentEngine). A failed load is not cached, so the next
-// caller tries again.
+// caller tries again, and a failed reload keeps the last loaded engine.
 let cached: { engine: AgentEngine | null; stale: boolean } | null = null;
 let inflight: Promise<AgentEngine | null> | null = null;
 // Bumped by every save, so a load that started before a save cannot overwrite it.
@@ -28,7 +28,8 @@ function asEngine(value: unknown): AgentEngine | null {
  * The caller's agent engine (`GET /account/agent-engine`), shared between
  * every caller. Hosted builds always run on OpenRouter and never call the
  * route. A local engine is null when none was chosen and no CLI is ready, or
- * when the load failed; callers then fall back to their own default.
+ * when the first load failed; callers then fall back to their own default. A
+ * failed reload returns the last loaded engine.
  */
 export function loadAgentEngine(): Promise<AgentEngine | null> {
   if (!isLocalMode()) return Promise.resolve(OPENROUTER_ENGINE);
@@ -42,7 +43,7 @@ export function loadAgentEngine(): Promise<AgentEngine | null> {
       setCached(engine);
       return engine;
     })
-    .catch(() => null)
+    .catch(() => cached?.engine ?? null)
     .finally(() => {
       if (inflight === promise) inflight = null;
     });

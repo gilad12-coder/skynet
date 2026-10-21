@@ -14,9 +14,8 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 const { AgentEngineSelect } = await import("./AgentEngineSetting");
-const { loadAgentEngine, loadLocalStatus, peekAgentEngine, saveAgentEngine } = await import(
-  "@/features/local-runtime"
-);
+const { loadAgentEngine, loadLocalStatus, localAgentModel, peekAgentEngine, saveAgentEngine } =
+  await import("@/features/local-runtime");
 
 const cli = (id: CliStatus["id"], patch: Partial<CliStatus> = {}): CliStatus => ({
   id,
@@ -165,6 +164,48 @@ void describe("loadAgentEngine", () => {
       assert.equal(peekAgentEngine(), "droid");
     } finally {
       globalThis.fetch = realFetch;
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+
+  void it("a failed reload keeps the stored engine, so agent requests keep its CLI", async () => {
+    let engineFails = false;
+    const realFetch = globalThis.fetch;
+    const realNow = Date.now;
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    globalThis.fetch = (async (url: string) => {
+      if (String(url).endsWith("/account/agent-engine")) {
+        return new Response(
+          JSON.stringify(engineFails ? { detail: "boom" } : { engine: "droid" }),
+          {
+            status: engineFails ? 500 : 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      const s = status([
+        cli("claude", { models: ["claude-sonnet"] }),
+        cli("droid", { models: ["glm-4"] }),
+      ]);
+      return new Response(JSON.stringify(s), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      await loadLocalStatus(true);
+      assert.equal(await loadAgentEngine(), "droid");
+      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/droid\//);
+      // The status cache expires, so the next request refreshes it and reloads the engine.
+      engineFails = true;
+      Date.now = () => realNow() + 60_000;
+      assert.match((await localAgentModel(null, null)) ?? "", /^subscription\/droid\//);
+      assert.equal(peekAgentEngine(), "droid");
+    } finally {
+      globalThis.fetch = realFetch;
+      Date.now = realNow;
       if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
       else process.env.APP_LOCAL_MODE = realLocal;
     }
