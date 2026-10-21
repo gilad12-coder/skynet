@@ -34,9 +34,13 @@ from ..account_data_service import delete_account, export_account
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..routers import agent_engine as engine_router_mod
+from ..routers import code_agent as code_agent_mod
 from ..routers import generalist_agent as agent_mod
+from ..routers import tagger_assist as tagger_mod
 from ..routers.agent_engine import create_agent_engine_router
+from ..routers.code_agent import create_code_agent_router
 from ..routers.generalist_agent import create_generalist_agent_router
+from ..routers.tagger_assist import create_tagger_assist_router
 from .test_generalist_persistence import _SECRET, _fund, _session_token
 
 _USER = "alice@example.com"
@@ -337,3 +341,88 @@ def test_local_chat_turn_with_no_model_runs_on_codex_with_no_remote_call(
     [call] = calls(tmp_path, "codex")
     assert call["argv"][call["argv"].index("--model") + 1] == CLI_MODELS["codex"][_CODEX_SLUG]
     assert remote == []
+
+
+# Each route, its routing function and its module, with a minimal valid body.
+_AGENT_ROUTES = [
+    (
+        "/optimizations/ai-generate-code",
+        code_agent_mod,
+        "route_menu_model",
+        {"dataset_columns": ["q", "a"], "column_roles": {"q": "input", "a": "output"}, "user_message": "hi"},
+    ),
+    ("/optimizations/task-interview", code_agent_mod, "route_interview_model", {"objective": "Answer questions"}),
+    (
+        "/optimizations/infer-inputs",
+        code_agent_mod,
+        "route_interview_model",
+        {"objective": "Answer questions", "artifact_kind": "prompt"},
+    ),
+    ("/account/intake-interview", code_agent_mod, "route_interview_model", {"phase": "billing"}),
+    ("/tagging-sessions/s1/assist/interview", tagger_mod, "route_interview_model", {}),
+    ("/tagging-sessions/s1/assist/interview/stream", tagger_mod, "route_interview_model", {}),
+]
+
+
+@pytest.mark.usefixtures("local")
+@pytest.mark.parametrize(
+    ("path", "module", "router_fn", "body"),
+    _AGENT_ROUTES,
+    ids=[
+        "ai_generate_code",
+        "task_interview",
+        "infer_inputs",
+        "intake_interview",
+        "tagger_interview",
+        "tagger_interview_stream",
+    ],
+)
+def test_agent_route_with_no_model_routes_the_engine_model(
+    path: str, module: Any, router_fn: str, body: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send the stored engine's model, not the empty pick, to the model router on each agent route.
+
+    The balance gates and the session load are stubbed, and the model router
+    records its input and stops the turn, so no agent runs and nothing is
+    charged. The test fails if a route stops filling the pick from the engine.
+
+    Args:
+        path: The agent route.
+        module: The router module whose routing call is recorded.
+        router_fn: The routing function the route calls.
+        body: A valid request body with no model.
+        monkeypatch: Stubs the gates and records the routed model.
+    """
+    engine = _engine()
+    with Session(engine) as session:
+        session.add(AgentEnginePreferenceModel(username=_USER, engine="codex"))
+        session.commit()
+    routed: list[str | None] = []
+
+    def record(model: str | None) -> str:
+        """Record the routed model and stop the turn before any agent runs."""
+        routed.append(model)
+        raise DomainError("test.routed", status=418)
+
+    monkeypatch.setattr(module, router_fn, record)
+    monkeypatch.setattr(module, "fits_kickoff_budget", lambda _size: True)
+    monkeypatch.setattr(code_agent_mod, "gate_interactive_turn", lambda *_args: None)
+    monkeypatch.setattr(code_agent_mod, "gate_intake_turn", lambda *_args: (None, False))
+    monkeypatch.setattr(code_agent_mod, "_intake_catalog", lambda: ([], []))
+    monkeypatch.setattr(tagger_mod, "enforce_llm_balance", lambda *_args: None)
+    monkeypatch.setattr(tagger_mod, "_load_for_role", lambda *_args: SimpleNamespace(columns=[], data=[]))
+    monkeypatch.setattr(tagger_mod, "_interview_config", lambda _row: {})
+    store = SimpleNamespace(engine=engine)
+    app = FastAPI()
+
+    @app.exception_handler(DomainError)
+    async def _domain_error(request: Request, exc: DomainError) -> JSONResponse:
+        """Render a domain error with its i18n code."""
+        return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
+
+    app.include_router(create_code_agent_router(job_store=store))
+    app.include_router(create_tagger_assist_router(job_store=store, get_worker_ref=lambda: None))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(username=_USER, role="user", groups=())
+    response = TestClient(app).post(path, json=body)
+    assert (response.status_code, response.json()) == (418, {"code": "test.routed"})
+    assert routed == [_CODEX_ID]
