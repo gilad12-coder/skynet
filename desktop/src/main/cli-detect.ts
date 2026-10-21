@@ -137,8 +137,10 @@ export async function checkLogin(id: CliId, bin: string, run: Runner, env: Recor
   }
   if (id === "codex") {
     const res = await run(bin, ["login", "status"], env);
+    const out = `${res.stdout}\n${res.stderr}`;
     // "Not logged in" also contains "logged in"; the exit code rules that case out.
-    return res.code === 0 && /logged in/i.test(`${res.stdout}\n${res.stderr}`);
+    // "Logged in using an API key" bills the key, not the ChatGPT subscription.
+    return res.code === 0 && /logged in/i.test(out) && !/api key/i.test(out);
   }
   const res = await run(bin, ["doctor", "--auth", "--json"], env);
   try {

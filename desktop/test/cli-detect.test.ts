@@ -118,13 +118,17 @@ describe("probeCli with fake binaries", () => {
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
   });
 
-  it("needs exit 0 and 'logged in' from codex login status", async () => {
+  it("needs exit 0 and a non-API-key 'logged in' from codex login status", async () => {
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Not logged in" >&2; exit 1; fi');
     expect(await probeCli("codex", [dir], {})).toMatchObject({ version: "0.160.1", versionOk: true, loggedIn: false });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "something else"; fi');
     expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using ChatGPT" >&2; fi');
     expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: true });
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using an API key - sk-proj-***ABCDE" >&2; fi');
+    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using API KEY"; fi');
+    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
   });
 
   it("reads ok from droid doctor --auth --json", async () => {
