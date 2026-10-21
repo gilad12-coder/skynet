@@ -8,17 +8,28 @@ Internal (Mac app plumbing, hidden from public docs):
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from ....config import settings
+from ....models import OptimizationStatusResponse
 from ....service_gateway.run_sync import MAX_BUNDLE_BYTES, RunSyncError, export_run, import_run
 from ...auth import AuthenticatedUser, get_authenticated_user
+from ...converters import (
+    compute_elapsed,
+    overview_to_base_fields,
+    parse_overview,
+    parse_timestamp,
+    status_to_job_status,
+)
 from ...errors import DomainError
-from .._helpers import enforce_job_quota, enforce_storage_quota
+from .._helpers import build_summary, enforce_job_quota, enforce_storage_quota
 from ..local_runtime import require_local_mode
+from .listing import build_sidebar_item
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 _MAX_BUNDLE_MB = MAX_BUNDLE_BYTES // (1024 * 1024)
@@ -34,6 +45,50 @@ def _domain_error(exc: RunSyncError) -> DomainError:
         The matching ``DomainError``.
     """
     return DomainError(exc.code, status=exc.http_status, params=exc.params)
+
+
+def _check_readable(job: dict[str, Any], events: list[dict[str, Any]]) -> None:
+    """Build the run list, sidebar, summary and detail shapes for an imported row.
+
+    The bundle's overview and fields are caller-shaped. One value the read models
+    cannot take would break the caller's whole run list, so the import is
+    refused instead.
+
+    Args:
+        job: The new row as the job store returns it.
+        events: The row's progress events.
+
+    Raises:
+        RunSyncError: 422 ``sync.invalid_bundle`` when any read shape fails.
+    """
+    try:
+        build_summary(job)
+        build_sidebar_item(job, set(), set())
+        created_at = parse_timestamp(job.get("created_at")) or datetime.now(UTC)
+        started_at = parse_timestamp(job.get("started_at"))
+        completed_at = parse_timestamp(job.get("completed_at"))
+        elapsed, elapsed_seconds = compute_elapsed(
+            created_at, started_at, completed_at, job.get("accumulated_runtime_seconds") or 0.0
+        )
+        OptimizationStatusResponse(
+            optimization_id=job["optimization_id"],
+            status=status_to_job_status(job.get("status", "pending")),
+            created_at=created_at,
+            started_at=started_at,
+            completed_at=completed_at,
+            elapsed=elapsed,
+            elapsed_seconds=elapsed_seconds,
+            **overview_to_base_fields(parse_overview(job)),
+            message=job.get("message"),
+            stop_reason=job.get("stop_reason"),
+            result_availability=job.get("result_availability"),
+            terminal_evidence=job.get("terminal_evidence"),
+            stored_bytes=job.get("stored_bytes", 0),
+            latest_metrics=job.get("latest_metrics", {}),
+            progress_events=events,
+        ).model_dump_json()
+    except (ValidationError, ValueError, TypeError, OverflowError, AttributeError):
+        raise RunSyncError("sync.invalid_bundle", 422) from None
 
 
 async def _read_capped_body(request: Request) -> bytes:
@@ -103,7 +158,7 @@ def register_sync_routes(router: APIRouter, *, job_store) -> None:
         enforce_job_quota(job_store, current_user.username)
         enforce_storage_quota(job_store, current_user.username, len(raw))
         try:
-            optimization_id = import_run(job_store, current_user.username, bundle)
+            optimization_id = import_run(job_store, current_user.username, bundle, check_row=_check_readable)
         except RunSyncError as exc:
             raise _domain_error(exc) from None
         return JSONResponse(status_code=201, content={"optimization_id": optimization_id})

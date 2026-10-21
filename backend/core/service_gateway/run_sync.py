@@ -14,6 +14,7 @@ import base64
 import binascii
 import json
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
@@ -39,13 +40,11 @@ from ..constants import (
 )
 from ..models import BlackboxRunResponse, RunResponse
 from ..storage.models import JobModel, ProgressEventModel
-from ..storage.usage import json_byte_size
+from ..storage.usage import IMPORTED_FROM_DESKTOP, IMPORTED_FROM_KEY, json_byte_size
 
 SCHEMA_VERSION = "skynet.run-export/v1"
 MAX_BUNDLE_BYTES = 50 * 1024 * 1024
 IMPORT_LABEL = "imported from desktop"
-IMPORTED_FROM_KEY = "imported_from"
-IMPORTED_FROM_DESKTOP = "desktop"
 PROGRAM_ARTIFACT_NAME = "program_artifact.json"
 
 _SYNCABLE_STATUSES = frozenset({"success", "failed", "cancelled", "stopped"})
@@ -76,6 +75,9 @@ MAX_BUNDLE_DEPTH = 64
 # meter them; an import takes them from the caller, so they are capped and counted.
 # latest_metrics also ships in every row of the run list.
 MAX_JOB_FIELD_BYTES = 64 * 1024
+# A time near year 1 or 9999 with a large offset leaves the datetime range once
+# converted to UTC, and every later read of the row (delete included) fails.
+_TIMESTAMP_YEARS = range(1970, 2101)
 
 
 def _is_storable(value: Any, limit: int) -> bool:
@@ -156,7 +158,7 @@ class _BundleJob(BaseModel):
     stop_reason: str | None = Field(default=None, max_length=32)
     result_availability: str | None = Field(default=None, max_length=16)
     terminal_evidence: dict[str, Any] | None = None
-    accumulated_runtime_seconds: float = Field(default=0.0, ge=0)
+    accumulated_runtime_seconds: float = Field(default=0.0, ge=0, allow_inf_nan=False)
 
 
 class _BundleOptimization(BaseModel):
@@ -264,18 +266,22 @@ def _parse_time(value: str | None, *, default: datetime | None) -> datetime | No
         default: Value used when ``value`` is ``None``.
 
     Returns:
-        An aware ``datetime``, or ``default``.
+        A ``datetime`` in UTC, or ``default``.
 
     Raises:
-        RunSyncError: 422 ``sync.invalid_bundle`` for text that is not ISO-8601.
+        RunSyncError: 422 ``sync.invalid_bundle`` for text that is not ISO-8601
+            or a time outside ``_TIMESTAMP_YEARS``.
     """
     if value is None:
         return default
     try:
         parsed = datetime.fromisoformat(value)
-    except ValueError:
+        parsed = (parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)).astimezone(UTC)
+    except (ValueError, OverflowError):
         raise RunSyncError("sync.invalid_bundle", 422) from None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    if parsed.year not in _TIMESTAMP_YEARS:
+        raise RunSyncError("sync.invalid_bundle", 422)
+    return parsed
 
 
 def _decode_program_artifact(artifacts: dict[str, str]) -> dict[str, Any] | None:
@@ -363,13 +369,22 @@ def _validated_result(bundle: _Bundle, overview: dict[str, Any]) -> dict[str, An
         result["program_artifact"] = artifact
     model = BlackboxRunResponse if bundle.optimization.optimization_type == OPTIMIZATION_TYPE_BLACKBOX else RunResponse
     try:
-        model.model_validate(result)
+        validated = model.model_validate(result)
     except ValidationError:
         raise RunSyncError("sync.invalid_bundle", 422) from None
+    # Lax validation turns text such as "Infinity" into a float the raw check never saw.
+    if not _is_storable(validated.model_dump(), MAX_BUNDLE_DEPTH):
+        raise RunSyncError("sync.invalid_bundle", 422)
     return result
 
 
-def import_run(job_store, username: str, bundle: dict) -> str:
+def import_run(
+    job_store,
+    username: str,
+    bundle: dict,
+    *,
+    check_row: Callable[[dict[str, Any], list[dict[str, Any]]], None] | None = None,
+) -> str:
     """Create a read-only copy of an exported run under the caller.
 
     The job row and its progress events are written in one transaction, already
@@ -380,6 +395,9 @@ def import_run(job_store, username: str, bundle: dict) -> str:
         job_store: The hosted job store; it must expose its SQLAlchemy ``engine``.
         username: The authenticated hosted caller.
         bundle: The decoded export bundle.
+        check_row: Called before commit with the new row as the store returns it
+            and its progress events; it raises ``RunSyncError`` to roll back an
+            import that the read routes could not serve.
 
     Returns:
         The new optimization id.
@@ -451,5 +469,16 @@ def import_run(job_store, username: str, bundle: dict) -> str:
             ProgressEventModel(optimization_id=optimization_id, timestamp=timestamp, event=event, metrics=metrics)
             for timestamp, event, metrics in event_rows
         )
+        session.flush()
+        if check_row is not None:
+            # Reload so the check sees the values as the database returns them.
+            session.refresh(job)
+            check_row(
+                job_store._job_to_dict(job),
+                [
+                    {"timestamp": timestamp.isoformat(), "event": event, "metrics": metrics}
+                    for timestamp, event, metrics in event_rows
+                ],
+            )
         session.commit()
     return optimization_id

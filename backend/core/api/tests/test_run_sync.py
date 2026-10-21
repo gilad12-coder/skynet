@@ -27,6 +27,7 @@ from ...storage.models import Base, ExecutionBudgetModel, JobModel, ProgressEven
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser
 from ..routers.optimizations import create_optimizations_router
+from ..routers.optimizations_meta import create_optimizations_meta_router
 from .conftest import bypass_auth
 
 DESK_USER = AuthenticatedUser(username="desk-user", role="user", groups=())
@@ -437,3 +438,113 @@ def test_values_postgres_cannot_store_are_422(
     assert resp.status_code == 422
     assert resp.json()["detail"] == t_en("sync.invalid_bundle")
     assert _count(hosted_store, JobModel) == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("created_at", "0001-01-01T00:00:00+14:00"),
+        ("completed_at", "9999-12-31T23:59:59-14:00"),
+        ("created_at", "1969-12-31T23:59:59+00:00"),
+        ("event", "9999-12-31T23:59:59-14:00"),
+    ],
+    ids=["created-before-year-1", "completed-after-9999", "before-1970", "event-after-9999"],
+)
+def test_out_of_range_timestamps_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], field: str, value: str
+) -> None:
+    """A time that leaves the datetime range in UTC, or is outside 1970..2100, is refused.
+
+    Before the fix, such a run imported with 201 and then broke the list, detail and delete routes.
+    """
+    if field == "event":
+        bundle["events"][0]["timestamp"] = value
+    else:
+        bundle["job"][field] = value
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+    assert _client(hosted_store, HOSTED_USER).get("/optimizations").status_code == 200
+
+
+def test_offset_timestamp_is_stored_in_utc(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """A time with an offset is stored as the same instant in UTC."""
+    bundle["job"]["created_at"] = "2026-05-01T12:00:00+02:00"
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    job = hosted_store.get_job(resp.json()["optimization_id"])
+    assert job["created_at"].startswith("2026-05-01T10:00:00")
+
+
+@pytest.mark.parametrize("value", ["Infinity", "inf", "1e400", "NaN"])
+def test_non_finite_runtime_text_is_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any], value: str) -> None:
+    """Runtime text that converts to a non-finite float is refused."""
+    bundle["job"]["accumulated_runtime_seconds"] = value
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
+@pytest.mark.parametrize("value", ["12.5", 3])
+def test_finite_runtime_is_accepted(hosted_store: _SQLiteJobStore, bundle: dict[str, Any], value: Any) -> None:
+    """Runtime as numeric text or an integer still imports."""
+    bundle["job"]["accumulated_runtime_seconds"] = value
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    assert hosted_store.get_job(resp.json()["optimization_id"])["accumulated_runtime_seconds"] == float(value)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda b: b["job"]["result"].update(baseline_test_metric="Infinity"),
+        lambda b: b["optimization"]["payload_overview"].update(model_name=7),
+        lambda b: b["optimization"]["payload_overview"].update(dataset_rows="abc"),
+        lambda b: b["optimization"]["payload_overview"].update(dataset_rows=5.5),
+        lambda b: b["optimization"]["payload_overview"].update(seed="abc"),
+    ],
+    ids=["infinite-result-metric", "numeric-model-name", "text-dataset-rows", "fractional-dataset-rows", "text-seed"],
+)
+def test_values_the_read_routes_cannot_serve_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], mutate: Any
+) -> None:
+    """A bundle whose row would break the caller's run list or detail is refused, and the list stays readable."""
+    mutate(bundle)
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+    assert _count(hosted_store, ProgressEventModel) == 0
+    assert _client(hosted_store, HOSTED_USER).get("/optimizations").status_code == 200
+
+
+def test_pin_and_rename_keep_imported_storage(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """Pin, rename and a later update keep counting the imported metrics and terminal evidence."""
+    blob = "x" * 4096
+    bundle["job"]["latest_metrics"] = {"blob": blob}
+    bundle["job"]["terminal_evidence"] = {"blob": blob}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    optimization_id = resp.json()["optimization_id"]
+    imported_bytes = hosted_store.get_job(optimization_id)["stored_bytes"]
+    assert imported_bytes >= 2 * len(blob)
+
+    app = FastAPI()
+    app.include_router(create_optimizations_meta_router(job_store=hosted_store))
+    bypass_auth(app, user=HOSTED_USER)
+    meta = TestClient(app, raise_server_exceptions=False)
+    assert meta.patch(f"/optimizations/{optimization_id}/pin").status_code == 200
+    pinned_bytes = hosted_store.get_job(optimization_id)["stored_bytes"]
+    assert pinned_bytes >= imported_bytes
+    assert meta.patch(f"/optimizations/{optimization_id}/name", json={"name": "Renamed"}).status_code == 200
+    assert hosted_store.get_job(optimization_id)["stored_bytes"] >= 2 * len(blob)
+
+    hosted_store.update_job(optimization_id, message="Note")
+    hosted_store.update_job(optimization_id, result=hosted_store.get_job(optimization_id)["result"])
+    assert hosted_store.get_job(optimization_id)["stored_bytes"] >= 2 * len(blob)
+    assert hosted_store.update_job_if_status(
+        optimization_id, ("success",), result=hosted_store.get_job(optimization_id)["result"]
+    )
+    assert hosted_store.get_job(optimization_id)["stored_bytes"] >= 2 * len(blob)

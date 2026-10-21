@@ -113,6 +113,30 @@ def json_byte_size(value: object) -> int:
     return len(json.dumps(value, separators=(",", ":"), default=str).encode("utf-8"))
 
 
+# A run copied from the Mac app (SKY-117) carries caller-supplied
+# ``latest_metrics`` and ``terminal_evidence``. A normal run's worker writes
+# those columns and keeps them small, so only an import counts them.
+IMPORTED_FROM_KEY = "imported_from"
+IMPORTED_FROM_DESKTOP = "desktop"
+
+
+def imported_job_extra_bytes(overview: object, latest_metrics: object, terminal_evidence: object) -> int:
+    """Return the extra stored bytes an imported job counts beyond its main JSON columns.
+
+    Args:
+        overview: The job's ``payload_overview``.
+        latest_metrics: The job's ``latest_metrics``.
+        terminal_evidence: The job's ``terminal_evidence``.
+
+    Returns:
+        The serialized size of ``latest_metrics`` and ``terminal_evidence`` for a
+        job imported from the desktop, else ``0``.
+    """
+    if not isinstance(overview, dict) or overview.get(IMPORTED_FROM_KEY) != IMPORTED_FROM_DESKTOP:
+        return 0
+    return json_byte_size(latest_metrics) + json_byte_size(terminal_evidence)
+
+
 def _byte_size(column: object, dialect_name: str):
     """Return a SQL expression for the byte length of ``column`` rendered as text.
 

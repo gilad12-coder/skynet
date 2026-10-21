@@ -25,6 +25,7 @@ from ...config import app_env
 from ...service_gateway import run_sync
 from ...storage.models import Base
 from ...storage.remote import RemoteDBJobStore
+from ..routers.optimizations.sync import _check_readable
 
 TEST_DB_URL = app_env("APP_BUDGET_TEST_DB_URL")
 pytestmark = pytest.mark.skipif(
@@ -174,3 +175,59 @@ def test_values_jsonb_rejects_are_refused_before_the_write(store: _SchemaJobStor
     assert excinfo.value.code == "sync.invalid_bundle"
     with store.engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM jobs")).scalar() == 0
+
+
+def _row_counts(store: _SchemaJobStore) -> tuple[int, int]:
+    """Count the job and progress event rows in the test schema.
+
+    Args:
+        store: The schema-scoped job store.
+
+    Returns:
+        The job count and the progress event count.
+    """
+    with store.engine.connect() as connection:
+        jobs = connection.execute(text("SELECT count(*) FROM jobs")).scalar()
+        events = connection.execute(text("SELECT count(*) FROM job_progress_events")).scalar()
+    return jobs, events
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda b: b["job"].update(created_at="0001-01-01T00:00:00+14:00"),
+        lambda b: b["events"][0].update(timestamp="9999-12-31T23:59:59-14:00"),
+    ],
+    ids=["created-before-year-1", "event-after-9999"],
+)
+def test_out_of_range_timestamps_write_no_row(store: _SchemaJobStore, mutate: Any) -> None:
+    """A time outside the stored range gives a sync error and writes no job or event row."""
+    bundle = _bundle()
+    mutate(bundle)
+    with pytest.raises(run_sync.RunSyncError) as excinfo:
+        run_sync.import_run(store, "bob", bundle, check_row=_check_readable)
+    assert excinfo.value.code == "sync.invalid_bundle"
+    assert _row_counts(store) == (0, 0)
+
+
+def test_unreadable_overview_rolls_back_job_and_events(store: _SchemaJobStore) -> None:
+    """When the read check fails after the flush, the job and its events are rolled back."""
+    bundle = _bundle()
+    bundle["optimization"]["payload_overview"]["model_name"] = 7
+    with pytest.raises(run_sync.RunSyncError) as excinfo:
+        run_sync.import_run(store, "bob", bundle, check_row=_check_readable)
+    assert excinfo.value.code == "sync.invalid_bundle"
+    assert _row_counts(store) == (0, 0)
+
+
+def test_overview_update_keeps_imported_storage(store: _SchemaJobStore) -> None:
+    """A pin-style overview write and a result update keep counting the imported job fields."""
+    bundle = _bundle()
+    bundle["job"]["terminal_evidence"] = {"blob": "x" * 4096}
+    new_id = run_sync.import_run(store, "bob", bundle, check_row=_check_readable)
+    assert store.get_job(new_id)["stored_bytes"] >= 4096
+    overview = store.get_job(new_id)["payload_overview"]
+    store.set_payload_overview(new_id, {**overview, "pinned": True})
+    assert store.get_job(new_id)["stored_bytes"] >= 4096
+    store.update_job(new_id, result=store.get_job(new_id)["result"])
+    assert store.get_job(new_id)["stored_bytes"] >= 4096
