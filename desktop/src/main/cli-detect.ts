@@ -126,12 +126,13 @@ export async function checkLogin(id: CliId, bin: string, run: Runner, env: Recor
   if (id === "claude") {
     const res = await run(bin, ["auth", "status"], env);
     try {
-      const parsed = JSON.parse(res.stdout) as { loggedIn?: unknown };
-      if (typeof parsed.loggedIn === "boolean") return parsed.loggedIn;
+      const parsed = JSON.parse(res.stdout) as { loggedIn?: unknown; authMethod?: unknown } | null;
+      // Only a stored claude.ai login runs on the subscription. api_key,
+      // api_key_helper, oauth_token, third_party, none or a missing method do not.
+      return parsed?.loggedIn === true && parsed.authMethod === "claude.ai";
     } catch {
-      // Not JSON: fall through.
+      // Not JSON: fail closed.
     }
-    // Fail closed: output without a boolean loggedIn counts as signed out.
     return false;
   }
   if (id === "codex") {

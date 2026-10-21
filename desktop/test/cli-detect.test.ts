@@ -102,8 +102,16 @@ describe("probeCli with fake binaries", () => {
   it("reads claude auth status JSON", async () => {
     fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306 (Claude Code)"; else echo \'{"loggedIn": false}\'; fi');
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
-    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": true}\'; fi');
+    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": true, "authMethod": "claude.ai"}\'; fi');
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: true });
+    for (const method of ["api_key_helper", "oauth_token", "api_key", "third_party", "none"]) {
+      fake("claude", `if [ "$1" = "--version" ]; then echo "2.1.306"; else echo '{"loggedIn": true, "authMethod": "${method}"}'; fi`);
+      expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
+    }
+    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": true}\'; fi');
+    expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
+    fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": false, "authMethod": "claude.ai"}\'; fi');
+    expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
     fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo "Logged in"; fi');
     expect(await probeCli("claude", [dir], {})).toMatchObject({ versionOk: true, loggedIn: false });
     fake("claude", 'if [ "$1" = "--version" ]; then echo "2.1.306"; else echo \'{"loggedIn": "yes"}\'; fi');
@@ -141,7 +149,7 @@ describe("probeCli with fake binaries", () => {
     const seen: Record<string, string>[] = [];
     const runner: Runner = async (_file, args, env) => {
       seen.push(env);
-      return { code: 0, stdout: args[0] === "--version" ? "2.1.300" : '{"loggedIn":true}', stderr: "" };
+      return { code: 0, stdout: args[0] === "--version" ? "2.1.300" : '{"loggedIn":true,"authMethod":"claude.ai"}', stderr: "" };
     };
     await probeClis(
       [dir],
