@@ -61,7 +61,7 @@ def route_agent_model(model: str | None) -> ModelConfig:
 
     Raises:
         DomainError: 422 when an explicit id is not a catalog model, or in
-            local mode when no model was picked.
+            local mode for any pick that is not a subscription model.
     """
     name = route_menu_model(model)
     subscription = parse_subscription_model_id(name or "")
@@ -145,8 +145,8 @@ def route_menu_model(model: str | None) -> str | None:
     Raises:
         DomainError: 422 when an explicit id is not a catalog model, or names
             a subscription model its CLI cannot run; 422
-            ``models.managed_unavailable_local`` in local mode when no model
-            was picked.
+            ``models.managed_unavailable_local`` in local mode for any pick
+            that is not a subscription model.
     """
     name = str(model or "").strip()
     subscription = parse_subscription_model_id(name) if settings.local_mode else None
@@ -155,12 +155,12 @@ def route_menu_model(model: str | None) -> str | None:
         if slug not in CLI_MODELS[cli]:
             raise DomainError("billing.subscription_unmapped_model", status=422, provider=cli)
         return name
+    _refuse_local_managed()
     # Saved prefs and stored conversations may still name a withdrawn model;
     # run the default instead of failing every turn with a 422.
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
         require_known_model(name)
         return name
-    _refuse_local_default()
     return default_model_id()
 
 
@@ -176,21 +176,22 @@ def route_interview_model(model: str | None) -> str | None:
 
     Raises:
         DomainError: 422 when an explicit id is not a catalog model; 422
-            ``models.managed_unavailable_local`` in local mode when no model
-            was picked.
+            ``models.managed_unavailable_local`` in local mode for any pick
+            that is not a subscription model.
     """
     name = str(model or "").strip()
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
         return route_menu_model(name)
-    _refuse_local_default()
+    _refuse_local_managed()
     return interview_model_id()
 
 
-def _refuse_local_default() -> None:
-    """Refuse the managed default in local mode.
+def _refuse_local_managed() -> None:
+    """Refuse a managed model in local mode.
 
-    The catalog, interview and server defaults are all OpenRouter models, and
-    the Mac app has no managed key, so a turn sent there fails with a 401.
+    Catalog ids and the catalog, interview and server defaults all run on
+    managed OpenRouter, and the Mac app has no managed key, so a turn sent
+    there fails with a 401. The composers have no BYOK route.
 
     Raises:
         DomainError: 422 ``models.managed_unavailable_local`` in local mode.

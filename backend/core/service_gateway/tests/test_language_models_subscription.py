@@ -121,6 +121,44 @@ def test_local_mode_never_falls_back_to_a_managed_model(
     assert (caught.value.status_code, caught.value.code) == (422, "models.managed_unavailable_local")
 
 
+@pytest.mark.usefixtures("local")
+@pytest.mark.parametrize("model", ["openai/gpt-4o-mini", MANAGED_DEFAULT], ids=["catalog_id", "openrouter_id"])
+@pytest.mark.parametrize(
+    "route",
+    [model_router.route_menu_model, model_router.route_interview_model, model_router.route_agent_model],
+    ids=["menu", "interview", "agent"],
+)
+def test_local_mode_refuses_an_explicit_managed_model(
+    monkeypatch: pytest.MonkeyPatch, route: object, model: str
+) -> None:
+    """Refuse a picked managed model in local mode, which has no managed key.
+
+    Args:
+        monkeypatch: Makes every id a known catalog model.
+        route: The composer router under test.
+        model: A managed catalog id the user picked.
+    """
+    monkeypatch.setattr(model_router, "require_known_model", lambda name: None)
+    with pytest.raises(DomainError) as caught:
+        route(model)
+    assert (caught.value.status_code, caught.value.code) == (422, "models.managed_unavailable_local")
+
+
+@pytest.mark.parametrize(
+    "route", [model_router.route_menu_model, model_router.route_interview_model], ids=["menu", "interview"]
+)
+def test_hosted_mode_keeps_an_explicit_managed_model(monkeypatch: pytest.MonkeyPatch, route: object) -> None:
+    """Keep a picked managed model for a hosted turn.
+
+    Args:
+        monkeypatch: Keeps local mode off and makes every id a known catalog model.
+        route: The composer router under test.
+    """
+    monkeypatch.setattr(model_router.settings, "local_mode", False)
+    monkeypatch.setattr(model_router, "require_known_model", lambda name: None)
+    assert route("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
 @pytest.mark.parametrize(
     "route", [model_router.route_menu_model, model_router.route_interview_model], ids=["menu", "interview"]
 )
