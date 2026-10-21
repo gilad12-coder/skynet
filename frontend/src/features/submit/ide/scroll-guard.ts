@@ -68,6 +68,10 @@ export function guardClippingInside(root: HTMLElement): () => void {
     // The focused node itself is skipped: Monaco's hidden input textarea sets
     // its own scroll offsets to place the caret and IME composition text.
     if (!focused || box === focused || !box.contains(focused)) return;
+    // VS Code menus (Explorer context menu, "..." menus) hide their overflow
+    // and scroll the focused item into view by script; pinning them at 0 hid
+    // the lower items of a menu taller than a short window.
+    if (box.closest(".monaco-menu-container")) return;
     if (!clipsButScrolls(getComputedStyle(box))) return;
     if (box.scrollTop !== 0) box.scrollTop = 0;
     if (box.scrollLeft !== 0) box.scrollLeft = 0;

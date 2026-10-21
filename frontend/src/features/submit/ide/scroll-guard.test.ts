@@ -21,13 +21,22 @@ class FakeBox {
   readonly ownerDocument: { activeElement: FakeBox | null };
   readonly overflow: string;
   readonly children: FakeBox[];
-  constructor(doc: { activeElement: FakeBox | null }, overflow: string, children: FakeBox[] = []) {
+  readonly classes: string[];
+  parent: FakeBox | null = null;
+  constructor(doc: { activeElement: FakeBox | null }, overflow: string, children: FakeBox[] = [], classes: string[] = []) {
     this.ownerDocument = doc;
     this.overflow = overflow;
     this.children = children;
+    this.classes = classes;
+    for (const c of children) c.parent = this;
   }
   contains(node: FakeBox): boolean {
     return node === this || this.children.some((c) => c.contains(node));
+  }
+  closest(selector: string): FakeBox | null {
+    const cls = selector.replace(/^\./, "");
+    for (let el: FakeBox | null = this; el; el = el.parent) if (el.classes.includes(cls)) return el;
+    return null;
   }
 }
 
@@ -86,6 +95,23 @@ test("the focused node, unfocused boxes and scrollable boxes keep their offsets"
       box.scrollLeft = 40;
       scroll(box);
       assert.equal(box.scrollLeft, 40);
+    }
+  });
+});
+
+test("a VS Code menu keeps the scroll that reveals its focused item", () => {
+  withFakeDom(() => {
+    const doc = { activeElement: null as FakeBox | null };
+    const item = new FakeBox(doc, "visible");
+    const menu = new FakeBox(doc, "hidden", [item], ["monaco-menu"]);
+    const container = new FakeBox(doc, "hidden", [menu], ["context-view", "monaco-menu-container"]);
+    doc.activeElement = item;
+    const { host, scroll } = hostWith(doc, container);
+    guardClippingInside(host);
+    for (const box of [menu, container]) {
+      box.scrollTop = 79;
+      scroll(box);
+      assert.equal(box.scrollTop, 79);
     }
   });
 });
