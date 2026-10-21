@@ -56,6 +56,7 @@ SHINKA_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 # reach; when present, that box is funded alongside the outer sandbox.
 PARENT_HOSTS_KEY = "parent_allowed_hosts"
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
+_BUILTIN_PATHS = frozenset({"/v1/_sandbox", "/v1/_mcp", "/v1/_evaluator", "/v1/_packages", "/v1/_budget/state"})
 # The state read travels the sandbox mailbox relay, which can lag for seconds
 # under load; one slow reply must not discard a finished run's result.
 _BUDGET_STATE_ATTEMPTS = 3
@@ -69,6 +70,19 @@ _TRANSIENT_SANDBOX_ERROR_TYPES = frozenset(
         "SandboxTimeoutError",
     }
 )
+
+
+def _unbound_capability(path: str, capabilities: Mapping[str, Any]) -> bool:
+    """Return whether ``path`` names a gateway capability that this gateway does not serve.
+
+    Args:
+        path: The request path, such as ``/v1/_host_agent``.
+        capabilities: The paths bound with ``bind_capability``.
+
+    Returns:
+        True for a ``/v1/_`` path that is neither built in nor bound.
+    """
+    return path.startswith("/v1/_") and path not in _BUILTIN_PATHS and path not in capabilities
 
 
 def _sandbox_failure_kind(error: BaseException) -> str:
@@ -290,6 +304,9 @@ class ModelGateway:
                 if route is None and not is_tools and not is_evaluator and not is_packages:
                     self._error(401, "unauthorized", "Unknown scoped model route.")
                     return
+                if _unbound_capability(self.path, gateway._capabilities):
+                    self._error(404, "not_found", "Unknown protected endpoint.")
+                    return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     if not 0 < length <= _MAX_REQUEST_BYTES:
@@ -496,13 +513,7 @@ class ModelGateway:
         Raises:
             ValueError: When ``path`` is already bound or would shadow a built-in endpoint.
         """
-        if path in self._capabilities or path in {
-            "/v1/_sandbox",
-            "/v1/_mcp",
-            "/v1/_evaluator",
-            "/v1/_packages",
-            "/v1/_budget/state",
-        }:
+        if path in self._capabilities or path in _BUILTIN_PATHS:
             raise ValueError(f"The gateway path {path!r} is already bound.")
         self._capabilities[path] = handler
 
@@ -613,6 +624,9 @@ class ModelGateway:
         is_packages = self._packages is not None and secrets.compare_digest(token, self._package_token)
         if route is None and not is_tools and not is_evaluator and not is_packages:
             raise ValueError("Unknown scoped model route.")
+        if _unbound_capability(path, self._capabilities):
+            message = {"error": {"type": "not_found", "code": "not_found", "message": "Unknown protected endpoint."}}
+            return ModelHTTPResult(404, "application/json", json.dumps(message).encode())
         if path == "/v1/_budget/state":
             snapshot = self._budget_state()
             return ModelHTTPResult(200, "application/json", json.dumps(snapshot, default=str).encode())
