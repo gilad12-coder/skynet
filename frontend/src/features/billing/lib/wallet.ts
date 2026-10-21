@@ -22,7 +22,7 @@
 export type TokenSourceMode = "managed" | "byok" | "subscription";
 
 /** A coding-agent CLI whose subscription the local desktop build can run models on. */
-export type CliProvider = "codex" | "claude" | "droid";
+export type CliProvider = "codex" | "claude";
 
 /** Coarse health of the wallet, used to theme the balance chip. */
 export type WalletStatus = "healthy" | "low" | "empty";

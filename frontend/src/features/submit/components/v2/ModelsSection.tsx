@@ -21,10 +21,11 @@ import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
 import { defaultOpen, useExperienceLevel } from "@/features/experience";
 import {
-  CLI_PROVIDERS,
   HostAgentPermissionField,
-  cliLabel,
+  hostCliChoices,
   hostCliPatch,
+  hostCliValue,
+  isCliProvider,
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
@@ -46,9 +47,6 @@ import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { ShinkaSettingsPanel } from "../blackbox/ShinkaSettingsPanel";
 import { Field, StepCard } from "../blackbox/shared";
 import { v2Msg } from "./ArtifactConfirmCard";
-
-// Radix Select cannot hold an empty value, so "no host CLI" has its own.
-const HOST_CLI_OFF = "off";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -284,7 +282,7 @@ export function ModelsSection({ kind, choice }: { kind: ArtifactKind; choice: Op
             {isLocalMode() && (
               <Field label={msg("host_agent.cli.label")} htmlFor="v2-proposer-host-cli">
                 <Select
-                  value={proposer.host_cli ?? HOST_CLI_OFF}
+                  value={hostCliValue(proposer.host_cli)}
                   onValueChange={(value) =>
                     updateProposer(hostCliPatch(value, proposer.host_permission))
                   }
@@ -293,20 +291,25 @@ export function ModelsSection({ kind, choice }: { kind: ArtifactKind; choice: Op
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={HOST_CLI_OFF}>{msg("host_agent.cli.off")}</SelectItem>
-                    {CLI_PROVIDERS.map((cli) => (
-                      <SelectItem key={cli} value={cli}>
-                        <span className="flex items-center gap-2">
-                          <Terminal className="size-4" aria-hidden="true" />
-                          <span>{cliLabel(cli)}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {hostCliChoices().map(({ value, label }) =>
+                      value === "off" ? (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ) : (
+                        <SelectItem key={value} value={value}>
+                          <span className="flex items-center gap-2">
+                            <Terminal className="size-4" aria-hidden="true" />
+                            <span>{label}</span>
+                          </span>
+                        </SelectItem>
+                      ),
+                    )}
                   </SelectContent>
                 </Select>
               </Field>
             )}
-            {isLocalMode() && proposer.host_cli && (
+            {isLocalMode() && isCliProvider(proposer.host_cli) && (
               <HostAgentPermissionField
                 value={proposer.host_permission}
                 onChange={(next) => updateProposer({ host_permission: next })}

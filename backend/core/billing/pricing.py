@@ -176,11 +176,12 @@ def model_token_costs(model_id: str) -> tuple[float, float]:
     return prices.prompt, prices.completion
 
 
-def usage_cost_usd(usage: ModelUsage) -> float:
+def usage_cost_usd(usage: ModelUsage, prices: TokenPrices | None = None) -> float:
     """Price one model's usage at provider cost (USD, before markup).
 
     Args:
         usage: The model's token usage and any cost the provider reported.
+        prices: Per-token prices the caller already looked up; ``None`` looks them up.
 
     Returns:
         The reported cost plus the per-token price of the tokens it does not cover.
@@ -190,7 +191,8 @@ def usage_cost_usd(usage: ModelUsage) -> float:
     cost = max(0.0, usage.reported_cost_usd)
     if unreported_in == 0 and unreported_out == 0:
         return cost
-    prices = model_token_prices(usage.model)
+    if prices is None:
+        prices = model_token_prices(usage.model)
     cache_read = min(max(0, usage.cache_read_tokens), unreported_in)
     cache_write = min(max(0, usage.cache_write_tokens), unreported_in - cache_read)
     reasoning = min(max(0, usage.reasoning_tokens), unreported_out)

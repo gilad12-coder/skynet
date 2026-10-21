@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const {
+  CLI_PROVIDERS,
   byokHintKey,
   runEstimateLabelKey,
   usageChargedKey,
@@ -10,6 +11,7 @@ const {
   cliState,
   defaultAgentCli,
   hostCliPatch,
+  isCliProvider,
   isLocalModelRefusal,
   LOCAL_MODEL_REFUSED_CODE,
   resolveAgentModel,
@@ -254,19 +256,32 @@ test("a request with no model pick sends the first model of the signed-in CLI", 
 test("the default agent CLI prefers ready, then installed, then Claude Code", () => {
   const now = new Date("2026-10-21T10:00:00Z");
   const codex = cli({ id: "codex" });
-  const droid = cli({ id: "droid" });
   assert.equal(defaultAgentCli(status([cli({ path: null }), codex]), now), "codex");
   // A ready CLI wins over an installed one listed before it.
+  assert.equal(defaultAgentCli(status([{ ...codex, logged_in: false }, cli()]), now), "claude");
   assert.equal(
-    defaultAgentCli(status([cli({ path: null }), { ...droid, logged_in: false }, codex]), now),
+    defaultAgentCli(status([cli({ path: null }), { ...codex, logged_in: false }]), now),
     "codex",
-  );
-  assert.equal(
-    defaultAgentCli(status([cli({ path: null }), { ...droid, logged_in: false }]), now),
-    "droid",
   );
   assert.equal(defaultAgentCli(status([cli({ path: null })]), now), "claude");
   assert.equal(defaultAgentCli(null, now), "claude");
+});
+
+test("Droid is not a CLI choice, even when an older backend still reports it", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  assert.deepEqual(CLI_PROVIDERS, ["codex", "claude"]);
+  assert.equal(isCliProvider("droid"), false);
+  const droid = { ...cli(), id: "droid" } as unknown as Cli;
+  assert.equal(defaultAgentCli(status([droid]), now), "claude");
+  assert.equal(
+    defaultAgentCli(status([droid, cli({ id: "codex", logged_in: false })]), now),
+    "codex",
+  );
+  assert.equal(parseSubscriptionModelId("subscription/droid/anthropic/claude-sonnet-4.5"), null);
+  assert.deepEqual(hostCliPatch("droid", "full_access"), {
+    host_cli: undefined,
+    host_permission: undefined,
+  });
 });
 
 test("the proposer host CLI select starts at workspace only and clears on off", () => {
@@ -357,8 +372,9 @@ test("a final subscription run with an API-rate amount gets the API-rates subscr
   };
   const done = { final: true, pairIndex: null };
   assert.equal(usageCostNoteKey(true, [row], done), "usage_tab.subscription_api_rates_note_local");
+  // A row without calls needs no price.
   assert.equal(
-    usageCostNoteKey(true, [row, { ...row, api_rate_cents: null }], done),
+    usageCostNoteKey(true, [row, { ...row, api_rate_cents: null, calls: 0 }], done),
     "usage_tab.subscription_api_rates_note_local",
   );
   assert.equal(
@@ -368,6 +384,48 @@ test("a final subscription run with an API-rate amount gets the API-rates subscr
   assert.equal(usageCostNoteKey(true, [row], { final: false, pairIndex: null }), null);
   assert.equal(usageCostNoteKey(true, [row], { final: true, pairIndex: 1 }), null);
   assert.equal(usageCostNoteKey(false, [row], done), null);
+});
+
+test("a subscription run with an unpriced model shows no partial API-rate amount", () => {
+  const priced = {
+    billing: "subscription",
+    charged_cents: 0,
+    provider_cents: null,
+    api_rate_cents: 3.2,
+    calls: 12,
+    unpriced_calls: 0,
+  };
+  const unpriced = { ...priced, api_rate_cents: null, calls: 4 };
+  const done = { final: true, pairIndex: null };
+  assert.equal(
+    usageCostNoteKey(true, [priced, unpriced], done),
+    "usage_tab.subscription_note_local",
+  );
+  assert.equal(
+    usageCostNoteKey(true, [unpriced, priced], done),
+    "usage_tab.subscription_note_local",
+  );
+});
+
+test("the API-rate texts say list rates without cache discounts", () => {
+  const ui = (locale: string) =>
+    JSON.parse(
+      readFileSync(
+        new URL(`../../../../../i18n/locales/ui/${locale}.json`, import.meta.url),
+        "utf8",
+      ),
+    ) as Record<string, string>;
+  const en = ui("en");
+  assert.match(
+    en["usage_tab.subscription_api_rates_note_local"]!,
+    /list API rates, without cache discounts/,
+  );
+  assert.match(en["tooltip.usage_tab.api_rate"]!, /list API rates, without cache discounts/);
+  const he = ui("he");
+  assert.match(he["usage_tab.subscription_api_rates_note_local"]!, /ללא הנחות מטמון/);
+  assert.match(he["tooltip.usage_tab.api_rate"]!, /ללא הנחות מטמון/);
+  assert.equal("subscription.cli.droid" in en, false);
+  assert.equal("subscription.cli.droid" in he, false);
 });
 
 test("the local English texts name no fee and no Skynet charge", () => {

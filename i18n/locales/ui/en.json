@@ -3775,7 +3775,7 @@
   "tooltip.usage_tab.role.other": "Model calls that don't fit one of the other roles.",
   "tooltip.usage_tab.charged": "What {term.appName} charged your wallet. For your own keys, that's the platform fee.",
   "tooltip.usage_tab.provider": "What your provider charges your own key for these calls. It's an estimate, and your provider bills it.",
-  "tooltip.usage_tab.api_rate": "What these calls would cost at API rates. Your subscription covered them, so nothing was billed.",
+  "tooltip.usage_tab.api_rate": "What these calls would cost at list API rates, without cache discounts. Your subscription covered them, so nothing was billed.",
   "tooltip.usage_tab.not_priced": "This model has no price on record, so its calls and tokens count but its cost can't be shown.",
   "tooltip.usage_tab.unattributed": "Model calls that weren't tagged with one. They still count in the total.",
   "usage_tab.role.rounding": "Rounding to whole cents",
@@ -4294,7 +4294,6 @@
   "subscription.cli.aria": "Choose the coding-agent CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid",
   "subscription.state.ok": "Signed in and ready",
   "subscription.state.ok_version": "Signed in and ready (version {version})",
   "subscription.state.missing": "Not installed on this computer",
@@ -4325,6 +4324,6 @@
   "tooltip.usage_tab.charged_local": "What these calls took from the free Mac app balance. It is not real money. Your provider bills your own key.",
   "usage_tab.api_rates_note_local": "* At API rates. Your provider bills these amounts to your own key.",
   "usage_tab.subscription_note_local": "Your subscription covered this run, so nothing was billed.",
-  "usage_tab.subscription_api_rates_note_local": "Your subscription covered this run, so nothing was billed. * Amounts show what this run would cost at API rates.",
+  "usage_tab.subscription_api_rates_note_local": "Your subscription covered this run, so nothing was billed. * Amounts show what this run would cost at list API rates, without cache discounts.",
   "usage_tab.api_rate": "At API rates"
 }

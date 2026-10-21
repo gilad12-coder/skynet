@@ -28,7 +28,7 @@ export interface ModelConfig {
   byok_provider?: string | null;
   // The CLI whose subscription runs the model; required when token_source is
   // "subscription" (local desktop build only).
-  cli_provider?: "codex" | "claude" | "droid" | null;
+  cli_provider?: "codex" | "claude" | null;
   base_url?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
@@ -596,7 +596,7 @@ export interface BlackboxProposer {
   max_tool_calls?: number | null;
   // Local desktop build only: run the proposer as this signed-in CLI on the
   // host, confined to the run workspace unless the user grants full access.
-  host_cli?: "codex" | "claude" | "droid" | null;
+  host_cli?: "codex" | "claude" | null;
   host_permission?: "workspace_only" | "full_access";
 }
 

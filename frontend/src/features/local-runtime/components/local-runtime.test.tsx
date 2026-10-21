@@ -14,14 +14,15 @@ import type { CliStatus, LocalStatus } from "../lib/subscription-model";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { SubscriptionSourcePicker } = await import("./SubscriptionSourcePicker");
+const { SubscriptionSourcePicker, hostCliChoices, hostCliValue } = await import(
+  "./SubscriptionSourcePicker"
+);
 const { HostAgentPermissionField } = await import("./HostAgentPermissionField");
 
 // The hints the local backend sends (backend/core/local/cli_probe.py).
 const BACKEND_HINTS: Record<CliProvider, string> = {
   codex: "Run `codex login` in a terminal.",
   claude: "Run `claude auth login` in a terminal.",
-  droid: "Run `droid` in a terminal and sign in.",
 };
 
 const cli = (id: CliProvider, patch: Partial<CliStatus> = {}): CliStatus => ({
@@ -64,9 +65,9 @@ const codeChips = (html: string) =>
 
 void describe("SubscriptionSourcePicker", () => {
   void it("shows the login command, not the backend's English sentence", () => {
-    for (const id of ["codex", "claude", "droid"] as const) {
+    for (const id of ["codex", "claude"] as const) {
       const html = picker(id, status([cli(id, { logged_in: false })]));
-      const expected = { codex: "codex login", claude: "claude auth login", droid: "droid" }[id];
+      const expected = { codex: "codex login", claude: "claude auth login" }[id];
       assert.deepEqual(codeChips(html), [expected]);
       assert.doesNotMatch(html, /in a terminal/);
       // The UI catalog does not load under jiti, so its strings render as their keys.
@@ -83,12 +84,38 @@ void describe("SubscriptionSourcePicker", () => {
   void it("disables a CLI that is not installed and warns when the pick is missing", () => {
     const html = picker("codex", status([cli("claude"), cli("codex", { path: null })]));
     assert.match(html, /subscription\.state\.missing/);
-    assert.equal(html.match(/disabled=""/g)?.length, 2);
+    assert.equal(html.match(/disabled=""/g)?.length, 1);
+  });
+
+  void it("offers only Codex and Claude Code, even when the backend reports Droid", () => {
+    const droid = { ...cli("codex"), id: "droid" } as unknown as CliStatus;
+    const html = picker(null, status([cli("codex"), cli("claude"), droid]));
+    assert.equal(html.match(/role="radio"/g)?.length, 2);
+    assert.match(html, /subscription\.cli\.codex/);
+    assert.match(html, /subscription\.cli\.claude/);
+    assert.doesNotMatch(html, /droid/i);
   });
 
   void it("says the status failed to load", () => {
     const html = picker("claude", null, true);
     assert.match(html, /subscription\.state\.failed/);
+  });
+});
+
+void describe("proposer host CLI picker", () => {
+  void it("lists off, Codex and Claude Code only", () => {
+    setClientLocale("en");
+    assert.deepEqual(hostCliChoices(), [
+      { value: "off", label: "host_agent.cli.off" },
+      { value: "codex", label: "subscription.cli.codex" },
+      { value: "claude", label: "subscription.cli.claude" },
+    ]);
+  });
+
+  void it("shows a saved Droid choice as off", () => {
+    assert.equal(hostCliValue("droid"), "off");
+    assert.equal(hostCliValue(undefined), "off");
+    assert.equal(hostCliValue("claude"), "claude");
   });
 });
 

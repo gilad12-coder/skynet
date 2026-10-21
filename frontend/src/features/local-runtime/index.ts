@@ -28,5 +28,10 @@ export {
   type CliStatus,
   type LocalStatus,
 } from "./lib/subscription-model";
-export { SubscriptionSourcePicker, cliLabel } from "./components/SubscriptionSourcePicker";
+export {
+  SubscriptionSourcePicker,
+  cliLabel,
+  hostCliChoices,
+  hostCliValue,
+} from "./components/SubscriptionSourcePicker";
 export { HostAgentPermissionField } from "./components/HostAgentPermissionField";

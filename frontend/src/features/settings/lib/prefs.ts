@@ -153,7 +153,7 @@ export function writePref<K extends keyof UserPrefs>(key: K, value: UserPrefs[K]
   }
 }
 
-const CLI_VALUES: readonly string[] = ["codex", "claude", "droid"];
+const CLI_VALUES: readonly string[] = ["codex", "claude"];
 
 /**
  * The CLI one agent role runs on. The stored value is user-editable browser

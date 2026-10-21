@@ -297,6 +297,8 @@ interface UsageShape {
   notModelAt: number;
   /** The run had an execution budget, which adds a summary tile. */
   budgeted?: boolean;
+  /** A settled subscription run showed its API-rate column and summary tile. */
+  apiRate?: boolean;
 }
 
 const usageLayoutKey = (id: string, pairIndex: number | null) =>
@@ -315,13 +317,15 @@ const COLD_USAGE_SHAPE: UsageShape = {
  * flight, built from the same table primitives (and the grouping control
  * itself, ghosted) so every row folds and wraps like the loaded one.
  */
-function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: UsageShape }) {
+export function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: UsageShape }) {
   const s = shape ?? COLD_USAGE_SHAPE;
   const bone = <Skeleton width={40} height={12} inline />;
   return (
     <div className="space-y-4" aria-hidden="true">
       <div className={SUMMARY_GRID_CLASS}>
-        {Array.from({ length: budgeted ? 6 : 3 }).map((_, i) => (
+        {Array.from({
+          length: (budgeted ? 6 : 3) + (s.splitCost ? 1 : 0) + (s.apiRate ? 1 : 0),
+        }).map((_, i) => (
           <div key={i} className="min-w-0 space-y-1">
             <div className="flex h-4 items-center">
               <Skeleton width="60%" height={10} containerClassName="block w-full" />
@@ -345,6 +349,11 @@ function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: Usag
                 </TableHead>
                 <TableHead className="text-end">{bone}</TableHead>
                 {s.splitCost && (
+                  <TableHead className="text-end" collapse="sm">
+                    {bone}
+                  </TableHead>
+                )}
+                {s.apiRate && (
                   <TableHead className="text-end" collapse="sm">
                     {bone}
                   </TableHead>
@@ -397,6 +406,11 @@ function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: Usag
                     </TableCell>
                     <TableCell className="text-end">{bone}</TableCell>
                     {s.splitCost && (
+                      <TableCell className="text-end" collapse="sm">
+                        {bone}
+                      </TableCell>
+                    )}
+                    {s.apiRate && (
                       <TableCell className="text-end" collapse="sm">
                         {bone}
                       </TableCell>
@@ -456,6 +470,15 @@ export function UsageTab({
   const layoutKey = usageLayoutKey(job.optimization_id, pairIndex);
   const shapeHint = useLayoutHint<UsageShape>(layoutKey);
   const offeredKey = offered.join(",");
+  const costNoteKey =
+    usage && groups.length > 0
+      ? usageCostNoteKey(isLocalMode(), rows, {
+          final: !running && !usage.settling,
+          pairIndex,
+        })
+      : null;
+  // Display only: a settled subscription run's tokens priced at API rates, never billed.
+  const showApiRate = costNoteKey === "usage_tab.subscription_api_rates_note_local";
   useEffect(() => {
     if (!usage) return;
     rememberLayout(layoutKey, {
@@ -465,6 +488,7 @@ export function UsageTab({
       splitCost,
       notModelAt: -1,
       budgeted,
+      apiRate: showApiRate,
     } satisfies UsageShape);
   }, [
     usage,
@@ -475,6 +499,7 @@ export function UsageTab({
     splitCost,
     firstNonModel,
     budgeted,
+    showApiRate,
   ]);
 
   if (!usage) {
@@ -498,15 +523,6 @@ export function UsageTab({
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
   const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
-  const costNoteKey =
-    groups.length > 0
-      ? usageCostNoteKey(isLocalMode(), rows, {
-          final: !running && !usage.settling,
-          pairIndex,
-        })
-      : null;
-  // Display only: a settled subscription run's tokens priced at API rates, never billed.
-  const showApiRate = costNoteKey === "usage_tab.subscription_api_rates_note_local";
 
   return (
     <FadeIn>

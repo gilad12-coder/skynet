@@ -4035,7 +4035,7 @@
   "tooltip.usage_tab.role.other": "不属于其他任何角色的模型调用。",
   "tooltip.usage_tab.charged": "{term.appName} 从你的钱包扣除的金额。使用自有密钥时，这是平台费用。",
   "tooltip.usage_tab.provider": "提供商就这些调用向你自有密钥收取的费用。这是估算值，由提供商计费。",
-  "tooltip.usage_tab.api_rate": "这些调用按 API 价格计算的费用。你的订阅已承担，因此没有产生任何费用。",
+  "tooltip.usage_tab.api_rate": "这些调用按 API 标价、不计缓存折扣计算的费用。你的订阅已承担，因此没有产生任何费用。",
   "tooltip.usage_tab.not_priced": "此模型没有价格记录，因此其调用和令牌会计入，但无法显示费用。",
   "tooltip.usage_tab.unattributed": "未标记角色的模型调用，仍计入合计。",
   "usage_tab.role.rounding": "向上取整到整美分",
@@ -4317,7 +4317,6 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "在 Mac 应用中标注需要你自己的服务商密钥。请在“你自己的密钥”下选择模型。",
   "submit.budget.local_note": "Mac 应用不设支出上限。每次模型调用由你的服务商密钥或 CLI 套餐支付。",
   "billing.mode.byok_hint_local": "模型费用计入你自己的服务商密钥。Mac 应用不收取任何费用。",
@@ -4325,6 +4324,6 @@
   "tooltip.usage_tab.charged_local": "这些调用从免费的 Mac 应用余额中使用的金额。这不是真实的钱。服务商会向你自己的密钥计费。",
   "usage_tab.api_rates_note_local": "* 按 API 价格计算。服务商会向你自己的密钥收取这些费用。",
   "usage_tab.subscription_note_local": "此次运行由你的订阅承担，因此没有产生任何费用。",
-  "usage_tab.subscription_api_rates_note_local": "此次运行由你的订阅承担，因此没有产生任何费用。* 金额显示此次运行按 API 价格计算的费用。",
+  "usage_tab.subscription_api_rates_note_local": "此次运行由你的订阅承担，因此没有产生任何费用。* 金额显示此次运行按 API 标价、不计缓存折扣计算的费用。",
   "usage_tab.api_rate": "按 API 价格"
 }

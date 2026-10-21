@@ -8,6 +8,7 @@ stage, pair, candidate and kind; the client regroups them by any of those.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from decimal import Decimal
@@ -196,9 +197,12 @@ def aggregate(
         row.output_tokens += output_tokens
         # Display only: what the subscription's tokens would cost at API rates. It never enters
         # charged_units, so credit totals, spend caps and the ledger stay unaffected.
-        if subscription and model is not None and known_token_prices(model) is not None:
-            usd = usage_cost_usd(ModelUsage(model, input_tokens, output_tokens))
-            row.api_rate_cents = (row.api_rate_cents or Decimal(0)) + Decimal(str(usd)) / Decimal(str(CENT_USD_VALUE))
+        if subscription and model is not None:
+            usd = _subscription_api_rate_usd(record.evidence.get("usage"), model, input_tokens, output_tokens)
+            if usd is not None:
+                row.api_rate_cents = (row.api_rate_cents or Decimal(0)) + Decimal(str(usd)) / Decimal(
+                    str(CENT_USD_VALUE)
+                )
         latency = record.evidence.get("latency_ms")
         if isinstance(latency, int) and latency >= 0:
             row.latency_ms_total += latency
@@ -226,6 +230,30 @@ def aggregate(
                     str(CENT_USD_VALUE)
                 )
     return list(rows.values())
+
+
+def _subscription_api_rate_usd(usage: Any, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Return what one subscription call would cost at API rates, in USD.
+
+    Args:
+        usage: The call's recorded usage block.
+        model: The model the call ran on.
+        input_tokens: Its input tokens.
+        output_tokens: Its output tokens.
+
+    Returns:
+        The list-price cost the CLI dispatcher recorded at call time, else the
+        current price table's cost, else ``None`` when no table prices the model.
+    """
+    cost = usage.get("cost") if isinstance(usage, Mapping) else None
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0:
+        return float(cost)
+    # One lookup only: a second one could miss after a price refresh and fall back to the
+    # high billing rate.
+    prices = known_token_prices(model)
+    if prices is None:
+        return None
+    return usage_cost_usd(ModelUsage(model, input_tokens, output_tokens), prices=prices)
 
 
 def _model_key(model: str | None) -> str:

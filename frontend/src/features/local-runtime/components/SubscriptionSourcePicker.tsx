@@ -11,6 +11,7 @@ import {
   CLI_PROVIDERS,
   cliState,
   findCli,
+  isCliProvider,
   type CliState,
   type LocalStatus,
 } from "../lib/subscription-model";
@@ -18,7 +19,6 @@ import {
 const CLI_LABEL_KEYS: Record<CliProvider, MessageKey> = {
   codex: "subscription.cli.codex",
   claude: "subscription.cli.claude",
-  droid: "subscription.cli.droid",
 };
 
 // The backend's login hint is an English sentence; the note shows only the
@@ -26,11 +26,26 @@ const CLI_LABEL_KEYS: Record<CliProvider, MessageKey> = {
 const LOGIN_COMMANDS: Record<CliProvider, string> = {
   codex: "codex login",
   claude: "claude auth login",
-  droid: "droid",
 };
 
 export function cliLabel(cli: CliProvider): string {
   return msg(CLI_LABEL_KEYS[cli]);
+}
+
+// Radix Select cannot hold an empty value, so "no host CLI" has its own.
+const HOST_CLI_OFF = "off";
+
+/** The proposer's host CLI menu: off, then each supported CLI. */
+export function hostCliChoices(): Array<{ value: string; label: string }> {
+  return [
+    { value: HOST_CLI_OFF, label: msg("host_agent.cli.off") },
+    ...CLI_PROVIDERS.map((cli) => ({ value: cli, label: cliLabel(cli) })),
+  ];
+}
+
+/** The host CLI menu's value; a saved CLI the app no longer offers reads as off. */
+export function hostCliValue(saved: string | null | undefined): string {
+  return isCliProvider(saved) ? saved : HOST_CLI_OFF;
 }
 
 function stateText(state: CliState, version: string | null): string {

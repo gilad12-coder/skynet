@@ -9,7 +9,7 @@ import type { CliProvider } from "@/features/billing";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import type { RunUsageRow } from "@/shared/types/run-usage";
 
-export const CLI_PROVIDERS: readonly CliProvider[] = ["codex", "claude", "droid"];
+export const CLI_PROVIDERS: readonly CliProvider[] = ["codex", "claude"];
 
 export const SUBSCRIPTION_MODEL_PREFIX = "subscription/";
 
@@ -195,8 +195,9 @@ type UsageNoteRow = Pick<
  * no charge and no provider spend ran on the subscription, so nothing was
  * billed. That claim is final, so it waits until the run stops and its ledger
  * settles, and it applies only to the whole-run view. When the backend priced
- * the subscription's tokens at API rates, the note also explains the "*"
- * amounts. Any other run, and hosted mode, gets no note.
+ * every call's tokens at API rates, the note also explains the "*" amounts; a
+ * run with an unpriced model keeps the plain note, so no partial sum reads as
+ * the run's amount. Any other run, and hosted mode, gets no note.
  */
 export function usageCostNoteKey(
   localMode: boolean,
@@ -218,7 +219,7 @@ export function usageCostNoteKey(
   );
   const calls = rows.reduce((n, r) => n + r.calls, 0);
   if (calls === 0 || billed) return null;
-  return rows.some((r) => r.api_rate_cents != null)
+  return rows.every((r) => r.calls === 0 || r.api_rate_cents != null)
     ? "usage_tab.subscription_api_rates_note_local"
     : "usage_tab.subscription_note_local";
 }
@@ -259,7 +260,8 @@ export function defaultAgentCli(
   status: LocalStatus | null | undefined,
   now: Date = new Date(),
 ): CliProvider {
-  const clis = status?.clis ?? [];
+  // An older backend may still report a CLI the app no longer offers.
+  const clis = (status?.clis ?? []).filter((cli) => isCliProvider(cli.id));
   const ready = clis.find((cli) => cliState(cli, now).kind === "ok");
   const installed = clis.find((cli) => cli.path);
   return ready?.id ?? installed?.id ?? "claude";

@@ -4035,7 +4035,7 @@
   "tooltip.usage_tab.role.other": "Chiamate al modello che non rientrano in nessuno degli altri ruoli.",
   "tooltip.usage_tab.charged": "Quanto {term.appName} ha addebitato al tuo portafoglio. Con le tue chiavi, è la commissione della piattaforma.",
   "tooltip.usage_tab.provider": "Quanto il tuo provider addebita alla tua chiave per queste chiamate. È una stima, e la fattura il tuo provider.",
-  "tooltip.usage_tab.api_rate": "Quanto costerebbero queste chiamate alle tariffe API. Il tuo abbonamento le ha coperte, quindi non è stato addebitato nulla.",
+  "tooltip.usage_tab.api_rate": "Quanto costerebbero queste chiamate alle tariffe di listino API, senza sconti per la cache. Il tuo abbonamento le ha coperte, quindi non è stato addebitato nulla.",
   "tooltip.usage_tab.not_priced": "Questo modello non ha un prezzo registrato: chiamate e token vengono conteggiati, ma il costo non può essere mostrato.",
   "tooltip.usage_tab.unattributed": "Chiamate al modello senza un ruolo assegnato. Rientrano comunque nel totale.",
   "usage_tab.role.rounding": "Arrotondamento al centesimo intero",
@@ -4317,7 +4317,6 @@
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",
   "subscription.cli.claude": "Claude Code",
-  "subscription.cli.droid": "Droid",
   "tagger.assist.local_key_needed": "L'etichettatura nell'app Mac richiede la tua chiave del provider. Scegli un modello in «La tua chiave».",
   "submit.budget.local_note": "L'app Mac non imposta un limite di spesa. Ogni chiamata al modello la paga la tua chiave del provider o il tuo piano CLI.",
   "billing.mode.byok_hint_local": "Il modello è addebitato sulla tua chiave del provider. L'app Mac non applica commissioni.",
@@ -4325,6 +4324,6 @@
   "tooltip.usage_tab.charged_local": "Quanto queste chiamate hanno preso dal saldo gratuito dell'app Mac. Non è denaro reale. Il tuo provider addebita sulla tua chiave.",
   "usage_tab.api_rates_note_local": "* Alle tariffe API. Il tuo provider addebita questi importi sulla tua chiave.",
   "usage_tab.subscription_note_local": "Il tuo abbonamento ha coperto questa esecuzione, quindi non è stato addebitato nulla.",
-  "usage_tab.subscription_api_rates_note_local": "Il tuo abbonamento ha coperto questa esecuzione, quindi non è stato addebitato nulla. * Gli importi mostrano quanto costerebbe questa esecuzione alle tariffe API.",
+  "usage_tab.subscription_api_rates_note_local": "Il tuo abbonamento ha coperto questa esecuzione, quindi non è stato addebitato nulla. * Gli importi mostrano quanto costerebbe questa esecuzione alle tariffe di listino API, senza sconti per la cache.",
   "usage_tab.api_rate": "Alle tariffe API"
 }
