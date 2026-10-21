@@ -1,9 +1,19 @@
+import type { CliProvider } from "@/features/billing";
 import type { ModelConfig } from "@/shared/types/api";
 import type { OptimizerChoice } from "@/shared/types/unified-run";
 
 type CodeAssistDefault = "auto" | "manual";
 type SplitModeDefault = "auto" | "manual";
 type TrustModeDefault = "ask" | "auto_safe" | "yolo";
+
+/** The agents the local desktop build can run on the user's CLI subscription. */
+export type LocalAgentRole = "generalist" | "code" | "interview" | "tagger";
+export const LOCAL_AGENT_ROLES: readonly LocalAgentRole[] = [
+  "generalist",
+  "code",
+  "interview",
+  "tagger",
+];
 
 export interface UserPrefs {
   wizardCodeAssist: CodeAssistDefault;
@@ -30,6 +40,9 @@ export interface UserPrefs {
   optimizerTaskModel: ModelConfig;
   optimizerReflectionModel: ModelConfig;
   optimizerMaxRuns: number | null;
+  // Local desktop build only: the CLI each agent role runs on, or null to
+  // use the composer's model as usual.
+  agentSubscription: Record<LocalAgentRole, CliProvider | null>;
 }
 
 export type AgentPreferencePatch = Partial<
@@ -92,6 +105,7 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
   optimizerTaskModel: "app.prefs.optimizer.task-model",
   optimizerReflectionModel: "app.prefs.optimizer.reflection-model",
   optimizerMaxRuns: "app.prefs.optimizer.max-runs",
+  agentSubscription: "app.prefs.agent.subscription",
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
@@ -109,6 +123,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   optimizerTaskModel: { name: "" },
   optimizerReflectionModel: { name: "" },
   optimizerMaxRuns: null,
+  agentSubscription: { generalist: null, code: null, interview: null, tagger: null },
 };
 
 // `skynet.prefs.advanced-mode` and `skynet.prefs.expand-advanced` belonged to
@@ -136,4 +151,17 @@ export function writePref<K extends keyof UserPrefs>(key: K, value: UserPrefs[K]
   } catch {
     /* noop */
   }
+}
+
+const CLI_VALUES: readonly string[] = ["codex", "claude", "droid"];
+
+/**
+ * The CLI one agent role runs on. The stored value is user-editable browser
+ * storage, so anything but a known CLI reads as "off".
+ */
+export function agentSubscriptionFor(role: LocalAgentRole): CliProvider | null {
+  const stored = readPref("agentSubscription") as unknown;
+  if (!stored || typeof stored !== "object") return null;
+  const value = (stored as Record<string, unknown>)[role];
+  return typeof value === "string" && CLI_VALUES.includes(value) ? (value as CliProvider) : null;
 }

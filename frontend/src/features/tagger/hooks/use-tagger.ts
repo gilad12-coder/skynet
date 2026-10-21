@@ -50,7 +50,7 @@ import {
   flaggedRowIds,
   initialAssistState,
   interviewComposerEffort,
-  interviewComposerModel,
+  interviewRequestModel,
   labelsAgree,
   sampleRowIds,
 } from "../lib/assist";
@@ -718,7 +718,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             // role/content go over the wire.
             turns: turns.map(({ role, content }) => ({ role, content })),
             locale: getActiveLocale(),
-            model: interviewComposerModel(state) ?? undefined,
+            model: interviewRequestModel(state) ?? undefined,
             reasoning_effort: interviewComposerEffort(state) ?? undefined,
           },
           {

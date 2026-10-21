@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { localAgentModel } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "@/features/settings";
 import { useCodeAgent, type AgentMessage, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import type { ValidateCodeResponse } from "@/shared/types/api";
 import type { ContractCheckResponse, UnifiedAuthoringContext } from "@/shared/types/unified-run";
@@ -140,7 +142,7 @@ export function useIdeCodingAgent(options: {
     files: files as Record<string, string>,
     setFile: writeFile,
     onOpenFile: openFile,
-    model,
+    model: localAgentModel(model, agentSubscriptionFor("code")),
     reasoningEffort: effort,
     initialMessages: options.initialMessages,
   });

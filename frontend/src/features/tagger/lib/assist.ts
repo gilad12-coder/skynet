@@ -1,4 +1,5 @@
-import { readPref } from "@/features/settings";
+import { localAgentModel } from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import type { ModelConfig } from "@/shared/types/api";
 import type {
   Annotation,
@@ -189,6 +190,14 @@ export function assistModelPatch(
  */
 export function interviewComposerModel(assist: Pick<AssistState, "interviewModel">): string | null {
   return assist.interviewModel === undefined ? readPref("composerModel") : assist.interviewModel;
+}
+
+/**
+ * The model an interview request sends: the composer's, or the local CLI's
+ * when the tagger runs on one.
+ */
+export function interviewRequestModel(assist: Pick<AssistState, "interviewModel">): string | null {
+  return localAgentModel(interviewComposerModel(assist), agentSubscriptionFor("tagger"));
 }
 
 /** Effective reasoning effort for the interview composer; same fallback split. */

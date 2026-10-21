@@ -23,9 +23,12 @@ type ProfileKind = "categorical" | "numeric" | "freeform";
 export interface ModelConfig {
   name: string;
   /** Billing/auth source for this model only. Older saved configs default to managed. */
-  token_source?: "managed" | "byok";
+  token_source?: "managed" | "byok" | "subscription";
   /** Vault provider slug when a BYOK model comes from a custom connection. */
   byok_provider?: string | null;
+  // The CLI whose subscription runs the model; required when token_source is
+  // "subscription" (local desktop build only).
+  cli_provider?: "codex" | "claude" | "droid" | null;
   base_url?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
@@ -591,6 +594,10 @@ export interface BlackboxProposer {
   // Caps tool calls per candidate for every coding-agent proposer, and for
   // ShinkaEvolve's agent editor.
   max_tool_calls?: number | null;
+  // Local desktop build only: run the proposer as this signed-in CLI on the
+  // host, confined to the run workspace unless the user grants full access.
+  host_cli?: "codex" | "claude" | "droid" | null;
+  host_permission?: "workspace_only" | "full_access";
 }
 
 export type BlackboxShinkaParentSelection = "weighted" | "power_law" | "beam_search";
@@ -657,7 +664,7 @@ export interface BlackboxRunRequest {
   // improves scores most; every other engine ignores them.
   extra_reflection_model_configs?: ModelConfig[];
   shinka?: BlackboxShinkaSettings | null;
-  token_source?: "managed" | "byok";
+  token_source?: "managed" | "byok" | "subscription";
   is_private?: boolean;
   // Batch managed chat model calls at half price; coding-agent proposer calls
   // and BYOK calls run normally.

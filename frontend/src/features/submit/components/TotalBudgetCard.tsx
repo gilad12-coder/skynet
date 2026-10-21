@@ -342,6 +342,11 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
           {msg("submit.budget.byok_note")}
         </p>
       )}
+      {mode === "subscription" && (
+        <p className="text-xs leading-relaxed text-muted-foreground" dir="auto">
+          {msg("subscription.budget_note")}
+        </p>
+      )}
     </StepCard>
   );
 }

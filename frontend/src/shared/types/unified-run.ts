@@ -134,7 +134,7 @@ export interface UnifiedRunRequest {
   models: UnifiedModels;
   workspace: UnifiedWorkspace;
   seed?: number | null;
-  token_source?: "managed" | "byok";
+  token_source?: "managed" | "byok" | "subscription";
   is_private?: boolean;
   economy_mode?: boolean;
   preflight_id?: string | null;

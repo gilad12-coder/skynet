@@ -1,8 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { Coins, Key, X } from "@/shared/ui/icons";
+import { Coins, Desktop, Key, X } from "@/shared/ui/icons";
 import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/features/billing";
+import {
+  SubscriptionSourcePicker,
+  cliState,
+  findCli,
+  subscriptionCatalogModels,
+  useLocalStatus,
+  type LocalStatus,
+} from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
 import { getByokModelCatalog, cachedByokCatalog } from "@/shared/lib/model-catalog";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
@@ -52,14 +61,26 @@ interface ModelConfigModalProps {
 const TOKEN_SOURCE_SEGMENTS: Array<{
   mode: TokenSourceMode;
   icon: typeof Coins;
-  labelKey: "billing.mode.managed" | "billing.mode.byok";
+  labelKey: "billing.mode.managed" | "billing.mode.byok" | "subscription.mode";
 }> = [
   { mode: "managed", icon: Coins, labelKey: "billing.mode.managed" },
   { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
 ];
 
+// The third source exists only in the local desktop build, where the user's
+// signed-in coding-agent CLIs can run models.
+const LOCAL_TOKEN_SOURCE_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  ...TOKEN_SOURCE_SEGMENTS,
+  { mode: "subscription", icon: Desktop, labelKey: "subscription.mode" },
+];
+
+/** The first CLI that can run models right now, as the subscription source's preselection. */
+function firstReadyCli(status: LocalStatus | null) {
+  return status?.clis.find((cli) => cliState(cli).kind === "ok" && cli.models.length > 0)?.id;
+}
+
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
-  const { base_url: _baseUrl, ...rest } = config;
+  const { base_url: _baseUrl, cli_provider: cliProvider, ...rest } = config;
   const {
     api_key: _apiKey,
     api_base: _ApiBase,
@@ -71,6 +92,7 @@ function withoutInlineConnection(config: ModelConfig): ModelConfig {
     ...rest,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? rest.byok_provider : undefined,
+    ...(tokenSource === "subscription" ? { cli_provider: cliProvider ?? null } : {}),
     extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
   };
 }
@@ -102,6 +124,22 @@ export function ModelConfigModal({
   const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
+  const localMode = isLocalMode();
+  const local = useLocalStatus(localMode && open && mode === "subscription");
+  const subscriptionModels = React.useMemo(
+    () =>
+      mode === "subscription"
+        ? subscriptionCatalogModels(findCli(local.status, draft.cli_provider), catalogModels)
+        : undefined,
+    [mode, local.status, draft.cli_provider, catalogModels],
+  );
+  // Preselect a ready CLI once the status lands, so switching to the
+  // subscription source lists models without a second click.
+  const readyCli = firstReadyCli(local.status);
+  React.useEffect(() => {
+    if (mode !== "subscription" || draft.cli_provider || !readyCli) return;
+    setDraft((current) => ({ ...current, cli_provider: readyCli }));
+  }, [mode, draft.cli_provider, readyCli]);
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -130,7 +168,12 @@ export function ModelConfigModal({
       cancelled = true;
     };
   }, [mode, byokProviderKey]);
-  const detectionModels = mode === "byok" ? (byokModels ?? undefined) : catalogModels;
+  const detectionModels =
+    mode === "byok"
+      ? (byokModels ?? undefined)
+      : mode === "subscription"
+        ? subscriptionModels
+        : catalogModels;
 
   // Recent chips follow the chosen source: a remembered managed model never
   // shows under BYOK (and vice versa), and a chip whose model the active
@@ -139,9 +182,12 @@ export function ModelConfigModal({
     if (!recentConfigs?.length) return [];
     const served = detectionModels ? new Set(detectionModels.map((m) => m.value)) : null;
     return recentConfigs.filter(
-      (rc) => (rc.token_source ?? "managed") === mode && (!served || served.has(rc.name)),
+      (rc) =>
+        (rc.token_source ?? "managed") === mode &&
+        (mode !== "subscription" || rc.cli_provider === draft.cli_provider) &&
+        (!served || served.has(rc.name)),
     );
-  }, [recentConfigs, detectionModels, mode]);
+  }, [recentConfigs, detectionModels, mode, draft.cli_provider]);
 
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
@@ -226,6 +272,7 @@ export function ModelConfigModal({
         name: draft.name,
         token_source: draft.token_source ?? "managed",
         byok_provider: draft.token_source === "byok" ? draft.byok_provider : undefined,
+        ...(draft.token_source === "subscription" ? { cli_provider: draft.cli_provider } : {}),
       });
     } else {
       onSave(withoutInlineConnection(draft));
@@ -317,11 +364,13 @@ export function ModelConfigModal({
                         }),
                       )
                     }
-                    options={TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => ({
-                      value,
-                      label: msg(labelKey),
-                      icon: <Icon className="size-3.5" aria-hidden="true" />,
-                    }))}
+                    options={(localMode ? LOCAL_TOKEN_SOURCE_SEGMENTS : TOKEN_SOURCE_SEGMENTS).map(
+                      ({ mode: value, icon: Icon, labelKey }) => ({
+                        value,
+                        label: msg(labelKey),
+                        icon: <Icon className="size-3.5" aria-hidden="true" />,
+                      }),
+                    )}
                   />
                 </div>
                 {mode === "managed" && (
@@ -330,6 +379,22 @@ export function ModelConfigModal({
                   </div>
                 )}
               </div>
+
+              {mode === "subscription" && (
+                <SubscriptionSourcePicker
+                  value={draft.cli_provider}
+                  onChange={(cli) =>
+                    setDraft((current) => {
+                      const served = findCli(local.status, cli)?.models.includes(current.name);
+                      return { ...current, cli_provider: cli, name: served ? current.name : "" };
+                    })
+                  }
+                  status={local.status}
+                  loading={local.loading}
+                  failed={local.failed}
+                  onRefresh={local.refresh}
+                />
+              )}
 
               {mode === "byok" && (
                 <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
@@ -390,6 +455,7 @@ export function ModelConfigModal({
               }
               byokMode={mode === "byok"}
               byokProviders={byokProviders}
+              modelsOverride={subscriptionModels}
               placeholder={msg("auto.features.submit.components.modelconfigmodal.literal.3")}
             />
           </div>
@@ -493,6 +559,7 @@ export function ModelConfigModal({
             onClick={handleSave}
             disabled={
               !draft.name.trim() ||
+              (mode === "subscription" && !draft.cli_provider) ||
               (!nameOnly &&
                 !modelDefaultsOnly &&
                 ((draft.temperature != null &&

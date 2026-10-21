@@ -15,8 +15,14 @@
  * unavailable seed and never contains demo balances or activity.
  */
 
-/** Where a job's tokens are billed: through the Skynet balance, or the user's own key. */
-export type TokenSourceMode = "managed" | "byok";
+/**
+ * Where a job's tokens are billed: through the Skynet balance, the user's own
+ * key, or (local desktop build only) the user's signed-in coding-agent CLI.
+ */
+export type TokenSourceMode = "managed" | "byok" | "subscription";
+
+/** A coding-agent CLI whose subscription the local desktop build can run models on. */
+export type CliProvider = "codex" | "claude" | "droid";
 
 /** Coarse health of the wallet, used to theme the balance chip. */
 export type WalletStatus = "healthy" | "low" | "empty";

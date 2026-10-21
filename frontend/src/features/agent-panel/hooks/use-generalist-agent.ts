@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { readPref } from "@/features/settings";
+import { localAgentModel, useLocalStatus } from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
@@ -240,6 +241,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   // queue above: these wait for their own chat's turn to end, then run in it.
   // Each queue's sender is attached by the effect further down.
   const [steerQueues] = React.useState(() => new Map<string, SteerQueue>());
+  // Loads the CLI list a role set to run locally maps its model onto.
+  useLocalStatus();
   const steerQueueFor = React.useCallback(
     (key: string): SteerQueue => {
       let queue = steerQueues.get(key);
@@ -491,7 +494,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           conversation_id: sessionsRef.current.get(key)?.conversationId ?? null,
           regenerate: run.regenerate,
           locale: getActiveLocale(),
-          model: modelRef.current ?? undefined,
+          model: localAgentModel(modelRef.current, agentSubscriptionFor("generalist")) ?? undefined,
           reasoning_effort: effortRef.current ?? undefined,
           steer_key: steerKey,
         },

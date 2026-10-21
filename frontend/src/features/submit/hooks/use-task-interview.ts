@@ -2,7 +2,8 @@
 
 import * as React from "react";
 
-import { readPref } from "@/features/settings";
+import { localAgentModel } from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { streamTaskInterviewTurn } from "@/shared/lib/api";
@@ -133,7 +134,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
           artifact_kind: current.artifactKind,
           starting_version: current.startingVersion,
           locale: getActiveLocale(),
-          model: model ?? undefined,
+          model: localAgentModel(model, agentSubscriptionFor("interview")) ?? undefined,
           reasoning_effort: reasoningEffort ?? undefined,
         },
         {

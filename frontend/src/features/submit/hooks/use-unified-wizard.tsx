@@ -58,7 +58,12 @@ import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { emptyModelConfig } from "../constants";
 import { restoreSavedLimit } from "../lib/budget-limit";
 import { cloneToSlices } from "../lib/clone-payload";
-import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "../lib/run-floor";
+import {
+  aggregateTokenSource,
+  callHoldKey,
+  isSubscriptionModel,
+  runFloor as computeRunFloor,
+} from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
@@ -406,11 +411,17 @@ export function WizardV2Provider({
     ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
     metricModel,
   ].filter(hasModel);
+  // A CLI-subscription model bills to the user's own plan, so it has no
+  // server hold to fetch and adds nothing to the floor.
+  const pricedModels = submittedModels.filter(
+    (model): model is ModelConfig & { token_source?: "managed" | "byok" } =>
+      !isSubscriptionModel(model),
+  );
   const {
     holds: callHolds,
     boxHoldCents,
     settled: costSettled,
-  } = useModelCallHolds(submittedModels);
+  } = useModelCallHolds(pricedModels);
   const tokenSource = aggregateTokenSource(submittedModels);
   // The floor waits for the server's box hold, since the boxes are most of it.
   const runFloor =
@@ -418,10 +429,11 @@ export function WizardV2Provider({
       ? null
       : computeRunFloor({
           boxHoldCents,
-          callHoldCents: submittedModels.map(
+          callHoldCents: pricedModels.map(
             (model) =>
               callHolds.get(callHoldKey(model.name, model.token_source ?? "managed")) ?? null,
           ),
+          tokenSource,
         });
 
   // The spending limit lives on the server budget, like the slice mirror the

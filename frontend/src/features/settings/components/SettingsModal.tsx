@@ -117,6 +117,8 @@ import { PackageRegistrySetting } from "./PackageRegistrySetting";
 import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
 import { SettingsRow } from "@/shared/ui/settings-row";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { AgentLocalRunSetting } from "./AgentLocalRunSetting";
 
 function WizardTab() {
   const { prefs, setPref } = useUserPrefs();
@@ -289,6 +291,8 @@ function AgentTab() {
           </SelectContent>
         </Select>
       </SettingsRow>
+
+      {isLocalMode() && <AgentLocalRunSetting />}
     </div>
   );
 }
