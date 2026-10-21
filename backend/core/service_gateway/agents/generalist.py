@@ -2406,6 +2406,10 @@ def _build_local_summary_lm(turn_config: ModelConfig | None) -> Any | None:
         # Keep the saved key, endpoint and connection params; drop the turn's
         # own effort, which a label must not think with.
         extra = {k: v for k, v in turn_config.extra.items() if k != "reasoning_effort"}
+        # A connection's own reasoning body would make the label think; only
+        # the no-thinking settings below may set it.
+        if isinstance(extra.get("extra_body"), dict):
+            extra["extra_body"] = {k: v for k, v in extra["extra_body"].items() if k != "reasoning"}
         no_thinking = _no_thinking_extra(model)
         if isinstance(extra.get("extra_body"), dict) and "extra_body" in no_thinking:
             no_thinking["extra_body"] = {**extra["extra_body"], **no_thinking["extra_body"]}

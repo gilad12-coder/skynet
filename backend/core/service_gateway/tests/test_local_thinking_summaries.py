@@ -17,6 +17,7 @@ from core.local.cli_catalog import CLI_MODELS
 from core.models import ModelConfig
 from core.service_gateway import language_models
 from core.service_gateway.agents import generalist
+from core.service_gateway.agents.generalist import WizardState
 
 INTERVIEW_MODEL = "google/gemini-3.5-flash"
 REASONING = "The question column holds the input and the answer column holds the expected output for each row."
@@ -103,6 +104,65 @@ async def test_local_summary_runs_on_the_saved_openrouter_key(built: list[ModelC
     assert summary.base_url is None
     assert len(sink) == 1
     assert sink[0].side_call is True
+
+
+async def test_local_summary_drops_the_connection_reasoning_body(
+    built: list[ModelConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a saved connection's ``extra_body`` reasoning out of the label, so only the no-thinking settings apply."""
+    monkeypatch.setattr(generalist, "_no_thinking_extra", lambda model: {"reasoning_effort": "none"})
+    turn = _byok_turn()
+    turn.extra["extra_body"] = {"provider": {"sort": "price"}, "reasoning": {"effort": "high"}}
+    summaries = generalist._thinking_summaries("English", asyncio.Queue(), [], turn)
+
+    assert await summaries._summarize(REASONING) == generalist._clean_summary(LABEL)
+    summary = built[0]
+    assert summary.extra["reasoning_effort"] == "none"
+    assert summary.extra["extra_body"] == {"provider": {"sort": "price"}}
+    # The turn keeps its own reasoning body.
+    assert turn.extra["extra_body"]["reasoning"] == {"effort": "high"}
+
+
+async def test_local_turn_labels_thinking_on_its_own_saved_key(
+    built: list[ModelConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pass the turn's config from ``run_generalist_agent`` to the label, so a local BYOK turn gets labels."""
+
+    async def fake_drive(*, emit: Any, **_kwargs: Any) -> str:
+        """Stream one stretch of thinking, then reply.
+
+        Args:
+            emit: The turn's emitter.
+
+        Returns:
+            The reply.
+        """
+        emit({"event": "reasoning_patch", "data": {"chunk": REASONING}})
+        await asyncio.sleep(0)
+        return "ok"
+
+    monkeypatch.setattr(generalist, "_drive_generalist_agent", fake_drive)
+    monkeypatch.setattr(generalist, "served_model_from", lambda lm: None)
+
+    events = [
+        ev
+        async for ev in generalist.run_generalist_agent(
+            wizard_state=WizardState(),
+            chat_history=[],
+            user_message="go",
+            model_config=_byok_turn(),
+            locale="en",
+            usage_sink=[],
+        )
+    ]
+
+    labels = [e["data"]["text"] for e in events if e["event"] == "thinking_summary"]
+    assert labels == [generalist._clean_summary(LABEL)]
+    turn, summary = built
+    assert turn.name == "anthropic/claude-opus-5.5"
+    assert summary.name == INTERVIEW_MODEL
+    assert summary.token_source == TOKEN_SOURCE_BYOK
+    assert summary.extra["api_key"] == "sk-or-fake"
 
 
 async def test_local_summary_runs_on_the_selected_cli(built: list[ModelConfig]) -> None:
