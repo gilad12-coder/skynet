@@ -37,6 +37,11 @@ EXCLUDED_TOP_LEVEL = frozenset({".app", ".app-bridge"})
 # Project config the host CLIs load (settings, hooks, MCP servers, skills).
 # It never leaves the sandbox, so guest code cannot run on the Mac through it.
 AGENT_CONFIG_NAMES = frozenset({".claude", ".codex", ".factory", ".agents", ".mcp.json", "CLAUDE.local.md"})
+# CLI login file names; the host turn must never send one back to the guest.
+LOGIN_FILE_NAMES = frozenset({"auth.json", ".credentials.json", ".claude.json"})
+# The Mac's home volume ignores case, so ".Claude" opens ".claude".
+_EXCLUDED_TOP_FOLDED = frozenset(name.casefold() for name in EXCLUDED_TOP_LEVEL)
+_EXCLUDED_NAMES_FOLDED = frozenset(name.casefold() for name in AGENT_CONFIG_NAMES | LOGIN_FILE_NAMES)
 FAILED_CODE = "blackbox.host_agent_failed"
 RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILURE_PREFIX = "APP_HOST_AGENT_ERROR "
@@ -77,10 +82,11 @@ def excluded_path(relative: Path) -> bool:
         relative: Path relative to the workspace root.
 
     Returns:
-        True for launch config, bridge state and any CLI's project config.
+        True for launch config, bridge state, any CLI's project config and CLI
+        login file names, in any letter case.
     """
-    parts = relative.parts
-    return bool(parts) and (parts[0] in EXCLUDED_TOP_LEVEL or any(part in AGENT_CONFIG_NAMES for part in parts))
+    parts = [part.casefold() for part in relative.parts]
+    return bool(parts) and (parts[0] in _EXCLUDED_TOP_FOLDED or any(part in _EXCLUDED_NAMES_FOLDED for part in parts))
 
 
 def pack_workspace(workspace: Path) -> tuple[bytes, set[str]]:

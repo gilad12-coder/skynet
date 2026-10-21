@@ -7,9 +7,11 @@ import io
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -41,6 +43,7 @@ from core.config import Settings, settings
 from core.local.cli_isolation import CLAUDE_ARGS, CODEX_ARGS
 from core.local.cli_probe import read_cli_limits
 from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
+from core.worker import host_agent_shim
 
 STRIPPED = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
 RESET_EPOCH = 1_893_456_000
@@ -61,6 +64,7 @@ Path(os.environ["FAKE_CLI_RECORD"]).write_text(json.dumps({
     "cwd": os.getcwd(),
     "env": {key: os.environ.get(key) for key in __STRIPPED__},
     "home": os.environ.get("HOME"),
+    "turn_env": {key: os.environ.get(key) for key in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR", "SSH_AUTH_SOCK")},
     "prompt": prompt,
     "files": sorted(path.as_posix() for path in Path(".").rglob("*")),
 }))
@@ -206,6 +210,7 @@ def test_turn_edits_a_copy_with_stripped_keys(
 ) -> None:
     """The CLI runs in a fresh copy under the state dir, without provider keys, and its edits come back."""
     monkeypatch.setenv("FAKE_CLI_NAME", cli)
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(tmp_path / "agent.sock"))
     original = (guest / "solver.py").read_text()
     body = {
         "cli": cli,
@@ -228,6 +233,15 @@ def test_turn_edits_a_copy_with_stripped_keys(
     assert copy.parent.parent == workspaces
     assert copy != guest.resolve()
     assert record["env"] == dict.fromkeys(STRIPPED)
+    turn_tmp = record["turn_env"]["TMPDIR"]
+    assert Path(turn_tmp).parent == copy.parent
+    assert record["turn_env"] == {
+        "TMPDIR": turn_tmp,
+        "TMP": turn_tmp,
+        "TEMP": turn_tmp,
+        "CLAUDE_CODE_TMPDIR": turn_tmp,
+        "SSH_AUTH_SOCK": None,
+    }
     if cli == "codex":
         assert record["home"] != os.environ["HOME"]
     assert record["prompt"] == "Improve solve()."
@@ -592,3 +606,195 @@ def test_workspace_only_cannot_read_the_users_home(tmp_path: Path) -> None:
     assert allowed.stdout == "mine"
     assert write.returncode != 0
     assert not outside.exists()
+
+
+def _gone(pid: int, seconds: float = 10) -> bool:
+    """Wait until a process no longer runs, and kill it when it still does.
+
+    Args:
+        pid: The process id.
+        seconds: How long to wait.
+
+    Returns:
+        True when the process stopped by itself in time.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    os.kill(pid, signal.SIGKILL)
+    return False
+
+
+def test_timeout_kills_children_in_a_new_session(tmp_path: Path) -> None:
+    """A tool command that calls setsid, and a daemon that forks twice, both stop on timeout."""
+    session_pid = tmp_path / "session.pid"
+    daemon_pid = tmp_path / "daemon.pid"
+    script = f"""
+import os, time
+from pathlib import Path
+if os.fork() == 0:
+    os.setsid()
+    Path({str(session_pid)!r}).write_text(str(os.getpid()))
+    time.sleep(120)
+    os._exit(0)
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        Path({str(daemon_pid)!r}).write_text(str(os.getpid()))
+        time.sleep(120)
+    os._exit(0)
+time.sleep(120)
+"""
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        host_agent.run_group([sys.executable, "-c", script], cwd=tmp_path, env=dict(os.environ), stdin="", timeout=2)
+
+    assert _gone(int(session_pid.read_text()))
+    assert _gone(int(daemon_pid.read_text()))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
+def test_workspace_only_cannot_reach_local_sockets_or_launchctl(tmp_path: Path) -> None:
+    """Under the profile a CLI cannot connect to a unix socket (Docker, ssh-agent) or run launchctl."""
+    home = tmp_path / "home"
+    turn = home / "turn"
+    turn.mkdir(parents=True)
+    # A unix socket path must stay under 104 bytes, so it cannot live in tmp_path.
+    socket_dir = Path(tempfile.mkdtemp(prefix="sky", dir="/private/tmp"))
+    socket_path = socket_dir / "s"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind(str(socket_path))
+        server.listen(1)
+        client = f"import socket; socket.socket(socket.AF_UNIX).connect({str(socket_path)!r}); print('connected')"
+        plain = subprocess.run([sys.executable, "-c", client], capture_output=True, text=True, timeout=30, check=False)
+        confined = subprocess.run(
+            host_agent.confine([sys.executable, "-c", client], home=home, writable=[str(turn)], readable=[]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    finally:
+        server.close()
+        socket_path.unlink(missing_ok=True)
+        socket_dir.rmdir()
+    launchctl = subprocess.run(
+        host_agent.confine(["/bin/launchctl", "version"], home=home, writable=[str(turn)], readable=[]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert plain.stdout.strip() == "connected"
+    assert confined.returncode != 0
+    assert "connected" not in confined.stdout
+    assert "Operation not permitted" in confined.stderr
+    assert launchctl.returncode != 0
+
+
+def _login(account: str, token: str) -> bytes:
+    """Build a codex login file.
+
+    Args:
+        account: The account id.
+        token: The access token value.
+
+    Returns:
+        The ``auth.json`` bytes.
+    """
+    return json.dumps({"tokens": {"account_id": account, "access_token": token, "refresh_token": token[::-1]}}).encode()
+
+
+@pytest.mark.parametrize(
+    ("change", "kept"),
+    [
+        ("refresh", True),
+        ("other_account", False),
+        ("not_json", False),
+        ("no_tokens", False),
+        ("deleted", False),
+        ("link", False),
+    ],
+)
+def test_only_a_same_account_refresh_reaches_the_users_login(change: str, kept: bool, tmp_path: Path) -> None:
+    """A turn may refresh the codex login, but cannot swap, break or redirect it."""
+    original = _login("account-1", "A" * 32)
+    copy = tmp_path / "auth.json"
+    copy.write_bytes(original)
+    target = tmp_path / "elsewhere.json"
+    target.write_text("{}")
+    changed = {
+        "refresh": _login("account-1", "B" * 32),
+        "other_account": _login("account-2", "C" * 32),
+        "not_json": b"not json",
+        "no_tokens": json.dumps({"tokens": {"account_id": "account-1"}}).encode(),
+    }
+    copy.unlink()
+    if change == "link":
+        copy.symlink_to(target)
+    elif change != "deleted":
+        copy.write_bytes(changed[change])
+
+    host_agent.keep_valid_login(copy, original)
+
+    assert not copy.is_symlink()
+    assert copy.read_bytes() == (changed[change] if kept else original)
+    assert target.read_text() == "{}"
+
+
+def test_result_drops_login_files_and_token_copies(tmp_path: Path) -> None:
+    """The returned archive holds no CLI login file and no file with a login token in it."""
+    workdir = tmp_path / "copy"
+    (workdir / "sub").mkdir(parents=True)
+    secret = "s3cret-token-value-0123456789"
+    (workdir / "a.txt").write_text("a")
+    (workdir / "leak.txt").write_text(f"token={secret}\n")
+    (workdir / "auth.json").write_text("{}")
+    (workdir / "sub" / ".Credentials.json").write_text("{}")
+    (workdir / "sub" / ".claude.json").write_text("{}")
+
+    with tarfile.open(fileobj=io.BytesIO(host_agent._pack(workdir, {secret})), mode="r:gz") as archive:
+        names = set(archive.getnames())
+
+    assert names == {"a.txt", "sub"}
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [".Claude/settings.json", ".MCP.json", "claude.local.md", ".APP/host-agent/shim.py", "a/.CODEX/config.toml"],
+)
+def test_agent_config_is_matched_in_any_letter_case(relative: str, tmp_path: Path) -> None:
+    """A case-insensitive Mac disk would load ``.Claude`` as ``.claude``, so the filter ignores case."""
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x")
+
+    host_agent.strip_agent_config(tmp_path)
+
+    assert host_agent_shim.excluded_path(Path(relative))
+    assert not path.exists()
+
+
+def test_tool_roots_never_open_the_home_or_a_folder_in_it(tmp_path: Path) -> None:
+    """A CLI under ``~/.cargo/bin`` gets that folder, never ``~/.cargo`` (credentials.toml) or the home."""
+    home = tmp_path / "home"
+    nested = home / ".cargo" / "bin" / "tool"
+    shallow = home / "tool"
+    nested.parent.mkdir(parents=True)
+    for binary in (nested, shallow):
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+    real_home = os.path.realpath(home)
+
+    roots = host_agent.tool_roots(str(nested), home) + host_agent.tool_roots(str(shallow), home)
+
+    assert roots == [os.path.realpath(nested.parent)]
+    for root in roots:
+        assert not (real_home + os.sep).startswith(root.rstrip(os.sep) + os.sep)
+        assert root != os.path.realpath(home / ".cargo")

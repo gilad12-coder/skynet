@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import ctypes
 import io
 import json
 import logging
@@ -32,6 +33,7 @@ import os
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -49,7 +51,7 @@ from typing import Any, Literal, cast
 from ..config import Settings
 from ..i18n import t_locale
 from ..local.cli_catalog import CliProvider, cli_model_arg, parse_subscription_model_id
-from ..local.cli_isolation import isolated_cli
+from ..local.cli_isolation import CODEX_AUTH_FILE, isolated_cli
 from ..local.cli_probe import cli_binary, read_cli_limits, write_cli_limit
 from ..worker.host_agent_shim import excluded_path
 from .cli_runners import limit_error
@@ -69,6 +71,8 @@ HostPermission = Literal["workspace_only", "full_access"]
 HOST_PERMISSIONS: tuple[HostPermission, ...] = ("workspace_only", "full_access")
 HOST_AGENT_TOKEN_KEY = "host_agent_token"
 SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
+# Agent sockets act outside the sandbox (the SSH agent signs with the user's keys).
+AGENT_SOCKET_ENV = frozenset({"SSH_AUTH_SOCK"})
 RATE_LIMITED_CODE = "subscription.rate_limited"
 FAILED_KEY = "blackbox.host_agent_failed"
 RATE_LIMITED_KEY = "blackbox.host_agent_rate_limited"
@@ -219,14 +223,35 @@ def _safe_link(workdir: Path, path: Path) -> bool:
     return os.path.commonpath([resolved, str(workdir)]) == str(workdir)
 
 
-def _pack(workdir: Path) -> bytes:
+def _holds_secret(path: Path, secret_values: set[str]) -> bool:
+    """Tell whether a file contains one of the CLI's login tokens.
+
+    Args:
+        path: A regular file in the copy.
+        secret_values: Token values from the login file.
+
+    Returns:
+        True when any token appears in the file's bytes.
+    """
+    if not secret_values:
+        return False
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return True
+    return any(value.encode() in data for value in secret_values)
+
+
+def _pack(workdir: Path, secret_values: set[str] | frozenset[str] = frozenset()) -> bytes:
     """Archive the edited copy without following links.
 
-    Launch files, agent config, special files and links that leave the copy
-    stay out, so the guest never receives a path into the Mac.
+    Launch files, agent config, login files, files that hold a login token,
+    special files and links that leave the copy stay out, so the guest never
+    receives a path into the Mac or the user's login.
 
     Args:
         workdir: The CLI's workspace after the turn.
+        secret_values: Token values of the CLI's login.
 
     Returns:
         Gzip tar bytes.
@@ -241,7 +266,11 @@ def _pack(workdir: Path) -> bytes:
                 if not _safe_link(workdir, path):
                     logger.warning("Host agent: dropped a link that leaves the copy")
                     continue
-            elif not (path.is_file() or path.is_dir()):
+            elif path.is_file():
+                if _holds_secret(path, set(secret_values)):
+                    logger.warning("Host agent: dropped a file that holds the CLI's login")
+                    continue
+            elif not path.is_dir():
                 continue
             archive.add(path, arcname=relative.as_posix(), recursive=False)
     return buffer.getvalue()
@@ -259,26 +288,49 @@ def _real(path: Path | str) -> str:
     return os.path.realpath(path)
 
 
-def tool_roots(binary: str) -> list[str]:
+def _install_root(path: Path | str, home: str) -> bool:
+    """Tell whether a directory may be opened for reading inside the home.
+
+    Args:
+        path: A real directory path.
+        home: The user's real home directory.
+
+    Returns:
+        False for the home itself, a directory that contains it, and a folder
+        directly in it (``~/.cargo`` holds ``credentials.toml`` next to ``bin``).
+    """
+    path = str(path)
+    if os.path.commonpath([path, home]) == path:
+        return False
+    if os.path.commonpath([path, home]) != home:
+        return True
+    return len(Path(path).relative_to(home).parts) >= 2
+
+
+def tool_roots(binary: str, home: Path | str | None = None) -> list[str]:
     """Return the directories a CLI must read to start.
 
     Covers the command's own directory, its install tree and, for a script,
     its interpreter's install tree (for example a Node install for Codex).
+    A root that would open the home, or a folder directly in it, is left out.
 
     Args:
         binary: Absolute path of the CLI command.
+        home: The user's home directory; the process's home by default.
 
     Returns:
         Real directory paths.
     """
-    roots = {_real(Path(binary).parent)}
+    real_home = _real(home if home is not None else Path.home())
     real = Path(_real(binary))
+    roots = {_real(Path(binary).parent), str(real.parent)}
     parts = real.parts
     if "node_modules" in parts:
         index = parts.index("node_modules")
         prefix = parts[: index - 1] if index > 0 and parts[index - 1] == "lib" else parts[:index]
         roots.add(str(Path(*prefix)))
     else:
+        # A release folder (codex keeps codex-resources beside bin/).
         roots.add(str(real.parent.parent))
     try:
         with real.open("rb") as handle:
@@ -293,24 +345,35 @@ def tool_roots(binary: str) -> list[str]:
         found = shutil.which(interpreter) if interpreter else None
         if found:
             roots.add(str(Path(_real(found)).parent.parent))
-    return sorted(roots)
+    return sorted(root for root in roots if _install_root(root, real_home))
 
 
-def confine(argv: list[str], *, home: Path | str, writable: list[str], readable: list[str]) -> list[str]:
+def confine(
+    argv: list[str],
+    *,
+    home: Path | str,
+    writable: list[str],
+    readable: list[str],
+    hidden: tuple[str, ...] = (),
+) -> list[str]:
     """Wrap a command in a macOS sandbox that hides the user's home.
 
     The command may write only to ``writable`` (and devices). Inside ``home``
-    it may also read only ``writable`` and ``readable``; everything else there
-    is denied. File metadata stays readable so path lookups and ``getcwd``
-    work. Reads outside ``home`` and the network stay open: the CLI needs
-    system libraries and its provider. macOS refuses a nested sandbox under a
-    profile with deny rules, so this profile is the CLI's only sandbox.
+    and ``hidden`` it may also read only ``writable`` and ``readable``;
+    everything else there is denied. File metadata stays readable so path
+    lookups and ``getcwd`` work. It cannot connect to any Unix socket (the
+    Docker daemon and the SSH agent act outside the sandbox) or run
+    ``launchctl``, which starts jobs outside it. Other reads outside ``home``
+    and the TCP network stay open: the CLI needs system libraries and its
+    provider. macOS refuses a nested sandbox under a profile with deny rules,
+    so this profile is the CLI's only sandbox.
 
     Args:
         argv: The CLI command.
         home: The user's home directory.
         writable: Directories and files the turn owns (the copy, temp space, its login).
         readable: The CLI's install directories.
+        hidden: More directories to hide, such as the shared temp folder.
 
     Returns:
         The ``sandbox-exec`` command.
@@ -321,6 +384,10 @@ def confine(argv: list[str], *, home: Path | str, writable: list[str], readable:
     if sys.platform != "darwin" or not SANDBOX_EXEC.exists():
         raise HostAgentRequestError("workspace_only host agents need macOS sandbox-exec.")
     params = {"HOME_DIR": _real(home)}
+    hidden_rules = ['(subpath (param "HOME_DIR"))']
+    for index, path in enumerate(hidden):
+        params[f"H{index}"] = _real(path)
+        hidden_rules.append(f'(subpath (param "H{index}"))')
     write_rules = []
     for index, path in enumerate(writable):
         params[f"W{index}"] = _real(path)
@@ -334,8 +401,12 @@ def confine(argv: list[str], *, home: Path | str, writable: list[str], readable:
         "(version 1)",
         "(allow default)",
         "(deny file-write*)",
-        '(deny file-read-data file-read-xattr (subpath (param "HOME_DIR")))',
+        f"(deny file-read-data file-read-xattr {' '.join(hidden_rules)})",
         '(allow file-write* (subpath "/dev"))',
+        "(deny network-outbound (remote unix-socket))",
+        # Name lookups go through this socket; without it no provider host resolves.
+        '(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))',
+        '(deny process-exec (literal "/bin/launchctl"))',
     ]
     if read_rules:
         profile.append(f"(allow file-read-data file-read-xattr {' '.join(read_rules)})")
@@ -345,30 +416,160 @@ def confine(argv: list[str], *, home: Path | str, writable: list[str], readable:
     return [str(SANDBOX_EXEC), "-p", "\n".join(profile), *defines, *argv]
 
 
-def _stop_group(pid: int) -> None:
-    """Kill a CLI's whole process group, children included.
+_PROC_PIDVNODEPATHINFO = 9
+# struct proc_vnodepathinfo: the cwd's vnode_info (152 bytes), then its path.
+_VNODE_PATH_INFO_SIZE = 2352
+_CWD_PATH = slice(152, 152 + 1024)
+_libproc: list[Any] = []
+
+
+def _cwd(pid: int) -> str | None:
+    """Return a process's working directory.
 
     Args:
-        pid: The group leader, started in its own session.
+        pid: The process id.
+
+    Returns:
+        The real path, or None when it cannot be read.
     """
+    if sys.platform == "linux":
+        try:
+            return str(Path(f"/proc/{pid}/cwd").readlink())
+        except OSError:
+            return None
+    if sys.platform != "darwin":
+        return None
+    if not _libproc:
+        library = ctypes.CDLL("/usr/lib/libproc.dylib")
+        library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        _libproc.append(library)
+    buffer = ctypes.create_string_buffer(_VNODE_PATH_INFO_SIZE)
+    if _libproc[0].proc_pidinfo(pid, _PROC_PIDVNODEPATHINFO, 0, buffer, _VNODE_PATH_INFO_SIZE) != _VNODE_PATH_INFO_SIZE:
+        return None
+    return buffer.raw[_CWD_PATH].split(b"\0", 1)[0].decode("utf-8", "replace") or None
+
+
+def _process_table() -> list[tuple[int, int, int]]:
+    """List this user's live processes with their parent and group.
+
+    Returns:
+        ``(pid, ppid, pgid)`` rows, without zombies.
+    """
+    rows = []
+    if sys.platform == "linux":
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                stat_line = (entry / "stat").read_text()
+            except OSError:
+                continue
+            # The command name in field 2 can hold spaces, so fields count from its ")".
+            fields = stat_line.rsplit(")", 1)[-1].split()
+            if fields[0] != "Z":
+                rows.append((int(entry.name), int(fields[1]), int(fields[2])))
+        return rows
+    listing = subprocess.run(
+        ["/bin/ps", "-x", "-o", "pid=,ppid=,pgid=,stat="], capture_output=True, text=True, check=False
+    ).stdout
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) == 4 and fields[0].isdigit() and not fields[3].startswith("Z"):
+            rows.append((int(fields[0]), int(fields[1]), int(fields[2])))
+    return rows
+
+
+def _turn_processes(leader: int | None, root: Path) -> set[int]:
+    """Find every live process of one turn, also those that left its group or session.
+
+    A process belongs to the turn when it is the leader or its descendant,
+    when it works inside the turn's folder (an escaped tool command keeps the
+    folder it started in), or when it shares a group with one that does.
+
+    Args:
+        leader: The CLI's own process while it is not reaped, else None.
+        root: The turn's folder.
+
+    Returns:
+        Process ids, without this process.
+    """
+    rows = _process_table()
+    real_root = _real(root)
+    found = set() if leader is None else {leader}
+    for pid, _, _ in rows:
+        cwd = _cwd(pid)
+        if cwd is not None and (cwd == real_root or cwd.startswith(real_root + os.sep)):
+            found.add(pid)
+    children: dict[int, list[int]] = {}
+    for pid, ppid, _ in rows:
+        children.setdefault(ppid, []).append(pid)
+    groups = {pgid for pid, _, pgid in rows if pid in found}
+    while True:
+        before = len(found)
+        found |= {pid for pid, _, pgid in rows if pgid in groups}
+        queue = list(found)
+        while queue:
+            for child in children.get(queue.pop(), []):
+                if child not in found:
+                    found.add(child)
+                    queue.append(child)
+        groups |= {pgid for pid, _, pgid in rows if pid in found}
+        if len(found) == before:
+            break
+    own_group = os.getpgid(0)
+    turn = {pid for pid, _, pgid in rows if pid in found and pgid != own_group}
+    if leader is not None:
+        turn.add(leader)
+    return turn - {os.getpid()}
+
+
+def _stop_turn(process: subprocess.Popen[str], root: Path) -> None:
+    """Kill every process of one turn and every group they lead, until none is left.
+
+    A CLI runs each tool command in a new session (``setsid``), so killing the
+    leader's group alone would leave those commands running on the Mac.
+
+    Args:
+        process: The CLI, started in its own session.
+        root: The turn's folder.
+    """
+    own_group = os.getpgid(0)
     with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, signal.SIGKILL)
+        # A group id is not reused while any member lives, so this is safe even
+        # after the leader is reaped.
+        os.killpg(process.pid, signal.SIGKILL)
+    for _ in range(50):
+        # A reaped leader's pid can belong to another process by now.
+        pids = _turn_processes(process.pid if process.poll() is None else None, root)
+        if not pids:
+            return
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                group = os.getpgid(pid)
+                if group != own_group:
+                    os.killpg(group, signal.SIGKILL)
+                os.kill(pid, signal.SIGKILL)
+        time.sleep(0.1)
+    logger.warning("Host agent: some turn processes did not stop")
 
 
 def run_group(
-    argv: list[str], *, cwd: Path, env: dict[str, str], stdin: str, timeout: float
+    argv: list[str], *, cwd: Path, env: dict[str, str], stdin: str, timeout: float, root: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command in its own session and kill its whole group when it ends.
+    """Run a command in its own session and kill all its processes when it ends.
 
-    A CLI starts tools and helpers of its own, so a timeout that killed only
-    the direct child would leave them running on the Mac.
+    A CLI starts tools and helpers of its own, some in new sessions, so a
+    timeout that killed only the direct child or its group would leave them
+    running on the Mac.
 
     Args:
         argv: The command.
         cwd: Working directory.
         env: Full environment.
         stdin: Text written to standard input.
-        timeout: Seconds before the group is killed.
+        timeout: Seconds before every process of the turn is killed.
+        root: The turn's folder; a process working inside it belongs to the
+            turn. ``cwd`` by default.
 
     Returns:
         The finished process with its captured output.
@@ -377,6 +578,7 @@ def run_group(
         subprocess.TimeoutExpired: When the command ran longer than ``timeout``.
         OSError: When the command could not start.
     """
+    root = root or cwd
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -391,15 +593,14 @@ def run_group(
     try:
         stdout, stderr = process.communicate(stdin, timeout=timeout)
     except subprocess.TimeoutExpired:
-        _stop_group(process.pid)
+        _stop_turn(process, root)
         try:
             process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
-            # A helper that left the group still holds the output pipes.
             process.kill()
         raise
     finally:
-        _stop_group(process.pid)
+        _stop_turn(process, root)
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
@@ -539,24 +740,88 @@ def _error(code: str, message: str, *, reset_at: str | None = None, transcript: 
 
 
 def _login_paths(cli: CliProvider) -> list[str]:
-    """Return the files in the user's home a CLI needs for its subscription login.
+    """Return the files in the user's home a CLI must read for its subscription login.
 
     Codex gets a temporary home with a login copy from :func:`isolated_cli`, so
-    it needs nothing here. Claude Code keeps its real config file, because its
-    login lives in the login Keychain, whose database the CLI opens itself and
-    may update when the login refreshes. ``~/.claude`` (other sessions'
-    transcripts, the user's own instructions) stays hidden.
+    it needs nothing here. Claude Code reads its real config file and the login
+    Keychain. Both stay read-only: ``~/.claude.json`` holds the user's own MCP
+    servers, which the user's later sessions would start outside any sandbox,
+    and the Keychain service writes a refreshed login itself. ``~/.claude``
+    (other sessions' transcripts, the user's own instructions) stays hidden.
 
     Args:
         cli: The CLI of the turn.
 
     Returns:
-        Paths the turn may read and write under the user's home.
+        Paths the turn may read under the user's home.
     """
     if cli != "claude":
         return []
     home = Path.home()
     return [str(home / ".claude.json"), str(home / "Library" / "Keychains")]
+
+
+def _login_secrets(raw: bytes) -> tuple[str | None, set[str]]:
+    """Read the account and the token values from a codex login file.
+
+    Args:
+        raw: The ``auth.json`` bytes.
+
+    Returns:
+        The account id (None when the file has none) and every token value.
+    """
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        return None, set()
+    if not isinstance(document, dict):
+        return None, set()
+    tokens = document.get("tokens") if isinstance(document.get("tokens"), dict) else {}
+    values = {value for value in [*tokens.values(), document.get("OPENAI_API_KEY")] if isinstance(value, str)}
+    account = tokens.get("account_id")
+    return (account if isinstance(account, str) and account else None), {value for value in values if len(value) >= 16}
+
+
+def _read_no_follow(path: Path) -> bytes | None:
+    """Read a regular file without following a link.
+
+    Args:
+        path: The file.
+
+    Returns:
+        Its bytes, or None for a link, a missing file or another kind.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    with os.fdopen(descriptor, "rb") as handle:
+        return handle.read() if stat.S_ISREG(os.fstat(handle.fileno()).st_mode) else None
+
+
+def keep_valid_login(copy: Path, original: bytes) -> None:
+    """Undo a change to the codex login copy unless it is a real refresh.
+
+    :func:`isolated_cli` puts a changed copy back over the user's real login.
+    The turn's tool commands can write the copy, so only a valid login for the
+    same account may go back; anything else is replaced by the original bytes.
+
+    Args:
+        copy: The login copy in the turn's temporary codex home.
+        original: Its bytes before the turn.
+    """
+    current = _read_no_follow(copy)
+    if current == original:
+        return
+    account, _ = _login_secrets(original)
+    new_account, new_secrets = _login_secrets(current or b"")
+    if account is not None and new_account == account and new_secrets:
+        return
+    logger.warning("Host agent: refused a changed codex login from the turn")
+    copy.unlink(missing_ok=True)
+    descriptor = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(original)
 
 
 def _command(binary: str, env: dict[str, str]) -> str:
@@ -615,27 +880,42 @@ def run_host_agent(
     try:
         _extract(archive, workdir)
         strip_agent_config(workdir)
+        turn_tmp = turn / "tmp"
+        turn_tmp.mkdir()
         with isolated_cli(cli) as isolation:
-            binary = _command(cli_binary(cli, settings), isolation.env)
+            env = {key: value for key, value in isolation.env.items() if key not in AGENT_SOCKET_ENV}
+            # Each turn gets its own temp folder; the shared one holds other apps' files.
+            # Claude Code ignores TMPDIR and uses /tmp/claude-<uid> unless CLAUDE_CODE_TMPDIR is set.
+            env.update({name: str(turn_tmp) for name in ("TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR")})
+            login_copy = Path(env["CODEX_HOME"]) / CODEX_AUTH_FILE if cli == "codex" else None
+            login_original = (_read_no_follow(login_copy) if login_copy else None) or b""
+            _, secret_values = _login_secrets(login_original)
+            binary = _command(cli_binary(cli, settings), env)
             argv = host_cli_argv(
                 cli, permission, binary, workdir, _model_arg(cli, str(body.get("model") or "")), isolation.args
             )
             if permission == "workspace_only":
+                # Codex's temporary home (with its login copy) is the only shared-temp path it may use.
+                cli_home = [str(Path(env["CODEX_HOME"]).parent)] if login_copy else []
                 argv = confine(
                     argv,
                     home=Path.home(),
-                    writable=[str(turn), tempfile.gettempdir(), *_login_paths(cli)],
-                    readable=tool_roots(binary),
+                    writable=[str(turn), *cli_home],
+                    readable=[*tool_roots(binary), *_login_paths(cli)],
+                    hidden=(tempfile.gettempdir(), "/private/tmp"),
                 )
             started = time.monotonic()
             try:
                 completed = run_group(
-                    argv, cwd=workdir, env=isolation.env, stdin=prompt, timeout=settings.host_agent_timeout_seconds
+                    argv, cwd=workdir, env=env, stdin=prompt, timeout=settings.host_agent_timeout_seconds, root=turn
                 )
             except subprocess.TimeoutExpired:
                 return _error(FAILED_KEY, f"The {cli} turn ran longer than {settings.host_agent_timeout_seconds:.0f}s.")
             except OSError as error:
                 return _error(FAILED_KEY, f"The {cli} CLI could not start: {error}")
+            finally:
+                if login_copy is not None and login_original:
+                    keep_valid_login(login_copy, login_original)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         text, usage, cli_error = parse_cli_output(cli, completed.stdout)
         transcript = text or completed.stdout or completed.stderr
@@ -654,7 +934,7 @@ def run_host_agent(
             return _error(FAILED_KEY, cli_error[:2000], transcript=transcript)
         return {
             "status": "ok",
-            "result_tar_b64": base64.b64encode(_pack(workdir)).decode("ascii"),
+            "result_tar_b64": base64.b64encode(_pack(workdir, secret_values)).decode("ascii"),
             "usage": {**usage, "model_ms": usage["model_ms"] or elapsed_ms, "cost": 0.0},
             "transcript_tail": transcript[-_TRANSCRIPT_TAIL_CHARS:],
         }

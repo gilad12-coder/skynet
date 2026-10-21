@@ -411,7 +411,7 @@ def test_shim_reports_a_refused_result(
     """A result with a link out of the workspace fails with a structured line and changes nothing."""
     parent, token = gateway
     evil = _archive(_file("solver.py"), _special("leak", tarfile.SYMTYPE, "/etc/hosts"))
-    monkeypatch.setattr(host_agent, "_pack", lambda workdir: evil)
+    monkeypatch.setattr(host_agent, "_pack", lambda workdir, secret_values=frozenset(): evil)
 
     completed = _run_shim(workspace, parent, token)
 
