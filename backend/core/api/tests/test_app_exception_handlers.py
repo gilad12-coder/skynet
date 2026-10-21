@@ -61,9 +61,7 @@ def _problem_response(
         "type": f"https://errors.skynet.app/{code}" if code else "about:blank",
         "title": title
         or (
-            code.replace("_", " ").replace(".", " ").capitalize()
-            if code
-            else error_type.replace("_", " ").capitalize()
+            code.replace("_", " ").replace(".", " ").capitalize() if code else error_type.replace("_", " ").capitalize()
         ),
         "status": status,
         "detail": detail,
@@ -122,6 +120,7 @@ def _build_test_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         """Map Pydantic validation errors to a 422 Problem Details response."""
+
         def _format_field(loc: Iterable[Any]) -> str:
             """Join a Pydantic error location tuple into a dotted field path."""
             parts: list[str] = []

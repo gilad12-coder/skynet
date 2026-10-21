@@ -53,7 +53,7 @@ from ..worker.repo_staging import (
 )
 from ..worker.unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from ..worker.vercel_dspy import run_vercel_dspy
-from .model_billing import normalize_model_token_sources
+from .model_billing import enforce_local_mode_sources, enforce_raw_local_mode_sources, normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
 
@@ -126,7 +126,9 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
         typed = BlackboxRunRequest.model_validate(payload)
     else:
         typed = UnifiedRunRequest.model_validate(payload)
-    normalize_model_token_sources(typed)
+    requested_source = typed.token_source
+    model_configs, _ = normalize_model_token_sources(typed)
+    enforce_local_mode_sources(typed, requested_source, model_configs)
     return typed.model_dump(mode="json", by_alias=True)
 
 
@@ -417,6 +419,9 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
     Returns:
         Durable scoped checks and current budget state.
     """
+    # Gate before the check claims evidence or spends: a hosted check must not
+    # bill a subscription or host-CLI run as managed.
+    enforce_raw_local_mode_sources(request.payload)
     terminal = None
     if request.workflow == "unified" and request.scope == "evaluation":
         terminal = check_terminal.current_recorder()

@@ -281,9 +281,7 @@ def test_optimized_nodes_backfills_prompt_from_state() -> None:
 def test_optimized_nodes_backfill_groups_cot_predict_under_node() -> None:
     """A cot node's ``.predict`` predictor state folds back to its node key."""
     art = ProgramArtifact(
-        program_state_json={
-            "n_polish.predict": {"demos": [], "signature": {"instructions": "Polish.", "fields": []}}
-        }
+        program_state_json={"n_polish.predict": {"demos": [], "signature": {"instructions": "Polish.", "fields": []}}}
     )
 
     assert set(art.optimized_nodes) == {"n_polish"}

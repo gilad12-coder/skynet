@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -126,3 +130,37 @@ def test_subscription_model_needs_a_cli() -> None:
 
     config = ModelConfig(name="anthropic/claude-sonnet-4.6", token_source="subscription", cli_provider="claude")
     assert config.cli_provider == "claude"
+
+
+def _dockerfile_bind(env: dict[str, str]) -> str:
+    """Run the image's start command with ``exec`` replaced by ``echo``.
+
+    Args:
+        env: Environment the container would start with.
+
+    Returns:
+        The command line the container would run.
+    """
+    dockerfile = Path(__file__).resolve().parents[2] / "Dockerfile"
+    cmd = next(line for line in dockerfile.read_text().splitlines() if line.startswith("CMD "))
+    script = json.loads(cmd.removeprefix("CMD "))[2].replace("exec ", "echo ")
+    return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_dockerfile_keeps_the_hosted_bind() -> None:
+    """Without local mode the image binds every interface, as before."""
+    assert _dockerfile_bind({"PATH": "/usr/bin:/bin", "API_HOST": "127.0.0.1"}) == (
+        "uvicorn main:app --host 0.0.0.0 --port 8000"
+    )
+
+
+@pytest.mark.parametrize("flag", ["APP_LOCAL_MODE", "SKYNET_LOCAL_MODE"])
+def test_dockerfile_binds_the_checked_host_in_local_mode(flag: str) -> None:
+    """In local mode the image binds API_HOST, the address the settings check accepted.
+
+    Args:
+        flag: Local-mode variable name the container sets.
+    """
+    env = {"PATH": "/usr/bin:/bin", flag: "1", "API_HOST": "127.0.0.1", "PORT": "9000"}
+
+    assert _dockerfile_bind(env) == "uvicorn main:app --host 127.0.0.1 --port 9000"

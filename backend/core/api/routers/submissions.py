@@ -70,8 +70,6 @@ from ...constants import (
     PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_BYOK,
-    TOKEN_SOURCE_MANAGED,
-    TOKEN_SOURCE_SUBSCRIPTION,
 )
 from ...exceptions import ServiceError
 from ...i18n_keys import I18nKey
@@ -113,7 +111,7 @@ from ...storage.usage import json_byte_size
 from ...worker.engine import get_worker
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_billing import normalize_model_token_sources
+from ..model_billing import enforce_local_mode_sources, normalize_model_token_sources
 from ..preflight_execution import WizardPreflightRequest, run_preflight
 from ..rate_limit import enforce_submission_rate
 from ..submission_idempotency import resolve_submission_replay_keys
@@ -692,35 +690,6 @@ def _cap_cost_ceiling_to_balance(
     payload.max_cost_cents = budget if current is None else min(current, budget)
 
 
-def _enforce_local_mode_sources(payload, requested_source: str, model_configs: list[ModelConfig]) -> None:
-    """Keep subscription runs in local mode and managed runs out of it.
-
-    A subscription model or a host-CLI proposer runs on the user's own Mac, so
-    a hosted deployment has no way to serve it. The Mac app has no managed
-    model routing, so a managed model there could never run.
-
-    Args:
-        payload: The submission, read for its proposer's ``host_cli``.
-        requested_source: The run-level ``token_source`` before normalization,
-            which folds ``subscription`` into ``managed``.
-        model_configs: Executable configs with normalized per-model sources.
-
-    Raises:
-        DomainError: 422 ``models.subscription_local_only`` outside local mode;
-            422 ``models.managed_unavailable_local`` in local mode.
-    """
-    sources = {config.token_source for config in model_configs}
-    optimizer = getattr(payload, "optimizer", None)
-    proposer = getattr(payload, "proposer", None) or getattr(optimizer, "proposer", None)
-    host_cli = getattr(proposer, "host_cli", None) is not None
-    if not settings.local_mode:
-        if TOKEN_SOURCE_SUBSCRIPTION in sources or requested_source == TOKEN_SOURCE_SUBSCRIPTION or host_cli:
-            raise DomainError("models.subscription_local_only", status=422)
-        return
-    if TOKEN_SOURCE_MANAGED in sources:
-        raise DomainError("models.managed_unavailable_local", status=422)
-
-
 def _enforce_byok_connections(job_store, username: str, model_configs: list[ModelConfig]) -> None:
     """Refuse BYOK models without a verified saved provider connection.
 
@@ -1034,7 +1003,7 @@ def submit_unified_payload(
 
     _requested_source = payload.token_source
     _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-    _enforce_local_mode_sources(payload, _requested_source, _model_configs)
+    enforce_local_mode_sources(payload, _requested_source, _model_configs)
     if not settings.local_mode:
         _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
         if payload.execution_budget_id is None:
@@ -1230,7 +1199,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         _requested_source = payload.token_source
         _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _enforce_local_mode_sources(payload, _requested_source, _model_configs)
+        enforce_local_mode_sources(payload, _requested_source, _model_configs)
         if not settings.local_mode:
             _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
             if payload.execution_budget_id is None:

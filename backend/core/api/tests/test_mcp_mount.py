@@ -53,9 +53,7 @@ def test_annotations_for_route_falls_back_to_method() -> None:
 
 def test_annotations_for_route_authored_hint_overrides_method() -> None:
     """An authored destructive hint merges over a POST's mutating default."""
-    route = SimpleNamespace(
-        method="POST", extensions={"x-mcp-annotations": {"destructiveHint": True}}
-    )
+    route = SimpleNamespace(method="POST", extensions={"x-mcp-annotations": {"destructiveHint": True}})
     ann = _annotations_for_route(route)
     assert ann is not None
     assert ann.readOnlyHint is False
@@ -64,9 +62,7 @@ def test_annotations_for_route_authored_hint_overrides_method() -> None:
 
 def test_annotations_for_route_authored_hint_without_method_default() -> None:
     """Authored hints apply even when the verb itself maps to no default."""
-    route = SimpleNamespace(
-        method="TRACE", extensions={"x-mcp-annotations": {"destructiveHint": True}}
-    )
+    route = SimpleNamespace(method="TRACE", extensions={"x-mcp-annotations": {"destructiveHint": True}})
     ann = _annotations_for_route(route)
     assert ann is not None
     assert ann.destructiveHint is True

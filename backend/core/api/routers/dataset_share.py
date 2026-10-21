@@ -280,9 +280,7 @@ def create_dataset_share_router(*, job_store) -> APIRouter:
                 ``general_role`` is invalid.
         """
         if req.general_access not in _GENERAL_ACCESS_VALUES:
-            raise DomainError(
-                "share.invalid_general_access", status=400, allowed=", ".join(_GENERAL_ACCESS_VALUES)
-            )
+            raise DomainError("share.invalid_general_access", status=400, allowed=", ".join(_GENERAL_ACCESS_VALUES))
         if req.general_role is not None and req.general_role not in LINK_ROLES:
             raise DomainError(
                 "share.invalid_role", status=400, role=req.general_role, allowed=", ".join(_LINK_ROLE_VALUES)
@@ -391,9 +389,7 @@ def create_dataset_share_router(*, job_store) -> APIRouter:
         response_model=DatasetSharingState,
         summary="Remove a member's grant",
     )
-    def remove_member(
-        dataset_id: str, username: str, current_user: AuthenticatedUserDep
-    ) -> DatasetSharingState:
+    def remove_member(dataset_id: str, username: str, current_user: AuthenticatedUserDep) -> DatasetSharingState:
         """Remove a member's grant from the dataset.
 
         Args:
@@ -512,8 +508,8 @@ def create_dataset_share_router(*, job_store) -> APIRouter:
         if record is None or rows is None:
             raise DomainError("dataset.share.not_found", status=404)
         order = record.column_schema.get("column_order")
-        columns = [str(c) for c in order] if isinstance(order, list) and order else (
-            list(rows[0].keys()) if rows else []
+        columns = (
+            [str(c) for c in order] if isinstance(order, list) and order else (list(rows[0].keys()) if rows else [])
         )
         return {
             "dataset_id": dataset_id,

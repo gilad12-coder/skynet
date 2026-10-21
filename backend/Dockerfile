@@ -198,4 +198,7 @@ EXPOSE 8000
 # inject it and route edge traffic to it) so the bound port always matches
 # settings.port and the generalist agent's derived MCP self-dial URL. The
 # sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# With a local-mode flag set, the API binds API_HOST instead, which the
+# settings guard requires to be loopback; otherwise the guard could pass while
+# the server listens on every interface.
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; elif [ -n \"$APP_LOCAL_MODE$SKYNET_LOCAL_MODE\" ]; then exec uvicorn main:app --host \"${API_HOST:-0.0.0.0}\" --port ${PORT:-8000}; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]

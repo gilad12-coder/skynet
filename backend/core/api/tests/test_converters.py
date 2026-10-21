@@ -180,9 +180,7 @@ def test_compute_elapsed_reports_banked_time_before_resumed_leg_starts() -> None
     """
     created = _ts(2024, 1, 1, 10, 0, 0)
 
-    elapsed_str, elapsed_secs = compute_elapsed(
-        created, started_at=None, completed_at=None, accumulated_seconds=180.0
-    )
+    elapsed_str, elapsed_secs = compute_elapsed(created, started_at=None, completed_at=None, accumulated_seconds=180.0)
 
     assert elapsed_secs == 180.0
     assert elapsed_str == "00:03:00"

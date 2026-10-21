@@ -38,9 +38,21 @@ VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 ENV_PREFIX = "APP_"
 LEGACY_ENV_PREFIX = "SKYNET_"
 
-# main.run_server binds API_HOST (default 0.0.0.0); local mode must stay
-# reachable from this machine only.
+# Local mode must stay reachable from this machine only.
 LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+DEFAULT_API_HOST = "0.0.0.0"
+
+
+def api_bind_host() -> str:
+    """Return the address the API server binds.
+
+    ``main.run_server`` and the Docker image's local-mode command bind this
+    value, and the local-mode guard checks it, so the two cannot disagree.
+
+    Returns:
+        ``API_HOST``, or ``0.0.0.0`` when it is unset.
+    """
+    return os.environ.get("API_HOST", DEFAULT_API_HOST)
 
 
 def legacy_env_name(name: str) -> str:
@@ -1476,7 +1488,7 @@ class Settings(BaseSettings):
             raise ValueError("APP_LOCAL_MODE is not allowed on a Railway deployment")
         if self.is_preview_environment:
             raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
-        api_host = os.environ.get("API_HOST", "0.0.0.0")
+        api_host = api_bind_host()
         if api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
             raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {api_host!r}")
         return self

@@ -51,9 +51,7 @@ logger = logging.getLogger(__name__)
 # agent-tagged route depends on ``get_authenticated_user``, so without the
 # bearer token every tool call returns 401 ``auth.missing_token``. Override
 # the lookup in the components module so the header flows through.
-_fastmcp_openapi_components.get_http_headers = partial(
-    _fastmcp_deps.get_http_headers, include={"authorization"}
-)
+_fastmcp_openapi_components.get_http_headers = partial(_fastmcp_deps.get_http_headers, include={"authorization"})
 
 AGENT_TAG = "agent"
 

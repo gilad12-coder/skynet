@@ -819,7 +819,7 @@ class SandboxRuntimeCost(BaseModel):
 
 
 class BlackboxProposerRuntimeInfo(BaseModel):
-    id: Literal["vercel"]
+    id: Literal["vercel", "docker"]
     available: bool
     unavailable_reason: str | None = None
     cost: SandboxRuntimeCost

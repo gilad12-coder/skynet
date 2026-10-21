@@ -72,9 +72,7 @@ def register_deletion_routes(router: APIRouter, *, job_store) -> None:
                 not an ``owner`` (admins and the creator qualify), 409 if still
                 active.
         """
-        job_data, _role = require_role_at_least(
-            job_store, optimization_id, current_user, ShareRole.owner
-        )
+        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.owner)
 
         status = status_to_job_status(job_data.get("status", "pending"))
         if status not in TERMINAL_STATUSES:
@@ -117,9 +115,7 @@ def register_deletion_routes(router: APIRouter, *, job_store) -> None:
                 result / missing pair), 403 (caller is not an ``owner``), 409
                 (not yet terminal), 500 (corrupt result).
         """
-        job_data, _role = require_role_at_least(
-            job_store, optimization_id, current_user, ShareRole.owner
-        )
+        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.owner)
 
         overview = parse_overview(job_data)
         if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) != OPTIMIZATION_TYPE_GRID_SEARCH:
@@ -212,12 +208,9 @@ def register_deletion_routes(router: APIRouter, *, job_store) -> None:
         if not ordered_unique:
             return BulkDeleteResponse(deleted=deleted, skipped=skipped)
 
-        allowed, denied = filter_ids_at_least(
-            job_store, ordered_unique, current_user, ShareRole.owner
-        )
+        allowed, denied = filter_ids_at_least(job_store, ordered_unique, current_user, ShareRole.owner)
         skipped.extend(
-            BulkDeleteSkipped(optimization_id=optimization_id, reason="not_found")
-            for optimization_id in denied
+            BulkDeleteSkipped(optimization_id=optimization_id, reason="not_found") for optimization_id in denied
         )
 
         if not allowed:

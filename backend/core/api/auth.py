@@ -202,11 +202,7 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
         raise DomainError("auth.not_configured", status=500)
     token_hash = hash_api_token(token)
     with Session(job_store.engine) as session:
-        row = (
-            session.query(ApiTokenModel)
-            .filter(ApiTokenModel.token_hash == token_hash)
-            .one_or_none()
-        )
+        row = session.query(ApiTokenModel).filter(ApiTokenModel.token_hash == token_hash).one_or_none()
         if row is None:
             raise DomainError("auth.invalid_token", status=401)
         username = str(row.username)
@@ -216,9 +212,7 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
     return AuthenticatedUser(username=username, role=role, groups=())
 
 
-def get_authenticated_user(
-    request: Request, authorization: str | None = Header(default=None)
-) -> AuthenticatedUser:
+def get_authenticated_user(request: Request, authorization: str | None = Header(default=None)) -> AuthenticatedUser:
     """Verify the bearer credential and return the authenticated user.
 
     Accepts two credential types on ``Authorization: Bearer``: a long-lived

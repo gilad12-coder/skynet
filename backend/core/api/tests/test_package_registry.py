@@ -169,7 +169,12 @@ def _probe_returning(response_or_error: object):
 @pytest.mark.parametrize(
     ("response_or_error", "ok", "reason", "status_code"),
     [
-        (_FakeResponse(200, content_type="application/vnd.pypi.simple.v1+json", payload={"files": []}), True, "healthy", 200),
+        (
+            _FakeResponse(200, content_type="application/vnd.pypi.simple.v1+json", payload={"files": []}),
+            True,
+            "healthy",
+            200,
+        ),
         (_FakeResponse(200, text="<html><body><a href='pip-1.whl'>pip</a></body></html>"), True, "healthy", 200),
         (_FakeResponse(403), False, "auth_required", 403),
         (_FakeResponse(401), False, "auth_required", 401),
@@ -241,7 +246,9 @@ def test_check_endpoint_normalizes_then_probes(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(package_registry.httpx, "get", fake_get)
     client, _engine, _app = _client()
-    response = client.post("/account/package-registry/check", json={"index_url": "https://Packages.Example.com/team/simple/"})
+    response = client.post(
+        "/account/package-registry/check", json={"index_url": "https://Packages.Example.com/team/simple/"}
+    )
     assert response.json() == {"ok": True, "reason": "healthy", "status_code": 200}
     assert captured["url"] == "https://packages.example.com/team/simple/pip/"
 

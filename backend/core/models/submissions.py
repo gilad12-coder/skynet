@@ -116,7 +116,7 @@ class _OptimizationRequestBase(BaseModel):
             "the balance. Billable sandbox usage is charged at marked-up provider cost in both modes."
         ),
     )
-    execution_runtime: Literal["vercel"] = "vercel"
+    execution_runtime: Literal["vercel", "docker"] = "vercel"
     preflight_id: str | None = Field(default=None, min_length=1, max_length=64)
     preflight_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
     execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -295,7 +295,7 @@ class WorkflowDryRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(description="Values for the workflow's input-anchor fields.")
     model_settings: ModelConfig = Field(alias="model_config")
     tool_source: ToolSource | None = None
-    execution_runtime: Literal["vercel"] = "vercel"
+    execution_runtime: Literal["vercel", "docker"] = "vercel"
     execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
     execution_budget_revision: int | None = Field(default=None, ge=1)
 

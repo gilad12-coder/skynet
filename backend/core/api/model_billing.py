@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from ..billing.byok_bridge import payload_uses_token_source
+from ..config import settings
 from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED, TOKEN_SOURCE_SUBSCRIPTION
 from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.common import ModelConfig
 from ..models.submissions import _OptimizationRequestBase
 from .errors import DomainError
+
+# The Mac app's own sandbox runtime; a hosted deployment runs only Vercel.
+LOCAL_EXECUTION_RUNTIME = "docker"
 
 
 def request_model_configs(
@@ -93,3 +100,69 @@ def normalize_model_token_sources(
         if sources and all(source == uniform for source in sources.values()):
             payload.token_source = uniform
     return configs, sources
+
+
+def enforce_local_mode_sources(
+    payload: _OptimizationRequestBase | BlackboxRunRequest | UnifiedRunRequest,
+    requested_source: str,
+    model_configs: list[ModelConfig],
+) -> None:
+    """Keep subscription runs in local mode and managed runs out of it.
+
+    A subscription model or a host-CLI proposer runs on the user's own Mac, so
+    a hosted deployment has no way to serve it. The Mac app has no managed
+    model routing, so a managed model there could never run.
+
+    Args:
+        payload: The submission or setup check, read for its proposer's ``host_cli``.
+        requested_source: The run-level ``token_source`` before normalization,
+            which folds ``subscription`` into ``managed``.
+        model_configs: Executable configs with normalized per-model sources.
+
+    Raises:
+        DomainError: 422 ``models.subscription_local_only`` outside local mode;
+            422 ``local.not_available`` for a Docker runtime outside local mode;
+            422 ``models.managed_unavailable_local`` in local mode.
+    """
+    sources = {config.token_source for config in model_configs}
+    optimizer = getattr(payload, "optimizer", None)
+    proposer = getattr(payload, "proposer", None) or getattr(optimizer, "proposer", None)
+    host_cli = getattr(proposer, "host_cli", None) is not None
+    if not settings.local_mode:
+        if TOKEN_SOURCE_SUBSCRIPTION in sources or requested_source == TOKEN_SOURCE_SUBSCRIPTION or host_cli:
+            raise DomainError("models.subscription_local_only", status=422)
+        if getattr(payload, "execution_runtime", None) == LOCAL_EXECUTION_RUNTIME:
+            raise DomainError("local.not_available", status=422)
+        return
+    if TOKEN_SOURCE_MANAGED in sources:
+        raise DomainError("models.managed_unavailable_local", status=422)
+
+
+def enforce_raw_local_mode_sources(payload: dict[str, Any]) -> None:
+    """Refuse subscription work outside local mode before a payload is typed.
+
+    An Anything evaluation check is not validated into a request, so its raw
+    model configs and proposer are read directly.
+
+    Args:
+        payload: Raw run or setup payload.
+
+    Raises:
+        DomainError: 422 ``models.subscription_local_only`` outside local mode
+            when a model uses a subscription or the proposer names a host CLI;
+            422 ``local.not_available`` for a Docker runtime.
+    """
+    if settings.local_mode:
+        return
+    requested = str(payload.get("token_source") or TOKEN_SOURCE_MANAGED)
+    optimizer = payload.get("optimizer")
+    proposer = payload.get("proposer") or (optimizer.get("proposer") if isinstance(optimizer, dict) else None)
+    host_cli = isinstance(proposer, dict) and proposer.get("host_cli") is not None
+    if (
+        requested == TOKEN_SOURCE_SUBSCRIPTION
+        or host_cli
+        or payload_uses_token_source(payload, TOKEN_SOURCE_SUBSCRIPTION, default_token_source=requested)
+    ):
+        raise DomainError("models.subscription_local_only", status=422)
+    if payload.get("execution_runtime") == LOCAL_EXECUTION_RUNTIME:
+        raise DomainError("local.not_available", status=422)

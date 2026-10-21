@@ -53,18 +53,14 @@ def test_validate_code_request_accepts_both_blocks() -> None:
 
 def test_validate_code_request_sample_row_defaults_empty() -> None:
     """Verify ValidateCodeRequest defaults sample_row to an empty dict."""
-    req = ValidateCodeRequest.model_validate(
-        {"signature_code": "class S: pass", "column_mapping": _column_mapping()}
-    )
+    req = ValidateCodeRequest.model_validate({"signature_code": "class S: pass", "column_mapping": _column_mapping()})
 
     assert req.sample_row == {}
 
 
 def test_validate_code_request_optimizer_name_defaults_none() -> None:
     """Verify ValidateCodeRequest defaults optimizer_name to None."""
-    req = ValidateCodeRequest.model_validate(
-        {"signature_code": "class S: pass", "column_mapping": _column_mapping()}
-    )
+    req = ValidateCodeRequest.model_validate({"signature_code": "class S: pass", "column_mapping": _column_mapping()})
 
     assert req.optimizer_name is None
 

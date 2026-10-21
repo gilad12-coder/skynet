@@ -20,7 +20,12 @@ from ...local.cli_probe import clear_probe_cache
 from ...registry.core import ServiceRegistry
 from ...storage.models import BillingCustomerModel, ExecutionBudgetModel, UserIdentityModel, UserModel
 from ..app import create_app
+from ..auth import AuthenticatedUser, get_authenticated_user
+from ..errors import DomainError
+from ..model_billing import enforce_local_mode_sources, enforce_raw_local_mode_sources
+from ..preflight_execution import WizardPreflightRequest, _canonical_execution_payload
 from ..routers import submissions as _sub_mod
+from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
@@ -261,6 +266,24 @@ def test_host_cli_proposer_is_refused_outside_local_mode(monkeypatch: pytest.Mon
     assert store.created_ids() == []
 
 
+def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted deployment runs only Vercel sandboxes, so a Docker run gets 422.
+
+    Args:
+        monkeypatch: Pytest fixture used to switch local mode.
+    """
+    payload = SimpleNamespace(execution_runtime="docker")
+    monkeypatch.setattr(settings, "local_mode", False)
+
+    with pytest.raises(DomainError) as refused:
+        enforce_local_mode_sources(payload, "byok", [])
+
+    assert refused.value.status_code == 422
+    assert refused.value.code == "local.not_available"
+    monkeypatch.setattr(settings, "local_mode", True)
+    enforce_local_mode_sources(payload, "subscription", [])
+
+
 def test_managed_run_is_refused_in_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Mac app has no managed routing, so a managed model gets 422.
 
@@ -299,3 +322,116 @@ def test_local_mode_grants_the_local_credit(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(settings, "local_mode", True)
     assert free_grant_cents() == 12_345
+
+
+def _execution_request(**overrides: Any) -> WizardPreflightRequest:
+    """Build a unified execution setup check around ``unified_payload``.
+
+    Args:
+        **overrides: Top-level payload keys replacing the defaults.
+
+    Returns:
+        A request in the shape the wizard sends before a run.
+    """
+    return WizardPreflightRequest(
+        scope="execution",
+        workflow="unified",
+        payload=unified_payload(**overrides),
+        execution_budget_id="draft",
+        execution_budget_revision=1,
+    )
+
+
+def test_hosted_execution_check_refuses_a_subscription_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted setup check must not charge a subscription model as managed.
+
+    Args:
+        monkeypatch: Pytest fixture used to keep local mode off.
+    """
+    monkeypatch.setattr(settings, "local_mode", False)
+
+    with pytest.raises(DomainError) as refused:
+        _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+
+    assert refused.value.status_code == 422
+    assert refused.value.code == "models.subscription_local_only"
+
+
+def test_local_execution_check_keeps_a_subscription_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local mode accepts the same check and keeps its subscription source.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+
+    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+
+    assert payload["token_source"] == "subscription"
+
+
+def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local mode refuses a managed check, as it refuses the managed run.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+
+    with pytest.raises(DomainError) as refused:
+        _canonical_execution_payload(_execution_request(), "alice")
+
+    assert refused.value.code == "models.managed_unavailable_local"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"token_source": "subscription"},
+        {"proposer": {"host_cli": "codex"}},
+        {"task_model_config": {"name": "anthropic/claude-sonnet-4.6", "token_source": "subscription"}},
+        {"execution_runtime": "docker"},
+    ],
+)
+def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
+    """The hosted wizard check route refuses subscription work before it claims a budget.
+
+    The job store is a bare object, so the request would fail if the check
+    went past the gate.
+
+    Args:
+        monkeypatch: Pytest fixture used to keep local mode off.
+        payload: Raw evaluation inputs that only a local deployment can run.
+    """
+    monkeypatch.setattr(settings, "local_mode", False)
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    app = FastAPI()
+    app.include_router(wizard_preflight.create_wizard_preflight_router(job_store=object()))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("alice", "user", ())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/wizard/preflight",
+            json={
+                "workflow": "anything",
+                "scope": "evaluation",
+                "payload": payload,
+                "execution_budget_id": "draft",
+                "execution_budget_revision": 1,
+            },
+        )
+
+    assert response.status_code == 422
+    code = "local.not_available" if "execution_runtime" in payload else "models.subscription_local_only"
+    assert response.json()["detail"] == DomainError(code).detail
+
+
+def test_local_wizard_check_passes_the_raw_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local mode lets raw subscription and host-CLI inputs through the gate.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+
+    enforce_raw_local_mode_sources({"token_source": "subscription", "proposer": {"host_cli": "codex"}})

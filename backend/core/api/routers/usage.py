@@ -126,10 +126,7 @@ def create_usage_router(*, job_store) -> APIRouter:
         """
         items = job_store.compute_user_storage_items(current_user.username, limit)
         return StorageItemsResponse(
-            items=[
-                StorageItemResponse(id=item.id, type=item.type, name=item.name, bytes=item.bytes)
-                for item in items
-            ]
+            items=[StorageItemResponse(id=item.id, type=item.type, name=item.name, bytes=item.bytes) for item in items]
         )
 
     @router.get(
@@ -137,9 +134,7 @@ def create_usage_router(*, job_store) -> APIRouter:
         response_model=StorageItemsResponse,
         summary="List every deletable item in one storage category",
     )
-    def get_storage_category_items(
-        category: str, current_user: AuthenticatedUserDep
-    ) -> StorageItemsResponse:
+    def get_storage_category_items(category: str, current_user: AuthenticatedUserDep) -> StorageItemsResponse:
         """Return all of the caller's deletable items in one storage category.
 
         Args:
@@ -160,10 +155,7 @@ def create_usage_router(*, job_store) -> APIRouter:
             raise HTTPException(status_code=404, detail="unknown_category")
         items = job_store.compute_user_storage_category_items(current_user.username, category)
         return StorageItemsResponse(
-            items=[
-                StorageItemResponse(id=item.id, type=item.type, name=item.name, bytes=item.bytes)
-                for item in items
-            ]
+            items=[StorageItemResponse(id=item.id, type=item.type, name=item.name, bytes=item.bytes) for item in items]
         )
 
     @router.delete(
@@ -171,9 +163,7 @@ def create_usage_router(*, job_store) -> APIRouter:
         response_model=StorageDeleteResponse,
         summary="Delete one of the caller's pending uploads",
     )
-    def delete_staged_upload(
-        staged_id: str, current_user: AuthenticatedUserDep
-    ) -> StorageDeleteResponse:
+    def delete_staged_upload(staged_id: str, current_user: AuthenticatedUserDep) -> StorageDeleteResponse:
         """Delete one staged (pending) upload owned by the caller.
 
         Args:

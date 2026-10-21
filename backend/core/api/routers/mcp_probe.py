@@ -89,8 +89,7 @@ async def _list_tools(mcp_url: str, auth_header: str | None) -> list[McpProbeToo
         await session.initialize()
         listing = await session.list_tools()
         return [
-            McpProbeTool(name=tool.name, description=_clean_description(tool.description))
-            for tool in listing.tools
+            McpProbeTool(name=tool.name, description=_clean_description(tool.description)) for tool in listing.tools
         ]
 
 

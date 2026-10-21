@@ -78,9 +78,7 @@ def token_app() -> FastAPI:
         A FastAPI app whose ``app.state.job_store`` and router both point at a
         shared in-memory SQLite store holding the ``api_tokens`` table.
     """
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     ApiTokenModel.__table__.create(engine)
     store = _Store(engine)
     app = FastAPI()
@@ -126,14 +124,8 @@ def test_regenerate_invalidates_previous_token(token_app: FastAPI) -> None:
     assert first != second
 
     token_app.dependency_overrides.clear()
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {second}"}).status_code
-        == 200
-    )
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {first}"}).status_code
-        == 401
-    )
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {second}"}).status_code == 200
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {first}"}).status_code == 401
 
 
 def test_revoke_then_token_rejected(token_app: FastAPI) -> None:
@@ -144,10 +136,7 @@ def test_revoke_then_token_rejected(token_app: FastAPI) -> None:
     assert client.delete("/settings/api-token").status_code == 204
 
     token_app.dependency_overrides.clear()
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code
-        == 401
-    )
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 def test_get_returns_null_when_no_token(token_app: FastAPI) -> None:

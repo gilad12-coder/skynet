@@ -75,9 +75,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # keep the default account-security fixture deterministic and let the
     # email-code flow opt in to a fake relay explicitly below.
     monkeypatch.setattr(settings, "smtp_host", None)
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     for model in (
         UserModel,
         WebAuthnCredentialModel,
@@ -163,9 +161,7 @@ def test_security_status_defaults(client: TestClient) -> None:
 def test_provisioned_oauth_account_has_no_password_features(client: TestClient) -> None:
     """A provider-provisioned row reports no password and cannot enroll in 2FA."""
     oauth_email = "sso@example.com"
-    provisioned = client.post(
-        "/auth/oauth/provision", json={"email": oauth_email, "name": "SSO"}, headers=_AUTH_HEADER
-    )
+    provisioned = client.post("/auth/oauth/provision", json={"email": oauth_email, "name": "SSO"}, headers=_AUTH_HEADER)
     assert provisioned.status_code == 200
     client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
         username=oauth_email, role="user", groups=()
@@ -212,9 +208,7 @@ def test_totp_gates_login_and_recovery_codes_burn(client: TestClient) -> None:
 def test_totp_disable_restores_plain_login(client: TestClient) -> None:
     """Disabling with a live code clears the factor and the login gate."""
     secret, _ = _enable_totp(client)
-    resp = client.post(
-        "/auth/security/totp/disable", json={"code": pyotp.TOTP(secret).now()}
-    )
+    resp = client.post("/auth/security/totp/disable", json={"code": pyotp.TOTP(secret).now()})
     assert resp.status_code == 200
     assert client.get("/auth/security").json()["totp_enabled"] is False
     assert _login(client).status_code == 200
@@ -282,9 +276,7 @@ def _fake_credential(challenge_b64: str, raw_id: bytes = b"cred-1") -> dict[str,
     }
 
 
-def test_passkey_register_list_delete(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_passkey_register_list_delete(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Registration verifies against the stored challenge, then lists/deletes."""
     options = client.post("/auth/security/passkeys/options").json()
     assert options["rp"]["name"] == APP_NAME
@@ -293,9 +285,7 @@ def test_passkey_register_list_delete(
     monkeypatch.setattr(
         security_module,
         "verify_registration_response",
-        lambda **kwargs: SimpleNamespace(
-            credential_id=b"cred-1", credential_public_key=b"pubkey", sign_count=0
-        ),
+        lambda **kwargs: SimpleNamespace(credential_id=b"cred-1", credential_public_key=b"pubkey", sign_count=0),
     )
     created = client.post(
         "/auth/security/passkeys",
@@ -328,23 +318,16 @@ def test_passkey_register_list_delete(
     assert client.delete(f"/auth/security/passkeys/{credential_id}").status_code == 404
 
 
-def test_passkey_signin_resolves_identity(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_passkey_signin_resolves_identity(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """A verified assertion signs the credential's owner in and bumps counters."""
     reg_challenge = client.post("/auth/security/passkeys/options").json()["challenge"]
     monkeypatch.setattr(
         security_module,
         "verify_registration_response",
-        lambda **kwargs: SimpleNamespace(
-            credential_id=b"cred-1", credential_public_key=b"pubkey", sign_count=0
-        ),
+        lambda **kwargs: SimpleNamespace(credential_id=b"cred-1", credential_public_key=b"pubkey", sign_count=0),
     )
     assert (
-        client.post(
-            "/auth/security/passkeys", json={"credential": _fake_credential(reg_challenge)}
-        ).status_code
-        == 201
+        client.post("/auth/security/passkeys", json={"credential": _fake_credential(reg_challenge)}).status_code == 201
     )
 
     options = client.post("/auth/webauthn/options", headers=_AUTH_HEADER).json()
@@ -370,9 +353,7 @@ def test_passkey_signin_resolves_identity(
         assert row.last_used_at is not None
 
 
-def test_passkey_signin_rejects_unknown_credential(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_passkey_signin_rejects_unknown_credential(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """An assertion for an unregistered credential fails closed."""
     options = client.post("/auth/webauthn/options", headers=_AUTH_HEADER).json()
     resp = client.post(
@@ -387,12 +368,7 @@ def test_passkey_signin_rejects_unknown_credential(
 def test_internal_routes_reject_bad_secret(client: TestClient) -> None:
     """The pre-session routes stay closed without the shared secret."""
     assert client.post("/auth/webauthn/options").status_code == 403
-    assert (
-        client.post(
-            "/auth/2fa/email/send", json={"email": _EMAIL, "password": _PASSWORD}
-        ).status_code
-        == 403
-    )
+    assert client.post("/auth/2fa/email/send", json={"email": _EMAIL, "password": _PASSWORD}).status_code == 403
 
 
 def _act_as(client: TestClient, email: str) -> None:

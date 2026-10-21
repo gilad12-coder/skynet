@@ -52,6 +52,4 @@ def test_job_log_entry_round_trip() -> None:
 def test_job_log_entry_requires_message() -> None:
     """Verify JobLogEntry rejects construction missing the message field."""
     with pytest.raises(ValidationError):
-        JobLogEntry.model_validate(
-            {"timestamp": datetime.now(tz=UTC), "level": "INFO", "logger": "dspy"}
-        )
+        JobLogEntry.model_validate({"timestamp": datetime.now(tz=UTC), "level": "INFO", "logger": "dspy"})

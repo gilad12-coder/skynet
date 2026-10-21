@@ -214,9 +214,7 @@ def test_update_then_remove_member_revokes_access() -> None:
     dataset_id = _save(alice)
     _add_member(alice, dataset_id, "bob", "viewer")
 
-    promoted = alice.patch(
-        f"/datasets/library/{dataset_id}/sharing/members/bob", json={"role": "editor"}
-    ).json()
+    promoted = alice.patch(f"/datasets/library/{dataset_id}/sharing/members/bob", json={"role": "editor"}).json()
     assert promoted["members"] == [{"username": "bob", "role": "editor"}]
 
     removed = alice.delete(f"/datasets/library/{dataset_id}/sharing/members/bob").json()
@@ -230,15 +228,11 @@ def test_member_not_found_and_modify_self_guards() -> None:
     alice = _client(store, _ALICE)
     dataset_id = _save(alice)
 
-    missing = alice.patch(
-        f"/datasets/library/{dataset_id}/sharing/members/carol", json={"role": "editor"}
-    )
+    missing = alice.patch(f"/datasets/library/{dataset_id}/sharing/members/carol", json={"role": "editor"})
     assert missing.status_code == 404
     assert missing.json()["code"] == "dataset.share.member_not_found"
 
-    own = alice.patch(
-        f"/datasets/library/{dataset_id}/sharing/members/alice", json={"role": "editor"}
-    )
+    own = alice.patch(f"/datasets/library/{dataset_id}/sharing/members/alice", json={"role": "editor"})
     assert own.status_code == 400
     assert own.json()["code"] == "dataset.share.cannot_modify_self"
 
@@ -257,12 +251,13 @@ def test_non_owner_cannot_manage_sharing() -> None:
 
     _add_member(alice, dataset_id, "bob", "viewer")
     assert bob.get(f"/datasets/library/{dataset_id}/sharing").status_code == 403
-    assert bob.put(
-        f"/datasets/library/{dataset_id}/sharing", json={"general_access": "anyone"}
-    ).status_code == 403
-    assert bob.post(
-        f"/datasets/library/{dataset_id}/sharing/members", json={"username": "carol", "role": "viewer"}
-    ).status_code == 403
+    assert bob.put(f"/datasets/library/{dataset_id}/sharing", json={"general_access": "anyone"}).status_code == 403
+    assert (
+        bob.post(
+            f"/datasets/library/{dataset_id}/sharing/members", json={"username": "carol", "role": "viewer"}
+        ).status_code
+        == 403
+    )
 
 
 def test_anyone_link_grants_viewer_and_claim_lists_dataset() -> None:
@@ -319,9 +314,7 @@ def test_transfer_ownership_moves_owner_and_demotes_previous() -> None:
     dataset_id = _save(alice)
     _add_member(alice, dataset_id, "bob", "editor")
 
-    state = alice.post(
-        f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "bob"}
-    ).json()
+    state = alice.post(f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "bob"}).json()
     assert state["owner"] == "bob"
     assert state["members"] == [{"username": "alice", "role": "editor"}]
 
@@ -350,14 +343,10 @@ def test_transfer_to_non_member_and_self_are_rejected() -> None:
     alice = _client(store, _ALICE)
     dataset_id = _save(alice)
 
-    to_stranger = alice.post(
-        f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "carol"}
-    )
+    to_stranger = alice.post(f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "carol"})
     assert to_stranger.status_code == 404
     assert to_stranger.json()["code"] == "dataset.share.member_not_found"
 
-    to_self = alice.post(
-        f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "alice"}
-    )
+    to_self = alice.post(f"/datasets/library/{dataset_id}/sharing/transfer", json={"username": "alice"})
     assert to_self.status_code == 400
     assert to_self.json()["code"] == "dataset.share.cannot_grant_self"

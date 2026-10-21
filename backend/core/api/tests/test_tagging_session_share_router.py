@@ -52,9 +52,7 @@ class _MemStore(RemoteDBJobStore):
         self._session_factory = sessionmaker(bind=self._engine)
 
 
-def _client(
-    user: AuthenticatedUser, store: _MemStore | None = None
-) -> tuple[TestClient, _MemStore]:
+def _client(user: AuthenticatedUser, store: _MemStore | None = None) -> tuple[TestClient, _MemStore]:
     """Mount the session CRUD + sharing routers on a store, authed as ``user``.
 
     Args:
@@ -95,21 +93,14 @@ def test_invited_viewer_can_read_but_not_edit_or_manage() -> None:
     sid = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
 
-    resp = alice_client.post(
-        f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "viewer"}
-    )
+    resp = alice_client.post(f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "viewer"})
     assert resp.status_code == 200
     assert resp.json()["members"] == [{"username": "bob", "role": "viewer"}]
 
     detail = bob_client.get(f"/tagging-sessions/{sid}")
     assert detail.status_code == 200
     assert detail.json()["role"] == "viewer"
-    assert (
-        bob_client.put(
-            f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}
-        ).status_code
-        == 403
-    )
+    assert bob_client.put(f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}).status_code == 403
     assert bob_client.patch(f"/tagging-sessions/{sid}", json={"pinned": True}).status_code == 403
     assert bob_client.delete(f"/tagging-sessions/{sid}").status_code == 403
     assert bob_client.get(f"/tagging-sessions/{sid}/sharing").status_code == 403
@@ -126,9 +117,7 @@ def test_invited_editor_can_autosave_but_not_manage() -> None:
     sid = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
 
-    alice_client.post(
-        f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "editor"}
-    )
+    alice_client.post(f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "editor"})
     resp = bob_client.put(
         f"/tagging-sessions/{sid}",
         json={"annotations": {"r1": "yes", "r2": "no"}, "current_index": 2},
@@ -177,21 +166,12 @@ def test_transfer_ownership_moves_owner_and_demotes_previous() -> None:
     sid = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
 
-    alice_client.post(
-        f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "editor"}
-    )
-    state = alice_client.post(
-        f"/tagging-sessions/{sid}/sharing/transfer", json={"username": "bob"}
-    ).json()
+    alice_client.post(f"/tagging-sessions/{sid}/sharing/members", json={"username": "bob", "role": "editor"})
+    state = alice_client.post(f"/tagging-sessions/{sid}/sharing/transfer", json={"username": "bob"}).json()
     assert state["owner"] == "bob"
     assert state["members"] == [{"username": "alice", "role": "editor"}]
 
     assert bob_client.get(f"/tagging-sessions/{sid}").json()["role"] == "owner"
     assert bob_client.patch(f"/tagging-sessions/{sid}", json={"pinned": True}).status_code == 200
     assert alice_client.patch(f"/tagging-sessions/{sid}", json={"pinned": False}).status_code == 403
-    assert (
-        alice_client.put(
-            f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}
-        ).status_code
-        == 200
-    )
+    assert alice_client.put(f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}).status_code == 200

@@ -90,9 +90,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, user: str | None = "adi") -> TestCl
     """
     if user is not None:
         identity = AuthenticatedUser(username=user, role="user", groups=())
-        monkeypatch.setattr(
-            dashboard_module, "get_authenticated_user", lambda *a, **k: identity
-        )
+        monkeypatch.setattr(dashboard_module, "get_authenticated_user", lambda *a, **k: identity)
     app = FastAPI()
     app.include_router(create_dashboard_router(job_store=object()))
     return TestClient(app, raise_server_exceptions=False)
@@ -154,9 +152,7 @@ def test_shared_scope_mismatch_is_forbidden(monkeypatch: pytest.MonkeyPatch) -> 
     """Requesting another user's shared corpus is rejected with 403."""
     _spy_search(monkeypatch)
     client = _client(monkeypatch, user="adi")
-    resp = client.post(
-        "/dashboard/search", json={"shared_with_username": "someone-else"}
-    )
+    resp = client.post("/dashboard/search", json={"shared_with_username": "someone-else"})
     assert resp.status_code == 403
     assert resp.json()["detail"] == "auth.owner_mismatch"
 
@@ -234,8 +230,6 @@ def test_facets_scope_mismatch_is_forbidden(monkeypatch: pytest.MonkeyPatch) -> 
     """Requesting another user's facet scope is rejected with 403."""
     _spy_facets(monkeypatch)
     client = _client(monkeypatch, user="adi")
-    resp = client.get(
-        "/dashboard/facets", params={"shared_with_username": "someone-else"}
-    )
+    resp = client.get("/dashboard/facets", params={"shared_with_username": "someone-else"})
     assert resp.status_code == 403
     assert resp.json()["detail"] == "auth.owner_mismatch"
