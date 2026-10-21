@@ -241,10 +241,15 @@ export function RewardComparison({
   );
 }
 
+/** Report whether the split explicitly says no held-out final score exists. */
+export function isNotHeldOut(splitCounts: unknown): boolean {
+  const split = splitCounts as Partial<UnifiedSplitCounts> | null | undefined;
+  return !!split && typeof split === "object" && "held_out" in split && split.held_out === false;
+}
+
 /** Say so when too few cases left none for a held-out final score. */
 export function HeldOutNotice({ splitCounts }: { splitCounts: unknown }) {
-  const split = splitCounts as Partial<UnifiedSplitCounts> | null | undefined;
-  if (!split || typeof split !== "object" || !("held_out" in split) || split.held_out !== false) {
+  if (!isNotHeldOut(splitCounts)) {
     return null;
   }
   return (

@@ -13,7 +13,9 @@ import type { BlackboxRunResult } from "@/shared/types/api";
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 
-const { HeldOutNotice, RewardComparison, savedMetricCode } = await import("./RewardComparison");
+const { HeldOutNotice, RewardComparison, isNotHeldOut, savedMetricCode } = await import(
+  "./RewardComparison"
+);
 
 const METRIC = `REWARD_SPEC = {
     "weights": {"accuracy": 0.35, "speed": 0.35, "cost": 0.30},
@@ -146,5 +148,13 @@ void describe("HeldOutNotice", () => {
     const html = render(<HeldOutNotice splitCounts={result().split_counts} />);
     assert.match(html, /^<p role="note" data-notice="not-held-out"[^>]*class="flex items-start/);
     assert.match(html, /^<p[^>]*><svg[^>]*aria-hidden="true"[^>]*>[\s\S]*<\/svg><span>/);
+  });
+
+  void it("lets the page skip the notice wrapper unless held_out is explicitly false", () => {
+    assert.equal(isNotHeldOut(result().split_counts), true);
+    assert.equal(isNotHeldOut({ ...result().split_counts, held_out: true }), false);
+    assert.equal(isNotHeldOut({ train: 5, val: 2, test: 3 }), false);
+    assert.equal(isNotHeldOut(null), false);
+    assert.equal(isNotHeldOut(undefined), false);
   });
 });

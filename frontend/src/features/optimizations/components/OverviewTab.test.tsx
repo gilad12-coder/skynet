@@ -108,6 +108,11 @@ void describe("detail page result layout", () => {
     );
     assert.ok(notice > 0 && notice < summary, "notice renders before the summary card");
     assert.ok(!view.slice(notice, summary).includes("<div"), "nothing else sits between them");
+    const gate = view.lastIndexOf("{jobIsBlackbox", notice);
+    assert.ok(
+      view.slice(gate, notice).includes("isNotHeldOut("),
+      "the FadeIn wrapper renders only with the notice, so no empty gap sits above the summary",
+    );
 
     const fixture = overviewFixture("oa-gepa-prompt");
     const job = {
