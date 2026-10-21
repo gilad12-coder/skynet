@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -196,7 +198,10 @@ def test_codex_reads_the_event_stream(tmp_path: Path) -> None:
     assert (completion.prompt_tokens, completion.completion_tokens) == (29250, 43)
     assert completion.model_ms is not None
     [call] = calls(tmp_path, "codex")
-    assert call["argv"][:6] == ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--model"]
+    assert call["argv"][:5] == ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check"]
+    for feature in ("shell_tool", "unified_exec", "code_mode_host", "view_image"):
+        assert call["argv"][call["argv"].index(feature) - 1] == "--disable"
+    assert 'web_search="disabled"' in call["argv"]
     assert call["argv"][-1] == "-"
     assert "--output-schema" in call["argv"]
     assert call["stdin"] == "ping"
@@ -226,7 +231,9 @@ def test_droid_reads_the_prompt_file_and_result(tmp_path: Path) -> None:
     assert completion.text == "pong"
     assert (completion.prompt_tokens, completion.completion_tokens, completion.model_ms) == (13423, 5, 3344)
     [call] = calls(tmp_path, "droid")
-    assert call["argv"][:4] == ["exec", "-o", "json", "--model"]
+    assert call["argv"][:3] == ["exec", "-o", "json"]
+    assert call["argv"][call["argv"].index("--only-tools") + 1] == "TodoWrite"
+    assert "--disable-builtin-skills" in call["argv"]
     assert "--auto" not in call["argv"]
     assert not set(API_KEYS) & set(call["env"])
 
@@ -246,12 +253,56 @@ def test_overloaded_failure_is_transient(tmp_path: Path) -> None:
     assert caught.value.transient
 
 
-def test_timeout_is_transient(tmp_path: Path) -> None:
-    """Stop a CLI at the call timeout and allow a retry."""
+def test_timeout_is_final(tmp_path: Path) -> None:
+    """Stop a CLI at the call timeout, and do not mark it for a retry: it would hang again."""
     fake_cli(tmp_path, "droid", "time.sleep(10)")
     with pytest.raises(CliRunError) as caught:
         cli_runners.run_droid("glm-5.3", "ping", None, local_settings(tmp_path, cli_call_timeout_seconds=0.5), tmp_path)
-    assert caught.value.transient
+    assert not caught.value.transient
+
+
+def _gone(pid: int) -> bool:
+    """Wait up to three seconds for a process to stop, and say whether it did."""
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.mark.parametrize(("name", "runner"), [("claude", cli_runners.run_claude), ("codex", cli_runners.run_codex)])
+def test_timeout_stops_the_child_of_a_wrapper(tmp_path: Path, name: str, runner: Any) -> None:
+    """Stop a wrapper's child at the timeout too, though it keeps the output pipe open."""
+    pid_file = tmp_path / "child.pid"
+    fake_cli(
+        tmp_path,
+        name,
+        "import subprocess\n"
+        "child = subprocess.Popen(['sleep', '30'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+        "child.wait()",
+    )
+    started = time.monotonic()
+    with pytest.raises(CliRunError) as caught:
+        runner("m", "ping", None, local_settings(tmp_path, cli_call_timeout_seconds=3.0), tmp_path)
+    # The timeout, the kill grace, and slack for a loaded test machine; the child sleeps 30 s.
+    assert time.monotonic() - started < 10
+    assert caught.value.message == f"{name} timed out"
+    assert _gone(int(pid_file.read_text()))
+
+
+@pytest.mark.parametrize(("name", "runner"), [("claude", cli_runners.run_claude), ("codex", cli_runners.run_codex)])
+def test_early_exit_with_a_long_prompt_keeps_the_cli_reason(tmp_path: Path, name: str, runner: Any) -> None:
+    """Report a CLI that exits before it reads a long prompt as a failed call with its stderr."""
+    script = tmp_path / name
+    script.write_text(f"#!{sys.executable}\nimport sys\nsys.stderr.write('not logged in')\nsys.exit(1)\n")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    with pytest.raises(CliRunError) as caught:
+        runner("m", "x" * 300_000, None, local_settings(tmp_path), tmp_path)
+    assert "not logged in" in caught.value.message
 
 
 @pytest.mark.parametrize(

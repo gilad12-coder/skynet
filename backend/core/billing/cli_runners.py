@@ -2,13 +2,19 @@
 
 Each runner starts the CLI once, without provider API keys in its environment,
 so the CLI bills the signed-in subscription and never a key a developer left
-in the shell. Runners only read: no tools, no file writes, no session state.
+in the shell. Each CLI runs as a plain completion: its host tools (shell, file
+reads, web) are turned off, so a prompt cannot make it read the user's files.
+Each CLI runs in its own process group, and a timeout stops the whole group,
+including any child a wrapper script started.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -32,6 +38,26 @@ _CLOCK_RESET = re.compile(
     r"(?:resets?|try again|available again)\s*(?:at|after|on)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
     re.IGNORECASE,
 )
+_KILL_GRACE_SECONDS = 2.0
+# Codex features that give the model a host tool. With them off, codex answers
+# from the prompt alone; the read-only sandbox would still let a shell read files.
+_CODEX_DISABLED_FEATURES = (
+    "shell_tool",
+    "unified_exec",
+    "code_mode_host",
+    "apps",
+    "plugins",
+    "multi_agent",
+    "memories",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+    "view_image",
+    "hooks",
+    "skill_search",
+)
+# droid ignores an empty tool list, so it keeps one tool with no host access.
+_DROID_ONLY_TOOLS = "TodoWrite"
 _TRANSIENT_TEXT = re.compile(
     r"overloaded|timed? ?out|temporar|connection|network|econnreset|503|502|500|529", re.IGNORECASE
 )
@@ -172,6 +198,67 @@ def _int(value: Any) -> int:
     return int(value) if isinstance(value, int | float) and not isinstance(value, bool) and value > 0 else 0
 
 
+def _start(provider: str, argv: list[str], settings: Settings, cwd: Path) -> subprocess.Popen[str]:
+    """Start a CLI in its own process group, with pipes for all three streams.
+
+    Args:
+        provider: The CLI, for error reports.
+        argv: The full command.
+        settings: Application settings (environment).
+        cwd: The directory the CLI runs in.
+
+    Returns:
+        The running process; its process group id is its pid.
+
+    Raises:
+        CliRunError: When the binary is missing.
+    """
+    try:
+        return subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            env=cli_env(settings),
+            start_new_session=True,
+        )
+    except FileNotFoundError as error:
+        raise CliRunError(provider, f"{provider} is not installed", transient=False) from error
+
+
+def _kill_group(process: subprocess.Popen[str]) -> None:
+    """Stop a CLI's whole process group: SIGTERM, a short grace, then SIGKILL.
+
+    A wrapper script (such as an npm or shell shim) runs the real CLI as its
+    child; killing only the wrapper leaves that child running with the pipes open.
+
+    Args:
+        process: A process started by :func:`_start`.
+    """
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGTERM)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=_KILL_GRACE_SECONDS)
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _close(process: subprocess.Popen[str]) -> None:
+    """Close a stopped CLI's pipes and reap it.
+
+    Args:
+        process: A process started by :func:`_start`.
+    """
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            with contextlib.suppress(OSError):
+                stream.close()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=_KILL_GRACE_SECONDS)
+
+
 def _run(provider: str, argv: list[str], prompt: str | None, settings: Settings, cwd: Path) -> tuple[str, str]:
     """Run a CLI once and return its stdout and stderr.
 
@@ -186,26 +273,30 @@ def _run(provider: str, argv: list[str], prompt: str | None, settings: Settings,
         ``(stdout, stderr)``.
 
     Raises:
-        CliRunError: When the binary is missing or the call times out.
+        CliRunError: When the binary is missing or the call times out. A
+            timeout is not transient: a hung call would hang again.
     """
+    process = _start(provider, argv, settings, cwd)
     try:
-        done = subprocess.run(
-            argv,
-            input=prompt if prompt is not None else "",
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            env=cli_env(settings),
-            timeout=settings.cli_call_timeout_seconds,
-            check=False,
+        # communicate() ignores a broken stdin pipe, so a CLI that exits before
+        # it reads a long prompt still reports its own stderr below.
+        stdout, stderr = process.communicate(
+            prompt if prompt is not None else "", timeout=settings.cli_call_timeout_seconds
         )
-    except FileNotFoundError as error:
-        raise CliRunError(provider, f"{provider} is not installed", transient=False) from error
     except subprocess.TimeoutExpired as error:
-        raise CliRunError(provider, f"{provider} timed out", transient=True) from error
-    if done.returncode != 0 and not done.stdout.strip():
-        raise _failure(provider, done.stderr)
-    return done.stdout, done.stderr
+        _kill_group(process)
+        _close(process)
+        raise CliRunError(provider, f"{provider} timed out", transient=False) from error
+    except BaseException:
+        _kill_group(process)
+        _close(process)
+        raise
+    # A child the CLI left behind must not outlive the call.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+    if process.returncode != 0 and not stdout.strip():
+        raise _failure(provider, stderr)
+    return stdout, stderr
 
 
 def _json_object(provider: str, stdout: str, stderr: str) -> dict[str, Any]:
@@ -296,7 +387,7 @@ def run_claude(
 def run_codex(
     model_arg: str, prompt: str, json_schema: Mapping[str, Any] | None, settings: Settings, cwd: Path
 ) -> CliCompletion:
-    """Answer one prompt with ``codex exec`` in a read-only sandbox.
+    """Answer one prompt with ``codex exec`` in a read-only sandbox, with its host tools off.
 
     Args:
         model_arg: The CLI's ``--model`` value.
@@ -320,6 +411,11 @@ def run_codex(
             "--sandbox",
             "read-only",
             "--skip-git-repo-check",
+            "-c",
+            'web_search="disabled"',
+            "-c",
+            "mcp_servers={}",
+            *(arg for feature in _CODEX_DISABLED_FEATURES for arg in ("--disable", feature)),
             "--model",
             model_arg,
         ]
@@ -347,33 +443,35 @@ def _stream_codex(argv: list[str], prompt: str, settings: Settings, cwd: Path) -
         SubscriptionRateLimitedError: When the subscription is capped.
         CliRunError: When the call fails.
     """
-    try:
-        process = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            env=cli_env(settings),
-        )
-    except FileNotFoundError as error:
-        raise CliRunError("codex", "codex is not installed", transient=False) from error
-    timer = threading.Timer(settings.cli_call_timeout_seconds, process.kill)
+    process = _start("codex", argv, settings, cwd)
+    timed_out = threading.Event()
+
+    def expire() -> None:
+        """Stop the whole codex process group at the call timeout."""
+        timed_out.set()
+        _kill_group(process)
+
+    def feed() -> None:
+        """Write the prompt; a CLI that exits early only closes the pipe."""
+        assert process.stdin is not None
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+            process.stdin.write(prompt)
+            process.stdin.close()
+
+    timer = threading.Timer(settings.cli_call_timeout_seconds, expire)
     timer.start()
     errors: list[str] = []
     stderr_lines: list[str] = []
-    reader = threading.Thread(target=lambda: stderr_lines.extend(process.stderr), daemon=True)
+    reader = threading.Thread(target=lambda: stderr_lines.extend(process.stderr or ()), daemon=True)
     reader.start()
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
     first: float | None = None
     finished: float | None = None
     text = ""
     usage: dict[str, Any] = {}
     try:
-        assert process.stdin is not None
         assert process.stdout is not None
-        process.stdin.write(prompt)
-        process.stdin.close()
         for line in process.stdout:
             try:
                 event = json.loads(line)
@@ -395,11 +493,18 @@ def _stream_codex(argv: list[str], prompt: str, settings: Settings, cwd: Path) -
             elif kind == "error":
                 errors.append(str(event.get("message") or ""))
         process.wait()
+    except BaseException:
+        _kill_group(process)
+        raise
     finally:
         timer.cancel()
-        reader.join(timeout=5)
-    if process.returncode is not None and process.returncode < 0 and finished is None:
-        raise CliRunError("codex", "codex timed out", transient=True)
+        writer.join(timeout=_KILL_GRACE_SECONDS)
+        reader.join(timeout=_KILL_GRACE_SECONDS)
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+        _close(process)
+    if timed_out.is_set() and finished is None:
+        raise CliRunError("codex", "codex timed out", transient=False)
     if finished is None:
         raise _failure("codex", "\n".join(errors) or "".join(stderr_lines))
     return CliCompletion(
@@ -414,7 +519,7 @@ def _stream_codex(argv: list[str], prompt: str, settings: Settings, cwd: Path) -
 def run_droid(
     model_arg: str, prompt: str, json_schema: Mapping[str, Any] | None, settings: Settings, cwd: Path
 ) -> CliCompletion:
-    """Answer one prompt with ``droid exec`` in its default read-only mode.
+    """Answer one prompt with ``droid exec`` in read-only mode, with its host tools off.
 
     Args:
         model_arg: The CLI's ``--model`` value.
@@ -436,12 +541,16 @@ def run_droid(
     with tempfile.TemporaryDirectory(prefix="skynet-droid-") as scratch:
         prompt_path = Path(scratch) / "prompt.txt"
         prompt_path.write_text(prompt, encoding="utf-8")
-        # No ``--auto``: droid then stays read-only.
+        # No ``--auto``: droid then stays read-only. Its read-only mode still
+        # reads any host file, so its tools are cut down to one with no host access.
         argv = [
             cli_probe.cli_binary("droid", settings),
             "exec",
             "-o",
             "json",
+            "--disable-builtin-skills",
+            "--only-tools",
+            _DROID_ONLY_TOOLS,
             "--model",
             model_arg,
             "-f",

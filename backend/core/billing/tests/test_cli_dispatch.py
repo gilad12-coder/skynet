@@ -131,6 +131,67 @@ def test_transient_failure_is_retried(tmp_path: Path) -> None:
     assert len(calls(tmp_path, "claude")) == 2
 
 
+def test_timeout_is_not_retried(tmp_path: Path) -> None:
+    """Answer a timed-out call with 502 after one attempt, so a hung CLI holds a slot once."""
+    fake_cli(tmp_path, "claude", "time.sleep(30)")
+    settings = local_settings(tmp_path, cli_call_timeout_seconds=3.0)
+    result = CliDispatcher(None, "claude", MODEL, "judge", settings).dispatch("/chat/completions", REQUEST)
+    assert result.status == 502
+    assert _body(result)["error"]["message"] == "claude timed out"
+    assert len(calls(tmp_path, "claude")) == 1
+
+
+def test_messages_request_answers_in_the_anthropic_shape(tmp_path: Path) -> None:
+    """Answer an Anthropic messages call, with its system text and tool turns in the prompt."""
+    fake_cli(tmp_path, "claude", printing(CLAUDE_SUCCESS))
+    request = {
+        "model": MODEL,
+        "max_tokens": 16,
+        "system": [{"type": "text", "text": "Be brief."}],
+        "messages": [
+            {"role": "user", "content": "ping"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "look", "input": {"q": 1}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "seen"}]},
+        ],
+    }
+    result = CliDispatcher(None, "claude", MODEL, "optimization", local_settings(tmp_path)).dispatch(
+        "/messages", request
+    )
+    assert result.status == 200
+    body = _body(result)
+    assert (body["type"], body["role"], body["stop_reason"]) == ("message", "assistant", "end_turn")
+    assert body["content"] == [{"type": "text", "text": "pong"}]
+    assert body["usage"]["input_tokens"] == 2 + 2275 + 649
+    assert body["usage"]["output_tokens"] == 4
+    assert body["usage"]["token_source"] == "subscription"
+    [call] = calls(tmp_path, "claude")
+    for text in ("Be brief.", "ping", '"name": "look"', "Tool result: seen"):
+        assert text in call["stdin"]
+
+
+def test_messages_stream_answers_anthropic_events(tmp_path: Path) -> None:
+    """Answer a streamed messages call with the Anthropic event sequence."""
+    fake_cli(tmp_path, "claude", printing(CLAUDE_SUCCESS))
+    request = {"model": MODEL, "max_tokens": 16, "stream": True, "messages": [{"role": "user", "content": "ping"}]}
+    result = CliDispatcher(None, "claude", MODEL, "optimization", local_settings(tmp_path)).dispatch(
+        "/messages", request
+    )
+    assert result.content_type == "text/event-stream"
+    blocks = [block.split("\n") for block in result.body.decode().split("\n\n") if block]
+    names = [lines[0].removeprefix("event: ") for lines in blocks]
+    assert names == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    data = [json.loads(lines[1].removeprefix("data: ")) for lines in blocks]
+    assert data[2]["delta"] == {"type": "text_delta", "text": "pong"}
+    assert data[4]["usage"]["output_tokens"] == 4
+
+
 def test_final_failure_answers_502(tmp_path: Path) -> None:
     """Answer a failed call with 502 and the CLI's short reason."""
     fake_cli(tmp_path, "claude", "sys.stderr.write('Invalid model name')\nsys.exit(1)")
@@ -195,6 +256,7 @@ def test_other_paths_and_models_are_refused(tmp_path: Path) -> None:
     """Refuse another model, and answer 422 for a protocol a CLI cannot serve."""
     dispatcher = CliDispatcher(None, "claude", MODEL, "judge", local_settings(tmp_path))
     assert dispatcher.dispatch("/embeddings", REQUEST).status == 422
+    assert dispatcher.dispatch("/responses", REQUEST).status == 422
     with pytest.raises(UnpricedOperationError):
         dispatcher.dispatch("/chat/completions", {**REQUEST, "model": "anthropic/claude-opus-4.5"})
 

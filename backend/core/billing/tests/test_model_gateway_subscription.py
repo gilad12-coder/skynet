@@ -12,6 +12,7 @@ from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
 from core import config
+from core.api import preflight_execution
 from core.billing import cli_dispatch
 from core.billing.budgets import BudgetService
 from core.billing.model_dispatch import ModelHTTPResult
@@ -155,3 +156,15 @@ def test_unbound_capability_is_not_found(gateway: ModelGateway) -> None:
     assert response.json()["error"]["code"] == "not_found"
     assert gateway.dispatch_guest(route["token"], "/v1/_host_agent", {"goal": "x"}, {}).status == 404
     assert _post(route["url"], "wrong", "/_host_agent", {"goal": "x"}).status_code == 401
+
+
+@pytest.mark.usefixtures("local")
+def test_native_preflight_reaches_a_subscription_optimization_model(gateway: ModelGateway) -> None:
+    """Pass the setup check of a native engine, which sends the optimization role ``/v1/messages``."""
+    gateway.register_subscription(MODEL, "claude", "optimization")
+    gateway.register_subscription(MODEL, "claude", "task")
+    checks = preflight_execution._verify_model_routes(gateway, native=True)
+    assert {check["key"]: check["status"] for check in checks} == {
+        "model.optimization": "succeeded",
+        "model.task": "succeeded",
+    }

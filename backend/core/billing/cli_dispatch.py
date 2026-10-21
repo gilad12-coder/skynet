@@ -1,8 +1,9 @@
-"""Serve chat completions from the user's own coding-CLI subscriptions in local mode.
+"""Serve model calls from the user's own coding-CLI subscriptions in local mode.
 
 A :class:`CliDispatcher` stands where an ``OpenRouterDispatcher`` stands in the
-model gateway, so guests keep the OpenAI chat protocol while the answer comes
-from ``claude``, ``codex`` or ``droid`` on the user's machine. The wallet
+model gateway, so guests keep the OpenAI chat protocol (and native harnesses
+the Anthropic messages protocol) while the answer comes from ``claude``,
+``codex`` or ``droid`` on the user's machine. The wallet
 records every call at zero cents; ``usage.cost`` carries the model's public
 list price so cost scores stay comparable with hosted runs.
 """
@@ -43,7 +44,8 @@ __all__ = [
 ]
 
 _CHAT_PATH = "/chat/completions"
-_UNSUPPORTED_PATHS = frozenset({"/responses", "/messages", "/embeddings"})
+_MESSAGES_PATH = "/messages"
+_UNSUPPORTED_PATHS = frozenset({"/responses", "/embeddings"})
 _RETRY_DELAYS_SECONDS = (2.0, 4.0, 8.0)
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
 _PRICE_TIMEOUT_SECONDS = 10
@@ -139,6 +141,57 @@ def render_prompt(request: Mapping[str, Any]) -> str:
             f"describe any tool call as JSON.\n{json.dumps(tools)}"
         )
     return "\n\n".join(parts)
+
+
+def _anthropic_text(content: Any) -> str:
+    """Flatten one Anthropic message content into plain text.
+
+    Tool calls and tool results become labeled JSON, since a CLI answers in text.
+
+    Args:
+        content: A string or a list of content blocks.
+
+    Returns:
+        The blocks joined by newlines.
+    """
+    if not isinstance(content, list):
+        return _text(content)
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(str(block))
+        elif block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+        elif block.get("type") == "tool_use":
+            call = {"name": block.get("name"), "input": block.get("input")}
+            parts.append(f"Tool call: {json.dumps(call)}")
+        elif block.get("type") == "tool_result":
+            parts.append(f"Tool result: {_anthropic_text(block.get('content'))}")
+    return "\n".join(parts)
+
+
+def chat_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn an Anthropic messages request into the chat request a CLI answers.
+
+    Args:
+        request: The ``/messages`` body.
+
+    Returns:
+        A chat completion body with the same model, turns and tools.
+    """
+    messages: list[dict[str, Any]] = []
+    system = request.get("system")
+    if system:
+        messages.append({"role": "system", "content": _anthropic_text(system)})
+    messages.extend(
+        {"role": message.get("role") or "user", "content": _anthropic_text(message.get("content"))}
+        for message in request.get("messages") or []
+        if isinstance(message, dict)
+    )
+    chat: dict[str, Any] = {"model": request.get("model"), "messages": messages}
+    if request.get("tools"):
+        chat["tools"] = request["tools"]
+    return chat
 
 
 def _schema(request: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -237,36 +290,39 @@ class CliDispatcher:
         attempt: int = 0,
         protocol_headers: Mapping[str, str] | None = None,
     ) -> ModelHTTPResult:
-        """Answer one chat completion and record it at zero cents.
+        """Answer one chat completion or Anthropic message and record it at zero cents.
 
         Args:
-            path: The protocol path; only ``/chat/completions`` is served.
-            request: The chat completion body.
+            path: The protocol path: ``/chat/completions`` or ``/messages``.
+            request: The request body.
             operation_key: Stable identity of this physical attempt, if any.
             attempt: Retry number within the logical operation.
             protocol_headers: Unused; kept for the dispatcher interface.
 
         Returns:
-            The OpenAI-shaped answer, a 429 for a capped subscription, a 502 for
-            a failed CLI, or a 422 for a path a CLI cannot serve.
+            The answer in the request's protocol, a 429 for a capped
+            subscription, a 502 for a failed CLI, or a 422 for a path a CLI
+            cannot serve.
 
         Raises:
             UnpricedOperationError: When the request names another model or path.
         """
         del protocol_headers
         if path in _UNSUPPORTED_PATHS:
-            return _error(422, "subscription.unsupported_path", "Subscription models serve only chat completions.")
-        if path != _CHAT_PATH or request.get("model") != self.model:
+            return _error(
+                422, "subscription.unsupported_path", "Subscription models serve only chat completions and messages."
+            )
+        if path not in (_CHAT_PATH, _MESSAGES_PATH) or request.get("model") != self.model:
             raise UnpricedOperationError("This scoped route cannot dispatch a different model or API operation.")
         if self.runtime is None:
-            return self._answer(request)[0]
+            return self._answer(path, request)[0]
         quote = operation_quote(
             request, Decimal(0), self.policy, {"provider": "subscription", "cli": self.cli, "model": self.model}
         )
 
         def send() -> PaidResult[ModelHTTPResult]:
             """Run the CLI and report a zero charge with its usage as evidence."""
-            result, evidence = self._answer(request)
+            result, evidence = self._answer(path, request)
             return PaidResult(value=result, provider_usd=Decimal(0), evidence=evidence)
 
         return self.runtime.execute(
@@ -297,17 +353,19 @@ class CliDispatcher:
         order += [name for name in fallback if name in RUNNERS and name not in order]
         return order
 
-    def _answer(self, request: Mapping[str, Any]) -> tuple[ModelHTTPResult, dict[str, Any]]:
+    def _answer(self, path: str, request: Mapping[str, Any]) -> tuple[ModelHTTPResult, dict[str, Any]]:
         """Run the request on the first CLI that is not capped.
 
         Args:
-            request: The chat completion body.
+            path: ``/chat/completions`` or ``/messages``.
+            request: The request body.
 
         Returns:
             The answer and the evidence to record with it.
         """
-        prompt = render_prompt(request)
-        schema = _schema(request)
+        chat = chat_request(request) if path == _MESSAGES_PATH else request
+        prompt = render_prompt(chat)
+        schema = _schema(chat)
         capped: SubscriptionRateLimitedError | None = None
         evidence: dict[str, Any] = {"provider": "subscription", "model": self.model, "cli": self.cli}
         for provider in self._providers():
@@ -343,6 +401,8 @@ class CliDispatcher:
                 if completion.model_ms is not None
                 else round((time.monotonic() - started) * 1000),
             )
+            if path == _MESSAGES_PATH:
+                return self._message(request, completion.text, usage), evidence
             return self._success(request, completion.text, usage), evidence
         assert capped is not None or not self._providers()
         provider = capped.provider if capped else self.cli
@@ -358,7 +418,8 @@ class CliDispatcher:
         """Run one CLI call, retrying transient failures with jittered back-off.
 
         Every retry is free under a subscription, so retrying inside one
-        recorded operation cannot double-charge the wallet.
+        recorded operation cannot double-charge the wallet. A timeout is not
+        transient, so one hung call holds a slot for one timeout only.
 
         Args:
             provider: The CLI.
@@ -444,6 +505,61 @@ class CliDispatcher:
             {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": usage},
         ]
         stream = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+        return ModelHTTPResult(200, "text/event-stream", stream.encode())
+
+    def _message(self, request: Mapping[str, Any], text: str, usage: dict[str, Any]) -> ModelHTTPResult:
+        """Build the Anthropic message answer, as JSON or as SSE events.
+
+        Args:
+            request: The ``/messages`` body.
+            text: The CLI's answer.
+            usage: The chat usage block.
+
+        Returns:
+            The answer.
+        """
+        extra = {key: usage[key] for key in ("cost", "model_ms", "token_source", "cli_provider")}
+        tokens = {"input_tokens": usage["prompt_tokens"], "output_tokens": usage["completion_tokens"]}
+        message = {
+            "id": f"msg_cli_{uuid4().hex}",
+            "type": "message",
+            "role": "assistant",
+            "model": self.model,
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {**tokens, **extra},
+        }
+        if not request.get("stream"):
+            return ModelHTTPResult(200, "application/json", json.dumps(message).encode())
+        start = {
+            **message,
+            "content": [],
+            "stop_reason": None,
+            "usage": {"input_tokens": tokens["input_tokens"], "output_tokens": 0},
+        }
+        events = [
+            ("message_start", {"type": "message_start", "message": start}),
+            (
+                "content_block_start",
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            ),
+            (
+                "content_block_delta",
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}},
+            ),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            (
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {**tokens, **extra},
+                },
+            ),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        stream = "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
         return ModelHTTPResult(200, "text/event-stream", stream.encode())
 
 
