@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   childPath,
+  codexSubscriptionLogin,
   compareVersions,
   FAKE_CLI_DIR_ENV,
   findExecutable,
@@ -14,6 +15,7 @@ import {
   probeClis,
   probeDocker,
   readCliLimits,
+  readCodexLoginFile,
   searchDirs,
   type Runner,
 } from "../src/main/cli-detect";
@@ -119,16 +121,62 @@ describe("probeCli with fake binaries", () => {
   });
 
   it("needs exit 0 and a non-API-key 'logged in' from codex login status", async () => {
+    const codexHome = path.join(dir, "codex-home");
+    fs.mkdirSync(codexHome);
+    fs.writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "a" } }));
+    const env = { CODEX_HOME: codexHome };
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Not logged in" >&2; exit 1; fi');
-    expect(await probeCli("codex", [dir], {})).toMatchObject({ version: "0.160.1", versionOk: true, loggedIn: false });
+    expect(await probeCli("codex", [dir], env)).toMatchObject({ version: "0.160.1", versionOk: true, loggedIn: false });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "something else"; fi');
-    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
+    expect(await probeCli("codex", [dir], env)).toMatchObject({ loggedIn: false });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using ChatGPT" >&2; fi');
-    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: true });
+    expect(await probeCli("codex", [dir], env)).toMatchObject({ loggedIn: true });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using an API key - sk-proj-***ABCDE" >&2; fi');
-    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
+    expect(await probeCli("codex", [dir], env)).toMatchObject({ loggedIn: false });
     fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.160.1"; else echo "Logged in using API KEY"; fi');
-    expect(await probeCli("codex", [dir], {})).toMatchObject({ loggedIn: false });
+    expect(await probeCli("codex", [dir], env)).toMatchObject({ loggedIn: false });
+  });
+
+  // codex says "Logged in using ChatGPT" (exit 0) for all of these; the backend
+  // (core/local/cli_probe.py) refuses them, so the onboarding must too.
+  it("signs codex in only when auth.json is a ChatGPT login with an access token, like the backend", async () => {
+    const codexHome = path.join(dir, "codex-home");
+    fs.mkdirSync(codexHome);
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.163.0"; else echo "Logged in using ChatGPT"; fi');
+    const withAuth = async (doc: unknown) => {
+      fs.writeFileSync(path.join(codexHome, "auth.json"), typeof doc === "string" ? doc : JSON.stringify(doc));
+      return (await probeCli("codex", [dir], { CODEX_HOME: codexHome })).loggedIn;
+    };
+    expect(await withAuth({ auth_mode: "chatgpt", tokens: { id_token: "x", access_token: "a", refresh_token: "r" } })).toBe(true);
+    expect(await withAuth({ tokens: { access_token: "a" } })).toBe(true);
+    expect(await withAuth({ OPENAI_API_KEY: "", tokens: { access_token: "a" } })).toBe(true);
+    expect(await withAuth({ auth_mode: "chatgpt" })).toBe(false);
+    expect(await withAuth({ auth_mode: "chatgpt", tokens: null })).toBe(false);
+    expect(await withAuth({ auth_mode: "chatgpt", tokens: { access_token: "" } })).toBe(false);
+    expect(await withAuth({ auth_mode: "chatgpt", tokens: { access_token: {} } })).toBe(false);
+    expect(await withAuth({})).toBe(false);
+    expect(await withAuth({ auth_mode: "chatgptAuthTokens", tokens: { access_token: "a" } })).toBe(false);
+    expect(await withAuth({ auth_mode: "personalAccessToken", tokens: { access_token: "a" } })).toBe(false);
+    expect(await withAuth({ auth_mode: "agentIdentity", tokens: { access_token: "a" } })).toBe(false);
+    expect(await withAuth({ auth_mode: "bedrockAccessKeys", tokens: { access_token: "a" } })).toBe(false);
+    expect(await withAuth({ OPENAI_API_KEY: "sk-x", tokens: { access_token: "a" } })).toBe(false);
+    expect(await withAuth("not json")).toBe(false);
+    expect(await withAuth([])).toBe(false);
+    // Keychain store: codex keeps no auth.json.
+    fs.rmSync(path.join(codexHome, "auth.json"));
+    expect((await probeCli("codex", [dir], { CODEX_HOME: codexHome })).loggedIn).toBe(false);
+  });
+
+  it("reads auth.json from CODEX_HOME, else from HOME/.codex", async () => {
+    const home = path.join(dir, "home");
+    fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".codex", "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "a" } }));
+    expect(readCodexLoginFile({ HOME: home })).toMatchObject({ auth_mode: "chatgpt" });
+    expect(readCodexLoginFile({ HOME: home, CODEX_HOME: path.join(dir, "empty") })).toBeNull();
+    fake("codex", 'if [ "$1" = "--version" ]; then echo "codex-cli 0.163.0"; else echo "Logged in using ChatGPT"; fi');
+    expect((await probeCli("codex", [dir], { HOME: home })).loggedIn).toBe(true);
+    expect((await probeCli("codex", [dir], { HOME: home, CODEX_HOME: path.join(dir, "empty") })).loggedIn).toBe(false);
+    expect(codexSubscriptionLogin(null)).toBe(false);
   });
 
   it("reads ok from droid doctor --auth --json", async () => {

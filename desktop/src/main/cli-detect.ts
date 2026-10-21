@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { buildChildEnv } from "./shell-env";
 
@@ -121,14 +122,46 @@ export function childPath(loginPath: string, env: NodeJS.ProcessEnv = process.en
   return fake ? `${fake}:${loginPath}` : loginPath;
 }
 
+/** Python truthiness of a JSON value, so the rule below matches the backend's `bool()` exactly. */
+function pyTruthy(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object" && value !== null) return Object.keys(value).length > 0;
+  return Boolean(value);
+}
+
 /**
- * Login checks modeled on the backend's `core/local/cli_probe.py` (SKY-111).
- * The backend stays the authority. For codex the desktop reads only the
- * `codex login status` text and never reads auth.json. The backend also reads
- * auth.json, so it can still refuse codex after this check passes: ChatGPT mode
- * with no or empty tokens, the `chatgptAuthTokens` mode, other non-ChatGPT
- * logins whose text has no "api key", and a login kept in the macOS Keychain
- * (`cli_auth_credentials_store = keyring` or `auto`), where no auth.json exists.
+ * Tell whether a codex `auth.json` is a ChatGPT subscription login, by the
+ * backend's rule (`codex_subscription_login` in `core/local/cli_probe.py`):
+ * an explicit `auth_mode` wins; without one, a non-empty `OPENAI_API_KEY`
+ * means an API-key login, else ChatGPT. Only `chatgpt` with a non-empty
+ * `tokens.access_token` counts.
+ */
+export function codexSubscriptionLogin(document: unknown): boolean {
+  if (typeof document !== "object" || document === null || Array.isArray(document)) return false;
+  const doc = document as Record<string, unknown>;
+  let mode = doc.auth_mode;
+  if (mode === undefined || mode === null) mode = pyTruthy(doc.OPENAI_API_KEY) ? "apikey" : "chatgpt";
+  const tokens = doc.tokens;
+  if (typeof tokens !== "object" || tokens === null || Array.isArray(tokens)) return false;
+  return mode === "chatgpt" && pyTruthy((tokens as Record<string, unknown>).access_token);
+}
+
+/** Read the codex login file the backend reads: `$CODEX_HOME/auth.json`, else `~/.codex/auth.json`. */
+export function readCodexLoginFile(env: Record<string, string>): unknown {
+  const home = env.CODEX_HOME || path.join(env.HOME || os.homedir(), ".codex");
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, "auth.json"), "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Login checks with the same rules as the backend's `core/local/cli_probe.py`.
+ * The backend stays the authority. For codex both read `codex login status`
+ * and `auth.json`, so a login kept only in the macOS Keychain
+ * (`cli_auth_credentials_store = keyring` or `auto`) counts as signed out in
+ * both places, and the onboarding never passes when codex jobs would fail.
  */
 export async function checkLogin(id: CliId, bin: string, run: Runner, env: Record<string, string>): Promise<boolean | null> {
   if (id === "claude") {
@@ -148,7 +181,8 @@ export async function checkLogin(id: CliId, bin: string, run: Runner, env: Recor
     const out = `${res.stdout}\n${res.stderr}`;
     // "Not logged in" also contains "logged in"; the exit code rules that case out.
     // "Logged in using an API key" bills the key, not the ChatGPT subscription.
-    return res.code === 0 && /logged in/i.test(out) && !/api key/i.test(out);
+    if (!(res.code === 0 && /logged in/i.test(out) && !/api key/i.test(out))) return false;
+    return codexSubscriptionLogin(readCodexLoginFile(env));
   }
   const res = await run(bin, ["doctor", "--auth", "--json"], env);
   try {

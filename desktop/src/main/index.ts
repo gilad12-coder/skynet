@@ -41,6 +41,13 @@ if (process.env.SKYNET_DESKTOP_THEME === "light" || process.env.SKYNET_DESKTOP_T
   nativeTheme.themeSource = process.env.SKYNET_DESKTOP_THEME;
 }
 
+// The web app picks its language from Accept-Language, which Chromium takes
+// from its own locale (the system language). A forced onboarding language must
+// change that locale too, or the web app stays in the system language.
+if (process.env.SKYNET_DESKTOP_LANG === "en" || process.env.SKYNET_DESKTOP_LANG === "he") {
+  app.commandLine.appendSwitch("lang", process.env.SKYNET_DESKTOP_LANG);
+}
+
 let win: BrowserWindow | null = null;
 let state: OnboardingState = { kind: "checking", clis: [], docker: null };
 let acceptedRateCap = false;

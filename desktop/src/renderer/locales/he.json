@@ -21,7 +21,7 @@
   "not_logged_in.title": "צריך להתחבר ל-CLI",
   "not_logged_in.body": "ה-CLI מותקן אבל לא מחובר. אפשר להריץ את הפקודה בטרמינל, לסיים את ההתחברות ואז לבדוק שוב.",
   "not_logged_in.droid": "אפשר להריץ droid פעם אחת בטרמינל ולעקוב אחרי שלבי ההתחברות.",
-  "not_logged_in.codex": "{cli}: צריך להתחבר עם ChatGPT. התחברות עם מפתח API לא נחשבת.",
+  "not_logged_in.codex": "{cli}: צריך להתחבר עם ChatGPT. התחברות עם מפתח API לא נחשבת. גם התחברות שנשמרה ב-Keychain של macOS לא נחשבת: קודם צריך להגדיר ‎cli_auth_credentials_store = \"file\"‎ בקובץ ‎~/.codex/config.toml‎.",
   "rate_capped.title": "הגעת למגבלת השימוש",
   "rate_capped.body": "מנוי ה-CLI הגיע למגבלה שלו. אפשר יהיה להתחיל עבודות חדשות אחרי האיפוס.",
   "rate_capped.reset": "האיפוס ב-{time}",

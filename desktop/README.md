@@ -32,6 +32,7 @@ Quitting stops the web server, the API, Postgres and every `skynet.job` sandbox 
 - macOS on Apple silicon. CI also builds an Intel (x64) app, but nobody has run it on Intel hardware yet.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/), running, with "Use Rosetta for x86_64/amd64 emulation" turned on
 - One coding CLI, signed in: `claude` 2.1.226 or newer, `codex` 0.160.0 or newer, or `droid`
+- For `codex`: a ChatGPT sign-in kept in `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Skynet reads that file, so a login kept only in the macOS Keychain does not count. Set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login`.
 
 ## Install a downloaded build
 
@@ -107,7 +108,7 @@ These variables are for development and tests:
 | --- | --- |
 | `SKYNET_DESKTOP_FAKE_CLI_DIR` | Look up `docker`, `claude`, `codex` and `droid` only in this directory. Put small shell scripts there to trigger each onboarding screen. |
 | `SKYNET_DESKTOP_DATA_DIR` | Use this directory instead of `~/Library/Application Support/Skynet`. Write `local/cli_limits.json` there to trigger the usage-limit screen. |
-| `SKYNET_DESKTOP_LANG` | `en` or `he` |
+| `SKYNET_DESKTOP_LANG` | `en` or `he`. Also sets Chromium's language, so the web app gets the same `Accept-Language` |
 | `SKYNET_DESKTOP_THEME` | `light` or `dark` |
 | `SKYNET_DESKTOP_NO_UPDATE` | `1` turns off the update check |
 | `SKYNET_DESKTOP_PG_VOLUME` | Use this Docker volume for Postgres instead of `skynet-local-pgdata`, so a test run does not touch your data. Only a plain volume name is accepted |

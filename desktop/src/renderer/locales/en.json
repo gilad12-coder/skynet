@@ -21,7 +21,7 @@
   "not_logged_in.title": "Sign in to your CLI",
   "not_logged_in.body": "The CLI is installed but not signed in. Run the command in Terminal, finish the sign-in, then check again.",
   "not_logged_in.droid": "Run droid once in Terminal and follow its sign-in steps.",
-  "not_logged_in.codex": "{cli}: sign in with ChatGPT. An API key sign-in does not count.",
+  "not_logged_in.codex": "{cli}: sign in with ChatGPT. An API key sign-in does not count. A login kept in the macOS Keychain does not count either: first set cli_auth_credentials_store = \"file\" in ~/.codex/config.toml.",
   "rate_capped.title": "Usage limit reached",
   "rate_capped.body": "Your CLI subscription reached its limit. New jobs can start again after the reset.",
   "rate_capped.reset": "Resets {time}",
