@@ -4321,5 +4321,7 @@
   "submit.budget.local_note": "Die Mac-App setzt kein Ausgabenlimit. Dein Anbieterschlüssel oder dein CLI-Tarif bezahlt jeden Modellaufruf.",
   "billing.mode.byok_hint_local": "Das Modell wird über deinen eigenen Anbieterschlüssel abgerechnet. Die Mac-App berechnet keine Gebühr.",
   "usage_tab.charged_local": "Mac-App-Guthaben",
-  "tooltip.usage_tab.charged_local": "Was diese Aufrufe vom kostenlosen Mac-App-Guthaben abgezogen haben. Es ist kein echtes Geld. Dein Anbieter rechnet über deinen eigenen Schlüssel ab."
+  "tooltip.usage_tab.charged_local": "Was diese Aufrufe vom kostenlosen Mac-App-Guthaben abgezogen haben. Es ist kein echtes Geld. Dein Anbieter rechnet über deinen eigenen Schlüssel ab.",
+  "usage_tab.api_rates_note_local": "* Zu API-Preisen. Dein Anbieter rechnet diese Beträge über deinen eigenen Schlüssel ab.",
+  "usage_tab.subscription_note_local": "Dein Abo hat diesen Lauf abgedeckt, daher wurde nichts berechnet."
 }

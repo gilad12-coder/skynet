@@ -4321,5 +4321,7 @@
   "submit.budget.local_note": "A app para Mac não define limite de gastos. A sua chave de fornecedor ou o seu plano da CLI paga cada chamada ao modelo.",
   "billing.mode.byok_hint_local": "O modelo é cobrado na sua própria chave de fornecedor. A app para Mac não cobra nenhuma taxa.",
   "usage_tab.charged_local": "Saldo da app para Mac",
-  "tooltip.usage_tab.charged_local": "O que estas chamadas usaram do saldo gratuito da app para Mac. Não é dinheiro real. O seu fornecedor cobra na sua própria chave."
+  "tooltip.usage_tab.charged_local": "O que estas chamadas usaram do saldo gratuito da app para Mac. Não é dinheiro real. O seu fornecedor cobra na sua própria chave.",
+  "usage_tab.api_rates_note_local": "* Às tarifas da API. O seu fornecedor cobra estes valores na sua própria chave.",
+  "usage_tab.subscription_note_local": "A sua subscrição cobriu esta execução, por isso nada foi cobrado."
 }

@@ -6,6 +6,7 @@ const {
   byokHintKey,
   runEstimateLabelKey,
   usageChargedKey,
+  usageCostNoteKey,
   cliState,
   defaultAgentCli,
   hostCliPatch,
@@ -174,7 +175,12 @@ test("an agent request waits for the status before it picks the CLI's slug", asy
   assert.equal(loaded, "subscription/claude/anthropic/claude-opus-4.1");
   assert.equal(loads, 1);
   assert.equal(
-    await resolveAgentModel(null, "claude", async () => status([cli()]), () => null),
+    await resolveAgentModel(
+      null,
+      "claude",
+      async () => status([cli()]),
+      () => null,
+    ),
     "subscription/claude/anthropic/claude-sonnet-4.5",
   );
 });
@@ -297,6 +303,31 @@ test("the usage tab names no Skynet charge in local mode", () => {
   assert.equal(usageChargedKey(true), "usage_tab.charged_local");
 });
 
+test("the local usage note says nothing was billed only for a subscription run", () => {
+  const row = (patch: Partial<Parameters<typeof usageCostNoteKey>[1][number]> = {}) => ({
+    billing: "skynet",
+    charged_cents: 0,
+    provider_cents: null,
+    calls: 12,
+    unpriced_calls: 0,
+    ...patch,
+  });
+  const subscription = [row(), row({ calls: 3 })];
+  const ownKey = [row({ billing: "byok", charged_cents: 1, provider_cents: 14 })];
+  const mixed = [row(), ...ownKey];
+  const credits = [row(), row({ calls: 0, charged_cents: 5 })];
+  assert.equal(usageCostNoteKey(true, subscription), "usage_tab.subscription_note_local");
+  assert.equal(usageCostNoteKey(true, ownKey), "usage_tab.api_rates_note_local");
+  assert.equal(usageCostNoteKey(true, mixed), "usage_tab.api_rates_note_local");
+  assert.equal(usageCostNoteKey(true, credits), null);
+  assert.equal(usageCostNoteKey(true, [row({ billing: "byok", unpriced_calls: 12 })]), null);
+  assert.equal(usageCostNoteKey(true, [row({ calls: 0 })]), null);
+  assert.equal(usageCostNoteKey(true, []), null);
+  for (const rows of [subscription, ownKey, mixed, credits]) {
+    assert.equal(usageCostNoteKey(false, rows), null);
+  }
+});
+
 test("the local English texts name no fee and no Skynet charge", () => {
   const en = JSON.parse(
     readFileSync(new URL("../../../../../i18n/locales/ui/en.json", import.meta.url), "utf8"),
@@ -305,6 +336,8 @@ test("the local English texts name no fee and no Skynet charge", () => {
     "billing.mode.byok_hint_local",
     "usage_tab.charged_local",
     "tooltip.usage_tab.charged_local",
+    "usage_tab.api_rates_note_local",
+    "usage_tab.subscription_note_local",
   ]) {
     assert.ok(en[key], key);
     assert.doesNotMatch(en[key], /platform fee|term\.appName|Skynet/, key);

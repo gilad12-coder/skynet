@@ -7,6 +7,7 @@
  */
 import type { CliProvider } from "@/features/billing";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
+import type { RunUsageRow } from "@/shared/types/run-usage";
 
 export const CLI_PROVIDERS: readonly CliProvider[] = ["codex", "claude", "droid"];
 
@@ -180,6 +181,32 @@ export function usageChargedKey(
   localMode: boolean,
 ): "usage_tab.charged" | "usage_tab.charged_local" {
   return localMode ? "usage_tab.charged_local" : "usage_tab.charged";
+}
+
+type UsageNoteRow = Pick<
+  RunUsageRow,
+  "billing" | "charged_cents" | "provider_cents" | "calls" | "unpriced_calls"
+>;
+
+/**
+ * The note above the local usage table, or null for none. Own-key amounts in
+ * the provider column are at API rates and the provider bills the user's key,
+ * so that column gets an asterisk and this note. A run whose model calls drew
+ * no charge and no provider spend ran on the subscription, so nothing was
+ * billed. Any other run, and hosted mode, gets no note.
+ */
+export function usageCostNoteKey(
+  localMode: boolean,
+  rows: readonly UsageNoteRow[],
+): "usage_tab.api_rates_note_local" | "usage_tab.subscription_note_local" | null {
+  if (!localMode) return null;
+  if (rows.some((r) => r.provider_cents != null)) return "usage_tab.api_rates_note_local";
+  const billed = rows.some(
+    (r) =>
+      r.charged_cents > 0 || r.unpriced_calls > 0 || r.billing === "byok" || r.billing === "direct",
+  );
+  const calls = rows.reduce((n, r) => n + r.calls, 0);
+  return calls > 0 && !billed ? "usage_tab.subscription_note_local" : null;
 }
 
 /** A model config billed to the user's CLI subscription. */

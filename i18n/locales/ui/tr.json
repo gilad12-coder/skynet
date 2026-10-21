@@ -4321,5 +4321,7 @@
   "submit.budget.local_note": "Mac uygulaması harcama limiti koymaz. Her model çağrısını sağlayıcı anahtarınız veya CLI planınız öder.",
   "billing.mode.byok_hint_local": "Model ücreti kendi sağlayıcı anahtarınıza yansıtılır. Mac uygulaması ücret almaz.",
   "usage_tab.charged_local": "Mac uygulaması bakiyesi",
-  "tooltip.usage_tab.charged_local": "Bu çağrıların ücretsiz Mac uygulaması bakiyesinden aldığı tutar. Gerçek para değildir. Sağlayıcınız ücreti kendi anahtarınıza yansıtır."
+  "tooltip.usage_tab.charged_local": "Bu çağrıların ücretsiz Mac uygulaması bakiyesinden aldığı tutar. Gerçek para değildir. Sağlayıcınız ücreti kendi anahtarınıza yansıtır.",
+  "usage_tab.api_rates_note_local": "* API ücretleriyle. Sağlayıcınız bu tutarları kendi anahtarınıza yansıtır.",
+  "usage_tab.subscription_note_local": "Bu çalıştırmayı aboneliğiniz karşıladı, bu yüzden hiçbir ücret alınmadı."
 }

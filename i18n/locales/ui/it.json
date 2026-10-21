@@ -4321,5 +4321,7 @@
   "submit.budget.local_note": "L'app Mac non imposta un limite di spesa. Ogni chiamata al modello la paga la tua chiave del provider o il tuo piano CLI.",
   "billing.mode.byok_hint_local": "Il modello è addebitato sulla tua chiave del provider. L'app Mac non applica commissioni.",
   "usage_tab.charged_local": "Saldo dell'app Mac",
-  "tooltip.usage_tab.charged_local": "Quanto queste chiamate hanno preso dal saldo gratuito dell'app Mac. Non è denaro reale. Il tuo provider addebita sulla tua chiave."
+  "tooltip.usage_tab.charged_local": "Quanto queste chiamate hanno preso dal saldo gratuito dell'app Mac. Non è denaro reale. Il tuo provider addebita sulla tua chiave.",
+  "usage_tab.api_rates_note_local": "* Alle tariffe API. Il tuo provider addebita questi importi sulla tua chiave.",
+  "usage_tab.subscription_note_local": "Il tuo abbonamento ha coperto questa esecuzione, quindi non è stato addebitato nulla."
 }

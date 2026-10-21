@@ -25,7 +25,7 @@ import { ACTIVE_STATUSES } from "@/shared/constants/job-status";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getRunUsage } from "@/shared/lib/api";
 import { formatBudgetUsd, formatCentsUsd } from "@/features/billing";
-import { usageChargedKey } from "@/features/local-runtime";
+import { usageChargedKey, usageCostNoteKey } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { cn } from "@/shared/lib/utils";
@@ -485,13 +485,17 @@ export function UsageTab({
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
   const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
+  const costNoteKey = groups.length > 0 ? usageCostNoteKey(isLocalMode(), rows) : null;
 
   return (
     <FadeIn>
       <div className="space-y-4">
         {running && <BudgetPace job={job} spentCents={total.chargedCents} />}
         <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
-        <div className="flex justify-end">
+        <div
+          className={cn("flex items-center gap-3", costNoteKey ? "justify-between" : "justify-end")}
+        >
+          {costNoteKey && <p className="text-xs text-muted-foreground">{msg(costNoteKey)}</p>}
           <ExportTableMenu
             iconOnly
             disabled={groups.length === 0}
@@ -541,6 +545,7 @@ export function UsageTab({
                       <TableHead className="text-end" collapse="sm">
                         <HelpTip text={tip("usage_tab.provider")}>
                           {msg("usage_tab.provider")}
+                          {costNoteKey === "usage_tab.api_rates_note_local" && "*"}
                         </HelpTip>
                       </TableHead>
                     )}

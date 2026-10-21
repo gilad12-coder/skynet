@@ -4321,5 +4321,7 @@
   "submit.budget.local_note": "The Mac app sets no spending limit. Your provider key or your CLI plan pays for each model call.",
   "billing.mode.byok_hint_local": "The model is billed to your own provider key. The Mac app charges no fee.",
   "usage_tab.charged_local": "Mac app balance",
-  "tooltip.usage_tab.charged_local": "What these calls took from the free Mac app balance. It is not real money. Your provider bills your own key."
+  "tooltip.usage_tab.charged_local": "What these calls took from the free Mac app balance. It is not real money. Your provider bills your own key.",
+  "usage_tab.api_rates_note_local": "* At API rates. Your provider bills these amounts to your own key.",
+  "usage_tab.subscription_note_local": "Your subscription covered this run, so nothing was billed."
 }

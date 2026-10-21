@@ -10,6 +10,7 @@ export {
   byokHintKey,
   runEstimateLabelKey,
   usageChargedKey,
+  usageCostNoteKey,
   CLI_PROVIDERS,
   cliState,
   defaultAgentCli,
