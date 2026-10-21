@@ -284,7 +284,8 @@ def effective_environment(
         The rules the run is held to.
 
     Raises:
-        ConstraintsError: When the file proposes an editable path outside the approved ones.
+        ConstraintsError: When the file proposes an editable path outside the approved ones,
+            or protects every editable path.
     """
     if constraints is None:
         return RepoEnvironment(
@@ -301,6 +302,13 @@ def effective_environment(
             )
         editable = constraints.editable_paths
     protected = tuple(dict.fromkeys((CONSTRAINTS_FILE, *constraints.protected_paths)))
+    # Protected paths win over editable ones when a patch is checked, so this
+    # run could only spend its budget on versions that are all refused.
+    if all(_inside(path, protected) for path in editable):
+        raise ConstraintsError(
+            f"{CONSTRAINTS_FILE} protects every editable path ({', '.join(editable)}), so no version could"
+            " change anything. Protect less, or make a path outside [paths] protected editable."
+        )
     notes: list[str] = []
     setup = approved_setup
     if (approved_setup or "").strip():

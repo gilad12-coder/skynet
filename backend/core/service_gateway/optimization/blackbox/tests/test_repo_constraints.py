@@ -109,6 +109,31 @@ def test_the_file_cannot_widen_the_approved_editable_paths() -> None:
 
 
 @pytest.mark.parametrize(
+    ("raw", "approved"),
+    [
+        (b'[paths]\neditable = ["bot/geocode"]\nprotected = ["bot"]\n', ["bot"]),
+        (b'[paths]\nprotected = ["bot"]\n', ["bot/geocode"]),
+        (b'[paths]\neditable = ["optimize.toml"]\n', ["."]),
+    ],
+)
+def test_a_file_that_protects_every_editable_path_fails_the_setup_check(raw: bytes, approved: list[str]) -> None:
+    """A run where every edit would be refused as protected fails before it spends its budget."""
+    constraints = parse_constraints(raw)
+
+    with pytest.raises(ConstraintsError, match="protects every editable path"):
+        effective_environment(constraints, approved_editable=approved, approved_setup=None)
+
+
+def test_a_file_that_protects_part_of_an_editable_path_still_runs() -> None:
+    """Protecting a file inside an editable folder leaves the rest of the folder editable."""
+    constraints = parse_constraints(b'[paths]\nprotected = ["bot/labels.csv"]\n')
+
+    environment = effective_environment(constraints, approved_editable=["bot"], approved_setup=None)
+
+    assert environment.editable_paths == ("bot",)
+
+
+@pytest.mark.parametrize(
     ("raw", "message"),
     [
         (b'[services]\ngeocoder = ["search"]\n', "cannot grant services"),

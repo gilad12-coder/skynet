@@ -38,6 +38,8 @@ invariants = ["Keep the reply format unchanged."]
   and a repository file can never grant them.
 - An unknown section or setting, a `version` other than `1`, or invalid TOML.
 - A path that leaves the repository, names `.git`, or protects the whole tree.
+- An empty `[paths] editable` list, or protected paths that cover every
+  editable path. Such a run could not change anything.
 - An `optimize.toml` that is a link or a folder, or a file larger than 64 KiB.
 
 ## Where the effective environment is recorded
