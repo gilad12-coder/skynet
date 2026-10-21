@@ -1,6 +1,6 @@
 /*
  * The pure half of Chrome web push: decoding the server's VAPID key and the
- * rules for when to ask. Kept free of browser globals so it can be unit
+ * rules for when to subscribe. Kept free of browser globals so it can be unit
  * tested under the node runner; `push.ts` does the browser work.
  */
 
@@ -26,12 +26,12 @@ export function vapidKeyBytes(key: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Whether to offer "tell me when it's done?" after a run starts: only while
- * the browser has never been asked and the user has not said no to us before.
- * A browser that already granted gets subscribed silently instead.
+ * Whether a run start may re-save this browser's push subscription. Only a
+ * browser that already granted qualifies; asking for permission belongs to
+ * the Settings screen, never to a run start.
  */
-export function shouldOfferRunPrompt(permission: PushPermission, declined: boolean): boolean {
-  return permission === "default" && !declined;
+export function shouldSyncPush(permission: PushPermission): boolean {
+  return permission === "granted";
 }
 
 /**

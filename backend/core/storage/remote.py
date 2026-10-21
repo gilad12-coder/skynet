@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from .. import run_log
-from ..billing.budgets import BudgetService
+from ..billing.budgets import BudgetConflictError, BudgetError, BudgetInFlightError, BudgetService
 from ..billing.plans import has_pro_entitlement
 from ..config import settings
 from ..constants import (
@@ -33,6 +33,7 @@ from ..constants import (
     PROGRESS_LANE_STARTED,
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
+    WORKER_RESTART_CAUSE,
 )
 from ..worker.checkpoint_compat import CheckpointCompatibilityError, validate_checkpoint
 from .agent_run_store import PostgresAgentRunStore
@@ -96,6 +97,12 @@ logger = logging.getLogger(__name__)
 
 MAX_PROGRESS_EVENTS = 5000
 ORPHANED_RUN_MESSAGE = "The run stopped because its worker went away. Resume, retry or clone it to continue."
+ORPHANED_RUN_RECOVERY_FAILED_MESSAGE = (
+    "The run stopped because its worker went away, and it cannot continue by itself. Retry or clone it."
+)
+# Guards each store's in-memory list of runs the orphan sweep ended; test
+# stores skip ``__init__``, so the list is created on first use.
+_ENDED_ORPHANS_LOCK = threading.Lock()
 PROGRESS_TRIM_SAMPLE_RATE = 100
 # Auto's composition phases; a single-engine run's lane reports phase "single".
 AUTO_LANE_PHASES = frozenset({"explore", "continue"})
@@ -772,6 +779,47 @@ class RemoteDBJobStore:
             )
             session.commit()
             return rows > 0
+        finally:
+            session.close()
+
+    def claim_ended_orphan_notification(self, optimization_id: str, generation: int) -> JobRecord | None:
+        """Claim the notification of a run that a sweep ended and read it in the same transaction.
+
+        The read happens before the commit, while the claim's row lock is
+        held, so an owner resume cannot change the run between the claim and
+        the snapshot that the notification describes.
+
+        Args:
+            optimization_id: ID of the run that the sweep failed or stopped.
+            generation: Execution generation that the sweep ended.
+
+        Returns:
+            The run as it was when the claim matched, without its payload, or
+            ``None`` when a prior attempt already notified, the run left the
+            ``failed``/``stopped`` state or the generation, or it is missing.
+        """
+        session = self._get_session()
+        try:
+            rows = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .filter(JobModel.notified_at.is_(None))
+                .filter(JobModel.status.in_(("failed", "stopped")))
+                .filter(JobModel.execution_generation == generation)
+                .update({JobModel.notified_at: datetime.now(UTC)}, synchronize_session=False)
+            )
+            if rows == 0:
+                session.rollback()
+                return None
+            job = (
+                session.query(JobModel)
+                .options(defer(JobModel.payload))
+                .filter(JobModel.optimization_id == optimization_id)
+                .one()
+            )
+            snapshot = self._job_to_dict(job, include_payload=False)
+            session.commit()
+            return snapshot
         finally:
             session.close()
 
@@ -1623,6 +1671,7 @@ class RemoteDBJobStore:
         expected_generation: int | None = None,
         budget_service: Any = None,
         pair_index_to_resume: int | None = None,
+        automatic: bool = False,
     ) -> int | None:
         """Re-queue a terminal job in place so a worker resumes it from its checkpoint.
 
@@ -1637,15 +1686,21 @@ class RemoteDBJobStore:
         cleared, so the resumed run's elapsed timer measures net active compute
         across all legs and excludes the paused gap between them.
 
+        An ``automatic`` requeue recovers a run whose worker went away: it takes
+        a still-active row instead of a terminal one, and a top-level run with
+        no checkpoint yet starts again from the beginning.
+
         Args:
             optimization_id: The job to resume.
             bump_attempts: Whether to count this re-queue against the attempt cap.
             expected_generation: Fenced publication generation observed by the caller.
             budget_service: Authoritative funding and dispatch fence for a protected job.
             pair_index_to_resume: Explicit pair whose stored result is cleared atomically for recovery.
+            automatic: Whether the orphan sweep recovers an interrupted active run.
 
         Returns:
-            The new attempt count, or ``None`` when the job row is missing.
+            The new attempt count, or ``None`` when the job row is missing, was
+            changed concurrently, waits for in-flight usage, or hit its budget.
         """
         session = self._get_session()
         try:
@@ -1657,12 +1712,20 @@ class RemoteDBJobStore:
             )
             if job is None:
                 return None
-            if job.status not in {"failed", "cancelled", "paused", "success", "stopped"} or (
+            allowed = (
+                {"running", "validating"} if automatic else {"failed", "cancelled", "paused", "success", "stopped"}
+            )
+            if job.status not in allowed or (
                 expected_generation is not None and job.execution_generation != expected_generation
             ):
                 return None
             checkpoints = self._checkpoints.list_for_optimization(optimization_id)
-            if not checkpoints:
+            # A grid pair or a child run needs its own checkpoint to rejoin its
+            # parent's results, so only a whole top-level run may start again.
+            fresh_restart = (
+                automatic and not checkpoints and pair_index_to_resume is None and job.parent_optimization_id is None
+            )
+            if not checkpoints and not fresh_restart:
                 raise CheckpointCompatibilityError("No completed compatible checkpoint is available.")
             if pair_index_to_resume is not None and not any(
                 checkpoint.pair_index == pair_index_to_resume for checkpoint in checkpoints
@@ -1676,7 +1739,7 @@ class RemoteDBJobStore:
                     job.code_version,
                     sandbox_image=job.sandbox_image,
                 )
-            if job.sandbox_image is None and job.code_version != self._current_code_version:
+            if not fresh_restart and job.sandbox_image is None and job.code_version != self._current_code_version:
                 raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
             if job.execution_budget_id is None:
                 raise CheckpointCompatibilityError(
@@ -1703,11 +1766,13 @@ class RemoteDBJobStore:
                     job.execution_budget_generation = fenced.generation
                     job.execution_generation = int(job.execution_generation or 0) + 1
                     job.payload = {**(job.payload or {}), "execution_budget_generation": fenced.generation}
+                    cause = job.recovery.get("cause") if isinstance(job.recovery, dict) else None
                     job.recovery = {
                         "state": "recovering",
                         "phase": "waiting_for_usage",
                         "reason": "Reconciling interrupted requests before resuming.",
                         "execution_generation": int(job.execution_generation or 0) + 1,
+                        **({"cause": cause} if cause else {}),
                     }
                     fenced_generation = job.execution_generation
                     previous_status = job.status
@@ -1728,6 +1793,23 @@ class RemoteDBJobStore:
                 budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.pending_operations or budget.reserved_cents:
                     return None
+                if automatic:
+                    # The earliest pair checkpoint bounds what every pair keeps;
+                    # work that settled after it runs again and is not charged twice.
+                    resumed_from = (
+                        None
+                        if fresh_restart
+                        else session.query(func.min(GepaCheckpointModel.updated_at))
+                        .filter(GepaCheckpointModel.optimization_id == optimization_id)
+                        .scalar()
+                    )
+                    budget_service.waive_interrupted_work(
+                        job.execution_budget_id,
+                        job.username,
+                        generation=int(job.execution_budget_generation or 0) - 1,
+                        settled_after=resumed_from,
+                    )
+                    budget = budget_service.get(job.execution_budget_id, job.username)
                 if budget.state == "closed" and budget.available_cents > 0:
                     budget = budget_service.resume_admission(
                         job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
@@ -1740,7 +1822,10 @@ class RemoteDBJobStore:
                             reason="budget_reached",
                         )
                     _mark_resume_budget_stop(job)
+                    ended_generation = int(job.execution_generation or 0)
                     session.commit()
+                    if automatic:
+                        self._note_ended_orphan(optimization_id, ended_generation)
                     return None
             if pair_index_to_resume is not None:
                 result = job.result if isinstance(job.result, dict) else {}
@@ -1767,7 +1852,11 @@ class RemoteDBJobStore:
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
-            if job.sandbox_image is not None:
+            if automatic and (job.sandbox_image is not None or fresh_restart):
+                # The sweep can run on a pod of the version a deploy is replacing;
+                # an unversioned row stays claimable by the workers that remain.
+                job.code_version = None  # type: ignore[assignment]
+            elif job.sandbox_image is not None:
                 # Workers claim only their own version's jobs; a pinned image carries
                 # the optimizer, so the current workers can run it.
                 job.code_version = self._current_code_version  # type: ignore[assignment]
@@ -1787,7 +1876,12 @@ class RemoteDBJobStore:
                 ) + max(0.0, (leg_end - leg_start).total_seconds())
             job.completed_at = None  # type: ignore[assignment]
             job.started_at = None  # type: ignore[assignment]
-            job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
+            if fresh_restart:
+                job.message = "Starting again after a worker restart"  # type: ignore[assignment]
+            elif automatic:
+                job.message = "Resuming after a worker restart"  # type: ignore[assignment]
+            else:
+                job.message = "Resuming" if bump_attempts else "Re-running grid pair"  # type: ignore[assignment]
             session.commit()
             return next_attempt
         finally:
@@ -2282,10 +2376,17 @@ class RemoteDBJobStore:
             session.close()
 
     def recover_orphaned_jobs(self) -> int:
-        """Fail runs whose worker lease expired, leaving any restart to the user.
+        """Requeue runs whose worker went away, and fail the ones that cannot go on.
+
+        A funded top-level run resumes from its checkpoint, or starts again when
+        it has none, on any live worker. A graceful worker restart does not count
+        against the attempt cap; an expired lease does, so a run that crashes
+        its worker cannot loop forever. A run that waits for in-flight usage to
+        settle stays active until a later sweep. A run that the sweep fails or
+        stops waits in :meth:`take_ended_orphans` for its notification.
 
         Returns:
-            Number of orphaned jobs marked failed.
+            Number of orphaned jobs requeued or marked failed.
         """
         session = self._get_session()
         try:
@@ -2297,7 +2398,12 @@ class RemoteDBJobStore:
                 .exists()
             )
             candidates = [
-                (job.optimization_id, int(job.execution_generation or 0))
+                (
+                    job.optimization_id,
+                    int(job.execution_generation or 0),
+                    job.execution_budget_id is not None,
+                    isinstance(job.recovery, dict) and job.recovery.get("cause") == WORKER_RESTART_CAUSE,
+                )
                 for job in session.query(JobModel)
                 .filter(
                     JobModel.status.in_(["running", "validating"]),
@@ -2308,21 +2414,69 @@ class RemoteDBJobStore:
             ]
         finally:
             session.close()
-        for identifier, generation in candidates:
-            self.update_job_if_status(
+        handled = 0
+        for identifier, generation, funded, worker_restart in candidates:
+            message = ORPHANED_RUN_MESSAGE
+            if funded:
+                try:
+                    attempt = self.requeue_for_resume(
+                        identifier,
+                        automatic=True,
+                        bump_attempts=not worker_restart,
+                        expected_generation=generation,
+                        budget_service=BudgetService(engine=self._engine),
+                    )
+                except (CheckpointCompatibilityError, BudgetError) as exc:
+                    if isinstance(exc, BudgetConflictError | BudgetInFlightError):
+                        logger.info("Orphaned run %s waits for its budget to settle: %s", identifier, exc)
+                        continue
+                    message = f"{ORPHANED_RUN_RECOVERY_FAILED_MESSAGE} {exc}"
+                except Exception:
+                    logger.exception("Could not recover orphaned run %s; the next sweep retries", identifier)
+                    continue
+                else:
+                    if attempt is not None:
+                        handled += 1
+                    continue
+            if self.update_job_if_status(
                 identifier,
                 ("running", "validating"),
                 expected_generation=generation,
                 status="failed",
                 stop_reason="interrupted",
                 completed_at=now.isoformat(),
-                message=ORPHANED_RUN_MESSAGE,
+                message=message,
                 recovery=None,
                 claimed_by=None,
                 claimed_at=None,
                 lease_expires_at=None,
-            )
-        return len(candidates)
+            ):
+                self._note_ended_orphan(identifier, generation)
+                handled += 1
+        return handled
+
+    def _note_ended_orphan(self, optimization_id: str, generation: int) -> None:
+        """Remember a run that the orphan sweep ended, so its owner hears about it.
+
+        Args:
+            optimization_id: The run that the sweep failed or stopped.
+            generation: Execution generation the run ended in.
+        """
+        with _ENDED_ORPHANS_LOCK:
+            vars(self).setdefault("_ended_orphans", []).append((optimization_id, generation))
+
+    def take_ended_orphans(self) -> list[tuple[str, int]]:
+        """Return and forget the runs that orphan sweeps ended since the last call.
+
+        The store cannot send notifications itself (the notification package
+        imports the storage package), so the periodic sweeper sends them.
+
+        Returns:
+            ``(id, generation)`` of each run that a sweep failed or stopped,
+            oldest first.
+        """
+        with _ENDED_ORPHANS_LOCK:
+            return vars(self).pop("_ended_orphans", [])
 
     def claim_next_job(
         self,

@@ -65,6 +65,7 @@ class WizardPreflightRequest(BaseModel):
     execution_budget_id: str = Field(min_length=1, max_length=64)
     execution_budget_revision: int = Field(ge=1)
     contract_sample_count: int | None = Field(default=None, ge=1, le=CONTRACT_SAMPLE_MAX)
+    locale: str | None = Field(default=None, max_length=35)
 
     @field_validator("payload")
     @classmethod
@@ -85,10 +86,14 @@ class WizardPreflightRequest(BaseModel):
         return payload
 
 
+# ``message`` is worded in the request's locale; when it comes from the
+# catalog, ``message_code`` and ``message_params`` let a client word it itself.
 class WizardPreflightCheck(BaseModel):
     key: str
     status: Literal["succeeded", "failed", "pending", "skipped"]
     message: str | None = None
+    message_code: str | None = None
+    message_params: dict[str, str | int] | None = None
     field: str | None = None
 
 
@@ -109,6 +114,9 @@ class WizardPreflightResponse(BaseModel):
     scorer_result: dict[str, Any] | None = None
     workflow_result: dict[str, Any] | None = None
     terminal: dict[str, Any] | None = None
+    # A repository run's effective environment: what versions may change,
+    # what stays protected, and which network and services each step gets.
+    environment: dict[str, Any] | None = None
 
 
 def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
@@ -631,6 +639,8 @@ def _perform_preflight(
             bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
         if request.workflow == "anything":
             result = _verify_anything(gateway, protected, scope=request.scope, identity=identity)
+            if is_repo_payload(protected):
+                result["environment"] = protected["target"]["repo"]["environment"]
         else:
             result = _verify_unified(gateway, protected, scope=request.scope, identity=identity)
         states = {check["status"] for check in result["checks"]}

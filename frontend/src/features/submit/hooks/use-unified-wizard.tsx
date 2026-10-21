@@ -23,7 +23,7 @@ import {
   useExperienceOptional,
   type ExperienceLevel,
 } from "@/features/experience";
-import { offerRunDoneNotifications } from "@/features/notifications";
+import { syncPushSubscription } from "@/features/notifications";
 import { readPref, useUserPrefs } from "@/features/settings";
 import {
   getJob,
@@ -548,7 +548,7 @@ export function WizardV2Provider({
     setTimeout(() => {
       setSubmitPhase("done");
       router.push(jobUrl);
-      offerRunDoneNotifications();
+      void syncPushSubscription();
     }, SUBMIT_SPLASH_HOLD_MS);
   };
 

@@ -16,6 +16,7 @@ from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.connectors.github_publish import PublishedChange, RepoPublishError
 from core.connectors.github_repo import RepoSnapshot
 from core.exceptions import ServiceError
+from core.service_gateway.optimization.blackbox.repo_constraints import ConstraintsError
 from core.service_gateway.optimization.blackbox.repo_workspace import _PROBE_OK, NetworkCutoffError
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from core.worker import repo_staging
@@ -41,6 +42,126 @@ def _payload(commit: str | None) -> dict[str, Any]:
     return {"target": {"kind": "repo", "repo": repo}}
 
 
+def _tree(workdir: Path, files: dict[str, str]) -> Path:
+    """Pack files the way the parent ships a fetched tree.
+
+    Args:
+        workdir: Folder the archive goes in.
+        files: Root-relative path to text.
+
+    Returns:
+        The archive.
+    """
+    archive = workdir / "tree.tgz"
+    with tarfile.open(archive, "w:gz") as packed:
+        for name, text in files.items():
+            data = text.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            packed.addfile(info, io.BytesIO(data))
+    return archive
+
+
+def _stage_with(
+    files: dict[str, str], monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], repo_staging.StagedRepository]:
+    """Stage the fixture payload over a tree holding ``files``.
+
+    Args:
+        files: Root-relative path to text in the fetched tree.
+        monkeypatch: Pytest monkeypatch.
+        payload: Payload to stage; the fixture payload pinned to ``c * 40`` when omitted.
+
+    Returns:
+        The staged payload and repository.
+    """
+    monkeypatch.setattr(repo_staging, "resolve_repo_secrets", lambda payload, **_: {"API_KEY": "secret-value"})
+    monkeypatch.setattr(repo_staging, "github_token", lambda engine, username: "gh-token")
+    monkeypatch.setattr(
+        repo_staging,
+        "fetch_snapshot",
+        lambda repository, pinned, token, workdir: RepoSnapshot(
+            commit=pinned, archive=_tree(workdir, files), readonly_paths=(), size_bytes=1
+        ),
+    )
+    return repo_staging.stage_repository(payload or _payload("c" * 40), username="alice", binding_id="b", engine=None)
+
+
+_CONSTRAINTS = """
+[paths]
+editable = ["src/geocode"]
+protected = ["src/geocode/eval"]
+
+[instructions]
+intent = "Pick the place the sender means."
+"""
+
+
+def test_staging_applies_the_repository_constraints_and_records_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The file narrows the editable paths, protects its judge, briefs the agent, and is saved with the run."""
+    staged_payload, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch)
+
+    repo = staged_payload["target"]["repo"]
+    assert repo["editable_paths"] == ["src/geocode"]
+    assert staged.protected_paths == ("optimize.toml", "src/geocode/eval")
+    environment = repo["environment"]
+    assert environment["commit"] == "c" * 40
+    assert environment["editable_paths"] == ["src/geocode"]
+    assert environment["protected_paths"] == ["optimize.toml", "src/geocode/eval"]
+    assert environment["secret_names"] == ["API_KEY"]
+    assert environment["services"] == []
+    assert environment["constraints_file"]["path"] == "optimize.toml"
+    assert "secret-value" not in repr(staged_payload)
+    assert "Pick the place the sender means." in staged_payload["background"]
+    assert "`src/geocode/eval`" in staged_payload["background"]
+    staged.cleanup()
+
+
+@pytest.mark.parametrize(
+    ("files", "message"),
+    [
+        ({"optimize.toml": '[paths]\neditable = ["tests"]\n'}, "outside the approved editable paths"),
+        ({"optimize.toml": '[services]\ngeocoder = ["search"]\n'}, "cannot grant services"),
+    ],
+)
+def test_staging_refuses_a_file_that_asks_for_more(
+    files: dict[str, str], message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wider path or a service request fails setup with the reason and leaves nothing on disk."""
+    workdirs: list[Path] = []
+    real_mkdtemp = repo_staging.tempfile.mkdtemp
+
+    def track(**options: Any) -> str:
+        """Remember the scratch folder staging makes."""
+        workdirs.append(Path(real_mkdtemp(**options)))
+        return str(workdirs[-1])
+
+    monkeypatch.setattr(repo_staging.tempfile, "mkdtemp", track)
+
+    with pytest.raises(ConstraintsError, match=message):
+        _stage_with(files, monkeypatch)
+
+    assert workdirs
+    assert not workdirs[0].exists()
+
+
+def test_a_resumed_run_with_different_rules_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run resumes only under the rules first recorded for it."""
+    first, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch)
+    staged.cleanup()
+    resumed = _payload("c" * 40)
+    resumed["target"]["repo"]["environment"] = first["target"]["repo"]["environment"]
+
+    again, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
+    staged.cleanup()
+    assert again["target"]["repo"]["environment"]["protected_paths"] == ["optimize.toml", "src/geocode/eval"]
+
+    with pytest.raises(ConstraintsError, match="environment changed since it was recorded"):
+        _stage_with({}, monkeypatch, resumed)
+
+
 @pytest.mark.parametrize("commit", [None, "b" * 40])
 def test_staging_pins_the_commit_and_keeps_secrets_in_the_parent(
     commit: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -51,9 +172,7 @@ def test_staging_pins_the_commit_and_keeps_secrets_in_the_parent(
     def fetch(repository: str, pinned: str, token: str, workdir: Path) -> RepoSnapshot:
         """Pretend to clone and record what was asked for."""
         fetched.append((repository, pinned, token))
-        archive = workdir / "tree.tgz"
-        archive.write_bytes(b"tree")
-        return RepoSnapshot(commit=pinned, archive=archive, readonly_paths=("vendor/lib",), size_bytes=4)
+        return RepoSnapshot(commit=pinned, archive=_tree(workdir, {}), readonly_paths=("vendor/lib",), size_bytes=4)
 
     monkeypatch.setattr(repo_staging, "resolve_repo_secrets", lambda payload, **_: {"API_KEY": "secret-value"})
     monkeypatch.setattr(repo_staging, "github_token", lambda engine, username: "gh-token")
@@ -215,6 +334,7 @@ def _binding(tmp_path: Path, setup: str | None) -> tuple[dict[str, Any], repo_st
         },
     }
     payload["target"]["setup_command"] = setup
+    payload["target"]["repo"]["environment"] = {"editable_paths": ["src"]}
     return payload, staged
 
 
@@ -251,6 +371,11 @@ def test_setup_runs_online_in_the_parent_before_the_guest_gets_a_route(tmp_path:
     assert box.online is False
     setup = [online for command, online in box.commands if "pip install" in command]
     assert setup == [True]
+    assert payload["target"]["repo"]["environment"]["network"] == {
+        "setup": list(PACKAGE_REGISTRY_HOSTS),
+        "versions": [],
+    }
+    assert payload["target"]["repo"]["environment"]["setup_command"] == "pip install -r requirements.txt"
     staged.close_scorers()
 
 
@@ -390,6 +515,21 @@ def test_publishing_rechecks_the_editing_rules(monkeypatch: pytest.MonkeyPatch, 
 
     assert outcome is not None
     assert "read-only" in outcome["error"]
+
+
+def test_publishing_refuses_a_version_that_changes_a_protected_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A best version editing a file the repository protects is never pushed, and the rule is named."""
+    monkeypatch.setattr(repo_staging, "push_version", lambda *args: pytest.fail("pushed a protected change"))
+    staged = repo_staging.StagedRepository(
+        snapshot=_staged(tmp_path).snapshot, secrets={}, workdir=tmp_path, protected_paths=("src/app.py",)
+    )
+
+    outcome = _publish(_result(0.5, 0.8), staged)
+
+    assert outcome is not None
+    assert "protected by the repository's optimize.toml" in outcome["error"]
 
 
 def test_publishing_failure_is_recorded_not_raised(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

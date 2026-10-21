@@ -13,9 +13,9 @@ from ..config import settings
 
 def email_configured() -> bool:
     """Return whether an SMTP relay is configured for outbound mail."""
-    # A preview environment starts with an empty database and nobody reads its
-    # inbox, so sign-ups there must be verified on creation for automated checks.
-    return bool(settings.smtp_host) and not settings.is_preview_environment
+    # PR previews keep email verification: their acceptance checks must prove
+    # the same signup, login and code flow that staging and production serve.
+    return bool(settings.smtp_host)
 
 
 def send_email(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
