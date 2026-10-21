@@ -40,6 +40,7 @@ from ..desktop_auth import (
     as_utc,
     generate_desktop_token,
     get_desktop_principal,
+    has_live_refresh_token,
     link_is_live,
 )
 from ..email_sender import email_configured, send_email
@@ -221,7 +222,7 @@ def _limit(key: str, *, limit: int, window_seconds: int) -> None:
 
 
 def _live_link_count(session: Session, username: str, now: datetime) -> int:
-    """Count the user's links that are neither revoked nor expired.
+    """Count the user's live links: not revoked, not expired, not idle-expired.
 
     Args:
         session: Open ORM session.
@@ -239,6 +240,7 @@ def _live_link_count(session: Session, username: str, now: datetime) -> int:
                 DesktopLinkModel.username == username,
                 DesktopLinkModel.revoked_at.is_(None),
                 DesktopLinkModel.absolute_expires_at > now,
+                has_live_refresh_token(DesktopLinkModel.id, now),
             )
         )
         or 0
@@ -482,11 +484,19 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
             token_hash = hash_api_token(body.refresh_token)
-            row = session.get(DesktopTokenModel, token_hash, with_for_update=True)
+            row = session.get(DesktopTokenModel, token_hash)
             if row is None or row.kind != TOKEN_KIND_REFRESH:
                 raise DomainError("desktop.invalid_grant", status=400)
-            link = session.get(DesktopLinkModel, row.link_id)
-            if link is None or not link_is_live(link, now):
+            # Lock the link before the token, so every refresh of one link runs
+            # in turn. Locking only the presented token let a replayed older
+            # token miss a concurrent rotation of its successor (READ COMMITTED)
+            # and fork the link into two live pairs.
+            link = session.get(DesktopLinkModel, row.link_id, with_for_update=True)
+            row = session.get(DesktopTokenModel, token_hash, with_for_update=True, populate_existing=True)
+            # The idle rule of link_is_live is left out on purpose: the
+            # presented token decides it below, and an idle-expired token keeps
+            # its 400 desktop.invalid_grant answer.
+            if link is None or link.revoked_at is not None or as_utc(link.absolute_expires_at) <= now:
                 raise DomainError("desktop.link_revoked", status=401)
             _limit(f"desktop-link-refresh:{link.id}", limit=60, window_seconds=3600)
             if row.superseded_at is not None:
@@ -674,10 +684,15 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         with Session(job_store.engine) as session:
             links = session.scalars(
                 select(DesktopLinkModel)
-                .where(DesktopLinkModel.username == user.username, DesktopLinkModel.revoked_at.is_(None))
+                .where(
+                    DesktopLinkModel.username == user.username,
+                    DesktopLinkModel.revoked_at.is_(None),
+                    DesktopLinkModel.absolute_expires_at > now,
+                    has_live_refresh_token(DesktopLinkModel.id, now),
+                )
                 .order_by(DesktopLinkModel.created_at.desc())
             ).all()
-            return [_link_info(link) for link in links if link_is_live(link, now)]
+            return [_link_info(link) for link in links]
 
     @router.delete(
         "/settings/desktop-links/{link_id}",
@@ -701,7 +716,7 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
             link = session.get(DesktopLinkModel, link_id)
-            if link is None or link.username != user.username or not link_is_live(link, now):
+            if link is None or link.username != user.username or not link_is_live(session, link, now):
                 raise DomainError("desktop.link_not_found", status=404)
             _revoke_link(session, link.id, now)
             session.commit()

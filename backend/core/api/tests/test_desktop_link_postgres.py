@@ -1,0 +1,212 @@
+"""Exercise concurrent desktop link refreshes against real PostgreSQL row locks (SKY-124, R782B-1).
+
+SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
+COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
+at an explicitly disposable database to run these tests.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import secrets
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any
+from uuid import uuid4
+
+import pytest
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import Session
+
+from core.api.auth import AuthenticatedUser, get_authenticated_user
+from core.api.errors import DomainError
+from core.api.routers import desktop_link
+from core.api.routers.desktop_link import create_desktop_link_router
+from core.config import app_env
+from core.storage.models import Base, DesktopLinkCodeModel, DesktopLinkModel, DesktopTokenModel, UserModel
+
+TEST_DB_URL = app_env("APP_DESKTOP_LINK_TEST_DB_URL")
+pytestmark = pytest.mark.skipif(
+    not TEST_DB_URL or not TEST_DB_URL.startswith("postgresql"),
+    reason="Set APP_DESKTOP_LINK_TEST_DB_URL to an explicitly disposable PostgreSQL database.",
+)
+
+REDIRECT = "http://127.0.0.1:54321/local/hosted-link/callback"
+MAC_HOLD_SECONDS = 0.5
+
+
+class _Store:
+    """Minimal store exposing the engine and the MAU admission hook."""
+
+    def __init__(self, engine: Engine) -> None:
+        """Hold the engine the routes open sessions on.
+
+        Args:
+            engine: Engine bound to the test schema.
+        """
+        self.engine = engine
+
+    def admit_monthly_active_user(self, username: str, month_start: Any, cap: int) -> bool:
+        """Admit every identity; the MAU cap is not under test here.
+
+        Args:
+            username: Identity to admit.
+            month_start: First day of the month.
+            cap: Configured cap.
+
+        Returns:
+            Always True.
+        """
+        return True
+
+
+async def _domain_error_json(request: Request, exc: Exception) -> JSONResponse:
+    """Render a DomainError with its semantic code, like the app's handler.
+
+    Args:
+        request: Incoming request.
+        exc: The raised DomainError.
+
+    Returns:
+        A JSON body with ``code``.
+    """
+    assert isinstance(exc, DomainError)
+    return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
+
+
+@pytest.fixture
+def database() -> Iterator[Engine]:
+    """Create the desktop link tables in a fresh schema and drop it after.
+
+    Returns:
+        An engine whose search path is the new schema.
+    """
+    schema = f"desktop_link_test_{uuid4().hex}"
+    admin = create_engine(TEST_DB_URL)
+    with admin.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_engine(TEST_DB_URL, connect_args={"options": f"-csearch_path={schema}"})
+    tables = [model.__table__ for model in (DesktopLinkModel, DesktopTokenModel, DesktopLinkCodeModel, UserModel)]
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+        yield engine
+    finally:
+        engine.dispose()
+        with admin.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
+
+def _client(engine: Engine) -> TestClient:
+    """Build an app with the desktop link router over ``engine``.
+
+    Args:
+        engine: Engine bound to the test schema.
+
+    Returns:
+        A test client acting as a signed-in browser user.
+    """
+    store = _Store(engine)
+    app = FastAPI()
+    app.state.job_store = store
+    app.add_exception_handler(DomainError, _domain_error_json)
+    app.include_router(create_desktop_link_router(job_store=store))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username="alice@example.test", role="user", groups=()
+    )
+    return TestClient(app)
+
+
+def _refresh(client: TestClient, refresh_token: str) -> Any:
+    """Call the refresh grant.
+
+    Args:
+        client: Test client.
+        refresh_token: Refresh token to rotate.
+
+    Returns:
+        The token endpoint response.
+    """
+    return client.post("/desktop/link/token", json={"grant_type": "refresh_token", "refresh_token": refresh_token})
+
+
+def test_replayed_token_during_a_concurrent_rotation_revokes_the_link(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A thief replaying RT0 while the Mac rotates RT1 cannot fork the link (R782B-1).
+
+    The Mac's refresh holds its transaction open inside the rate-limit call.
+    The thief starts during that hold. Without the link lock, the thief reads
+    no used successor, waits on the RT1 row, and both calls get a pair.
+    """
+    first_call = threading.Lock()
+    mac_in_transaction = threading.Event()
+
+    def hold_first_refresh(key: str, *, limit: int, window_seconds: int) -> None:
+        """Hold the first refresh transaction open; let later calls pass.
+
+        Args:
+            key: Limiter key.
+            limit: Unused.
+            window_seconds: Unused.
+        """
+        if key.startswith("desktop-link-refresh") and first_call.acquire(blocking=False):
+            mac_in_transaction.set()
+            time.sleep(MAC_HOLD_SECONDS)
+
+    client = _client(database)
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    code = client.post(
+        "/desktop/link/authorize",
+        json={
+            "redirect_uri": REDIRECT,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "scope": "identity",
+            "device_name": "Mac",
+        },
+    ).json()["code"]
+    pair = client.post(
+        "/desktop/link/token",
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": REDIRECT,
+            "client_id": "skynet-desktop",
+        },
+    ).json()
+    rt0 = pair["refresh_token"]
+    rt1 = _refresh(client, rt0).json()["refresh_token"]
+
+    monkeypatch.setattr(desktop_link, "_limit", hold_first_refresh)
+    monkeypatch.setattr(desktop_link, "_send_notice", lambda *args: None)
+    results: dict[str, Any] = {}
+
+    def mac() -> None:
+        """Rotate the Mac's current refresh token."""
+        results["mac"] = _refresh(client, rt1)
+
+    def thief() -> None:
+        """Replay the old refresh token once the Mac is mid-rotation."""
+        assert mac_in_transaction.wait(timeout=5)
+        results["thief"] = _refresh(client, rt0)
+
+    threads = [threading.Thread(target=mac), threading.Thread(target=thief)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert results["mac"].status_code == 200
+    assert results["thief"].status_code == 401
+    assert results["thief"].json()["code"] == "desktop.link_revoked"
+    with Session(database) as session:
+        assert session.get(DesktopLinkModel, pair["link_id"]).revoked_at is not None
+    assert _refresh(client, results["mac"].json()["refresh_token"]).status_code == 401

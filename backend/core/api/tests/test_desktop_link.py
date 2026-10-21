@@ -798,6 +798,34 @@ def test_removed_links_do_not_count_toward_the_cap(harness: Any) -> None:
     assert response.status_code == 200
 
 
+def test_idle_expired_link_is_gone(harness: Any) -> None:
+    """A link with no usable refresh token is not listed, not removable, and frees its cap slot (R782B-2)."""
+    client, engine, _ = harness
+    links = [_link(client, scope="identity") for _ in range(10)]
+    idle, rotated = links[0], links[1]
+    assert _refresh(client, rotated["refresh_token"]).status_code == 200
+    with Session(engine) as session:
+        for row in session.scalars(
+            select(DesktopTokenModel).where(
+                DesktopTokenModel.link_id == idle["link_id"], DesktopTokenModel.kind == "refresh"
+            )
+        ):
+            row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.commit()
+
+    listed = {row["link_id"] for row in client.get("/settings/desktop-links").json()}
+    assert idle["link_id"] not in listed
+    assert rotated["link_id"] in listed
+    assert len(listed) == 9
+    assert client.delete(f"/settings/desktop-links/{idle['link_id']}").status_code == 404
+    assert _code(client.get("/desktop/v1/whoami", headers=_bearer(idle["access_token"]))) == "desktop.link_revoked"
+    assert _code(_refresh(client, idle["refresh_token"])) == "desktop.invalid_grant"
+    eleventh = _link(client, scope="identity")
+    assert client.get("/desktop/v1/whoami", headers=_bearer(eleventh["access_token"])).status_code == 200
+    response, _ = _authorize(client)
+    assert _code(response) == "desktop.too_many_links"
+
+
 def test_authorize_is_rate_limited_per_user(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The consent endpoint uses a per-user hourly limit of 10."""
     client, _, _ = harness

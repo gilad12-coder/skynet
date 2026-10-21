@@ -16,8 +16,10 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import Header, Request
+from sqlalchemy import ColumnElement, exists, select
 from sqlalchemy.orm import Session
 
 from ..storage.models import DesktopLinkModel, DesktopTokenModel
@@ -76,17 +78,44 @@ def generate_desktop_token(kind: str) -> str:
     return f"{prefix}{secrets.token_urlsafe(_TOKEN_SECRET_BYTES)}"
 
 
-def link_is_live(link: DesktopLinkModel, now: datetime) -> bool:
-    """Return whether ``link`` is neither revoked nor past its absolute expiry.
+def has_live_refresh_token(link_id: Any, now: datetime) -> ColumnElement[bool]:
+    """Build an EXISTS clause for a usable refresh token of a link.
+
+    A link with no such token can never authenticate again, so it is gone
+    after 30 days with no use (SKY-124 addendum 2.8).
 
     Args:
+        link_id: Link id value, or the ``DesktopLinkModel.id`` column for a
+            correlated subquery.
+        now: Current UTC time.
+
+    Returns:
+        True when the link has a refresh token that is unexpired, unused and
+        not superseded.
+    """
+    return exists().where(
+        DesktopTokenModel.link_id == link_id,
+        DesktopTokenModel.kind == TOKEN_KIND_REFRESH,
+        DesktopTokenModel.used_at.is_(None),
+        DesktopTokenModel.superseded_at.is_(None),
+        DesktopTokenModel.expires_at > now,
+    )
+
+
+def link_is_live(session: Session, link: DesktopLinkModel, now: datetime) -> bool:
+    """Return whether ``link`` is not revoked, not expired, and not idle-expired.
+
+    Args:
+        session: Open ORM session.
         link: Link row to check.
         now: Current UTC time.
 
     Returns:
         True when the link may still authenticate calls.
     """
-    return link.revoked_at is None and as_utc(link.absolute_expires_at) > now
+    if link.revoked_at is not None or as_utc(link.absolute_expires_at) <= now:
+        return False
+    return bool(session.scalar(select(has_live_refresh_token(link.id, now))))
 
 
 def _resolve_principal(request: Request, token: str, scope: str) -> DesktopPrincipal:
@@ -116,7 +145,7 @@ def _resolve_principal(request: Request, token: str, scope: str) -> DesktopPrinc
         if row is None or row.kind != TOKEN_KIND_ACCESS:
             raise DomainError("auth.invalid_token", status=401)
         link = session.get(DesktopLinkModel, row.link_id)
-        if link is None or not link_is_live(link, now):
+        if link is None or not link_is_live(session, link, now):
             raise DomainError("desktop.link_revoked", status=401)
         if as_utc(row.expires_at) <= now:
             raise DomainError("desktop.token_expired", status=401)
