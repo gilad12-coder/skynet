@@ -66,6 +66,7 @@ ALLOWED_CALLS = frozenset(
 MAX_BODY_BYTES = 64 * 1024 * 1024
 UPSTREAM_TIMEOUT_SECONDS = 300.0
 HANDSHAKE_TIMEOUT_SECONDS = 30.0
+REFUSE_DRAIN_SECONDS = 2.0
 LOOPBACK = "127.0.0.1"
 _HOP_BY_HOP = frozenset(
     {
@@ -321,6 +322,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("content-length", "0")
         self.send_header("connection", "close")
         self.end_headers()
+        # Linux answers a close with unread request bytes by a TCP reset, which can
+        # destroy this reply before the client reads it. End the write side, then
+        # drain what the client still sends until it closes or the timeout ends.
+        with contextlib.suppress(OSError):
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_WR)
+            self.connection.settimeout(REFUSE_DRAIN_SECONDS)
+            drained = 0
+            while drained < MAX_BODY_BYTES and (chunk := self.connection.recv(65536)):
+                drained += len(chunk)
 
     def _body(self) -> bytes | None:
         """Read the request body, plain or chunked.
