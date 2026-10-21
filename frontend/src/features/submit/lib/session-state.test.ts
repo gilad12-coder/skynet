@@ -89,22 +89,27 @@ test("a saved spending limit survives any number of reloads", async () => {
 test("a saved scheduled run reads back after a reload", () => {
   const plan = {
     schedule: { kind: "daily", time: "09:00", timezone: "UTC" },
-    permitted: { data: true },
-    source: { connector: "google_drive", ref: "file-1" },
+    permitted: { task_model: true, reflection_model: false },
   };
   assert.deepEqual(decodeScheduledRun(JSON.stringify(plan)), plan);
-  assert.deepEqual(decodeScheduledRun(JSON.stringify({ ...plan, source: null })), {
-    ...plan,
-    source: null,
-  });
 });
 
-test("a missing or malformed scheduled run reads back as none", () => {
+test("a missing, malformed or older scheduled run reads back as none", () => {
   assert.equal(decodeScheduledRun(null), null);
   assert.equal(decodeScheduledRun("{not json"), null);
   assert.equal(
-    decodeScheduledRun(JSON.stringify({ permitted: { data: true }, source: null })),
+    decodeScheduledRun(JSON.stringify({ permitted: { task_model: true, reflection_model: true } })),
     null,
   );
-  assert.equal(decodeScheduledRun(JSON.stringify({ schedule: {}, source: null })), null);
+  assert.equal(decodeScheduledRun(JSON.stringify({ schedule: {} })), null);
+  assert.equal(
+    decodeScheduledRun(
+      JSON.stringify({
+        schedule: { kind: "daily", time: "09:00", timezone: "UTC" },
+        permitted: { data: true, models: false, optimizers: false },
+        source: null,
+      }),
+    ),
+    null,
+  );
 });

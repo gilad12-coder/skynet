@@ -359,11 +359,12 @@ class JobStore(Protocol):
         """Reclaim jobs whose worker lease has expired.
 
         Used on boot and as a periodic janitor: any ``running``/``validating``
-        row whose ``lease_expires_at`` is in the past is transitioned to
-        ``failed`` (the previous owner is presumed dead).
+        row whose ``lease_expires_at`` is in the past (the previous owner is
+        presumed dead) is requeued to resume or start again when it is funded,
+        and otherwise transitioned to ``failed``.
 
         Returns:
-            Number of jobs that were transitioned to ``failed``.
+            Number of jobs that were requeued or transitioned to ``failed``.
         """
         ...
 
