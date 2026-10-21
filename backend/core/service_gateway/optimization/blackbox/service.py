@@ -22,7 +22,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import dspy
 
@@ -117,7 +117,7 @@ _REPO_ENGINE_REASON = "Auto mode does not optimize a repository; pick one engine
 _PROGRESS_EVENTS = 100
 
 
-def _proposer_runtime() -> str:
+def _proposer_runtime() -> Literal["vercel", "docker"]:
     """Name the sandbox runtime this deployment runs proposers in.
 
     Returns:
@@ -165,9 +165,7 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
     unavailable = native_runtime_unavailable_reason(runtime, settings)
     runtimes = [
         BlackboxProposerRuntimeInfo(
-            # The catalog model only names "vercel" so far; in local mode the
-            # entry carries the Docker runtime's availability and zero cost.
-            id="vercel",
+            id=runtime,
             available=unavailable is None,
             unavailable_reason=unavailable,
             cost=runtime_cost_profile(settings, "anything", runtime),

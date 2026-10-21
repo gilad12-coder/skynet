@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -15,11 +16,13 @@ from typing import Any
 
 import pytest
 
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.config import Settings
 from core.exceptions import ServiceError
 from core.i18n import t
 from core.worker.vercel_dspy import _require_image_protocol
 
+from ..docker_egress_proxy import READY_MARKER
 from ..docker_sandbox import (
     DOCKER_JOB_LABEL,
     DockerSandboxRuntime,
@@ -59,7 +62,7 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as log:
     log.write(json.dumps(args) + "\\n")
-command = " ".join(args[:2]) if args[:1] == ["image"] else args[0]
+command = " ".join(args[:2]) if args[:1] in (["image"], ["network"]) else args[0]
 if command in os.environ.get("FAKE_DOCKER_FAIL", "").split(","):
     sys.stderr.write("Error response from daemon: refused\\n")
     sys.exit(1)
@@ -68,8 +71,12 @@ if command == "run":
 elif command == "ps":
     print("box1")
     print("box2")
+elif command == "network ls":
+    print("net1")
 elif command == "inspect":
     print("null")
+elif command == "logs":
+    print("{ready}")
 """
 
 
@@ -102,7 +109,7 @@ def fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, P
         The fake CLI's path and the file its calls are logged to.
     """
     binary = tmp_path / "docker"
-    binary.write_text(_FAKE_DOCKER.format(python=sys.executable))
+    binary.write_text(_FAKE_DOCKER.format(python=sys.executable, ready=READY_MARKER))
     binary.chmod(0o755)
     log = tmp_path / "calls.jsonl"
     log.touch()
@@ -164,16 +171,100 @@ def test_open_starts_an_offline_read_only_box_labelled_with_its_job(fake_docker:
     assert runtime.injects_headers is False
 
 
-def test_open_uses_the_bridge_network_only_for_allowlisted_hosts(fake_docker: tuple[str, Path]) -> None:
-    """A parent setup box that needs registries joins bridge; every other box stays offline."""
+def test_open_puts_an_allowlisted_box_behind_its_own_egress_proxy(fake_docker: tuple[str, Path]) -> None:
+    """A setup box joins only its own internal network; the proxy alone also joins bridge."""
     binary, log = fake_docker
     runtime = DockerSandboxRuntime(_IMAGE, docker_bin=binary)
+    image = "sha256:" + "b" * 64
 
-    runtime.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",), image="sha256:" + "b" * 64))
+    session = runtime.open(
+        SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org", "github.com"), image=image, tags={JOB_TAG: "job-7"})
+    )
 
-    (argv,) = _calls(log)
-    assert _flag_values(argv, "--network") == ["bridge"]
-    assert argv[-2] == "sha256:" + "b" * 64
+    create, proxy, connect, logs, box = _calls(log)
+    assert isinstance(session, DockerSandboxSession)
+    network = create[-1]
+    proxy_name = proxy[proxy.index("--name") + 1]
+    assert create[:3] == ["network", "create", "--internal"]
+    assert f"{DOCKER_JOB_LABEL}=job-7" in _flag_values(create, "--label")
+    assert _flag_values(proxy, "--network") == [network]
+    assert {"--read-only", "-I"} <= set(proxy)
+    assert _flag_values(proxy, "--cap-drop") == ["ALL"]
+    assert _flag_values(proxy, "--user") == ["65534:65534"]
+    assert f"{DOCKER_JOB_LABEL}=job-7" in _flag_values(proxy, "--label")
+    assert proxy[proxy.index(image) - 2 : proxy.index(image)] == ["--entrypoint", "python3"]
+    assert proxy[-4:] == ["3128", "60", "github.com", "pypi.org"]
+    assert connect == ["network", "connect", "bridge", proxy_name]
+    assert logs == ["logs", proxy_name]
+    assert _flag_values(box, "--network") == [network]
+    assert "bridge" not in box
+    url = f"http://{proxy_name}:3128"
+    assert {f"HTTPS_PROXY={url}", f"https_proxy={url}", f"HTTP_PROXY={url}"} <= set(_flag_values(box, "-e"))
+    assert box[-2] == image
+
+
+def test_closing_a_setup_box_removes_it_then_its_proxy_and_network(fake_docker: tuple[str, Path]) -> None:
+    """Close removes the box first, because a network with a container attached cannot go."""
+    binary, log = fake_docker
+    session = DockerSandboxRuntime(_IMAGE, docker_bin=binary).open(
+        SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",))
+    )
+    assert isinstance(session, DockerSandboxSession)
+    egress = session.egress
+    assert egress is not None
+    log.write_text("")
+
+    session.close()
+    session.close()
+
+    assert _calls(log) == [
+        ["rm", "-f", session.container],
+        ["rm", "-f", egress.proxy],
+        ["network", "rm", egress.network],
+    ]
+
+
+def test_switching_a_setup_box_offline_drops_its_proxy(fake_docker: tuple[str, Path]) -> None:
+    """Once the box is offline its proxy and network go; close does not remove them twice."""
+    binary, log = fake_docker
+    session = DockerSandboxRuntime(_IMAGE, docker_bin=binary).open(
+        SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",))
+    )
+    assert isinstance(session, DockerSandboxSession)
+    egress = session.egress
+    assert egress is not None
+    log.write_text("")
+
+    session.disable_network()
+    session.close()
+
+    inspect = ["inspect", "--format", "{{json .NetworkSettings.Networks}}", session.container]
+    assert _calls(log) == [
+        inspect,
+        inspect,
+        ["rm", "-f", egress.proxy],
+        ["network", "rm", egress.network],
+        ["rm", "-f", session.container],
+    ]
+    assert session.egress is None
+
+
+@pytest.mark.parametrize("fail", ["network connect", "run"])
+def test_a_failed_egress_or_box_start_removes_the_new_network(
+    fake_docker: tuple[str, Path], monkeypatch: pytest.MonkeyPatch, fail: str
+) -> None:
+    """Leave no proxy or network behind when the setup box cannot start."""
+    binary, log = fake_docker
+    monkeypatch.setenv("FAKE_DOCKER_FAIL", fail)
+
+    with pytest.raises(ServiceError, match="refused"):
+        DockerSandboxRuntime(_IMAGE, docker_bin=binary).open(
+            SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",))
+        )
+
+    calls = _calls(log)
+    network = calls[0][-1]
+    assert calls[-1] == ["network", "rm", network]
 
 
 @pytest.mark.parametrize(
@@ -212,6 +303,8 @@ def test_stop_job_sandboxes_removes_every_box_under_the_job_label(fake_docker: t
         ["ps", "-q", "--filter", f"label={DOCKER_JOB_LABEL}=job-7"],
         ["rm", "-f", "box1"],
         ["rm", "-f", "box2"],
+        ["network", "ls", "-q", "--filter", f"label={DOCKER_JOB_LABEL}=job-7"],
+        ["network", "rm", "net1"],
     ]
 
 
@@ -436,3 +529,188 @@ def test_live_stop_job_sandboxes_sweeps_leftover_boxes() -> None:
 
     assert runtime.stop_job_sandboxes("sky113-sweep") == 1
     assert not _container_exists(session.container)
+
+
+def _network_exists(network: str) -> bool:
+    """Check whether Docker still knows ``network``.
+
+    Args:
+        network: Network name.
+
+    Returns:
+        True while the network exists.
+    """
+    return subprocess.run(["docker", "network", "inspect", network], capture_output=True, check=False).returncode == 0
+
+
+# Docker Desktop for Mac routes this name and address to the Mac itself,
+# including services that listen only on the Mac's loopback.
+_MAC_HOST_TARGETS = ("host.docker.internal", "192.168.65.254")
+
+_HOST_PROBE = """
+import socket, sys, urllib.request
+ports = [int(port) for port in sys.argv[1:]]
+for host in {targets!r}:
+    for port in ports:
+        for label, attempt in (
+            ("direct", lambda: socket.create_connection((host, port), 4).close()),
+            ("proxy", lambda: urllib.request.urlopen(f"http://{{host}}:{{port}}/", timeout=8).read()),
+        ):
+            try:
+                attempt()
+                print("REACHED", label, host, port)
+            except Exception as error:
+                print("BLOCKED", label, host, port, type(error).__name__)
+"""
+
+
+@pytest.fixture
+def mac_listeners() -> Iterator[tuple[list[int], list[int]]]:
+    """Listen on this Mac's loopback only and on every interface, counting connections.
+
+    Yields:
+        The two ports and a list that grows by one per accepted connection.
+    """
+    accepted: list[int] = []
+    servers = [socket.create_server(("127.0.0.1", 0)), socket.create_server(("0.0.0.0", 0))]
+
+    def accept(server: socket.socket) -> None:
+        """Count and answer every connection until the server closes.
+
+        Args:
+            server: The listening socket.
+        """
+        while True:
+            try:
+                connection, _ = server.accept()
+            except OSError:
+                return
+            accepted.append(1)
+            with connection:
+                connection.sendall(b"HTTP/1.0 200 OK\r\n\r\nmac-secret")
+
+    for server in servers:
+        threading.Thread(target=accept, args=(server,), daemon=True).start()
+    try:
+        yield [server.getsockname()[1] for server in servers], accepted
+    finally:
+        for server in servers:
+            server.close()
+
+
+@pytest.fixture
+def live_setup_session() -> Iterator[DockerSandboxSession]:
+    """Open one real allowlisted setup box and remove it, its proxy and its network afterwards.
+
+    Yields:
+        The open session.
+    """
+    session = DockerSandboxRuntime(_LIVE_IMAGE).open(
+        SandboxSpec(
+            lifetime_seconds=300,
+            name="skynet-test-setup",
+            allowed_hosts=PACKAGE_REGISTRY_HOSTS,
+            tags={JOB_TAG: "sky113-setup"},
+        )
+    )
+    assert isinstance(session, DockerSandboxSession)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.mark.docker
+@_live
+def test_live_setup_box_cannot_reach_services_on_this_mac(
+    live_setup_session: DockerSandboxSession, mac_listeners: tuple[list[int], list[int]]
+) -> None:
+    """Neither a loopback-only nor an every-interface Mac listener answers a setup box, directly or via the proxy."""
+    ports, accepted = mac_listeners
+    probe = _HOST_PROBE.format(targets=_MAC_HOST_TARGETS)
+    # Control: a plain bridge container does reach the loopback-only
+    # listener, so the probe can see the leak this runtime must close.
+    control = subprocess.run(
+        ["docker", "run", "--rm", "--network", "bridge", "--entrypoint", "python3", _LIVE_IMAGE, "-c", probe]
+        + [str(port) for port in ports],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert f"REACHED direct host.docker.internal {ports[0]}" in control.stdout, control.stdout + control.stderr
+    accepted.clear()
+
+    live_setup_session.write_files({"probe.py": probe})
+    result = live_setup_session.run("python3 probe.py " + " ".join(map(str, ports)), timeout_seconds=120)
+
+    lines = result.stdout.splitlines()
+    assert len(lines) == len(_MAC_HOST_TARGETS) * len(ports) * 2, result.stdout + result.stderr
+    assert all(line.startswith("BLOCKED") for line in lines), result.stdout
+    assert accepted == []
+
+
+@pytest.mark.docker
+@_live
+def test_live_setup_box_reaches_registries_only(live_setup_session: DockerSandboxSession) -> None:
+    """A registry answers through the proxy; another host and any direct route are refused."""
+    registry = live_setup_session.run(
+        "curl -sS -o /dev/null -w '%{http_code}' --max-time 60 https://pypi.org/simple/six/", timeout_seconds=90
+    )
+    pip = live_setup_session.run(
+        "python3 -m pip download --no-deps --no-cache-dir -q -d /tmp/dl six==1.16.0 && ls /tmp/dl", timeout_seconds=180
+    )
+    other = live_setup_session.run("curl -sS --max-time 20 https://example.com/", timeout_seconds=60)
+    direct = live_setup_session.run(
+        "curl -sS --noproxy '*' --max-time 10 https://pypi.org/simple/six/ || exit 7", timeout_seconds=60
+    )
+    raw_ip = live_setup_session.run("curl -sS --max-time 20 https://1.1.1.1/", timeout_seconds=60)
+
+    assert registry.stdout == "200", registry.stderr
+    assert pip.ok, pip.stderr
+    assert "six-1.16.0" in pip.stdout
+    assert other.exit_code != 0
+    assert "403" in other.stderr
+    assert direct.exit_code != 0
+    assert raw_ip.exit_code != 0
+    assert "403" in raw_ip.stderr
+
+
+@pytest.mark.docker
+@_live
+def test_live_setup_box_close_and_sweep_remove_its_proxy_and_network() -> None:
+    """Close removes the box, its proxy and its network; the job sweep does too for a box left open."""
+    runtime = DockerSandboxRuntime(_LIVE_IMAGE)
+    spec = SandboxSpec(lifetime_seconds=120, allowed_hosts=("pypi.org",), tags={JOB_TAG: "sky113-egress-sweep"})
+    closed = runtime.open(spec)
+    left = runtime.open(spec)
+    assert isinstance(closed, DockerSandboxSession)
+    assert isinstance(left, DockerSandboxSession)
+    assert closed.egress is not None
+    assert left.egress is not None
+    closed_egress, left_egress = closed.egress, left.egress
+
+    closed.close()
+    assert not _container_exists(closed.container)
+    assert not _container_exists(closed_egress.proxy)
+    assert not _network_exists(closed_egress.network)
+
+    assert runtime.stop_job_sandboxes("sky113-egress-sweep") == 2
+    assert not _container_exists(left.container)
+    assert not _container_exists(left_egress.proxy)
+    assert not _network_exists(left_egress.network)
+
+
+@pytest.mark.docker
+@_live
+def test_live_setup_box_goes_offline_and_drops_its_proxy(live_setup_session: DockerSandboxSession) -> None:
+    """After the switch the box reaches nothing, and its proxy and network are gone."""
+    egress = live_setup_session.egress
+    assert egress is not None
+
+    live_setup_session.disable_network()
+    result = live_setup_session.run("curl -sS --max-time 10 https://pypi.org/simple/six/ || exit 7", timeout_seconds=60)
+
+    assert result.exit_code != 0
+    assert not _container_exists(egress.proxy)
+    assert not _network_exists(egress.network)

@@ -4,7 +4,11 @@ In local mode the protected parent opens its boxes as containers on this
 machine instead of Vercel microVMs. The guest contract stays the same: files
 and commands relative to a writable working directory, output streamed while
 a command runs (the model mailbox answers guest requests mid-command), and no
-network unless the parent asked for an allowlisted setup box. Containers run
+network unless the parent asked for an allowlisted setup box. Such a box gets
+its own internal Docker network with no route out; its only way out is an
+egress proxy sidecar (``docker_egress_proxy``) that tunnels HTTPS to the
+allowlisted hosts alone, so the box cannot reach this Mac or any other private
+address, matching the Vercel allowlist. Containers run
 with a read-only root filesystem, a fixed CPU and memory profile, a wall-time
 limit and the ``skynet.job`` label the desktop shell and the worker sweep use
 for cleanup. Local sandboxes are never billed, so the budget is never charged.
@@ -23,6 +27,8 @@ import tarfile
 import threading
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 from ....billing.runtime import BudgetRuntime
 from ....config import Settings
@@ -32,6 +38,7 @@ from ....i18n import t
 # sandbox.py's settings factories build this runtime in local mode, so the two
 # modules import each other; names are read from the module at call time.
 from . import sandbox
+from .docker_egress_proxy import READY_MARKER
 from .sandbox_log import logged_command
 
 logger = logging.getLogger(__name__)
@@ -50,7 +57,13 @@ _CLI_TIMEOUT_SECONDS = 60.0
 _PROBE_TIMEOUT_SECONDS = 10.0
 _MISSING_FILE_EXIT = 3
 _READ_FILE_SCRIPT = f'test -f "$1" || exit {_MISSING_FILE_EXIT}; exec cat -- "$1"'
-_ALLOWLIST_NETWORK = "bridge"
+# The proxy sidecar's own way out; the setup box never joins it.
+_UPLINK_NETWORK = "bridge"
+_EGRESS_PROXY_SOURCE = Path(__file__).with_name("docker_egress_proxy.py")
+_EGRESS_PORT = 3128
+_EGRESS_READY_SECONDS = 30.0
+# Above the port range a non-root user may bind, and without any capability.
+_EGRESS_USER = "65534:65534"
 
 
 def _docker(
@@ -109,6 +122,57 @@ def _relative_path(path: str) -> str:
     return normalized
 
 
+@dataclass(frozen=True)
+class _Egress:
+    """The internal network and proxy sidecar behind one allowlisted setup box."""
+
+    network: str
+    proxy: str
+
+    @property
+    def env(self) -> dict[str, str]:
+        """Point the box's package managers at the proxy.
+
+        Returns:
+            Proxy variables in the forms pip, uv, npm, yarn, cargo, go and git read.
+        """
+        url = f"http://{self.proxy}:{_EGRESS_PORT}"
+        names = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "npm_config_https_proxy", "npm_config_proxy")
+        return dict.fromkeys(names, url)
+
+
+def _remove_egress(docker_bin: str, egress: _Egress) -> None:
+    """Remove a setup box's proxy sidecar and then its network. Never raises.
+
+    Args:
+        docker_bin: Docker CLI path.
+        egress: The sidecar and network to remove.
+    """
+    for args, missing in (
+        (["rm", "-f", egress.proxy], b"No such container"),
+        (["network", "rm", egress.network], b"not found"),
+    ):
+        try:
+            result = _docker(docker_bin, args)
+        except ServiceError as error:
+            logger.warning("could not remove local sandbox egress %s: %s", args[-1], error)
+            continue
+        if result.returncode != 0 and missing not in result.stderr:
+            logger.warning("could not remove local sandbox egress %s: %s", args[-1], _stderr_line(result))
+
+
+def _label_args(labels: Mapping[str, str]) -> list[str]:
+    """Turn labels into Docker ``--label`` arguments.
+
+    Args:
+        labels: Label name → value.
+
+    Returns:
+        Alternating ``--label`` flags and ``name=value`` items.
+    """
+    return [item for key, value in labels.items() for item in ("--label", f"{key}={value}")]
+
+
 def _env_args(env: Mapping[str, str]) -> list[str]:
     """Turn an environment mapping into Docker ``-e`` arguments.
 
@@ -127,7 +191,15 @@ def _env_args(env: Mapping[str, str]) -> list[str]:
 class DockerSandboxSession:
     """Session over one running container, addressed by its id."""
 
-    def __init__(self, docker_bin: str, container: str, *, env: Mapping[str, str], owner: str | None) -> None:
+    def __init__(
+        self,
+        docker_bin: str,
+        container: str,
+        *,
+        env: Mapping[str, str],
+        owner: str | None,
+        egress: _Egress | None = None,
+    ) -> None:
         """Wrap a started container.
 
         Args:
@@ -135,13 +207,22 @@ class DockerSandboxSession:
             container: The container id ``docker run -d`` printed.
             env: The box's environment, kept so its values are redacted from logged output.
             owner: Job the box belongs to, which its logged output is routed to.
+            egress: The proxy sidecar and internal network of an allowlisted setup box.
         """
         self._docker_bin = docker_bin
         self.container = container
         self._env = dict(env)
         self.log_owner = owner
+        self.egress = egress
         self._closed = False
         self._lock = threading.Lock()
+
+    def _drop_egress(self) -> None:
+        """Remove the box's proxy sidecar and network once; later calls do nothing."""
+        with self._lock:
+            egress, self.egress = self.egress, None
+        if egress is not None:
+            _remove_egress(self._docker_bin, egress)
 
     def write_files(self, files: Mapping[str, str]) -> None:
         """Write text files at paths relative to the working directory, creating parents.
@@ -263,7 +344,7 @@ class DockerSandboxSession:
         return result.stdout.decode("utf-8", errors="replace")
 
     def disable_network(self) -> None:
-        """Detach the container from every network and confirm that only loopback is left.
+        """Detach the container from every network, confirm that only loopback is left, and drop the proxy.
 
         Raises:
             ServiceError: When Docker still reports a network on the container.
@@ -274,6 +355,7 @@ class DockerSandboxSession:
                 raise ServiceError(f"Could not switch the local sandbox's network off: {_stderr_line(result)}")
         if self._networks():
             raise ServiceError("Docker did not confirm that the scoring box's network is off.")
+        self._drop_egress()
 
     def _networks(self) -> list[str]:
         """List the networks the container is attached to, other than ``none``.
@@ -293,7 +375,7 @@ class DockerSandboxSession:
         return [name for name in networks if name != "none"]
 
     def close(self) -> None:
-        """Remove the container. Never raises; local boxes carry no usage to settle."""
+        """Remove the container, then its proxy and network. Never raises; local boxes carry no usage to settle."""
         with self._lock:
             if self._closed:
                 return
@@ -302,9 +384,10 @@ class DockerSandboxSession:
             result = _docker(self._docker_bin, ["rm", "-f", self.container])
         except ServiceError as error:
             logger.warning("could not remove local sandbox %s: %s", self.container[:12], error)
-            return
-        if result.returncode != 0 and b"No such container" not in result.stderr:
-            logger.warning("could not remove local sandbox %s: %s", self.container[:12], _stderr_line(result))
+        else:
+            if result.returncode != 0 and b"No such container" not in result.stderr:
+                logger.warning("could not remove local sandbox %s: %s", self.container[:12], _stderr_line(result))
+        self._drop_egress()
 
 
 class DockerSandboxRuntime:
@@ -350,18 +433,47 @@ class DockerSandboxRuntime:
             raise ServiceError("An offline sandbox cannot reach allowlisted hosts.")
         owner = spec.tags.get(sandbox.JOB_TAG)
         labels = {**sandbox.SANDBOX_TAG, **spec.tags, **({DOCKER_JOB_LABEL: owner} if owner else {})}
+        name = sandbox.unique_sandbox_name(spec.name or "skynet-local")
+        image = spec.image or self._image
         # The default for a box without hosts is offline: Docker has no edge
-        # policy, so an open network would let the guest reach anything.
-        network = _ALLOWLIST_NETWORK if spec.allowed_hosts else "none"
+        # policy, and its default bridge reaches services that listen only on
+        # this Mac's loopback, so an allowlisted box goes out through the proxy.
+        egress = self._open_egress(name, spec, labels, image) if spec.allowed_hosts else None
+        try:
+            container = self._run_box(name, spec, labels, image, egress)
+        except BaseException:
+            if egress is not None:
+                _remove_egress(self._docker_bin, egress)
+            raise
+        return DockerSandboxSession(self._docker_bin, container, env=spec.env, owner=owner, egress=egress)
+
+    def _run_box(
+        self, name: str, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str, egress: _Egress | None
+    ) -> str:
+        """Start the box's container.
+
+        Args:
+            name: Container name.
+            spec: The box's spec.
+            labels: Labels for the container.
+            image: Image the box boots from.
+            egress: The setup box's internal network and proxy, or ``None`` for an offline box.
+
+        Returns:
+            The container id.
+
+        Raises:
+            ServiceError: When Docker cannot start the container.
+        """
         argv = [
             "run",
             "-d",
             "--rm",
             "--init",
             "--name",
-            sandbox.unique_sandbox_name(spec.name or "skynet-local"),
+            name,
             "--network",
-            network,
+            egress.network if egress else "none",
             "--cpus",
             str(spec.vcpus),
             "--memory",
@@ -376,11 +488,11 @@ class DockerSandboxRuntime:
             *[item for mount in _TMPFS_MOUNTS for item in ("--tmpfs", mount)],
             "-w",
             WORKSPACE_DIR,
-            *_env_args({"HOME": WORKSPACE_DIR, "TMPDIR": "/tmp", **spec.env}),
-            *[item for key, value in labels.items() for item in ("--label", f"{key}={value}")],
+            *_env_args({"HOME": WORKSPACE_DIR, "TMPDIR": "/tmp", **(egress.env if egress else {}), **spec.env}),
+            *_label_args(labels),
             "--entrypoint",
             "sleep",
-            spec.image or self._image,
+            image,
             # The box's only process is this timer, so the container (and
             # every command in it) ends when its lifetime does.
             str(math.ceil(spec.lifetime_seconds)),
@@ -389,18 +501,108 @@ class DockerSandboxRuntime:
         container = result.stdout.decode().strip()
         if result.returncode != 0 or not container:
             raise ServiceError(f"Could not start the local sandbox: {_stderr_line(result)}")
-        return DockerSandboxSession(self._docker_bin, container, env=spec.env, owner=owner)
+        return container
+
+    def _open_egress(self, name: str, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str) -> _Egress:
+        """Create a setup box's internal network and start its egress proxy on it and on ``bridge``.
+
+        The proxy runs on the box's own image, which is already on this
+        machine, so no other image is pulled; it lives no longer than the box.
+
+        Args:
+            name: The box's container name, which the network and proxy names extend.
+            spec: The box's spec, with its allowlisted hosts and lifetime.
+            labels: Labels for the network and the proxy, so the job sweep finds them.
+            image: Image the proxy runs on; it needs ``python3``.
+
+        Returns:
+            The network and proxy, ready to tunnel.
+
+        Raises:
+            ServiceError: When Docker cannot create either or the proxy does not report ready.
+        """
+        egress = _Egress(network=f"{name}-net", proxy=f"{name}-egress")
+        created = _docker(self._docker_bin, ["network", "create", "--internal", *_label_args(labels), egress.network])
+        if created.returncode != 0:
+            raise ServiceError(f"Could not create the local sandbox's network: {_stderr_line(created)}")
+        try:
+            self._start_proxy(egress, spec, labels, image)
+        except BaseException:
+            _remove_egress(self._docker_bin, egress)
+            raise
+        return egress
+
+    def _start_proxy(self, egress: _Egress, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str) -> None:
+        """Start the proxy sidecar, give it its way out and wait until it listens.
+
+        Args:
+            egress: The network to serve and the sidecar's name.
+            spec: The box's spec, with its allowlisted hosts and lifetime.
+            labels: Labels for the sidecar.
+            image: Image the proxy runs on.
+
+        Raises:
+            ServiceError: When the sidecar does not start, connect or report ready in time.
+        """
+        argv = [
+            "run",
+            "-d",
+            "--rm",
+            "--init",
+            "--name",
+            egress.proxy,
+            "--network",
+            egress.network,
+            "--cpus",
+            "1",
+            "--memory",
+            "256m",
+            "--pids-limit",
+            "256",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--user",
+            _EGRESS_USER,
+            *_label_args(labels),
+            "--entrypoint",
+            "python3",
+            image,
+            "-I",
+            "-c",
+            _EGRESS_PROXY_SOURCE.read_text(encoding="utf-8"),
+            str(_EGRESS_PORT),
+            str(math.ceil(spec.lifetime_seconds)),
+            *sorted(set(spec.allowed_hosts)),
+        ]
+        started = _docker(self._docker_bin, argv)
+        if started.returncode != 0:
+            raise ServiceError(f"Could not start the local sandbox's egress proxy: {_stderr_line(started)}")
+        connected = _docker(self._docker_bin, ["network", "connect", _UPLINK_NETWORK, egress.proxy])
+        if connected.returncode != 0:
+            raise ServiceError(f"Could not connect the local sandbox's egress proxy: {_stderr_line(connected)}")
+        deadline = time.monotonic() + _EGRESS_READY_SECONDS
+        while True:
+            logs = _docker(self._docker_bin, ["logs", egress.proxy])
+            if READY_MARKER.encode() in logs.stdout:
+                return
+            if time.monotonic() >= deadline:
+                raise ServiceError(f"The local sandbox's egress proxy did not start: {_stderr_line(logs)}")
+            time.sleep(0.2)
 
     def stop_job_sandboxes(self, owner_id: str) -> int:
-        """Remove every container still up under ``owner_id``'s label.
+        """Remove every container still up under ``owner_id``'s label, then the job's networks.
 
         Args:
             owner_id: The job whose boxes to remove.
 
         Returns:
-            How many containers were removed.
+            How many containers (boxes and egress proxies) were removed.
         """
-        listed = _docker(self._docker_bin, ["ps", "-q", "--filter", f"label={DOCKER_JOB_LABEL}={owner_id}"])
+        selector = f"label={DOCKER_JOB_LABEL}={owner_id}"
+        listed = _docker(self._docker_bin, ["ps", "-q", "--filter", selector])
         if listed.returncode != 0:
             logger.warning("could not list local sandboxes of job %s: %s", owner_id, _stderr_line(listed))
             return 0
@@ -411,6 +613,14 @@ class DockerSandboxRuntime:
                 logger.warning("could not remove local sandbox %s of job %s", container, owner_id)
                 continue
             stopped += 1
+        # A network can only go once no container is attached, so it goes last.
+        networks = _docker(self._docker_bin, ["network", "ls", "-q", "--filter", selector])
+        if networks.returncode != 0:
+            logger.warning("could not list local sandbox networks of job %s: %s", owner_id, _stderr_line(networks))
+            return stopped
+        for network in networks.stdout.decode().split():
+            if _docker(self._docker_bin, ["network", "rm", network]).returncode != 0:
+                logger.warning("could not remove local sandbox network %s of job %s", network, owner_id)
         return stopped
 
 

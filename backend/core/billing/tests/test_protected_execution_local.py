@@ -19,6 +19,7 @@ from core.billing.protected_execution import (
 )
 from core.config import Settings
 from core.i18n import t
+from core.service_gateway.optimization.blackbox import service as blackbox_service
 from core.service_gateway.optimization.blackbox.docker_sandbox import DockerSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import JOB_TAG
 
@@ -208,3 +209,16 @@ def test_runtime_catalog_reports_docker_in_local_mode(
     assert runtime["id"] == catalog["default_runtime"] == "docker"
     assert runtime["available"] is True
     assert runtime["cost"]["maximum_session_cents"] == "0"
+
+
+def test_engine_catalog_names_the_docker_proposer_runtime_in_local_mode(
+    local_settings: tuple[Settings, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The engine catalog reports the Docker runtime, free, in local mode."""
+    settings, _ = local_settings
+    monkeypatch.setattr(blackbox_service, "settings", settings)
+
+    (runtime,) = blackbox_service.engine_catalog("text").proposer_runtimes
+
+    assert runtime.id == "docker"
+    assert runtime.cost.maximum_session_cents == "0"
