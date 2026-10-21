@@ -16,9 +16,12 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .. import config as app_config
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, app_env
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
+from ..local.cli_catalog import CliProvider, parse_subscription_model_id
 from .budgets import BudgetError, BudgetInsufficientError
+from .cli_dispatch import CliDispatcher
 from .credential_safety import scrub_model_config
 from .data_policy import data_policy_for
 from .dependency_lock import verify_dependency_lock
@@ -197,7 +200,8 @@ class ModelGateway:
         # and its type to tell the limit from the account balance.
         self.budget_refusal: BudgetInsufficientError | None = None
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
-        self._routes: dict[str, OpenRouterDispatcher] = {}
+        self._routes: dict[str, OpenRouterDispatcher | CliDispatcher] = {}
+        self._capabilities: dict[str, Callable[[bytes, dict[str, str]], ModelHTTPResult]] = {}
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
         self._evaluator: EvaluatorEndpoint | None = None
@@ -218,7 +222,7 @@ class ModelGateway:
             def log_message(self, format: str, *args: Any) -> None:
                 """Avoid logging guest requests or scoped credentials."""
 
-            def _route(self) -> OpenRouterDispatcher | None:
+            def _route(self) -> OpenRouterDispatcher | CliDispatcher | None:
                 """Resolve a short-lived role token without accepting provider credentials."""
                 token = self.headers.get("Authorization", "").removeprefix("Bearer ")
                 if not token:
@@ -264,6 +268,9 @@ class ModelGateway:
                     self._sandbox_request()
                     return
                 route = self._route()
+                if self.path in gateway._capabilities:
+                    self._capability_request(route is not None)
+                    return
                 token = self.headers.get("Authorization", "").removeprefix("Bearer ")
                 is_tools = (
                     self.path == "/v1/_mcp"
@@ -333,6 +340,30 @@ class ModelGateway:
                     self._error(
                         502, "evaluator_unavailable", "The configured evaluator could not complete this request."
                     )
+
+            def _capability_request(self, authorized: bool) -> None:
+                """Pass a bound capability's raw request to its parent-side handler.
+
+                Args:
+                    authorized: Whether the caller presented a registered route token.
+                """
+                if not authorized:
+                    self._error(401, "unauthorized", "Unknown scoped model route.")
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= _MAX_REQUEST_BYTES:
+                        self._error(413, "request_too_large", "The request exceeds the supported size.")
+                        return
+                    body = self.rfile.read(length)
+                    headers = {name.lower(): value for name, value in self.headers.items()}
+                    self._reply(gateway._capabilities[self.path](body, headers))
+                except BudgetReached:
+                    self._error(402, "budget_reached", "The remaining budget cannot cover the next operation.")
+                except (UsagePendingError, BudgetError):
+                    self._error(424, "usage_pending", "Previous work must settle before another attempt is admitted.")
+                except (UnpricedOperationError, ValueError, TypeError) as error:
+                    self._error(422, "unpriced_operation", str(error))
 
             def _sandbox_request(self) -> None:
                 """Serve guest control with a separate capability and streamed command output."""
@@ -437,6 +468,44 @@ class ModelGateway:
         )
         return {"url": self.url, "token": token, "model": model, "role": role}
 
+    def register_subscription(self, model: str, cli: CliProvider, role: str) -> dict[str, str]:
+        """Register one fixed role answered by a local CLI subscription.
+
+        Args:
+            model: OpenRouter catalog slug the guest names.
+            cli: The CLI that serves the role first.
+            role: Task, judge, or optimization usage attribution.
+
+        Returns:
+            Scoped guest route containing no credential.
+
+        Raises:
+            UnpricedOperationError: Outside local mode, or when ``cli`` cannot run ``model``.
+        """
+        token = secrets.token_urlsafe(32)
+        self._routes[token] = CliDispatcher(self.runtime, cli, model, role, app_config.settings)
+        return {"url": self.url, "token": token, "model": model, "role": role}
+
+    def bind_capability(self, path: str, handler: Callable[[bytes, dict[str, str]], ModelHTTPResult]) -> None:
+        """Serve a parent-side endpoint to callers that hold a registered route token.
+
+        Args:
+            path: Gateway path such as ``/v1/_host_agent``.
+            handler: Takes the raw request body and lower-cased headers.
+
+        Raises:
+            ValueError: When ``path`` is already bound or would shadow a built-in endpoint.
+        """
+        if path in self._capabilities or path in {
+            "/v1/_sandbox",
+            "/v1/_mcp",
+            "/v1/_evaluator",
+            "/v1/_packages",
+            "/v1/_budget/state",
+        }:
+            raise ValueError(f"The gateway path {path!r} is already bound.")
+        self._capabilities[path] = handler
+
     def _beat(self) -> None:
         """Report that an economy batch is still being awaited."""
         if self.heartbeat is not None:
@@ -534,6 +603,11 @@ class ModelGateway:
             Model response after authoritative admission and settlement.
         """
         route = self._routes.get(token)
+        if path in self._capabilities:
+            if route is None:
+                raise ValueError("Unknown scoped model route.")
+            body_bytes = json.dumps(dict(body)).encode()
+            return self._capabilities[path](body_bytes, {name.lower(): value for name, value in headers.items()})
         is_tools = self._tools is not None and secrets.compare_digest(token, self._tool_token)
         is_evaluator = self._evaluator is not None and secrets.compare_digest(token, self._evaluator_token)
         is_packages = self._packages is not None and secrets.compare_digest(token, self._package_token)
@@ -721,6 +795,21 @@ class ModelGateway:
         for config, role in models:
             source = config.get("token_source") or result.get("token_source") or "managed"
             extra = config.get("extra") or {}
+            if source == "subscription":
+                route = self._register_subscription_config(config, role)
+                if config is target_config:
+                    target_name = str(target.get("model") or "").strip("/")
+                    if target_name not in {str(config.get("name") or "").strip("/"), route["model"]}:
+                        raise UnpricedOperationError(
+                            "The agent task model does not match its credential configuration."
+                        )
+                    target_route = route
+                cleaned = scrub_model_config(config)
+                config.clear()
+                config.update(cleaned)
+                config["extra"] = {**dict(config.get("extra") or {}), ROUTE_KEY: route}
+                config.pop("base_url", None)
+                continue
             endpoint = extra.get("api_base") or extra.get("base_url") or config.get("base_url")
             if source == "byok" and urlsplit(str(endpoint or "")).hostname != "openrouter.ai":
                 raise UnpricedOperationError("This BYOK endpoint has no verified operation budget adapter.")
@@ -769,6 +858,8 @@ class ModelGateway:
             else:
                 if result.get("token_source") == "byok":
                     raise UnpricedOperationError("A BYOK agent target needs an explicit verified model configuration.")
+                if result.get("token_source") == "subscription":
+                    raise UnpricedOperationError("A subscription agent target needs an explicit model configuration.")
                 result["_skynet_target_route"] = self.register(
                     model=str(target["model"]).removeprefix("openrouter/"),
                     api_key=managed_key,
@@ -776,6 +867,28 @@ class ModelGateway:
                     policy=ChargePolicy("managed_model"),
                 )
         return result
+
+    def _register_subscription_config(self, config: Mapping[str, Any], role: str) -> dict[str, str]:
+        """Register the subscription route a ``token_source: subscription`` model config names.
+
+        Args:
+            config: The model config; its name is a catalog slug or ``subscription/<cli>/<slug>``.
+            role: Usage attribution.
+
+        Returns:
+            The scoped route.
+
+        Raises:
+            UnpricedOperationError: Outside local mode, or without a CLI that can run the model.
+        """
+        if not app_config.settings.local_mode:
+            raise UnpricedOperationError("Subscription models run only in local mode.")
+        name = str(config.get("name") or "").removeprefix("openrouter/")
+        parsed = parse_subscription_model_id(name)
+        cli, model = parsed if parsed is not None else (config.get("cli_provider"), name)
+        if cli not in ("codex", "claude", "droid") or not model:
+            raise UnpricedOperationError("A subscription model needs a CLI that can run it.")
+        return self.register_subscription(model, cli, role)
 
     def close(self) -> None:
         """Finish covered requests before releasing the trusted transport and route tokens."""
@@ -790,6 +903,7 @@ class ModelGateway:
         finally:
             self._client.close()
             self._routes.clear()
+            self._capabilities.clear()
             self._tools = None
             self._evaluator = None
             self._packages = None
