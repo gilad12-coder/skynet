@@ -1963,6 +1963,8 @@
   "share.transfer.confirm_title": "Transfer ownership?",
   "share.transfer.success": "Ownership transferred to {name}",
   "share.visibility.label": "Public visibility",
+  "share.visibility.load_failed": "Could not load the public visibility setting.",
+  "share.visibility.retry": "Try again",
   "share.visibility.now_private": "The optimization is now private",
   "share.visibility.now_public": "The optimization is now public",
   "share.visibility.private": "Private",

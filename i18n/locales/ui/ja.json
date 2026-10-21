@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "オーナー権限を譲渡しますか？",
   "share.transfer.success": "オーナー権限を {name} に譲渡しました",
   "share.visibility.label": "公開設定",
+  "share.visibility.load_failed": "公開設定を読み込めませんでした。",
+  "share.visibility.retry": "再試行",
   "share.visibility.now_private": "最適化は非公開になりました",
   "share.visibility.now_public": "最適化は公開になりました",
   "share.visibility.private": "非公開",

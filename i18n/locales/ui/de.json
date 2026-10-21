@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "Eigentum übertragen?",
   "share.transfer.success": "Eigentum an {name} übertragen",
   "share.visibility.label": "Öffentliche Sichtbarkeit",
+  "share.visibility.load_failed": "Die Einstellung zur öffentlichen Sichtbarkeit konnte nicht geladen werden.",
+  "share.visibility.retry": "Erneut versuchen",
   "share.visibility.now_private": "Die Optimierung ist jetzt privat",
   "share.visibility.now_public": "Die Optimierung ist jetzt öffentlich",
   "share.visibility.private": "Privat",

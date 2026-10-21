@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "转移所有权？",
   "share.transfer.success": "所有权已转移给 {name}",
   "share.visibility.label": "公开可见性",
+  "share.visibility.load_failed": "无法加载公开可见性设置。",
+  "share.visibility.retry": "重试",
   "share.visibility.now_private": "该优化现已设为私有",
   "share.visibility.now_public": "该优化现已设为公开",
   "share.visibility.private": "私有",

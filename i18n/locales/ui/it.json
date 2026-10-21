@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "Trasferire la proprietà?",
   "share.transfer.success": "Proprietà trasferita a {name}",
   "share.visibility.label": "Visibilità pubblica",
+  "share.visibility.load_failed": "Impossibile caricare l'impostazione di visibilità pubblica.",
+  "share.visibility.retry": "Riprova",
   "share.visibility.now_private": "L'ottimizzazione è ora privata",
   "share.visibility.now_public": "L'ottimizzazione è ora pubblica",
   "share.visibility.private": "Privata",

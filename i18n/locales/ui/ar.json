@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "نقل الملكية؟",
   "share.transfer.success": "نُقلت الملكية إلى {name}",
   "share.visibility.label": "الظهور العام",
+  "share.visibility.load_failed": "تعذّر تحميل إعداد الظهور العام.",
+  "share.visibility.retry": "حاول مرة أخرى",
   "share.visibility.now_private": "أصبح التحسين خاصًا الآن",
   "share.visibility.now_public": "أصبح التحسين عامًّا الآن",
   "share.visibility.private": "خاص",

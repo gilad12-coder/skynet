@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "Передать владение?",
   "share.transfer.success": "Владение передано пользователю {name}",
   "share.visibility.label": "Публичная видимость",
+  "share.visibility.load_failed": "Не удалось загрузить настройку публичной видимости.",
+  "share.visibility.retry": "Повторить",
   "share.visibility.now_private": "Оптимизация теперь приватная",
   "share.visibility.now_public": "Оптимизация теперь публичная",
   "share.visibility.private": "Приватная",

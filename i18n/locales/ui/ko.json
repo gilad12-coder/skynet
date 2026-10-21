@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "소유권을 이전하시겠습니까?",
   "share.transfer.success": "{name}님에게 소유권이 이전됨",
   "share.visibility.label": "공개 표시 여부",
+  "share.visibility.load_failed": "공개 표시 여부 설정을 불러오지 못했습니다.",
+  "share.visibility.retry": "다시 시도",
   "share.visibility.now_private": "최적화가 이제 비공개입니다",
   "share.visibility.now_public": "최적화가 이제 공개입니다",
   "share.visibility.private": "비공개",

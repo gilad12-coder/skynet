@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "Sahiplik devredilsin mi?",
   "share.transfer.success": "Sahiplik {name} kullanıcısına devredildi",
   "share.visibility.label": "Genel görünürlük",
+  "share.visibility.load_failed": "Genel görünürlük ayarı yüklenemedi.",
+  "share.visibility.retry": "Tekrar dene",
   "share.visibility.now_private": "Optimizasyon artık özel",
   "share.visibility.now_public": "Optimizasyon artık herkese açık",
   "share.visibility.private": "Özel",

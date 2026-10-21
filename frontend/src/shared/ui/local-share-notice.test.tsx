@@ -14,7 +14,7 @@ import { shareLinkUrl } from "@/shared/lib/share-link";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { LocalShareNotice } = await import("./local-share-notice");
+const { LocalShareNotice, LocalVisibilityStatus } = await import("./local-share-notice");
 
 void describe("LocalShareNotice", () => {
   void it("asks for a hosted account and shows no link", () => {
@@ -29,6 +29,50 @@ void describe("LocalShareNotice", () => {
     setServerMessages(buildActiveCatalog("he"), "he");
     const html = renderToStaticMarkup(<LocalShareNotice />);
     assert.match(html, /התחבר\/י לחשבון בענן כדי לשתף/);
+  });
+});
+
+void describe("LocalVisibilityStatus", () => {
+  void it("shows a loading state while the visibility setting loads", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    const html = renderToStaticMarkup(<LocalVisibilityStatus failed={false} onRetry={() => {}} />);
+    assert.match(html, /role="status"/);
+    assert.match(html, /Loading…/);
+    assert.doesNotMatch(html, /<button/);
+  });
+
+  void it("shows the error and a retry button when the load fails", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    const html = renderToStaticMarkup(<LocalVisibilityStatus failed onRetry={() => {}} />);
+    assert.match(html, /Could not load the public visibility setting/);
+    assert.match(html, /<button[^>]*>.*Try again.*<\/button>/s);
+    assert.doesNotMatch(html, /Loading…/);
+  });
+
+  void it("calls onRetry from the retry button", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    let retried = 0;
+    const el = LocalVisibilityStatus({ failed: true, onRetry: () => (retried += 1) });
+    const findButton = (node: unknown): { props: { onClick: () => void } } | null => {
+      if (!node || typeof node !== "object") return null;
+      const n = node as { props?: { onClick?: unknown; children?: unknown } };
+      if (typeof n.props?.onClick === "function") return n as { props: { onClick: () => void } };
+      const kids = n.props?.children;
+      for (const k of Array.isArray(kids) ? kids : [kids]) {
+        const hit = findButton(k);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    findButton(el)?.props.onClick();
+    assert.equal(retried, 1);
+  });
+
+  void it("has the Hebrew error copy", () => {
+    setServerMessages(buildActiveCatalog("he"), "he");
+    const html = renderToStaticMarkup(<LocalVisibilityStatus failed onRetry={() => {}} />);
+    assert.match(html, /נסו שוב/);
+    assert.match(html, /לא ניתן לטעון את הגדרת החשיפה הציבורית/);
   });
 });
 

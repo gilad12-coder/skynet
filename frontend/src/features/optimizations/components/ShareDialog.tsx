@@ -49,7 +49,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { shareLinkUrl } from "@/shared/lib/share-link";
 import { shareDialogPlan } from "@/shared/lib/share-dialog-plan";
-import { LocalShareNotice } from "@/shared/ui/local-share-notice";
+import { LocalShareNotice, LocalVisibilityStatus } from "@/shared/ui/local-share-notice";
 
 const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
 
@@ -103,6 +103,14 @@ export function ShareDialog({
     onOpenChange?.(next);
   };
   const [state, setState] = useState<SharingState | null>(null);
+  // Set when getSharing fails, so the effect does not refetch in a loop. The
+  // retry button clears it; closing the dialog clears it so a re-open retries.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setLoadFailed(false);
+  }
   const [savingAccess, setSavingAccess] = useState(false);
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [transferTarget, setTransferTarget] = useState<string | null>(null);
@@ -135,12 +143,15 @@ export function ShareDialog({
   // built-in trigger or a controlling parent. An effect catches both; the trigger's
   // click handler alone would miss the externally-driven open.
   useEffect(() => {
-    if (open && state === null && plan.loadSharing) {
+    if (open && state === null && !loadFailed && plan.loadSharing) {
       getSharing(optimizationId)
         .then(setState)
-        .catch((err) => toast.error(err instanceof Error ? err.message : msg("share.error")));
+        .catch((err) => {
+          setLoadFailed(true);
+          toast.error(err instanceof Error ? err.message : msg("share.error"));
+        });
     }
-  }, [open, state, optimizationId, plan.loadSharing]);
+  }, [open, state, loadFailed, optimizationId, plan.loadSharing]);
 
   const handleAccessChange = async (value: GeneralAccess) => {
     setSavingAccess(true);
@@ -297,9 +308,14 @@ export function ShareDialog({
             {plan.showLocalNotice ? (
               <>
                 <LocalShareNotice />
-                {plan.showExploreVisibility && visibilityRow && (
+                {plan.showExploreVisibility && (
                   <div className="shrink-0 border-t border-border/40 px-4 py-4 sm:px-6">
-                    {visibilityRow}
+                    {visibilityRow || (
+                      <LocalVisibilityStatus
+                        failed={loadFailed}
+                        onRetry={() => setLoadFailed(false)}
+                      />
+                    )}
                   </div>
                 )}
               </>

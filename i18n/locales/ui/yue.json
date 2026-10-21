@@ -2681,6 +2681,8 @@
   "share.transfer.confirm_title": "轉移擁有權？",
   "share.transfer.success": "擁有權已轉讓畀 {name}",
   "share.visibility.label": "公開瀏覽權限",
+  "share.visibility.load_failed": "無法載入公開瀏覽權限設定。",
+  "share.visibility.retry": "再試一次",
   "share.visibility.now_private": "最佳化項目現已設為私人",
   "share.visibility.now_public": "呢個最佳化已設為公開",
   "share.visibility.private": "私人",

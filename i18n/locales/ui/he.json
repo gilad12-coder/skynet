@@ -2076,6 +2076,8 @@
   "share.transfer.confirm_title": "להעביר בעלות?",
   "share.transfer.success": "הבעלות הועברה אל {name}",
   "share.visibility.label": "חשיפה ציבורית",
+  "share.visibility.load_failed": "לא ניתן לטעון את הגדרת החשיפה הציבורית.",
+  "share.visibility.retry": "נסו שוב",
   "share.visibility.now_private": "האופטימיזציה כעת פרטית",
   "share.visibility.now_public": "האופטימיזציה כעת ציבורית",
   "share.visibility.private": "פרטי",

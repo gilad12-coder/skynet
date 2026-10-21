@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "انتقال مالکیت؟",
   "share.transfer.success": "مالکیت به {name} منتقل شد",
   "share.visibility.label": "نمایان بودن عمومی",
+  "share.visibility.load_failed": "تنظیم نمایان بودن عمومی بارگیری نشد.",
+  "share.visibility.retry": "دوباره تلاش کنید",
   "share.visibility.now_private": "بهینه‌سازی اکنون خصوصی است",
   "share.visibility.now_public": "بهینه‌سازی اکنون عمومی است",
   "share.visibility.private": "خصوصی",

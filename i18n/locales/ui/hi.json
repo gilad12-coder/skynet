@@ -3050,6 +3050,8 @@
   "share.transfer.confirm_title": "स्वामित्व स्थानांतरित करें?",
   "share.transfer.success": "स्वामित्व {name} को स्थानांतरित किया गया",
   "share.visibility.label": "सार्वजनिक दृश्यता",
+  "share.visibility.load_failed": "सार्वजनिक दृश्यता सेटिंग लोड नहीं हो सकी।",
+  "share.visibility.retry": "फिर से कोशिश करें",
   "share.visibility.now_private": "ऑप्टिमाइज़ेशन अब निजी है",
   "share.visibility.now_public": "ऑप्टिमाइज़ेशन अब सार्वजनिक है",
   "share.visibility.private": "निजी",

@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy import create_engine, text
+
 from core.service_gateway.embedding_pipeline import core as pipeline
 
 
@@ -635,25 +637,62 @@ def test_embed_finished_job_uses_free_summary_when_owner_has_no_balance() -> Non
     meter.assert_not_called()
 
 
-def test_set_embedding_privacy_skips_without_embedding_schema() -> None:
-    """A non-semantic backend has no ``job_embeddings`` table, so no query runs."""
-    store = _FakeJobStore()
-    with (
-        patch.object(pipeline.settings, "embeddings_enabled", False),
-        patch.object(pipeline, "Session") as session_cls,
-    ):
-        pipeline.set_embedding_privacy(store, "opt-1", True)
-    session_cls.assert_not_called()
+def _sqlite_store(*, with_embedding_table: bool) -> SimpleNamespace:
+    """Build a job store on in-memory SQLite, with or without a slim ``job_embeddings`` table.
+
+    The slim table holds only the columns the privacy and name sync touch, so the
+    real ORM update runs without pgvector.
+
+    Args:
+        with_embedding_table: Create the table and seed row ``opt-1`` (public, named ``old``).
+
+    Returns:
+        An object exposing ``engine`` like the real job store.
+    """
+    engine = create_engine("sqlite://")
+    if with_embedding_table:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE job_embeddings (optimization_id VARCHAR(36) PRIMARY KEY, "
+                    "is_private BOOLEAN NOT NULL, task_name VARCHAR, updated_at TIMESTAMP)"
+                )
+            )
+            conn.execute(text("INSERT INTO job_embeddings VALUES ('opt-1', 0, 'old', NULL)"))
+    return SimpleNamespace(engine=engine)
 
 
-def test_set_embedding_privacy_updates_row_with_embedding_schema() -> None:
-    """The semantic backend syncs ``is_private`` onto the embedding row."""
-    store = _FakeJobStore()
-    with (
-        patch.object(pipeline.settings, "embeddings_enabled", True),
-        patch.object(pipeline, "Session") as session_cls,
-    ):
+def _embedding_row(store: SimpleNamespace) -> tuple[Any, ...]:
+    """Return ``(is_private, task_name)`` of the seeded ``opt-1`` embedding row."""
+    with store.engine.connect() as conn:
+        return tuple(
+            conn.execute(text("SELECT is_private, task_name FROM job_embeddings WHERE optimization_id = 'opt-1'")).one()
+        )
+
+
+def test_set_embedding_privacy_skips_without_embedding_table() -> None:
+    """The Mac app database has no ``job_embeddings`` table, so the sync is a no-op, not an error."""
+    store = _sqlite_store(with_embedding_table=False)
+    with patch.object(pipeline.settings, "embeddings_enabled", False):
         pipeline.set_embedding_privacy(store, "opt-1", True)
-    session = session_cls.return_value.__enter__.return_value
-    session.query.return_value.filter.return_value.update.assert_called_once()
-    session.commit.assert_called_once()
+
+
+def test_set_embedding_privacy_updates_kept_table_with_embeddings_off() -> None:
+    """A row kept from an earlier semantic run is still updated, so a Private job never shows in Explore."""
+    store = _sqlite_store(with_embedding_table=True)
+    with patch.object(pipeline.settings, "embeddings_enabled", False):
+        pipeline.set_embedding_privacy(store, "opt-1", True)
+    assert _embedding_row(store) == (1, "old")
+
+
+def test_set_embedding_task_name_skips_without_embedding_table() -> None:
+    """A rename in the Mac app must not fail on the missing ``job_embeddings`` table."""
+    store = _sqlite_store(with_embedding_table=False)
+    pipeline.set_embedding_task_name(store, "opt-1", "new")
+
+
+def test_set_embedding_task_name_updates_row_with_embedding_table() -> None:
+    """The rename is copied onto an existing embedding row."""
+    store = _sqlite_store(with_embedding_table=True)
+    pipeline.set_embedding_task_name(store, "opt-1", "new")
+    assert _embedding_row(store) == (0, "new")
