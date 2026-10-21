@@ -10,7 +10,8 @@ On launch the app:
 2. Checks Docker, then a coding CLI: installed, new enough, signed in, and not at its usage limit.
    Each failed check shows an onboarding screen with the command to fix it.
 3. Starts Postgres (`pgvector/pgvector:pg16`, container `skynet-local-postgres`, volume `skynet-local-pgdata`).
-4. Builds the job sandbox image `skynet-local-sandbox:<app version>` once per app version.
+4. Builds the job sandbox image `skynet-local-sandbox:<app version>` from `backend/Dockerfile` once per app version.
+   It builds for `linux/amd64`, because the Dockerfile installs x64-only harness binaries. Docker Desktop runs it under Rosetta.
 5. Installs Python packages with the bundled `uv`, runs `alembic upgrade head`, and starts the API.
 6. Starts the bundled Next.js server and opens it in the window.
 
@@ -22,7 +23,7 @@ Quitting stops the web server, the API, Postgres and every `skynet.job` sandbox 
 ## Requirements
 
 - macOS on Apple silicon
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/), running
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/), running, with "Use Rosetta for x86_64/amd64 emulation" turned on
 - One coding CLI, signed in: `claude` 2.1.226 or newer, `codex` 0.160.0 or newer, or `droid`
 
 ## Install a downloaded build

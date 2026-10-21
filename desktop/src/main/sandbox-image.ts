@@ -32,13 +32,19 @@ export async function ensureSandboxImage(
   if (existing) return existing;
   const log = fs.createWriteStream(logFile, { flags: "a" });
   try {
-    const build = await runCommand(ctx.docker, ["build", "-t", ref, backendDir], {
+    // backend/Dockerfile installs x64-only harness binaries (it is the Railway image),
+    // so Apple silicon builds it for linux/amd64 and Docker Desktop runs it under Rosetta.
+    const build = await runCommand(ctx.docker, ["build", "--platform", "linux/amd64", "-t", ref, backendDir], {
       env: ctx.env,
       cwd: path.dirname(backendDir),
       timeoutMs: 60 * 60_000,
       log,
     });
-    if (build.code !== 0) throw new Error(`docker build ${ref} failed: ${lastLine(build.stderr)}`);
+    if (build.code !== 0) {
+      // BuildKit ends with a "View build details" link; the ERROR line says what broke.
+      const errorLine = build.stderr.split("\n").filter((l) => l.includes("ERROR")).pop();
+      throw new Error(`docker build ${ref} failed: ${errorLine?.trim() || lastLine(build.stderr)}`);
+    }
   } finally {
     log.end();
   }

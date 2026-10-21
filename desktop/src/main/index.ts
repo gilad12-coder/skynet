@@ -260,7 +260,19 @@ async function stopStack(): Promise<void> {
 
 function isAllowedUrl(target: string): boolean {
   if (target.startsWith("file://")) return true;
-  return frontendUrl !== null && (target === frontendUrl || target.startsWith(`${frontendUrl}/`));
+  if (frontendUrl === null) return false;
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return false;
+  }
+  // Next.js builds callbackUrl with "localhost" even though the server binds 127.0.0.1.
+  return (
+    url.protocol === "http:" &&
+    (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
+    url.port === new URL(frontendUrl).port
+  );
 }
 
 function createWindow(): void {
