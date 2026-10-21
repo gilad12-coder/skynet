@@ -1,5 +1,6 @@
 /*
- * node --test cannot load .tsx, so run it from frontend/ through jiti:
+ * node --test cannot load .tsx, so this runs through jiti (local-runtime.render.test.ts
+ * spawns it inside `npm run test:unit`). To run it by hand from frontend/:
  * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
  */
 import assert from "node:assert/strict";
