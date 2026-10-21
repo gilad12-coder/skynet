@@ -20,6 +20,8 @@ export interface WizardPreflightRequest {
   payload: WizardPreflightPayload;
   execution_budget_id: string;
   execution_budget_revision: number;
+  /** UI locale the server words check messages in. */
+  locale?: string;
 }
 export interface WizardPreflightResponse {
   id: string;
@@ -34,7 +36,10 @@ export interface WizardPreflightResponse {
   checks: Array<{
     key: string;
     status: PreflightStatus | "skipped";
+    /** Worded in the request's locale. */
     message?: string;
+    message_code?: string;
+    message_params?: Record<string, string | number>;
     field?: string;
   }>;
   budget: ExecutionBudget;

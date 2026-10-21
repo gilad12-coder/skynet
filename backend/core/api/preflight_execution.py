@@ -65,6 +65,7 @@ class WizardPreflightRequest(BaseModel):
     execution_budget_id: str = Field(min_length=1, max_length=64)
     execution_budget_revision: int = Field(ge=1)
     contract_sample_count: int | None = Field(default=None, ge=1, le=CONTRACT_SAMPLE_MAX)
+    locale: str | None = Field(default=None, max_length=35)
 
     @field_validator("payload")
     @classmethod
@@ -85,10 +86,14 @@ class WizardPreflightRequest(BaseModel):
         return payload
 
 
+# ``message`` is worded in the request's locale; when it comes from the
+# catalog, ``message_code`` and ``message_params`` let a client word it itself.
 class WizardPreflightCheck(BaseModel):
     key: str
     status: Literal["succeeded", "failed", "pending", "skipped"]
     message: str | None = None
+    message_code: str | None = None
+    message_params: dict[str, str | int] | None = None
     field: str | None = None
 
 

@@ -212,6 +212,42 @@ def t(key: str, /, **params: Any) -> str:
     return template
 
 
+DEFAULT_LOCALE = "en"
+_LOCALE_TAG = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*")
+
+
+def request_locale(explicit: str | None, accept_language: str | None = None) -> str:
+    """Pick the locale to answer a request in.
+
+    The UI's own locale wins over ``Accept-Language``: the browser sends its
+    language, which can differ from the language the user chose in the app.
+
+    Args:
+        explicit: Locale tag the client named in the request body, if any.
+        accept_language: Raw ``Accept-Language`` header, if any.
+
+    Returns:
+        A locale tag; English when neither source names a usable one.
+    """
+    if explicit and _LOCALE_TAG.fullmatch(explicit.strip()):
+        return explicit.strip()
+    ranked: list[tuple[float, int, str]] = []
+    for position, part in enumerate((accept_language or "").split(",")):
+        tag, _, quality = part.strip().partition(";")
+        tag = tag.strip()
+        if not _LOCALE_TAG.fullmatch(tag):
+            continue
+        weight = 1.0
+        if quality.strip().startswith("q="):
+            try:
+                weight = float(quality.strip()[2:])
+            except ValueError:
+                continue
+        if weight > 0:
+            ranked.append((-weight, position, tag))
+    return min(ranked)[2] if ranked else DEFAULT_LOCALE
+
+
 @lru_cache(maxsize=64)
 def _overlay(locale: str) -> dict[str, Any]:
     """Load one per-locale overlay catalog, or an empty mapping when absent.
