@@ -141,7 +141,7 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[CliStatus]:
         monkeypatch.setattr(module, "settings", current)
     monkeypatch.setattr(cli_dispatch, "_gateway", None)
     monkeypatch.setattr(cli_dispatch, "_list_prices", lambda model: None)
-    statuses = [_status("codex"), _status("claude"), _status("droid")]
+    statuses = [_status("codex"), _status("claude")]
     monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: list(statuses))
     return statuses
 
@@ -184,7 +184,6 @@ def test_local_default_is_the_first_ready_cli(local: list[CliStatus]) -> None:
     local[1] = _status("claude")
     assert client.get("/account/agent-engine").json() == {"engine": "claude"}
     local[1] = _status("claude", version_ok=False)
-    local[2] = _status("droid", path=None, logged_in=None, version_ok=False)
     assert client.get("/account/agent-engine").json() == {"engine": None}
     assert agent_engine.engine_agent_model(None, _USER, None) is None
     with pytest.raises(DomainError) as caught:
