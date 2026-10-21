@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ...i18n import request_locale
 from ...notifications import slack
 from ...notifications.catalog import CHROME, EMAIL, MACOS, SLACK
 from ...notifications.channels import vapid_public_key
@@ -26,6 +27,7 @@ from .local_runtime import require_local_mode
 from .notification_preferences import EventTypeValue
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
+AcceptLanguageDep = Annotated[str | None, Header(include_in_schema=False)]
 
 
 class LocalNotificationChannels(BaseModel):
@@ -43,6 +45,10 @@ class NativeNotificationItem(BaseModel):
     body: str = Field(description="Optional second line.")
     url: str = Field(description="App path the notification opens.")
     tag: str = Field(description="Replaces an earlier notification with the same tag.")
+
+
+class NativeNotificationClaimRequest(BaseModel):
+    locale: str | None = Field(default=None, description="The Mac app's UI locale for the display text.")
 
 
 class NativeNotificationClaim(BaseModel):
@@ -130,16 +136,23 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
             return LocalNotificationChannels(channels=_channel_states(), macos=_macos_cells(row))
 
     @router.post("/local/notifications/native/claim", include_in_schema=False)
-    def claim_native_notifications(user: AuthenticatedUserDep) -> NativeNotificationClaim:
+    def claim_native_notifications(
+        user: AuthenticatedUserDep,
+        request: NativeNotificationClaimRequest | None = None,
+        accept_language: AcceptLanguageDep = None,
+    ) -> NativeNotificationClaim:
         """Hand the Mac app the caller's queued macOS notifications, each once.
 
         Args:
             user: The signed-in local user.
+            request: Optional body naming the app's UI locale.
+            accept_language: The browser's languages, used when the body names no locale.
 
         Returns:
             The notifications to show.
         """
-        items = claim_native(job_store.engine, user.username)
+        locale = request_locale(request.locale if request else None, accept_language)
+        items = claim_native(job_store.engine, user.username, locale)
         return NativeNotificationClaim(
             items=[NativeNotificationItem(id=i.id, title=i.title, body=i.body, url=i.url, tag=i.tag) for i in items]
         )

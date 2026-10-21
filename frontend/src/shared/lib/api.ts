@@ -1083,10 +1083,11 @@ export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType
   });
 }
 
-/** Take the queued macOS notifications; each one is handed out once. */
+/** Take the queued macOS notifications in the UI locale; each one is handed out once. */
 export function claimNativeNotifications() {
   return request<{ items: NativeNotification[] }>("/local/notifications/native/claim", {
     method: "POST",
+    body: JSON.stringify({ locale: getActiveLocale() }),
   });
 }
 

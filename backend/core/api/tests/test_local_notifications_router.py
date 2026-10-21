@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...config import settings
+from ...i18n import t_locale
 from ...notifications.catalog import DEFAULT_GRID
 from ...notifications.dispatch import notify
 from ...notifications.preferences import configure_notification_preferences
@@ -150,3 +151,21 @@ def test_claim_returns_display_payloads_once(harness, local_mode: None) -> None:
         row = session.get(NotificationModel, item["id"])
         assert row is not None
         assert row.deliveries["macos"]["state"] == "sent"
+
+
+def test_claim_renders_in_the_app_locale(harness, local_mode: None) -> None:
+    """The banner uses the Mac app's UI locale, then Accept-Language, not the Hebrew base."""
+    client, _ = harness
+    notify(_USER, "finished", "opt-en", {}, title="Ticket triage", dedupe_key="en")
+    notify(_USER, "finished", "opt-he", {}, title="Ticket triage", dedupe_key="he")
+
+    english = client.post("/local/notifications/native/claim", json={"locale": "en"}).json()["items"]
+    assert [i["title"] for i in english] == [
+        t_locale("en", "email.event.finished.headline", title="Ticket triage"),
+        t_locale("en", "email.event.finished.headline", title="Ticket triage"),
+    ]
+    assert english[0]["title"] != t_locale(None, "email.event.finished.headline", title="Ticket triage")
+
+    notify(_USER, "finished", "opt-x", {}, title="Ticket triage", dedupe_key="x")
+    header = client.post("/local/notifications/native/claim", headers={"Accept-Language": "de"}).json()["items"]
+    assert header[0]["title"] == t_locale("de", "email.event.finished.headline", title="Ticket triage")

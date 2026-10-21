@@ -143,18 +143,19 @@ def _vapid_subject() -> str:
     return settings.vapid_subject or settings.app_public_url
 
 
-def push_payload(delivery: Delivery) -> dict[str, str]:
+def push_payload(delivery: Delivery, locale: str | None = None) -> dict[str, str]:
     """Build the JSON the service worker turns into a system notification.
 
     Args:
         delivery: The notification to deliver.
+        locale: Display locale; ``None`` keeps the Hebrew base that Web Push uses.
 
     Returns:
         ``title``, ``body``, ``url`` (an app path or absolute URL) and ``tag``
         (one per run and event, so a repeat replaces the shown one).
     """
     if delivery.event_type in EMAIL_EVENT_TYPES:
-        title = t_locale(None, f"email.event.{delivery.event_type}.headline", title=delivery.title)
+        title = t_locale(locale, f"email.event.{delivery.event_type}.headline", title=delivery.title)
     else:
         title = delivery.title
     return {

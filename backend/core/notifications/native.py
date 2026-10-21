@@ -36,12 +36,15 @@ class NativeNotification:
     tag: str
 
 
-def claim_native(engine: Engine, username: str, now: datetime | None = None) -> list[NativeNotification]:
+def claim_native(
+    engine: Engine, username: str, locale: str | None = None, now: datetime | None = None
+) -> list[NativeNotification]:
     """Claim ``username``'s queued macOS deliveries, oldest first.
 
     Args:
         engine: Database engine holding the notifications table.
         username: The signed-in local user.
+        locale: The Mac app's UI locale for the display text.
         now: Clock override for tests.
 
     Returns:
@@ -71,7 +74,8 @@ def claim_native(engine: Engine, username: str, now: datetime | None = None) -> 
                     title=row.title,
                     link=row.link,
                     facts=dict(row.facts or {}),
-                )
+                ),
+                locale,
             )
             claimed.append(NativeNotification(id=row.id, **payload))
             deliveries[MACOS] = {"state": "sent", "at": now.isoformat()}
