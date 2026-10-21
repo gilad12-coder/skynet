@@ -788,7 +788,8 @@ def test_tool_roots_never_open_the_home_or_a_folder_in_it(tmp_path: Path) -> Non
     shallow = home / "tool"
     nested.parent.mkdir(parents=True)
     for binary in (nested, shallow):
-        binary.write_text("#!/bin/sh\n")
+        # Not a script, so no interpreter root (``/usr`` on Linux) joins the result.
+        binary.write_bytes(b"\x7fELF")
         binary.chmod(0o755)
     real_home = os.path.realpath(home)
 
