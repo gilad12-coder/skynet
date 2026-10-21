@@ -251,8 +251,9 @@ export function keyRetryDelayMs(attempt: number): number {
  * The local composer menu: the CLI's subscription models, then the saved
  * key's models. `null` CLI models mean `/local/status` has not loaded; `null`
  * key models mean the key's list still loads. The menu stays empty until the
- * rows that can hold `pick` are known, so the menu never judges a saved pick
- * stale (and clears it) too early.
+ * rows that can hold `pick` are known, so the menu never judges a saved key
+ * pick stale (and clears it) too early. Only an OpenRouter pick waits for the
+ * key rows, as only that pick is sent as a key model.
  */
 export function localMenuModels(
   cliModels: CatalogModel[] | null,
@@ -260,7 +261,7 @@ export function localMenuModels(
   pick: string | null,
 ): CatalogModel[] {
   if (cliModels === null) return [];
-  if (keyModels === null) return pick && !parseSubscriptionModelId(pick) ? [] : cliModels;
+  if (keyModels === null) return isOpenRouterModelId(pick) ? [] : cliModels;
   return [...cliModels, ...keyModels];
 }
 

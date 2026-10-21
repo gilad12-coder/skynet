@@ -713,6 +713,31 @@ const localDeps = (
   };
 };
 
+test("while key rows are unknown, the chip and the request agree for every pick type", async () => {
+  const cliRows = subscriptionMenuModels(cli(), []);
+  // Mirrors ComposerModelMenu: the retired auto pick counts as no pick, and a
+  // pick a non-empty menu omits is stale, so the chip names the menu's first row.
+  const chip = (pick: string) => {
+    const saved = pick === "auto:intelligent" ? null : pick;
+    const listed = localMenuModels(cliRows, null, pick);
+    const stale = !!saved && listed.length > 0 && !listed.some((m) => m.value === saved);
+    return (saved && !stale ? saved : null) ?? listed[0]?.value ?? null;
+  };
+  const deps = () => localDeps({ keyVerified: async () => null, keyRows: () => null });
+  for (const pick of [
+    "auto:intelligent",
+    "anthropic/claude-haiku-3",
+    "openrouter/google/gemini-3-pro",
+    "subscription/claude/anthropic/claude-opus-4.1",
+  ]) {
+    assert.equal(chip(pick), await resolveLocalAgentModel(pick, "claude", deps()), pick);
+  }
+  // Only a key pick waits for the key rows.
+  assert.deepEqual(localMenuModels(cliRows, null, "openrouter/google/gemini-3-pro"), []);
+  assert.deepEqual(localMenuModels(cliRows, null, "auto:intelligent"), cliRows);
+  assert.deepEqual(localMenuModels(cliRows, null, "anthropic/claude-haiku-3"), cliRows);
+});
+
 test("a key pick goes unchanged, even when the key's model list is empty", async () => {
   const pick = "openrouter/google/gemini-3-pro";
   const deps = localDeps();
