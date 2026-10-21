@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import http.client
 import http.server
 import json
@@ -37,6 +38,7 @@ class _Upstream(http.server.BaseHTTPRequestHandler):
     seen: list[dict] = []
     release = threading.Event()
     expired = False
+    empty_status: int | None = None
 
     def do_POST(self) -> None:
         """Record the request, then stream two events with a pause the test controls."""
@@ -57,6 +59,10 @@ class _Upstream(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Record the request and answer with a small JSON body."""
         type(self).seen.append({"path": self.path, "headers": dict(self.headers.items()), "body": b""})
+        if type(self).empty_status is not None:
+            self.send_response(type(self).empty_status)
+            self.end_headers()
+            return
         if type(self).expired:
             payload = b'{"error": {"code": "token_expired"}}'
             self.send_response(401)
@@ -91,6 +97,7 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_Upstream]]:
     _Upstream.seen = []
     _Upstream.release = threading.Event()
     _Upstream.expired = False
+    _Upstream.empty_status = None
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Upstream)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -138,6 +145,39 @@ def _request(
     }
     connection.request(method, path, body=body if method == "POST" else None, headers=headers)
     return connection.getresponse()
+
+
+def _raw_post(proxy: CodexAuthProxy, framing: bytes, payload: bytes) -> bytes:
+    """Send one POST with hand-written body framing and read the answer's head.
+
+    Args:
+        proxy: The running proxy.
+        framing: The body-framing header line, with its CRLF.
+        payload: The bytes after the blank line.
+
+    Returns:
+        The bytes up to the end of the answer's headers, or what came before a 5-second silence.
+    """
+    context = ssl.create_default_context(cadata=proxy.ca_pem.decode())
+    with (
+        socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as raw,
+        context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
+    ):
+        secured.sendall(
+            b"POST /backend-api/codex/responses HTTP/1.1\r\nHost: x\r\n"
+            + f"Authorization: Bearer {PLACEHOLDER}\r\n".encode()
+            + framing
+            + b"\r\n"
+            + payload
+        )
+        secured.settimeout(5)
+        answer = b""
+        # A proxy that waits for the rest of a body it misread sends nothing, so the
+        # test ends on the timeout instead of hanging.
+        with contextlib.suppress(TimeoutError):
+            while b"\r\n\r\n" not in answer and (chunk := secured.recv(65536)):
+                answer += chunk
+    return answer
 
 
 def _jwt(claims: dict) -> str:
@@ -196,6 +236,83 @@ def test_only_the_model_paths_reach_the_provider(
 
     assert response.status == 404
     assert upstream.seen == []
+
+
+@pytest.mark.parametrize(
+    "length", ["-1", "+5", "0x5", "1_0", "5.0", "5 5", "five", "\u00b2"], ids=lambda value: value.encode().hex()
+)
+def test_content_length_that_is_not_plain_digits_is_refused(
+    length: str, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """A Content-Length other than ASCII digits gets 400 and is not forwarded, so no read skips the size limit.
+
+    Args:
+        length: A malformed Content-Length value.
+    """
+    answer = _raw_post(proxy, f"Content-Length: {length}\r\n".encode("latin-1"), b"A" * 4096)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+@pytest.mark.parametrize("size_line", [b"-1", b"+5", b"0x5", b"1_0", b"", b"5 5", b"g"])
+def test_chunk_size_that_is_not_plain_hex_is_refused(
+    size_line: bytes, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """A chunk size other than hex digits gets 400 and is not forwarded, so no read skips the size limit.
+
+    Args:
+        size_line: A malformed chunk-size line, without its CRLF.
+    """
+    answer = _raw_post(proxy, b"Transfer-Encoding: chunked\r\n", size_line + b"\r\n" + b"A" * 4096)
+
+    assert answer.startswith(b"HTTP/1.1 400 ")
+    assert upstream.seen == []
+
+
+def test_chunked_body_with_extensions_is_forwarded(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:
+    """Chunk extensions after ';' are ignored, as RFC 9112 allows, and the body arrives whole."""
+    upstream.release.set()
+    answer = _raw_post(
+        proxy, b"Transfer-Encoding: chunked\r\n", b"5;name=value\r\nhello\r\nA ; x\r\n0123456789\r\n0\r\n\r\n"
+    )
+
+    assert answer.startswith(b"HTTP/1.1 200 ")
+    assert [call["body"] for call in upstream.seen] == [b"hello0123456789"]
+
+
+@pytest.mark.parametrize("status", [204, 304])
+def test_answer_without_a_body_keeps_the_connection_in_step(
+    status: int, proxy: CodexAuthProxy, upstream: type[_Upstream]
+) -> None:
+    """A 204 or 304 answer carries no body bytes, so the next answer on the same connection parses correctly.
+
+    Args:
+        status: An upstream status that has no body.
+    """
+    upstream.empty_status = status
+    context = ssl.create_default_context(cadata=proxy.ca_pem.decode())
+    request = f"GET /backend-api/codex/models HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {PLACEHOLDER}\r\n\r\n"
+    with (
+        socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as raw,
+        context.wrap_socket(raw, server_hostname="127.0.0.1") as secured,
+    ):
+        reader = secured.makefile("rb")
+        secured.sendall(request.encode())
+        first = [reader.readline()]
+        while first[-1] not in (b"\r\n", b""):
+            first.append(reader.readline())
+        upstream.empty_status = None
+        secured.sendall(request.encode())
+        # A client that follows RFC 9112 reads no body after a 204 or 304, so the next
+        # bytes on the connection must start the second answer.
+        second = reader.readline()
+        reader.close()
+
+    assert first[0].startswith(f"HTTP/1.1 {status} ".encode())
+    assert not any(line.lower().startswith(b"transfer-encoding") for line in first)
+    assert second.startswith(b"HTTP/1.1 200 ")
+    assert len(upstream.seen) == 2
 
 
 def test_proxy_swaps_in_the_real_login_and_drops_cookies(proxy: CodexAuthProxy, upstream: type[_Upstream]) -> None:

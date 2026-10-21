@@ -66,6 +66,8 @@ ALLOWED_CALLS = frozenset(
     }
 )
 MAX_BODY_BYTES = 64 * 1024 * 1024
+MAX_LINE_BYTES = 4096
+_HEX_DIGITS = b"0123456789abcdefABCDEF"
 UPSTREAM_TIMEOUT_SECONDS = 300.0
 HANDSHAKE_TIMEOUT_SECONDS = 30.0
 # Applies to each read of codex's request and write of the answer, not to the
@@ -365,28 +367,54 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             while drained < MAX_BODY_BYTES and (chunk := self.connection.recv(65536)):
                 drained += len(chunk)
 
+    def _line(self) -> bytes:
+        """Read one framing line of a chunked body.
+
+        Returns:
+            The line without its line end.
+
+        Raises:
+            ValueError: The line is longer than :data:`MAX_LINE_BYTES` or the stream ended first.
+        """
+        line = self.rfile.readline(MAX_LINE_BYTES + 1)
+        if not line.endswith(b"\n"):
+            raise ValueError("unterminated chunk framing line")
+        return line.rstrip(b"\r\n")
+
     def _body(self) -> bytes | None:
         """Read the request body, plain or chunked.
 
         Returns:
             The body, or None when it is larger than :data:`MAX_BODY_BYTES`.
+
+        Raises:
+            ValueError: The body framing is malformed.
         """
+        # int() also takes a sign, "_" and spaces, and a negative size read to the end
+        # of the stream past the size limit, so the sizes must be bare digits.
         if "chunked" in (self.headers.get("transfer-encoding") or "").lower():
             parts: list[bytes] = []
             total = 0
             while True:
-                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                text = self._line().split(b";", 1)[0].rstrip(b" \t")
+                if not text or text.strip(_HEX_DIGITS):
+                    raise ValueError("chunk size is not hex digits")
+                size = int(text, 16)
                 if size == 0:
-                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+                    while self._line():
                         pass
                     return b"".join(parts)
                 total += size
                 if total > MAX_BODY_BYTES:
                     return None
                 parts.append(self.rfile.read(size))
-                self.rfile.readline()
-        length = int(self.headers.get("content-length") or 0)
-        return None if length > MAX_BODY_BYTES else self.rfile.read(length)
+                if self._line():
+                    raise ValueError("chunk data is longer than its size")
+        length = self.headers.get("content-length") or "0"
+        if not (length.isascii() and length.isdigit()):
+            raise ValueError("content-length is not digits")
+        size = int(length)
+        return None if size > MAX_BODY_BYTES else self.rfile.read(size)
 
     def _forward(self) -> None:
         """Run the checks, then forward the request and stream the response."""
@@ -446,6 +474,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("content-length", str(len(answer)))
                 self.end_headers()
                 self.wfile.write(answer)
+                self.wfile.flush()
+                return
+            if response.status < 200 or response.status in (204, 304):
+                # RFC 9112 6.3: these answers end at the headers, so a body frame here
+                # would be read as the start of the next answer on this connection.
+                self.end_headers()
                 self.wfile.flush()
                 return
             self.send_header("transfer-encoding", "chunked")
