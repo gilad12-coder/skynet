@@ -7,10 +7,14 @@ artifact routes read them back through their normal code paths.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import threading
 from typing import Any
 
+import fakeredis
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -25,8 +29,10 @@ from ...i18n_en import t_en
 from ...service_gateway import run_sync
 from ...storage.models import Base, ExecutionBudgetModel, JobModel, ProgressEventModel, WalletLedgerModel
 from ...storage.remote import RemoteDBJobStore
+from .. import rate_limit
 from ..auth import AuthenticatedUser
 from ..routers.optimizations import create_optimizations_router
+from ..routers.optimizations import sync as sync_mod
 from ..routers.optimizations_meta import create_optimizations_meta_router
 from .conftest import bypass_auth
 
@@ -557,3 +563,64 @@ def test_imported_run_test_results_is_404(hosted_store: _SQLiteJobStore, bundle:
     r = _client(hosted_store, HOSTED_USER).get(f"/optimizations/{resp.json()['optimization_id']}/test-results")
     assert r.status_code == 404
     assert r.json()["detail"] == t_en("optimization.payload_unavailable")
+
+
+async def test_import_does_not_block_other_requests(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While an import is stored, the event loop still serves another request."""
+    store_started = threading.Event()
+    release = threading.Event()
+    real_import = run_sync.import_run
+
+    def _slow_import(*args: Any, **kwargs: Any) -> str:
+        """Hold the import until the concurrent request is served.
+
+        Args:
+            *args: Positional arguments for ``import_run``.
+            **kwargs: Keyword arguments for ``import_run``.
+
+        Returns:
+            The new optimization id.
+        """
+        store_started.set()
+        assert release.wait(timeout=10), "the concurrent request was not served while the import ran"
+        return real_import(*args, **kwargs)
+
+    monkeypatch.setattr(sync_mod, "import_run", _slow_import)
+    app = FastAPI()
+    app.include_router(create_optimizations_router(job_store=hosted_store, get_worker_ref=lambda: None))
+
+    @app.get("/ping")
+    async def _ping() -> dict[str, bool]:
+        """Answer at once and let the held import finish.
+
+        Returns:
+            A fixed body.
+        """
+        release.set()
+        return {"ok": True}
+
+    bypass_auth(app, user=HOSTED_USER)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        import_task = asyncio.create_task(client.post("/optimizations/import", content=json.dumps(bundle)))
+        assert await asyncio.to_thread(store_started.wait, 10)
+        ping = await asyncio.wait_for(client.get("/ping"), timeout=5)
+        resp = await asyncio.wait_for(import_task, timeout=10)
+    assert ping.status_code == 200
+    assert resp.status_code == 201, resp.text
+
+
+def test_import_is_rate_limited(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Imports share the submission rate cap, so a refused import still counts toward it."""
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    monkeypatch.setattr(rate_limit, "shared_redis_client", lambda: redis)
+    monkeypatch.setattr(settings, "rate_limit_submissions_per_minute", 2)
+    assert _import(hosted_store, {"schema": "nope"}).status_code == 422
+    assert _import(hosted_store, bundle).status_code == 201
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == t_en("rate_limit.exceeded", retry_after=60)
+    assert _count(hosted_store, JobModel) == 1

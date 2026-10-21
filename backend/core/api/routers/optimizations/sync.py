@@ -7,6 +7,7 @@ Internal (Mac app plumbing, hidden from public docs):
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -27,6 +28,7 @@ from ...converters import (
     status_to_job_status,
 )
 from ...errors import DomainError
+from ...rate_limit import enforce_submission_rate
 from .._helpers import build_summary, enforce_job_quota, enforce_storage_quota
 from ..local_runtime import require_local_mode
 from .listing import build_sidebar_item
@@ -120,6 +122,35 @@ async def _read_capped_body(request: Request) -> bytes:
     return b"".join(chunks)
 
 
+def _store_bundle(job_store, username: str, raw: bytes) -> str:
+    """Parse an import body, check the caller's quotas and store the run.
+
+    The parse of up to 50 MB and the database write are blocking, so the route
+    runs this in a worker thread to keep the event loop serving other requests.
+
+    Args:
+        job_store: Job store the run is written to.
+        username: The hosted caller who owns the new run.
+        raw: The request body.
+
+    Returns:
+        The new optimization id.
+
+    Raises:
+        DomainError: 422 for a bad bundle, 409 when a quota is full.
+    """
+    try:
+        bundle: Any = json.loads(raw)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise DomainError("sync.invalid_bundle", status=422) from None
+    enforce_job_quota(job_store, username)
+    enforce_storage_quota(job_store, username, len(raw))
+    try:
+        return import_run(job_store, username, bundle, check_row=_check_readable)
+    except RunSyncError as exc:
+        raise _domain_error(exc) from None
+
+
 def register_sync_routes(router: APIRouter, *, job_store) -> None:
     """Register the run export and import routes on ``router``.
 
@@ -146,21 +177,15 @@ def register_sync_routes(router: APIRouter, *, job_store) -> None:
 
         Raises:
             DomainError: 422 in local mode or for a bad bundle, 413 above the
-                size cap, 409 when the caller's quota is full.
+                size cap, 409 when the caller's quota is full, 429 above the
+                submission rate.
         """
         if settings.local_mode:
             raise DomainError("sync.import_local_only_disabled", status=422)
+        # A refused import writes no job, so the job quota cannot stop repeats; the rate cap does.
+        await asyncio.to_thread(enforce_submission_rate, current_user.username)
         raw = await _read_capped_body(request)
-        try:
-            bundle: Any = json.loads(raw)
-        except (UnicodeDecodeError, ValueError, RecursionError):
-            raise DomainError("sync.invalid_bundle", status=422) from None
-        enforce_job_quota(job_store, current_user.username)
-        enforce_storage_quota(job_store, current_user.username, len(raw))
-        try:
-            optimization_id = import_run(job_store, current_user.username, bundle, check_row=_check_readable)
-        except RunSyncError as exc:
-            raise _domain_error(exc) from None
+        optimization_id = await asyncio.to_thread(_store_bundle, job_store, current_user.username, raw)
         return JSONResponse(status_code=201, content={"optimization_id": optimization_id})
 
     @router.get(
