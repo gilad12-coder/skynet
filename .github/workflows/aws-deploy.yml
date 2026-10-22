@@ -1,0 +1,65 @@
+# Builds the arm64 images and deploys one commit to AWS ECS (SKY-156; it also
+# covers the deploy part of SKY-162).
+# Manual only (workflow_dispatch) until the AWS stack is live and approved.
+# Needs the global stack applied first (it creates the OIDC provider and the
+# roles).
+# Auth: GitHub OIDC -> one role per environment (infra/terraform/global). No
+# static AWS keys. skynet-github-deploy-staging trusts only the GitHub
+# environment aws-staging and reaches only staging resources;
+# skynet-github-deploy-production trusts only aws-production and reaches only
+# production resources. Restrict aws-staging to the staging branch and
+# aws-production to main with required reviewers (see infra/terraform/README.md).
+#
+# Configuration (Settings > Environments > aws-<env> > variables and secrets):
+#   vars.AWS_DEPLOY_ROLE_ARN                     github_deploy_role_arns[<env>]
+#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
+#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional)
+#   secrets.SENTRY_AUTH_TOKEN                    (optional)
+name: aws deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+concurrency:
+  group: aws-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    # Native arm64 runner: the images run on Graviton Fargate tasks.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    environment: aws-${{ inputs.environment }}
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push images
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: infra/terraform/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+
+      - name: Migrate and deploy
+        run: infra/terraform/scripts/deploy.sh "${{ inputs.environment }}" "$GITHUB_SHA"
