@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import socket
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -650,12 +653,98 @@ def test_both_refresh_attempts_end_inside_the_grace(engine: Engine, hosted: Fake
     first, retry = hosted.refresh_timeouts
     assert first["read"] is not None
     assert all(value is not None for value in retry.values())
-    # The rotation commits after the first request is sent, so the first attempt
-    # can wait at most its read timeout after the commit. The resend can start
-    # no later than the resend deadline and then needs connect + write + read.
-    worst_end = hosted_link.REFRESH_RESEND_DEADLINE + retry["connect"] + retry["write"] + retry["read"]
-    assert first["read"] <= hosted_link.REFRESH_RESEND_DEADLINE
-    assert worst_end < 30.0
+    # The deadline counts from when the first body is sent, and hosted starts the
+    # grace only after it has that body. httpcore applies the connect timeout to
+    # the TCP connect and again to the TLS handshake. The resend reaches hosted
+    # after connect + TLS + write; its read time does not matter to hosted.
+    assert hosted_link.REFRESH_RESEND_DEADLINE + 2 * retry["connect"] + retry["write"] < 30.0
+
+
+class _DropFirstAnswer:
+    """A real HTTP/1.1 socket server that reads each request and drops the first answer.
+
+    It closes the first connection after it reads the whole request, as when
+    hosted commits a rotation and the answer is lost. It answers later requests.
+    """
+
+    def __init__(self) -> None:
+        """Listen on a free loopback port and serve in a background thread."""
+        self.sock = socket.create_server(("127.0.0.1", 0))
+        self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}"
+        self.bodies: list[dict[str, str]] = []
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self) -> None:
+        """Read whole requests until the socket closes."""
+        while True:
+            try:
+                conn, _addr = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    data += conn.recv(65536)
+                head, _sep, rest = data.partition(b"\r\n\r\n")
+                match = re.search(rb"content-length: *(\d+)", head, re.IGNORECASE)
+                length = int(match.group(1)) if match else 0
+                while len(rest) < length:
+                    rest += conn.recv(65536)
+                self.bodies.append(json.loads(rest))
+                if len(self.bodies) > 1:
+                    payload = b'{"ok": true}'
+                    conn.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(payload) + payload
+                    )
+
+    def close(self) -> None:
+        """Stop the server."""
+        self.sock.close()
+        self.thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(
+    ("ticks", "resent"),
+    [
+        # A slow DNS lookup and connect (13 s) before the body is sent, then a lost answer 10 s later.
+        ([0.0, 13.0, 23.0], True),
+        # A fast connect, then a lost answer after the resend deadline has passed.
+        ([0.0, 1.0, 1.0 + hosted_link.REFRESH_RESEND_DEADLINE + 0.5], False),
+    ],
+)
+def test_resend_deadline_counts_from_the_sent_request(
+    monkeypatch: pytest.MonkeyPatch, ticks: list[float], resent: bool
+) -> None:
+    """The resend deadline counts from when the real HTTP client sent the whole first request.
+
+    Hosted starts the 30 s grace only when it has the request, so time spent on
+    the connect must not stop the resend.
+
+    Args:
+        monkeypatch: Pytest fixture used to point the client at the server and move its clock.
+        ticks: Client clock values: start, first body sent, failure seen.
+        resent: Whether the client must send the refresh grant again.
+    """
+    server = _DropFirstAnswer()
+    try:
+        monkeypatch.setattr(settings, "hosted_api_url", server.url)
+        monkeypatch.setattr(hosted_link, "_TRANSPORT", None)
+        clock = iter(ticks)
+        monkeypatch.setattr(hosted_link, "_clock", lambda: next(clock))
+
+        if resent:
+            assert hosted_link._post_refresh("skyl_rt_old").json() == {"ok": True}
+            assert len(server.bodies) == 2
+            assert server.bodies[0] == server.bodies[1]
+        else:
+            with pytest.raises(DomainError) as exc:
+                hosted_link._post_refresh("skyl_rt_old")
+            assert exc.value.code == "hosted_link.unreachable"
+            assert len(server.bodies) == 1
+    finally:
+        server.close()
 
 
 def test_late_lost_refresh_response_is_not_sent_again(

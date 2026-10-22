@@ -41,11 +41,13 @@ CALLBACK_PATH = "/local/hosted-link/callback"
 STATE_TTL_SECONDS = 600
 REFRESH_MARGIN = timedelta(minutes=5)
 _TIMEOUT = httpx.Timeout(15.0)
-# Hosted (#782) gives an old refresh token a 30 s grace after a rotation. When a
-# refresh answer is lost, the client sends the same token again, and both
-# attempts must end inside that grace: the first attempt waits at most 10 s for
-# the answer, a resend starts at most 12 s after the first send, and the resend
-# itself takes at most 5 + 5 + 5 s, so the worst case ends at 27 s.
+# Hosted (#782) gives an old refresh token a 30 s grace after a rotation, from
+# when it has the whole first request. When a refresh answer is lost, the client
+# sends the same token again, and the resend must reach hosted inside that grace.
+# A resend starts at most 12 s after the first request body is sent. It then
+# needs a TCP connect (5 s), a TLS handshake (httpcore applies the connect
+# timeout again, 5 s) and a write (5 s), so it reaches hosted at most 27 s after
+# the first send, plus network transit. The resend's read time does not count.
 _REFRESH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _RESEND_TIMEOUT = httpx.Timeout(5.0)
 REFRESH_RESEND_DEADLINE = 12.0
@@ -350,12 +352,27 @@ def _post_refresh(refresh_token: str) -> httpx.Response:
         DomainError: 503 ``hosted_link.unreachable`` when no answer arrives.
     """
     body = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    sent_at: list[float] = []
+
+    def mark_sent(event: str, _info: dict[str, Any]) -> None:
+        """Record when the first request body has fully left the client.
+
+        Args:
+            event: The httpcore trace event name.
+            _info: The event details (not used).
+        """
+        if event.endswith("send_request_body.complete"):
+            sent_at.append(_clock())
+
     started = _clock()
     try:
         with _client(_REFRESH_TIMEOUT) as client:
-            return client.post("/desktop/link/token", json=body)
+            return client.post("/desktop/link/token", json=body, extensions={"trace": mark_sent})
     except _LOST_ANSWER_ERRORS as exc:
-        if _clock() - started > REFRESH_RESEND_DEADLINE:
+        # Hosted starts the grace only after it has the whole request, so a slow
+        # connect must not use up the deadline. A body that never fully left
+        # cannot have been committed, so the earlier start mark is safe there.
+        if _clock() - (sent_at[0] if sent_at else started) > REFRESH_RESEND_DEADLINE:
             raise DomainError("hosted_link.unreachable", status=503) from exc
         logger.info("The hosted refresh answer was lost; sending the same refresh grant once more")
     except httpx.HTTPError as exc:
