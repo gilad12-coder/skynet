@@ -1,8 +1,7 @@
 # check=skip=SecretsUsedInArgOrEnv
-# ^ SENTRY_AUTH_TOKEN stays a build ARG as the Railway fallback: Railway exposes
-#   variables to Dockerfile builds only through ARG. Other builders pass it as
-#   the BuildKit secret `sentry_auth_token` instead (see the build RUN below).
-#   Either way it lives in the discarded build stage only.
+# ^ SENTRY_AUTH_TOKEN is deliberately a build ARG: Railway exposes variables to
+#   Dockerfile builds only through ARG (no BuildKit secret mounts). It lives in
+#   the discarded build stage only, so the lint rule does not apply here.
 
 FROM node:20-alpine AS base
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -55,13 +54,8 @@ ARG APP_ENVIRONMENT
 ARG RAILWAY_ENVIRONMENT_NAME
 # The footer's AGPL source link points at this commit (legal-config.ts).
 ENV NEXT_PUBLIC_SOURCE_COMMIT=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
-# The secret mount is optional: without it, the SENTRY_AUTH_TOKEN ARG applies.
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
-    --mount=type=secret,id=sentry_auth_token,required=false \
-    if [ -s /run/secrets/sentry_auth_token ]; then \
-      SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)"; export SENTRY_AUTH_TOKEN; \
-    fi \
-    && node scripts/generate-third-party-licenses.mjs && npm run build
+    node scripts/generate-third-party-licenses.mjs && npm run build
 
 FROM base AS runner
 WORKDIR /app
