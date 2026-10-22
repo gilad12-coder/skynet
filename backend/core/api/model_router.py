@@ -9,8 +9,12 @@ prices), the composer degrades to the engine's configured server default.
 from __future__ import annotations
 
 import logging
+import re
 
+from ..billing.byok_bridge import resolve_byok_model_config
+from ..billing.byok_vault import ProviderKeyVault
 from ..config import settings
+from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
 from ..local.cli_catalog import CLI_MODELS, parse_subscription_model_id
 from ..models import ModelConfig
 from .errors import DomainError
@@ -26,9 +30,18 @@ from .model_catalog import (
 
 logger = logging.getLogger(__name__)
 
+# The one BYOK provider the Mac app's composers run on: catalog ids are
+# OpenRouter ids, so an OpenRouter key serves every catalog model.
+_LOCAL_BYOK_PROVIDER = "openrouter"
+
 # The retired "Auto · Intelligent" menu entry; saved conversations and
 # browser prefs may still send it, so it runs the default like no pick at all.
 _RETIRED_AUTO_ID = "auto:intelligent"
+
+# An OpenRouter model id: openrouter/<vendor>/<model>. A saved-key pick is
+# checked only for this shape, because the user's key pays for the turn and
+# the Mac app's curated catalog is empty (it has no platform OpenRouter key).
+_OPENROUTER_MODEL_ID = re.compile(r"openrouter/[^/\s]+/[^/\s]+")
 
 
 def default_model_id() -> str | None:
@@ -190,12 +203,87 @@ def route_interview_model(model: str | None) -> str | None:
     return interview_model_id()
 
 
+def route_local_byok_model(
+    model: str | None,
+    *,
+    job_store: object | None,
+    username: str,
+    interview: bool = False,
+) -> ModelConfig | None:
+    """Route a Mac app composer pick onto the caller's saved OpenRouter key.
+
+    The Mac app has no managed key. A user who saved and verified an
+    OpenRouter key runs any OpenRouter model id, and the catalog default, on
+    that key.
+    It never falls back to a managed key.
+
+    Args:
+        model: The pick after the agent engine filled an empty one.
+        job_store: Job store whose engine backs the encrypted key vault.
+        username: The caller, who owns the key.
+        interview: Whether an empty pick runs the interview default instead
+            of the composer default.
+
+    Returns:
+        A BYOK config with the decrypted key in memory only. ``None`` outside
+        local mode, for a subscription pick, with no store, or with no verified
+        OpenRouter key; the normal routes then apply.
+
+    Raises:
+        DomainError: 422 ``models.unknown_model`` when an explicit id is not
+            an OpenRouter model id; 400 ``billing.byok_missing_connection``
+            when the key is deleted after the verified-key check; 400
+            ``billing.byok_model_not_served`` when the saved connection cannot
+            route the model; 409 ``billing.byok_key_undecryptable`` when the
+            saved key cannot be decrypted; 503 ``billing.byok_not_configured``
+            when the vault key is unconfigured.
+    """
+    if not settings.local_mode:
+        return None
+    name = str(model or "").strip()
+    if parse_subscription_model_id(name) is not None:
+        return None
+    engine = getattr(job_store, "engine", None)
+    if engine is None or not username:
+        return None
+    vault = ProviderKeyVault(engine=engine)
+    if not vault.has_verified_connection(username, _LOCAL_BYOK_PROVIDER):
+        return None
+    if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
+        if not _OPENROUTER_MODEL_ID.fullmatch(name):
+            raise DomainError("models.unknown_model", status=422)
+    else:
+        name = (interview_model_id() if interview else default_model_id()) or agent_model_id()
+    config = ModelConfig(name=name, token_source=TOKEN_SOURCE_BYOK, byok_provider=_LOCAL_BYOK_PROVIDER)
+    try:
+        return resolve_byok_model_config(config, username=username, vault=vault)
+    except ValueError as exc:
+        # The key was deleted or failed a new check after the check above.
+        raise DomainError("billing.byok_missing_connection", status=400, provider=_LOCAL_BYOK_PROVIDER) from exc
+
+
+def metering_token_source(model_config: ModelConfig | None) -> str:
+    """Return the billing source a composer turn is metered under.
+
+    Args:
+        model_config: The turn's resolved config, or ``None`` off the BYOK route.
+
+    Returns:
+        ``byok`` for a BYOK config; else ``managed``, which is how every other
+        composer turn (subscription turns included) was metered before.
+    """
+    if model_config is not None and model_config.token_source == TOKEN_SOURCE_BYOK:
+        return TOKEN_SOURCE_BYOK
+    return TOKEN_SOURCE_MANAGED
+
+
 def _refuse_local_managed() -> None:
     """Refuse a managed model in local mode.
 
     Catalog ids and the catalog, interview and server defaults all run on
     managed OpenRouter, and the Mac app has no managed key, so a turn sent
-    there fails with a 401. The composers have no BYOK route.
+    there fails with a 401. A saved OpenRouter key takes the BYOK route
+    instead (see :func:`route_local_byok_model`).
 
     Raises:
         DomainError: 422 ``models.managed_unavailable_local`` in local mode.

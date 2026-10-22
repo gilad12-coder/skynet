@@ -1,9 +1,10 @@
 """The per-user agent engine: which engine runs an agent turn that picks no model.
 
 Hosted mode always runs on OpenRouter, so it never reads the stored setting.
-Local mode runs agent turns on a subscription CLI: the one the user chose, or
-else the first CLI that is ready on this machine. A CLI engine never falls back
-to OpenRouter.
+Local mode runs agent turns on the engine the user chose: a subscription CLI,
+or OpenRouter with the user's verified key. With no choice, it runs them on the
+first CLI that is ready on this machine. A CLI engine never falls back to
+OpenRouter.
 """
 
 from __future__ import annotations
@@ -104,8 +105,9 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
 
     Returns:
         ``model`` unchanged when it names a model, in hosted mode, or when the
-        engine is OpenRouter or unknown (the model router then refuses the turn
-        in local mode). Otherwise ``subscription/<cli>/<slug>`` on the engine
+        engine is OpenRouter or unknown (in local mode the model router then
+        runs the turn on the caller's verified OpenRouter key, or refuses it).
+        Otherwise ``subscription/<cli>/<slug>`` on the engine
         CLI's first catalog model.
     """
     name = str(model or "").strip()

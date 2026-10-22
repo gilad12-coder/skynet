@@ -53,6 +53,7 @@ from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id, catalog_snapshot
 from ...brand import APP_NAME
 from ...config import settings
+from ...constants import TOKEN_SOURCE_BYOK
 from ...exceptions import ServiceError
 from ...models import ModelConfig
 from ...storage.models import AgentApprovalModel
@@ -3064,9 +3065,12 @@ async def run_generalist_agent(
     model_name = model_config.name if model_config else agent_model_id(settings.generalist_agent_model)
     try:
         if model_config:
-            override = model_config.model_copy(
-                update={"base_url": model_config.base_url or settings.generalist_agent_base_url or None}
+            # A BYOK config must reach its own provider: the agent's base URL
+            # names the managed gateway, which would receive the user's key.
+            default_base = (
+                None if model_config.token_source == TOKEN_SOURCE_BYOK else settings.generalist_agent_base_url
             )
+            override = model_config.model_copy(update={"base_url": model_config.base_url or default_base or None})
             override = apply_model_reasoning_config(override)
             _apply_interactive_timeout(override)
             lm = build_language_model(override, disable_cache=True)
