@@ -64,7 +64,7 @@ caio==0.9.25
     # via aiofile
 cbor2==5.9.0
     # via webauthn
-certifi==2026.2.25
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
