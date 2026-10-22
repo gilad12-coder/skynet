@@ -6,11 +6,11 @@ import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/fea
 import {
   SubscriptionSourcePicker,
   byokHintKey,
-  cliState,
   findCli,
+  firstReadyCli,
+  isCliProvider,
   subscriptionCatalogModels,
   useLocalStatus,
-  type LocalStatus,
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
@@ -103,11 +103,6 @@ function initialDraft(config: ModelConfig, local: boolean, byokOnly = false): Mo
     : draft;
 }
 
-/** The first CLI that can run models right now, as the subscription source's preselection. */
-function firstReadyCli(status: LocalStatus | null) {
-  return status?.clis.find((cli) => cliState(cli).kind === "ok" && cli.models.length > 0)?.id;
-}
-
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, cli_provider: cliProvider, ...rest } = config;
   const {
@@ -121,7 +116,10 @@ function withoutInlineConnection(config: ModelConfig): ModelConfig {
     ...rest,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? rest.byok_provider : undefined,
-    ...(tokenSource === "subscription" ? { cli_provider: cliProvider ?? null } : {}),
+    // A saved CLI the app no longer offers opens unchosen, so a ready one is preselected.
+    ...(tokenSource === "subscription"
+      ? { cli_provider: isCliProvider(cliProvider) ? cliProvider : null }
+      : {}),
     extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
   };
 }

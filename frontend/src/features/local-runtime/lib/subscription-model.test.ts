@@ -10,6 +10,8 @@ const {
   usageCostNoteKey,
   cliState,
   defaultAgentCli,
+  findCli,
+  firstReadyCli,
   hostCliPatch,
   isCliProvider,
   isLocalModelRefusal,
@@ -21,6 +23,7 @@ const {
   subscriptionMenuModels,
   subscriptionModelConfig,
   subscriptionModelId,
+  withSupportedHostCli,
 } = await import("./subscription-model.ts");
 
 type Status = Parameters<typeof subscriptionAgentModel>[2] & object;
@@ -445,4 +448,28 @@ test("the local English texts name no fee and no Skynet charge", () => {
     assert.ok(en[key], key);
     assert.doesNotMatch(en[key], /platform fee|term\.appName|Skynet/, key);
   }
+});
+
+test("the model dialog never finds or preselects a CLI the app does not offer", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  const droid = { ...cli(), id: "droid" } as unknown as Cli;
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  assert.equal(findCli(status([droid]), "droid" as never), undefined);
+  assert.equal(findCli(status([droid, codex]), "codex"), codex);
+  assert.equal(firstReadyCli(status([droid]), now), undefined);
+  assert.equal(firstReadyCli(status([droid, codex]), now), "codex");
+  assert.equal(firstReadyCli(status([cli({ models: [] }), codex]), now), "codex");
+  assert.equal(firstReadyCli(null, now), undefined);
+});
+
+test("a proposer with a CLI the app does not offer sends no host CLI", () => {
+  const stale = { harness: "codex", host_cli: "droid", host_permission: "full_access" } as const;
+  assert.deepEqual(withSupportedHostCli(stale as never), { harness: "codex" });
+  const kept = { harness: "codex", host_cli: "claude", host_permission: "workspace_only" } as const;
+  assert.equal(withSupportedHostCli(kept), kept);
+  const off = { harness: "codex" };
+  assert.equal(withSupportedHostCli(off), off);
+  assert.deepEqual(withSupportedHostCli({ harness: "codex", host_cli: null }), {
+    harness: "codex",
+  });
 });
