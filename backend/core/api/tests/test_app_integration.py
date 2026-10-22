@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ...config import settings as app_settings
+from ...exceptions import AppError
 from ...models.constants import HEALTH_STATUS_OK
 from ...registry.core import ServiceRegistry
 from ..app import _SCALAR_PUBLIC_PATHS, create_app
@@ -174,6 +175,25 @@ def test_health_reports_deployed_commit(app_client, monkeypatch):
 
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA")
     assert client.get("/health").json()["commit"] is None
+
+
+def test_coded_error_type_uri_uses_owned_api_domain(app_client):
+    """A coded problem response points its ``type`` URI at the owned API domain, never skynet.app."""
+    client, _, _ = app_client
+
+    async def _raise_coded_error() -> None:
+        """Raise a coded ``AppError`` so the real handler renders it.
+
+        Raises:
+            AppError: Always, with an i18n ``code``.
+        """
+        raise AppError("Not found", status_code=404, error_code="NOT_FOUND", code="optimization.not_found")
+
+    client.app.add_api_route("/__problem_type_probe", _raise_coded_error)
+
+    body = client.get("/__problem_type_probe").json()
+
+    assert body["type"] == "https://api.skynetml.com/errors/optimization.not_found"
 
 
 def test_health_stale_worker_returns_503(app_client):
