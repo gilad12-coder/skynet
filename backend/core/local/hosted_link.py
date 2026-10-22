@@ -512,17 +512,23 @@ def unlink(engine: Engine, username: str) -> bool:
         Whether hosted confirmed the revoke. ``False`` means the link stays on
         the account until the user removes it on the website or it idles out.
     """
-    secret = ConnectorVault(engine).resolve(username, PROVIDER)
-    revoked = True
-    if secret is not None:
-        try:
-            with _client() as client:
-                response = client.post(
-                    "/desktop/link/revoke", json={"token": secret.refresh_token or secret.access_token}
-                )
-            revoked = response.status_code == 200
-        except (httpx.HTTPError, DomainError):
-            revoked = False
-    clear_link(engine, username)
+    # The refresh locks keep a refresh in flight from saving a new pair after
+    # the clear, which would show the Mac as linked again. The revoke call is
+    # bounded by ``_TIMEOUT``, so a slow hosted holds the locks only that long.
+    with _REFRESH_LOCK, engine.connect() as conn, conn.begin():
+        if engine.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _REFRESH_LOCK_KEY})
+        secret = ConnectorVault(engine).resolve(username, PROVIDER)
+        revoked = True
+        if secret is not None:
+            try:
+                with _client() as client:
+                    response = client.post(
+                        "/desktop/link/revoke", json={"token": secret.refresh_token or secret.access_token}
+                    )
+                revoked = response.status_code == 200
+            except (httpx.HTTPError, DomainError):
+                revoked = False
+        clear_link(engine, username)
     logger.info("Unlinked the Mac app (hosted revoke confirmed: %s)", revoked)
     return revoked

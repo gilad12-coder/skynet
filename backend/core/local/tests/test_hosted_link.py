@@ -381,6 +381,62 @@ def test_unlink_offline_still_deletes_local_data(engine: Engine, hosted: FakeHos
     assert hosted_link.link_status(engine, _USER) is None
 
 
+def test_unlink_waits_for_a_refresh_in_flight(
+    tmp_path: Path, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unlink during a refresh leaves no link behind when the refresh ends.
+
+    Args:
+        tmp_path: Folder for a file database that two threads can share.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to slow the refresh answer.
+    """
+    file_engine = create_engine(f"sqlite:///{tmp_path / 'local.db'}")
+    UserConnectorModel.__table__.create(file_engine)
+    hosted.access_ttl = 120
+    _link(file_engine, hosted)
+    refresh_sent = threading.Event()
+    unlink_done = threading.Event()
+    post_refresh = hosted_link._post_refresh
+
+    def slow_answer(refresh_token: str) -> httpx.Response:
+        """Let hosted rotate the pair, then hold the answer while unlink runs.
+
+        Args:
+            refresh_token: The stored refresh token.
+
+        Returns:
+            The hosted response.
+        """
+        response = post_refresh(refresh_token)
+        refresh_sent.set()
+        unlink_done.wait(0.5)
+        return response
+
+    monkeypatch.setattr(hosted_link, "_post_refresh", slow_answer)
+
+    def run_unlink() -> bool:
+        """Unlink once the refresh is in flight.
+
+        Returns:
+            Whether hosted confirmed the revoke.
+        """
+        refresh_sent.wait(5)
+        try:
+            return hosted_link.unlink(file_engine, _USER)
+        finally:
+            unlink_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        refresh = pool.submit(hosted_link.access_token, file_engine, _USER)
+        unlinked = pool.submit(run_unlink)
+        refresh.result(timeout=10)
+        assert unlinked.result(timeout=10) is True
+
+    assert hosted_link.link_status(file_engine, _USER) is None
+    assert hosted.revoked
+
+
 def test_expiry_is_saved(engine: Engine, hosted: FakeHosted) -> None:
     """The saved expiry follows ``expires_in``.
 
