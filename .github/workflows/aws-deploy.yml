@@ -1,0 +1,61 @@
+# Builds the arm64 images and deploys one commit to AWS ECS (SKY-162).
+# Manual only (workflow_dispatch) until the AWS stack is live and approved.
+# Blocked today: the account SCP denies the OIDC provider (iam:*Provider*), so
+# global/enable_github_oidc stays false and vars.AWS_DEPLOY_ROLE_ARN is unset.
+# Auth: GitHub OIDC -> role skynet-github-deploy (infra/aws/global). No static
+# AWS keys. The role trusts only the GitHub environments aws-staging and
+# aws-production; add required reviewers to aws-production.
+#
+# Configuration (Settings > Secrets and variables > Actions):
+#   vars.AWS_DEPLOY_ROLE_ARN                     output github_deploy_role_arn
+#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
+#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional, per environment)
+#   secrets.SENTRY_AUTH_TOKEN                    (optional, per environment)
+name: aws deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+concurrency:
+  group: aws-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    # Native arm64 runner: the images run on Graviton Fargate tasks.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    environment: aws-${{ inputs.environment }}
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push images
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: infra/aws/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+
+      - name: Migrate and deploy
+        run: infra/aws/scripts/deploy.sh "${{ inputs.environment }}" "$GITHUB_SHA"
