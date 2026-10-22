@@ -26,6 +26,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from scripts import agent_driver
+
 from ...config import settings
 from ...storage.models import ApiTokenModel, Base, UserModel
 from ..errors import DomainError
@@ -265,3 +267,47 @@ def test_api_token_made_after_a_new_sign_up_works(harness: SimpleNamespace) -> N
     pat = harness.client.post("/settings/api-token", headers=_bearer(_session_jwt())).json()["token"]
 
     assert _call(harness.client, "GET", "/account/model-privacy", pat).status_code == 200
+
+
+def test_agent_driver_normalizes_a_mixed_case_user(harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``agent_driver`` seeds and signs the same normalized email the backend looks up.
+
+    ``get_authenticated_user`` strips and lowercases the JWT identity before
+    it checks the ``users`` row. A padded or mixed-case ``--user`` must not get
+    401 ``auth.account_not_found`` on every driven turn.
+    """
+    seen: list[str] = []
+
+    def _seed(name: str) -> None:
+        """Insert the ``users`` row into the harness database, like ``ensure_account``.
+
+        Args:
+            name: The email the driver seeds.
+        """
+        seen.append(name)
+        with Session(harness.engine) as session:
+            session.add(UserModel(email=name, name=name, password_hash=""))
+            session.commit()
+
+    def _turn(*, token: str, **_: Any) -> dict[str, Any]:
+        """Send the driver's token to a real authenticated route.
+
+        Args:
+            token: The session JWT the driver minted.
+            **_: The other ``drive_turn`` arguments, unused.
+
+        Returns:
+            A ``drive_turn``-shaped result whose events hold the HTTP status.
+        """
+        response = _call(harness.client, "GET", "/account/model-privacy", token)
+        return {"conversation_id": None, "assistant_message": "", "event_types": [str(response.status_code)]}
+
+    monkeypatch.setattr(agent_driver, "ensure_account", _seed)
+    monkeypatch.setattr(agent_driver, "drive_turn", _turn)
+    monkeypatch.setattr(agent_driver, "_latest_wizard_state_after", lambda _cid: {})
+    monkeypatch.setattr(agent_driver, "_conversation_tools", lambda _cid: [])
+
+    summary = agent_driver.drive_conversation(["hi"], user="  Sampler1@Skynet.Local ")
+
+    assert seen == ["sampler1@skynet.local"]
+    assert summary["turns"][0]["events"] == ["200"]

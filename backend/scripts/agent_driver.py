@@ -242,6 +242,9 @@ def drive_conversation(
     Returns:
         ``{conversation_id, turns, tools_recorded}`` summarising the run.
     """
+    # get_authenticated_user strips and lowercases the JWT identity before the
+    # users lookup, so the seeded row and the token must use the same form.
+    user = user.strip().lower()
     ensure_account(user)
     token = mint_token(user)
     conv_id: str | None = None
