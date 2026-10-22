@@ -181,11 +181,14 @@ export function AgentEngineSelect({
         label={msg("settings.agent_engine.label")}
         description={msg(description)}
       >
+        {/* The select holds the stored engine, not the shown one: Radix fires no
+            change for the value it holds, so with the key gone a choice of the
+            shown CLI still saves it. The trigger names the shown engine. */}
         <Select
-          value={shown}
+          value={value}
           disabled={saving}
           onValueChange={(next) => {
-            if (isAgentEngine(next) && next !== shown) onChange(next);
+            if (isAgentEngine(next) && next !== value) onChange(next);
           }}
         >
           <SelectTrigger

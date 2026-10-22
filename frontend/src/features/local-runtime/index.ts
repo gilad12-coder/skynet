@@ -19,6 +19,7 @@ export {
   LOCAL_KEY_PROVIDER,
   MENU_GROUP_LABELS,
   menuModelGroup,
+  hiddenLocalPick,
   roleCli,
   OPENROUTER_ENGINE,
   type AgentEngine,

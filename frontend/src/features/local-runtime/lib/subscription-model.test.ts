@@ -26,6 +26,7 @@ const {
   LOCAL_MODEL_REFUSED_CODE,
   MENU_GROUP_LABELS,
   menuModelGroup,
+  hiddenLocalPick,
   roleCli,
   menuKeyVerified,
   requestKeyRows,
@@ -1052,6 +1053,28 @@ test("the OpenRouter engine menu lists only the key's models, with no Local grou
     localMenuModels(cliRows, keyRows, "subscription/codex/openai/gpt-5", true),
     keyRows,
   );
+});
+
+test("the OpenRouter engine menu keeps a saved Local pick for a CLI engine", () => {
+  const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
+  const cliRows = subscriptionMenuModels(findCli(loaded, "codex"), []);
+  const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  const localPick = "subscription/codex/openai/gpt-5";
+  // The OpenRouter engine menu has no Local rows, so it hides the pick and
+  // does not clear it.
+  assert.equal(
+    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, true)),
+    true,
+  );
+  // A CLI engine menu lists Local rows, so an unlisted Local pick is stale as before.
+  assert.equal(
+    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, false)),
+    false,
+  );
+  // A key pick is never hidden; the hosted menu (no given list) is unchanged.
+  assert.equal(hiddenLocalPick("openrouter/openai/gpt-5", keyRows), false);
+  assert.equal(hiddenLocalPick(localPick, undefined), false);
+  assert.equal(hiddenLocalPick(null, keyRows), false);
 });
 
 test("a stored OpenRouter engine with no verified key runs agents on the default CLI", () => {

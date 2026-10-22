@@ -15,6 +15,7 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 (globalThis as { React?: typeof React }).React = React;
 const { AgentEngineSelect, EngineChoice } = await import("./AgentEngineSetting");
 const { AgentRoleRow } = await import("./AgentLocalRunSetting");
+const { Select } = await import("@/shared/ui/primitives/select");
 const {
   agentEngineOptions,
   loadAgentEngine,
@@ -355,6 +356,37 @@ void describe("OpenRouter engine (SKY-123 AC3)", () => {
     assert.match(gone, /settings\.agent_engine\.description_local</);
     assert.match(gone, /role="status"/);
     assert.match(gone, /settings\.agent_engine\.openrouter_fallback/);
+  });
+
+  void it("with the key gone, choosing the shown CLI stores it", () => {
+    setClientLocale("en");
+    const saved: AgentEngine[] = [];
+    const tree = AgentEngineSelect({
+      local: true,
+      status: s,
+      value: "openrouter",
+      keyVerified: false,
+      saving: false,
+      onChange: (engine) => saved.push(engine),
+    });
+    const find = (node: React.ReactNode): React.ReactElement | null => {
+      if (!React.isValidElement(node)) return null;
+      if (node.type === Select) return node;
+      const { children } = node.props as { children?: React.ReactNode };
+      for (const child of React.Children.toArray(children)) {
+        const hit = find(child);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const select = find(tree)!.props as {
+      value: string;
+      onValueChange: (next: string) => void;
+    };
+    // Radix fires onValueChange only for a value other than the one it holds.
+    assert.notEqual(select.value, "codex");
+    select.onValueChange("codex");
+    assert.deepEqual(saved, ["codex"]);
   });
 
   void it("an agent role on the OpenRouter engine shows OpenRouter and no CLI choice", () => {

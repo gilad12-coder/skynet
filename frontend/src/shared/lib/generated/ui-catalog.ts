@@ -6747,7 +6747,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "settings.agent_engine.openrouter_fallback": "אין מפתח OpenRouter שמור ומאומת, ולכן הסוכנים רצים על {cli}",
   "settings.agent_engine.openrouter_local": "נדרש מפתח OpenRouter שמור ומאומת",
   "settings.agent_local.desc": "הרצת כל סוכן דרך CLI של סוכן קוד שמחובר במחשב הזה. המינוי שלכם משלם על הקריאות.",
-  "settings.agent_local.desc_openrouter": "כל הסוכנים רצים על מפתח ה-OpenRouter שלך. כדי לבחור CLI לכל סוכן, בחר Codex או Claude Code כמנוע הסוכנים.",
+  "settings.agent_local.desc_openrouter": "כל הסוכנים רצים על מפתח ה-OpenRouter שלכם. כדי לבחור CLI לכל סוכן, בחרו Codex או Claude Code כמנוע הסוכנים.",
   "settings.agent_local.role.code": "סוכן הקוד",
   "settings.agent_local.role.generalist": "העוזר",
   "settings.agent_local.role.interview": "ראיון המשימה",
