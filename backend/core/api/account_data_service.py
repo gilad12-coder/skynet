@@ -450,6 +450,9 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     Returns:
         Counts of hard-deleted and anonymized rows.
     """
+    # Authorize and the code exchange lock this row before they write, so
+    # they wait for the deletion and then find no account (R782E-1).
+    session.execute(select(UserModel.email).where(UserModel.email == username).with_for_update())
     deleted = 0
     anonymized = 0
 
@@ -527,10 +530,10 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
-    # Codes, then links, then tokens. The code delete waits for an exchange
-    # that holds its code lock, so the later link delete sees the link that
-    # exchange made (R782D-1). Links before tokens: a desktop refresh locks
-    # the link, then the token, and the opposite order deadlocks (R782C-1).
+    # Codes, then links, then tokens. An exchange that got the user lock
+    # first commits before this runs, so the link delete sees its link
+    # (R782D-1). Links before tokens: a desktop refresh locks the link, then
+    # the token, and the opposite order deadlocks (R782C-1).
     _run_delete(delete(DesktopLinkCodeModel).where(DesktopLinkCodeModel.username == username))
     desktop_link_ids = list(
         session.scalars(

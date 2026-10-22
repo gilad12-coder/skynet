@@ -430,7 +430,16 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         _limit(f"desktop-link-code:{_client_address(request)}", limit=30, window_seconds=60)
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
-            code = session.get(DesktopLinkCodeModel, hash_api_token(body.code), with_for_update=True)
+            code = session.get(DesktopLinkCodeModel, hash_api_token(body.code))
+            if code is None:
+                raise DomainError("desktop.invalid_grant", status=400)
+            # User row, then code: the account deletion takes the user lock
+            # first, so the opposite order deadlocks. After a deletion this
+            # finds no user and the re-read finds no code (R782E-1).
+            owner = session.get(UserModel, code.username, with_for_update=True)
+            code = session.get(
+                DesktopLinkCodeModel, hash_api_token(body.code), with_for_update=True, populate_existing=True
+            )
             if code is None:
                 raise DomainError("desktop.invalid_grant", status=400)
             if code.used_at is not None:
@@ -449,8 +458,8 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             if not matches or as_utc(code.expires_at) <= now:
                 session.commit()
                 raise DomainError("desktop.invalid_grant", status=400)
-            # Authorize can add a code during a deletion, after its code delete.
-            if session.get(UserModel, code.username) is None:
+            # An orphan code, such as one left by an older release, never links.
+            if owner is None:
                 session.commit()
                 raise DomainError("auth.invalid_token", status=401)
             if _live_link_count(session, code.username, now) >= MAX_LIVE_LINKS:
@@ -575,8 +584,9 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         now = datetime.now(UTC)
         code = secrets.token_urlsafe(32)
         with Session(job_store.engine) as session:
-            # A session JWT outlives an account deletion until it expires.
-            if session.get(UserModel, user.username) is None:
+            # A session JWT outlives an account deletion until it expires. The
+            # lock waits for an open deletion, so no code outlives it (R782E-1).
+            if session.get(UserModel, user.username, with_for_update=True) is None:
                 raise DomainError("auth.invalid_token", status=401)
             if _live_link_count(session, user.username, now) >= MAX_LIVE_LINKS:
                 raise DomainError("desktop.too_many_links", status=409, limit=MAX_LIVE_LINKS)

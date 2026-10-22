@@ -1,4 +1,4 @@
-"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1, R782C-1, R782D-1).
+"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1, R782C-1, R782D-1, R782E-1).
 
 SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
 COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
@@ -501,3 +501,193 @@ def test_code_exchange_during_account_deletion_leaves_no_link(
     else:
         # The deletion removed the code first, so the exchange finds none.
         assert exchange.status_code == 400
+
+
+def _authorize(client: TestClient) -> tuple[Any, str]:
+    """Ask the browser to approve a Mac link.
+
+    Args:
+        client: Test client.
+
+    Returns:
+        The authorize response and the PKCE verifier for its code.
+    """
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    response = client.post(
+        "/desktop/link/authorize",
+        json={
+            "redirect_uri": REDIRECT,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "scope": "identity",
+            "device_name": "Mac",
+        },
+    )
+    return response, verifier
+
+
+@pytest.mark.parametrize("code_kind", ["fresh", "pre-approved"])
+@pytest.mark.parametrize(
+    "held_statement",
+    ["DELETE FROM DESKTOP_LINK_CODES", "DELETE FROM DESKTOP_LINKS", "DELETE FROM DESKTOP_TOKENS", "DELETE FROM USERS"],
+)
+def test_link_approval_during_account_deletion_leaves_no_link(
+    full_database: Engine, monkeypatch: pytest.MonkeyPatch, held_statement: str, code_kind: str
+) -> None:
+    """A Mac linked while the account deletion is open gets no live link (R782E-1).
+
+    The deletion holds its transaction open after the chosen statement. During
+    the hold, the browser approves a Mac (``fresh``) or a Mac exchanges a code
+    approved before the deletion (``pre-approved``). When authorize and the
+    exchange read the user row without a lock, they saw the uncommitted
+    deletion's user row, so a code made after the code delete became a link
+    that outlived the account.
+    """
+    monkeypatch.setattr(desktop_link, "_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(desktop_link, "_send_notice", lambda *args: None)
+    client = _client(full_database)
+    _link_pair(client)
+    approved_code, approved_verifier = _approve(client) if code_kind == "pre-approved" else ("", "")
+
+    deletion_thread_name = "account-deletion"
+    deletion_holds = threading.Event()
+
+    def hold_deletion(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        """Hold the deletion transaction open after the chosen statement.
+
+        Args:
+            conn: Connection that ran the statement.
+            cursor: DBAPI cursor.
+            statement: SQL text.
+            args: Unused event arguments.
+        """
+        if (
+            threading.current_thread().name == deletion_thread_name
+            and not deletion_holds.is_set()
+            and statement.lstrip().upper().startswith(held_statement)
+        ):
+            deletion_holds.set()
+            time.sleep(DELETION_HOLD_SECONDS)
+
+    event.listen(full_database, "after_cursor_execute", hold_deletion)
+    results: dict[str, Any] = {}
+
+    def deletion() -> None:
+        """Delete the account in one transaction, like the account router."""
+        try:
+            with Session(full_database) as session:
+                delete_account(session, "alice@example.test")
+                session.commit()
+            results["deletion"] = "ok"
+        except Exception as exc:  # A lock error is the observed result.
+            results["deletion"] = type(exc).__name__
+
+    def mac() -> None:
+        """Approve and exchange, or exchange the earlier code, during the hold."""
+        if not deletion_holds.wait(timeout=5):
+            results["mac"] = "no-hold"
+            return
+        code, verifier = approved_code, approved_verifier
+        if code_kind == "fresh":
+            authorize, verifier = _authorize(client)
+            results["authorize"] = authorize.status_code
+            if authorize.status_code != 200:
+                return
+            code = authorize.json()["code"]
+        results["exchange"] = _exchange(client, code, verifier)
+
+    threads = [
+        threading.Thread(target=deletion, name=deletion_thread_name),
+        threading.Thread(target=mac, name="mac"),
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+    finally:
+        event.remove(full_database, "after_cursor_execute", hold_deletion)
+
+    assert results["deletion"] == "ok"
+    assert results.get("mac") != "no-hold"
+    exchange = results.get("exchange")
+    if exchange is not None and exchange.status_code == 200:
+        whoami = client.get(
+            "/desktop/v1/whoami", headers={"Authorization": f"Bearer {exchange.json()['access_token']}"}
+        )
+        assert whoami.status_code == 401
+    with Session(full_database) as session:
+        assert session.query(UserModel).count() == 0
+        assert session.query(DesktopLinkModel).count() == 0
+        assert session.query(DesktopTokenModel).count() == 0
+        assert session.query(DesktopLinkCodeModel).count() == 0
+    if code_kind == "fresh":
+        # Authorize waits for the deletion, then finds no account.
+        assert results["authorize"] == 401
+    else:
+        assert exchange.status_code in (400, 401)
+
+
+def test_account_deletion_during_an_authorize_removes_the_new_code(
+    full_database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion that starts inside an open authorize removes that code (R782E-1).
+
+    Authorize holds its transaction open after it locks the user row. The
+    deletion starts during that hold and must wait, so its code delete sees
+    the code that authorize commits.
+    """
+    monkeypatch.setattr(desktop_link, "_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(desktop_link, "_send_notice", lambda *args: None)
+    client = _client(full_database)
+    authorize_holds = threading.Event()
+    live_link_count = desktop_link._live_link_count
+
+    def hold_authorize(session: Session, username: str, now: Any) -> int:
+        """Hold the authorize transaction open after its account check.
+
+        Args:
+            session: Authorize session.
+            username: Signed-in user.
+            now: Current UTC time.
+
+        Returns:
+            The real live link count.
+        """
+        if not authorize_holds.is_set():
+            authorize_holds.set()
+            time.sleep(MAC_HOLD_SECONDS)
+        return live_link_count(session, username, now)
+
+    monkeypatch.setattr(desktop_link, "_live_link_count", hold_authorize)
+    results: dict[str, Any] = {}
+
+    def browser() -> None:
+        """Approve a Mac link."""
+        authorize, verifier = _authorize(client)
+        results["authorize"] = authorize
+        results["verifier"] = verifier
+
+    def deletion() -> None:
+        """Delete the account once authorize holds its transaction open."""
+        if not authorize_holds.wait(timeout=5):
+            results["deletion"] = "no-hold"
+            return
+        with Session(full_database) as session:
+            delete_account(session, "alice@example.test")
+            session.commit()
+        results["deletion"] = "ok"
+
+    threads = [threading.Thread(target=browser), threading.Thread(target=deletion)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert results["deletion"] == "ok"
+    assert results["authorize"].status_code == 200
+    with Session(full_database) as session:
+        assert session.query(DesktopLinkCodeModel).count() == 0
+    exchange = _exchange(client, results["authorize"].json()["code"], results["verifier"])
+    assert exchange.status_code == 400
