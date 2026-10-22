@@ -53,13 +53,13 @@ variable "image_tag" {
 }
 
 variable "enable_https" {
-  description = "Create the HTTPS listener. Set true after ACM shows the certificate as ISSUED."
+  description = "Create the HTTPS listener. Set true in terraform.tfvars after ACM shows the certificate as ISSUED, and keep it true."
   type        = bool
   default     = false
 }
 
 variable "services_enabled" {
-  description = "Create the ECS services (second apply, after secrets, litellm database and migration)."
+  description = "Create the ECS services. Set true in terraform.tfvars for the second apply (after secrets, litellm database and migration), and keep it true."
   type        = bool
   default     = false
 }

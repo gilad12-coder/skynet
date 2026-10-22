@@ -120,6 +120,9 @@ jobs:
       # the job log, which only repository members can read.
       # shell: bash adds -o pipefail, so a failed plan fails the job even
       # though its output goes through tee.
+      # destroys.txt lists ECS services and HTTPS listeners that a plan would
+      # delete (for example a go-live switch set back to false in
+      # terraform.tfvars); the "go-live guard" step fails the job on it.
       - name: plan
         if: steps.gate.outputs.run == 'true'
         shell: bash
@@ -135,11 +138,22 @@ jobs:
             if [ "$root" = global ]; then
               args+=(-out="$RUNNER_TEMP/global.tfplan")
             else
-              args+=(-var "image_tag=$IMAGE_TAG")
+              args+=(-var "image_tag=$IMAGE_TAG" -out="$RUNNER_TEMP/env.tfplan")
             fi
             terraform -chdir="$dir" plan "${args[@]}" | tee "$RUNNER_TEMP/plan.txt"
             line="$(grep -E '^(Plan:|No changes\.)' "$RUNNER_TEMP/plan.txt" | head -1 || true)"
             echo "- \`$root\`: ${line:-no summary line}" >>"$summary"
+            if [ "$root" != global ]; then
+              gone="$(terraform -chdir="$dir" show -json "$RUNNER_TEMP/env.tfplan" | jq -r '
+                .resource_changes[]?
+                | select(.type == "aws_ecs_service" or (.type == "aws_lb_listener" and .name == "https"))
+                | select(.change.actions == ["delete"])
+                | .address')"
+              if [ -n "$gone" ]; then
+                printf '%s\n' "$gone" | sed "s|^|$root: |" >>"$RUNNER_TEMP/destroys.txt"
+                echo "  - **Destroys live services or HTTPS:** $(echo "$gone" | paste -sd, -)" >>"$summary"
+              fi
+            fi
           done
           cat "$summary" >>"$GITHUB_STEP_SUMMARY"
 
@@ -156,3 +170,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/plan-summary.md"
+
+      - name: go-live guard
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          if [ -s "$RUNNER_TEMP/destroys.txt" ]; then
+            echo "::error::The plan destroys ECS services or the HTTPS listener. Keep services_enabled and enable_https true in terraform.tfvars."
+            cat "$RUNNER_TEMP/destroys.txt"
+            exit 1
+          fi

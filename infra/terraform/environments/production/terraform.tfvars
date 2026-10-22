@@ -10,6 +10,13 @@
 # service for 1-3 minutes until ECS starts a replacement. Deploys stay
 # zero-downtime (the new task starts before the old one stops).
 
+# Go-live switches. Pass 1 needs both false: secrets, database and an ISSUED
+# certificate do not exist yet. Step 8 of the README sets both to true here
+# and merges that change, so every later plan and apply keeps the services
+# and HTTPS. Setting either one back to false destroys them.
+services_enabled = false
+enable_https     = false
+
 egress_mode = "nat_single"
 
 db_instance_class = "db.t4g.small"

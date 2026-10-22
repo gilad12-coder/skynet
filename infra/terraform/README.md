@@ -89,6 +89,10 @@ holds the **full** variant. To scale up, add `-var-file=full.tfvars` to every
 `plan` and `apply`, or copy single values into `terraform.tfvars`. No `.tf`
 file changes.
 
+`terraform.tfvars` also holds the go-live switches `services_enabled` and
+`enable_https`. They are `false` for pass 1 and stay `true` after step 8 of
+"First apply". `full.tfvars` does not set them, so both variants keep them.
+
 | Variable | Staging lean | Staging full | Production lean | Production full |
 |----------|--------------|--------------|-----------------|-----------------|
 | `egress_mode` | `public_ip` (no NAT) | `nat_single` | `nat_single` | `nat_per_az` |
@@ -134,7 +138,8 @@ Scale-up order when traffic or risk grows: `desired_count = 2` for backend and
 frontend (about $28), then `nat_per_az` (about $37), then `db_multi_az = true`
 (about $26), then `cache_node_count = 2` (about $9).
 
-Changes apply in place. RDS class and Multi-AZ changes in production wait for
+Changes apply in place. The go-live switches in `terraform.tfvars` stay
+`true`, so a sizing apply keeps the services and HTTPS. RDS class and Multi-AZ changes in production wait for
 the Sunday maintenance window (`apply_immediately` is false there); add the
 change in the console with "apply immediately" if it cannot wait. A
 `spot` or `egress_mode` change starts a new deployment of the affected services.
@@ -222,7 +227,8 @@ SHA=$(git rev-parse HEAD)
 scripts/build-push.sh staging "$SHA"
 
 # 4. Environment, pass 1: network, ALB (HTTP only), RDS, Valkey, secrets,
-#    task definitions. No ECS services yet (services_enabled=false).
+#    task definitions. No ECS services yet: terraform.tfvars has
+#    services_enabled = false and enable_https = false.
 terraform -chdir=environments/staging init -backend-config="bucket=$BUCKET"
 #    terraform.tfvars (lean) loads automatically; add -var-file=full.tfvars
 #    to every apply for the full variant.
@@ -243,16 +249,22 @@ scripts/create-db-roles.sh staging
 scripts/deploy.sh staging "$SHA" --migrate-only
 
 # 8. Environment, pass 2: services on, HTTPS on (after ACM shows ISSUED).
+#    In environments/staging/terraform.tfvars, set services_enabled = true
+#    and enable_https = true. Apply, then merge that change through a PR.
+#    The switches must stay true: a later plan or apply that reads false
+#    destroys the 4 services, their scaling and alarms, and the HTTPS
+#    listener. The CI plan fails when a plan would destroy them.
 aws acm list-certificates --query 'CertificateSummaryList[].[DomainName,Status]' --output table
-terraform -chdir=environments/staging apply -var image_tag="$SHA" \
-  -var services_enabled=true -var enable_https=true
+terraform -chdir=environments/staging apply -var image_tag="$SHA"
 
 # 9. Check: ECS services stable, targets healthy, then the DNS cutover.
 ```
 
-For production, repeat steps 3 to 9 with `production`. Build the production
+For production, repeat steps 3 to 9 with `production` (step 8 edits
+`environments/production/terraform.tfvars`). Build the production
 frontend image separately: `scripts/build-push.sh production "$SHA"`.
-Optional: `-var alert_email=<address>` subscribes an email to the alarms.
+Optional: `alert_email = "<address>"` in `terraform.tfvars` subscribes an email
+to the alarms.
 
 ## Deploys after the first apply
 
@@ -324,6 +336,9 @@ builds the images that production also runs (ECR is shared), so keep the
 `infra/terraform`: `fmt -check`, `validate` for every root, tflint, checkov,
 then a read-only `plan -lock=false` of `global`, `staging` and `production`. It
 posts only the `Plan:` lines as a PR comment. It never applies. The plan job
+fails when an environment plan would destroy an ECS service or the HTTPS
+listener (for example a go-live switch set back to `false`); the comment names
+those resources. The plan job
 skips with a notice when the PR comes from a fork (no OIDC token) or when the
 two variables are not set.
 

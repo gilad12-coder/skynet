@@ -4,6 +4,13 @@
 # litellm 2.6 GB, frontend 0.3 GB. CPU stayed below 0.02 vCPU. One task per
 # service carries this load; Fargate Spot is acceptable for staging.
 
+# Go-live switches. Pass 1 needs both false: secrets, database and an ISSUED
+# certificate do not exist yet. Step 8 of the README sets both to true here
+# and merges that change, so every later plan and apply keeps the services
+# and HTTPS. Setting either one back to false destroys them.
+services_enabled = false
+enable_https     = false
+
 egress_mode = "public_ip"
 
 db_instance_class = "db.t4g.small"
