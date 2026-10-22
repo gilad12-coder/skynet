@@ -527,13 +527,20 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
-    desktop_link_ids = list(session.scalars(select(DesktopLinkModel.id).where(DesktopLinkModel.username == username)))
-    # Links before tokens: a desktop refresh locks the link, then the token.
-    # The opposite order here deadlocks against a concurrent refresh (R782C-1).
-    _run_delete(delete(DesktopLinkModel).where(DesktopLinkModel.username == username))
+    # Codes, then links, then tokens. The code delete waits for an exchange
+    # that holds its code lock, so the later link delete sees the link that
+    # exchange made (R782D-1). Links before tokens: a desktop refresh locks
+    # the link, then the token, and the opposite order deadlocks (R782C-1).
+    _run_delete(delete(DesktopLinkCodeModel).where(DesktopLinkCodeModel.username == username))
+    desktop_link_ids = list(
+        session.scalars(
+            delete(DesktopLinkModel).where(DesktopLinkModel.username == username).returning(DesktopLinkModel.id),
+            execution_options={"synchronize_session": False},
+        )
+    )
+    deleted += len(desktop_link_ids)
     if desktop_link_ids:
         _run_delete(delete(DesktopTokenModel).where(DesktopTokenModel.link_id.in_(desktop_link_ids)))
-    _run_delete(delete(DesktopLinkCodeModel).where(DesktopLinkCodeModel.username == username))
     _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))

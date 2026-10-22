@@ -32,7 +32,7 @@ from ...storage.models import (
 )
 from .. import desktop_auth
 from ..account_data_service import delete_account, export_account
-from ..auth import AuthenticatedUser, get_authenticated_user
+from ..auth import AuthenticatedUser, get_authenticated_user, hash_api_token
 from ..desktop_auth import DesktopPrincipal, get_desktop_principal
 from ..errors import DomainError
 from ..routers import desktop_link
@@ -892,6 +892,40 @@ def test_account_deletion_removes_desktop_links(harness: Any) -> None:
         assert session.scalars(select(DesktopTokenModel)).all() == []
         assert session.scalars(select(DesktopLinkCodeModel)).all() == []
     assert client.get("/desktop/v1/whoami", headers=_bearer(pair["access_token"])).status_code == 401
+
+
+def test_stale_session_after_account_deletion_cannot_link_a_mac(harness: Any) -> None:
+    """A session JWT that outlives the account can neither approve nor exchange a link."""
+    client, engine, _ = harness
+    with Session(engine) as session:
+        delete_account(session, "alice@example.test")
+        session.commit()
+    response, _ = _authorize(client)
+    assert response.status_code == 401
+    assert _code(response) == "auth.invalid_token"
+
+    verifier, challenge = _pkce()
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        session.add(
+            DesktopLinkCodeModel(
+                code_hash=hash_api_token("orphan-code"),
+                username="alice@example.test",
+                code_challenge=challenge,
+                redirect_uri=REDIRECT,
+                scopes="identity",
+                device_name="Mac",
+                created_at=now,
+                expires_at=now + timedelta(seconds=60),
+            )
+        )
+        session.commit()
+    exchange = _exchange(client, "orphan-code", verifier)
+    assert exchange.status_code == 401
+    assert _code(exchange) == "auth.invalid_token"
+    with Session(engine) as session:
+        assert session.scalars(select(DesktopLinkModel)).all() == []
+        assert session.get(DesktopLinkCodeModel, hash_api_token("orphan-code")).used_at is not None
 
 
 def test_account_export_lists_desktop_links_without_secrets(harness: Any) -> None:

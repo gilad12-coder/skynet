@@ -423,7 +423,8 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             The new token pair.
 
         Raises:
-            DomainError: 400 ``desktop.invalid_grant``, 409
+            DomainError: 400 ``desktop.invalid_grant``, 401
+                ``auth.invalid_token`` when the account is gone, 409
                 ``desktop.too_many_links``, or 429.
         """
         _limit(f"desktop-link-code:{_client_address(request)}", limit=30, window_seconds=60)
@@ -448,6 +449,10 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             if not matches or as_utc(code.expires_at) <= now:
                 session.commit()
                 raise DomainError("desktop.invalid_grant", status=400)
+            # Authorize can add a code during a deletion, after its code delete.
+            if session.get(UserModel, code.username) is None:
+                session.commit()
+                raise DomainError("auth.invalid_token", status=401)
             if _live_link_count(session, code.username, now) >= MAX_LIVE_LINKS:
                 session.commit()
                 raise DomainError("desktop.too_many_links", status=409, limit=MAX_LIVE_LINKS)
@@ -557,6 +562,7 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         Raises:
             DomainError: 403 ``desktop.session_required`` for a PAT caller,
                 400 ``desktop.invalid_redirect`` or ``desktop.invalid_scope``,
+                401 ``auth.invalid_token`` when the account is gone,
                 409 ``desktop.too_many_links``, or 429.
         """
         _require_session(request)
@@ -569,6 +575,9 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
         now = datetime.now(UTC)
         code = secrets.token_urlsafe(32)
         with Session(job_store.engine) as session:
+            # A session JWT outlives an account deletion until it expires.
+            if session.get(UserModel, user.username) is None:
+                raise DomainError("auth.invalid_token", status=401)
             if _live_link_count(session, user.username, now) >= MAX_LIVE_LINKS:
                 raise DomainError("desktop.too_many_links", status=409, limit=MAX_LIVE_LINKS)
             session.add(
