@@ -112,15 +112,20 @@ def claim_native(
         # SKIP LOCKED: a second window's claim, or a writer on one row, never waits on this one.
         # A stale row with an active lease is on screen now; it expires only if its confirm never comes.
         # The limit keeps each poll's work bounded; the next poll expires the rest.
+        # ``since`` is never earlier than ``created_at``, so this bound drops no stale row and keeps the index range.
         stale = session.scalars(
             select(NotificationModel)
-            .where(NotificationModel.username == username, stale_window, claimable)
+            .where(
+                NotificationModel.username == username, NotificationModel.created_at < cutoff, stale_window, claimable
+            )
             .order_by(NotificationModel.created_at)
             .limit(EXPIRE_BATCH)
             .with_for_update(skip_locked=True)
         )
         for row in stale:
             _mark(row, {"state": "expired", "at": now.isoformat()})
+        # No safe created_at bound here: a hold released late (the app was not running when it ended) gives an old row a
+        # fresh ``since``, so this query reads all of the user's rows through the username prefix of the index.
         rows = session.scalars(
             select(NotificationModel)
             .where(NotificationModel.username == username, open_window, claimable)

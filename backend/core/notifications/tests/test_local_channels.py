@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy import event as sa_event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -320,6 +321,37 @@ def test_claim_native_reaches_queued_rows_behind_many_handled_ones(engine, local
     newest = notify(_USER, "failed", "opt-new", title="New", now=_T0 + timedelta(minutes=1))
 
     assert [item.id for item in claim_native(engine, _USER, now=_T0 + timedelta(minutes=1))] == [newest]
+
+
+def test_claim_native_expiry_scan_reads_only_rows_older_than_the_window(engine, local_mode: None) -> None:
+    """The expiry query keeps a ``created_at`` range on the index, so it never reads the user's recent rows."""
+    notify(_USER, "finished", "opt-1", title="Ticket triage", now=_T0)
+    statements: list[tuple[str, tuple]] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany) -> None:
+        """Record each notifications SELECT the claim runs.
+
+        Args:
+            conn: The SQLAlchemy connection.
+            cursor: The DBAPI cursor.
+            statement: The SQL text.
+            parameters: The bound parameters.
+            context: The execution context.
+            executemany: Whether this is an executemany call.
+        """
+        if statement.lstrip().startswith("SELECT") and "FROM notifications" in statement:
+            statements.append((statement, parameters))
+
+    sa_event.listen(engine, "before_cursor_execute", capture)
+    try:
+        claim_native(engine, _USER, now=_T0)
+    finally:
+        sa_event.remove(engine, "before_cursor_execute", capture)
+
+    expiry = next(item for item in statements if item[1][-2] == EXPIRE_BATCH)
+    with engine.connect() as conn:
+        plan = " ".join(row[-1] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {expiry[0]}", expiry[1]))
+    assert "ix_notifications_username_created (username=? AND created_at<?)" in plan
 
 
 def test_claim_native_is_empty_in_hosted_mode(engine) -> None:
