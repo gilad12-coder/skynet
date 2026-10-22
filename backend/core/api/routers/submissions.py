@@ -109,6 +109,7 @@ from ...service_gateway.optimization.unified.split import split_cases, task_fing
 from ...storage.preflights import PreflightStore, setup_seed
 from ...storage.usage import json_byte_size
 from ...worker.engine import get_worker
+from ..agent_engine import fill_proposer_host_cli
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_billing import enforce_local_mode_sources, normalize_model_token_sources
@@ -1003,6 +1004,7 @@ def submit_unified_payload(
 
     _requested_source = payload.token_source
     _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+    fill_proposer_host_cli(job_store, payload.username, payload)
     enforce_local_mode_sources(payload, _requested_source, _model_configs)
     if not settings.local_mode:
         _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
@@ -1199,6 +1201,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         _requested_source = payload.token_source
         _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+        fill_proposer_host_cli(job_store, payload.username, payload)
         enforce_local_mode_sources(payload, _requested_source, _model_configs)
         if not settings.local_mode:
             _spendable = _enforce_balance(job_store, payload.username, payload.token_source)

@@ -54,6 +54,7 @@ from ..worker.repo_staging import (
 )
 from ..worker.unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from ..worker.vercel_dspy import run_vercel_dspy
+from .agent_engine import fill_proposer_host_cli
 from .model_billing import enforce_local_mode_sources, enforce_raw_local_mode_sources, normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
@@ -122,12 +123,13 @@ class WizardPreflightResponse(BaseModel):
     environment: dict[str, Any] | None = None
 
 
-def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
+def _canonical_execution_payload(request: WizardPreflightRequest, username: str, job_store: Any) -> dict[str, Any]:
     """Apply the submission schema before hashing complete execution inputs.
 
     Args:
         request: Full execution preflight request.
         username: Authenticated owner replacing any client-supplied identity.
+        job_store: Job store whose engine holds the caller's agent engine setting.
 
     Returns:
         The same canonical JSON shape the submission endpoint will attach.
@@ -139,6 +141,7 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
         typed = UnifiedRunRequest.model_validate(payload)
     requested_source = typed.token_source
     model_configs, _ = normalize_model_token_sources(typed)
+    fill_proposer_host_cli(job_store, username, typed)
     enforce_local_mode_sources(typed, requested_source, model_configs)
     return typed.model_dump(mode="json", by_alias=True)
 
@@ -464,7 +467,9 @@ def _run_preflight(
     evidence = PreflightStore(job_store.engine)
     # A unified check runs the full workspace contract, so its inputs are complete at every scope.
     if request.scope == "execution" or request.workflow == "unified":
-        request = request.model_copy(update={"payload": _canonical_execution_payload(request, user.username)})
+        request = request.model_copy(
+            update={"payload": _canonical_execution_payload(request, user.username, job_store)}
+        )
     if request.workflow == "unified" and request.contract_sample_count is not None:
         request = request.model_copy(
             update={"payload": {**request.payload, CONTRACT_SAMPLE_COUNT_KEY: request.contract_sample_count}}

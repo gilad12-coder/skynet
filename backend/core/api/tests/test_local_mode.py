@@ -17,8 +17,17 @@ from sqlalchemy.pool import StaticPool
 from ...billing.service import FREE_GRANT_CENTS, free_grant_cents
 from ...config import settings
 from ...local.cli_probe import clear_probe_cache
+from ...models.blackbox import BlackboxProposer
 from ...registry.core import ServiceRegistry
-from ...storage.models import BillingCustomerModel, ExecutionBudgetModel, UserIdentityModel, UserModel
+from ...storage.models import (
+    AgentEnginePreferenceModel,
+    BillingCustomerModel,
+    ExecutionBudgetModel,
+    UserIdentityModel,
+    UserModel,
+)
+from .. import agent_engine
+from ..agent_engine import fill_proposer_host_cli
 from ..app import create_app
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -29,6 +38,7 @@ from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
+from .test_agent_engine import _status
 from .test_submissions_router import (
     _billing_engine,
     _FakeJobStore,
@@ -207,6 +217,8 @@ def _local_submit_client(monkeypatch: pytest.MonkeyPatch, *, local_mode: bool) -
     client = make_client(store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_sub_mod.settings, "local_mode", local_mode)
     monkeypatch.setattr(_sub_mod, "_ensure_api_budget", _REAL_ENSURE_API_BUDGET)
+    # No CLI is ready unless a test says so, so the host's own CLIs never fill the proposer.
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [])
     monkeypatch.setattr(
         _sub_mod,
         "run_preflight",
@@ -421,7 +433,7 @@ def test_hosted_execution_check_refuses_a_subscription_model(monkeypatch: pytest
     monkeypatch.setattr(settings, "local_mode", False)
 
     with pytest.raises(DomainError) as refused:
-        _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+        _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", None)
 
     assert refused.value.status_code == 422
     assert refused.value.code == "models.subscription_local_only"
@@ -435,7 +447,7 @@ def test_local_execution_check_keeps_a_subscription_model(monkeypatch: pytest.Mo
     """
     monkeypatch.setattr(settings, "local_mode", True)
 
-    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", None)
 
     assert payload["token_source"] == "subscription"
 
@@ -449,7 +461,7 @@ def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.Monke
     monkeypatch.setattr(settings, "local_mode", True)
 
     with pytest.raises(DomainError) as refused:
-        _canonical_execution_payload(_execution_request(), "alice")
+        _canonical_execution_payload(_execution_request(), "alice", None)
 
     assert refused.value.code == "models.managed_unavailable_local"
 
@@ -505,3 +517,167 @@ def test_local_wizard_check_passes_the_raw_gate(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(settings, "local_mode", True)
 
     enforce_raw_local_mode_sources({"token_source": "subscription", "proposer": {"host_cli": "codex"}})
+
+
+def _engine_setup(monkeypatch: pytest.MonkeyPatch, store: Any, *, ready: tuple[str, ...], stored: str | None) -> None:
+    """Make CLIs look ready and store the caller's engine choice.
+
+    Args:
+        monkeypatch: Pytest fixture used to replace the CLI probe.
+        store: Job store whose engine holds the engine setting.
+        ready: The CLIs the probe reports as ready, in probe order.
+        stored: The engine ``alice`` chose in Settings, or ``None`` for no row.
+    """
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status(cli) for cli in ready])
+    if stored is not None:
+        with Session(store.engine) as session:
+            session.add(AgentEnginePreferenceModel(username="alice", engine=stored))
+            session.commit()
+
+
+def _stored_proposer(store: _FakeJobStore, resp: Any) -> dict[str, Any]:
+    """Return the proposer settings the accepted run stored.
+
+    Args:
+        store: The fake job store.
+        resp: The accepted ``/optimize`` response.
+
+    Returns:
+        The stored ``optimizer.proposer`` object.
+    """
+    assert resp.status_code == 201, resp.text
+    return store._jobs[resp.json()["optimization_id"]]["payload"]["optimizer"]["proposer"]
+
+
+@pytest.mark.parametrize(
+    ("ready", "stored", "expected"),
+    [(("codex", "claude"), None, "codex"), (("codex",), "claude", "claude")],
+)
+def test_local_proposer_follows_the_agent_engine(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], stored: str | None, expected: str
+) -> None:
+    """A local run with no proposer CLI pick runs its proposer on the engine CLI.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        stored: The engine stored in Settings, if any.
+        expected: The proposer CLI the stored run must name.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored=stored)
+
+    resp = client.post("/optimize", json=unified_payload(token_source="subscription", models=_SUBSCRIPTION_MODELS))
+
+    assert _stored_proposer(store, resp)["host_cli"] == expected
+
+
+@pytest.mark.parametrize(("pick", "expected"), [("claude", "claude"), (None, None)])
+def test_explicit_proposer_pick_overrides_the_agent_engine(
+    monkeypatch: pytest.MonkeyPatch, pick: str | None, expected: str | None
+) -> None:
+    """A per-run pick, including an explicit sandbox proposer, wins over the engine.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        pick: The run's explicit ``host_cli``.
+        expected: The proposer CLI the stored run must name.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=("codex", "claude"), stored="codex")
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(
+            token_source="subscription",
+            models=_SUBSCRIPTION_MODELS,
+            optimizer={"choice": "gepa", "proposer": {"host_cli": pick}},
+        ),
+    )
+
+    assert _stored_proposer(store, resp)["host_cli"] == expected
+
+
+@pytest.mark.parametrize(
+    ("ready", "stored", "proposer"),
+    [
+        (("codex",), "openrouter", {}),
+        ((), None, {}),
+        (("codex",), None, {"harness": "custom", "run_command": "my-agent --model {model}"}),
+    ],
+)
+def test_local_proposer_stays_in_the_sandbox_without_an_engine_cli(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], stored: str | None, proposer: dict[str, Any]
+) -> None:
+    """The OpenRouter engine, no ready CLI, or a custom harness leaves ``host_cli`` unset.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        stored: The engine stored in Settings, if any.
+        proposer: The run's proposer settings.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored=stored)
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(
+            token_source="subscription",
+            models=_SUBSCRIPTION_MODELS,
+            optimizer={"choice": "gepa", "proposer": proposer},
+        ),
+    )
+
+    assert _stored_proposer(store, resp)["host_cli"] is None
+
+
+def test_hosted_proposer_ignores_the_agent_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted mode never probes a CLI or reads the setting for a proposer.
+
+    Args:
+        monkeypatch: Pytest fixture used to keep local mode off.
+    """
+    store = _FakeJobStore()
+    client = make_client(store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(settings, "local_mode", False)
+
+    def _no_probe(_settings: Any) -> list[Any]:
+        """Fail the test if hosted mode probes a CLI."""
+        raise AssertionError("hosted mode probed a CLI")
+
+    monkeypatch.setattr(agent_engine, "probe_clis", _no_probe)
+
+    resp = client.post("/optimize", json=unified_payload())
+
+    assert _stored_proposer(store, resp)["host_cli"] is None
+
+
+def test_local_execution_check_fills_the_proposer_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setup check fills the same proposer CLI as the run, so its fingerprint matches.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    store = SimpleNamespace(engine=_billing_engine())
+    _engine_setup(monkeypatch, store, ready=("codex", "claude"), stored="claude")
+
+    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", store)
+
+    assert payload["optimizer"]["proposer"]["host_cli"] == "claude"
+
+
+def test_blackbox_proposer_follows_the_agent_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A black-box request's top-level proposer follows the engine too.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    request = SimpleNamespace(proposer=BlackboxProposer())
+
+    fill_proposer_host_cli(None, "alice", request)
+
+    assert request.proposer.host_cli == "claude"
