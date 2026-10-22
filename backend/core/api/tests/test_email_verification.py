@@ -155,7 +155,7 @@ def test_preview_environment_still_requires_the_emailed_code(
 ) -> None:
     """A PR preview with a relay emails a code and refuses login until it is confirmed."""
     client, sent = verify_client
-    monkeypatch.setattr(settings, "railway_environment_name", "skynet-pr-762")
+    monkeypatch.setattr(settings, "app_environment", "skynet-pr-762")
     assert settings.is_preview_environment
     _register(client, "pia@example.com", "originalpass1")
     assert len(sent) == 1

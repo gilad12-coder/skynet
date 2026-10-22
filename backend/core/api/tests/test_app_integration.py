@@ -165,15 +165,15 @@ def test_health_live_worker_returns_expected_shape(app_client):
 
 
 def test_health_reports_deployed_commit(app_client, monkeypatch):
-    """``/health`` names the commit Railway deployed, so the uptime monitor can spot a stale deploy."""
+    """``/health`` names the deployed commit, so the uptime monitor can spot a stale deploy."""
     client, mock_worker, _ = app_client
     mock_worker.threads_alive.return_value = True
     mock_worker.seconds_since_last_activity.return_value = 0.0
 
-    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "0f5104ee" * 5)
+    monkeypatch.setattr(app_settings, "app_git_sha", "0f5104ee" * 5)
     assert client.get("/health").json()["commit"] == "0f5104ee" * 5
 
-    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA")
+    monkeypatch.setattr(app_settings, "app_git_sha", "")
     assert client.get("/health").json()["commit"] is None
 
 

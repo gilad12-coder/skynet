@@ -9,7 +9,10 @@
 # for a private-network deploy where the only caller is the backend reaching it
 # at ``http://<service>.railway.internal:4000`` — Railway's private network is
 # IPv6-only. Harmless for the local compose / public setups, which also work
-# over the dual-stack socket.
+# over the dual-stack socket. An IPv4-only network (e.g. ECS Fargate in IPv4
+# subnets) still reaches it: with IPv6 disabled by sysctl, ``::`` keeps
+# accepting IPv4. A host whose kernel lacks IPv6 entirely can override the
+# command with ``--host 0.0.0.0``.
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

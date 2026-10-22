@@ -12,7 +12,8 @@ WORKDIR /app
 COPY package.json package-lock.json .npmrc* ./
 # Railway keeps no image layers between builds, so the npm download cache and
 # Next's compile cache live in cache mounts instead. Railway requires the
-# s/<service id>- prefix on the id; plain Docker treats it as any other id.
+# s/<service id>- prefix on the id; plain Docker treats it as any other id, so
+# the prefix stays until Railway builds stop.
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/root/.npm,target=/root/.npm \
     npm ci --prefer-offline
 
@@ -37,18 +38,22 @@ ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 # `npm run build`, so it only sees these when they are declared as build args.
 # Railway passes service variables into a Dockerfile build solely via ARG.
 # Build-stage only: nothing here is copied into the runner image.
-# .git is dockerignored, so the plugin cannot read the commit itself; it does
-# read RAILWAY_GIT_COMMIT_SHA, which keeps the uploaded release equal to the
-# one sentry.server.config.ts / sentry.edge.config.ts report at runtime.
+# .git is dockerignored, so the plugin cannot read the commit itself.
+# next.config.ts names the release from APP_GIT_SHA (Railway's
+# RAILWAY_GIT_COMMIT_SHA is the fallback), which keeps the uploaded release
+# equal to the one sentry.server.config.ts / sentry.edge.config.ts report at
+# runtime.
 ARG SENTRY_ORG
 ARG SENTRY_PROJECT
 ARG SENTRY_AUTH_TOKEN
+ARG APP_GIT_SHA
 ARG RAILWAY_GIT_COMMIT_SHA
 # next.config.ts skips the source-map upload when this names a `*-pr-<n>`
-# preview environment.
+# preview environment. RAILWAY_ENVIRONMENT_NAME is the fallback.
+ARG APP_ENVIRONMENT
 ARG RAILWAY_ENVIRONMENT_NAME
 # The footer's AGPL source link points at this commit (legal-config.ts).
-ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
+ENV NEXT_PUBLIC_SOURCE_COMMIT=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
     node scripts/generate-third-party-licenses.mjs && npm run build
 

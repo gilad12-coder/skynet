@@ -102,5 +102,5 @@ def test_email_configured_follows_smtp_host_in_every_environment(
 ) -> None:
     """An SMTP host counts as configured in every environment, PR previews included."""
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
-    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    monkeypatch.setattr(settings, "app_environment", environment_name)
     assert email_sender_module.email_configured() is expected

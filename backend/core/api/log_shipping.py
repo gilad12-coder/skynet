@@ -1,7 +1,6 @@
 """Ship a copy of every log record to an HTTP log aggregator.
 
-Railway keeps container logs for a limited window and has no native log
-drain, so anything older than that window is gone unless the app forwards
+The hosting platform keeps container logs for a limited window, so anything older than that window is gone unless the app forwards
 it somewhere itself. :class:`LogShipHandler` does that: it turns each record
 into a small JSON object, buffers it, and POSTs batches to ``LOG_SHIP_URL``
 with ``Authorization: Bearer LOG_SHIP_TOKEN`` from a daemon thread.
@@ -47,7 +46,7 @@ _MAX_EXCEPTION_CHARS = 16_000
 # Same fallback as observability._resolve_pod_name; observability imports this
 # module to install the handler, so importing it back would form a cycle.
 _POD_NAME = os.environ.get("POD_NAME") or socket.gethostname()
-_SERVICE_NAME = os.environ.get("RAILWAY_SERVICE_NAME") or os.environ.get("SERVICE_NAME") or ""
+_SERVICE_NAME = settings.app_service_name
 
 
 def _truncate(text_value: str, limit: int) -> str:
