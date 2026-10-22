@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ...storage.models import ApiTokenModel, UserModel
 from ..auth import (
     AuthenticatedUser,
+    api_token_expired,
     generate_api_token,
     get_authenticated_user,
     hash_api_token,
@@ -71,11 +72,12 @@ def create_api_tokens_router(*, job_store) -> APIRouter:
 
         Returns:
             The token metadata (never the secret), or ``None`` when the caller
-            has no active token.
+            has no active token. An expired token counts as none, so Settings
+            offers a new one instead of showing a token every call refuses.
         """
         with Session(job_store.engine) as session:
             row = session.get(ApiTokenModel, user.username)
-            if row is None:
+            if row is None or api_token_expired(row.created_at, datetime.now(UTC)):
                 return None
             return ApiTokenInfo(
                 last4=row.last4, created_at=row.created_at, last_used_at=row.last_used_at

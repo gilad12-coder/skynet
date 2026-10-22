@@ -198,6 +198,21 @@ def test_token_past_max_age_is_refused(token_app: FastAPI) -> None:
     assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {fresh}"}).status_code == 200
 
 
+def test_get_reports_no_token_once_it_expires(token_app: FastAPI) -> None:
+    """Settings sees an expired token as no token, so it offers to generate a new one."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    client.post("/settings/api-token")
+    _age_token(token_app, _MAX_AGE - timedelta(days=1))
+    assert client.get("/settings/api-token").json() is not None
+
+    _age_token(token_app, _MAX_AGE + timedelta(seconds=1))
+    response = client.get("/settings/api-token")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
 def test_create_refuses_when_the_account_row_is_gone(token_app: FastAPI) -> None:
     """A caller whose account was deleted after authenticating cannot add a token row."""
     _bypass_as(token_app, "deleted-user")

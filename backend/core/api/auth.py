@@ -198,6 +198,19 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
+def api_token_expired(created_at: datetime, now: datetime) -> bool:
+    """Return whether a PAT generated at ``created_at`` is past :data:`API_TOKEN_MAX_AGE`.
+
+    Args:
+        created_at: The token row's stored generation time.
+        now: Current aware UTC time.
+
+    Returns:
+        ``True`` when the token no longer authenticates.
+    """
+    return _as_utc(created_at) + API_TOKEN_MAX_AGE <= now
+
+
 def _account_exists(session: Session, username: str) -> bool:
     """Return whether a ``users`` row exists for ``username``.
 
@@ -264,7 +277,7 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
     now = datetime.now(UTC)
     with Session(job_store.engine) as session:
         row = session.query(ApiTokenModel).filter(ApiTokenModel.token_hash == token_hash).one_or_none()
-        if row is None or _as_utc(row.created_at) + API_TOKEN_MAX_AGE <= now:
+        if row is None or api_token_expired(row.created_at, now):
             raise DomainError("auth.invalid_token", status=401)
         username = str(row.username)
         # Token creation and account deletion lock the users row, so no new
