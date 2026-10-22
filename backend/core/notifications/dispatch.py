@@ -63,7 +63,7 @@ def _delivery(row: NotificationModel) -> Delivery:
     )
 
 
-def _record(engine: Engine, notification_id: str, states: Mapping[str, str], now: datetime) -> None:
+def _record(engine: Engine, notification_id: str, states: Mapping[str, str], now: datetime, since: datetime) -> None:
     """Merge channel delivery states into a notification's ``deliveries``.
 
     Args:
@@ -71,6 +71,7 @@ def _record(engine: Engine, notification_id: str, states: Mapping[str, str], now
         notification_id: The notification row.
         states: ``{channel: state}`` to record.
         now: Timestamp stored with each state.
+        since: When the row became deliverable (its event, or its hold's release).
     """
     with Session(engine) as session:
         row = session.get(NotificationModel, notification_id, with_for_update=True)
@@ -79,6 +80,9 @@ def _record(engine: Engine, notification_id: str, states: Mapping[str, str], now
         deliveries = dict(row.deliveries or {})
         for channel, state in states.items():
             deliveries[channel] = {"state": state, "at": now.isoformat()}
+            if state == "queued":
+                # The Mac app's claim window counts from here, not from the event, so a held row keeps its full day.
+                deliveries[channel]["since"] = since.timestamp()
         row.deliveries = deliveries
         session.commit()
 
@@ -220,7 +224,8 @@ def _notify(
             return None
         delivery = _delivery(row)
     if immediate:
-        _record(engine, delivery.notification_id, {ch: _send(delivery, ch) for ch in immediate}, datetime.now(UTC))
+        states = {ch: _send(delivery, ch) for ch in immediate}
+        _record(engine, delivery.notification_id, states, datetime.now(UTC), now)
     return delivery.notification_id
 
 
@@ -274,7 +279,7 @@ def release_held(engine: Engine, now: datetime | None = None) -> int:
             else:
                 states[channel] = _send(delivery, channel)
         if states:
-            _record(engine, notification_id, states, datetime.now(UTC))
+            _record(engine, notification_id, states, datetime.now(UTC), now)
         released += 1
     return released
 

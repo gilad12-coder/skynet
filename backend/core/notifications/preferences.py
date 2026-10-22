@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -176,6 +179,33 @@ def settings_from_row(row: NotificationPreferenceModel | None) -> NotificationSe
         stuck_fraction=row.stuck_fraction,
         budget_alert_fraction=row.budget_alert_fraction,
     )
+
+
+def lock_preferences(session: Session, username: str) -> NotificationPreferenceModel:
+    """Lock ``username``'s preference row for a read-modify-write, creating it when missing.
+
+    The hosted preference route and the Mac app's macOS route both rebuild
+    ``held_channels`` and ``channel_grid`` from the stored row; without the
+    lock, two concurrent saves each drop the other's change. Call it first in
+    the session's transaction and commit to release the lock.
+
+    Args:
+        session: A session with no open transaction yet.
+        username: The identity whose row is changed.
+
+    Returns:
+        The locked row.
+    """
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        # SQLite ignores FOR UPDATE; an immediate transaction takes the write lock before the read.
+        session.execute(text("BEGIN IMMEDIATE"))
+    insert = postgresql_insert if dialect == "postgresql" else sqlite_insert
+    # Two first saves race to create the row; the loser locks the winner's row instead of failing.
+    session.execute(insert(NotificationPreferenceModel).values(username=username).on_conflict_do_nothing())
+    row = session.get(NotificationPreferenceModel, username, with_for_update=True)
+    assert row is not None
+    return row
 
 
 def configure_notification_preferences(engine: Engine | None) -> None:

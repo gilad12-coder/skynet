@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ...notifications.catalog import CHANNELS, DELIVERY_CHANNELS, LOCAL_CHANNELS, MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
-from ...notifications.preferences import clean_held_channels, merge_grid, settings_from_row
+from ...notifications.preferences import clean_held_channels, lock_preferences, merge_grid, settings_from_row
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 
@@ -122,10 +122,7 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
             Effective preferences after the update.
         """
         with Session(job_store.engine) as session:
-            row = session.get(NotificationPreferenceModel, user.username)
-            if row is None:
-                row = NotificationPreferenceModel(username=user.username)
-                session.add(row)
+            row = lock_preferences(session, user.username)
             if body.grid is not None:
                 grid = merge_grid(row.channel_grid)
                 for event, cells in body.grid.items():

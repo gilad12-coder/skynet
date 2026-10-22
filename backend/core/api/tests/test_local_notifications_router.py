@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from ...config import settings
+from ...config import app_env, settings
 from ...i18n import t_locale
-from ...notifications.catalog import DEFAULT_GRID
+from ...notifications.catalog import DEFAULT_GRID, MACOS
 from ...notifications.dispatch import notify
-from ...notifications.preferences import configure_notification_preferences
-from ...storage.models import Base, NotificationModel
+from ...notifications.preferences import clean_held_channels, configure_notification_preferences, lock_preferences
+from ...storage.models import Base, NotificationModel, NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers.local_notifications import create_local_notifications_router
 from ..routers.notification_preferences import create_notification_preferences_router
@@ -226,3 +229,77 @@ def test_claim_renders_in_the_app_locale(harness, local_mode: None) -> None:
     notify(_USER, "finished", "opt-x", {}, title="Ticket triage", dedupe_key="x")
     header = client.post("/local/notifications/native/claim", headers={"Accept-Language": "de"}).json()["items"]
     assert header[0]["title"] == t_locale("de", "email.event.finished.headline", title="Ticket triage")
+
+
+@pytest.fixture(params=["sqlite", "postgresql"])
+def shared_store(request: pytest.FixtureRequest, tmp_path, local_mode: None):
+    """Build a client over both preference routes on a database that more than one connection can open.
+
+    The SQLite case uses a file, so each connection takes real database locks.
+    The Postgres case runs only when ``APP_TEST_DB_URL`` names a throwaway
+    ``postgresql://`` database, like ``test_native_postgres.py``.
+
+    Args:
+        request: Selects the database.
+        tmp_path: Folder for the SQLite file.
+        local_mode: Local mode, so both routes and the macOS hold exist.
+
+    Yields:
+        ``(client, engine, username)``.
+    """
+    if request.param == "sqlite":
+        engine = create_engine(f"sqlite:///{tmp_path / 'preferences.db'}")
+    else:
+        url = app_env("APP_TEST_DB_URL")
+        if not url or not url.startswith("postgresql"):
+            pytest.skip("APP_TEST_DB_URL not set to a postgresql:// URL")
+        engine = create_engine(url)
+    NotificationPreferenceModel.__table__.create(engine, checkfirst=True)
+    username = f"race-{uuid.uuid4().hex[:8]}@skynet.test"
+    store = SimpleNamespace(engine=engine)
+    app = FastAPI()
+    app.include_router(create_notification_preferences_router(job_store=store))
+    app.include_router(create_local_notifications_router(job_store=store))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username=username, role="user", groups=()
+    )
+    yield TestClient(app), engine, username
+    with Session(engine) as session:
+        session.execute(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == username))
+        session.commit()
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "other_change"),
+    [
+        ("/account/notification-preferences", {"held_channels": ["email", "chrome"]}, [MACOS]),
+        ("/local/notifications/macos", {"held": True}, ["email", "chrome"]),
+    ],
+)
+@pytest.mark.parametrize("saved_before", [True, False])
+def test_a_save_waits_for_a_concurrent_save_and_keeps_its_change(
+    shared_store, path: str, body: dict, other_change: list[str], saved_before: bool
+) -> None:
+    """Both routes lock the row before they read it, so a save during another save never drops that change.
+
+    Without a stored row the two saves also race to create it; the second must not fail.
+    """
+    client, engine, username = shared_store
+    if saved_before:
+        with Session(engine) as session:
+            session.add(NotificationPreferenceModel(username=username, held_channels=["email"]))
+            session.commit()
+    with Session(engine) as holder, ThreadPoolExecutor(max_workers=1) as pool:
+        row = lock_preferences(holder, username)
+        pending = pool.submit(client.patch, path, json=body)
+        time.sleep(0.5)
+        assert not pending.done()
+        row.held_channels = list(clean_held_channels([*clean_held_channels(row.held_channels), *other_change]))
+        holder.commit()
+        assert pending.result(timeout=10).status_code == 200
+
+    with Session(engine) as session:
+        stored = session.get(NotificationPreferenceModel, username)
+        assert stored is not None
+        assert clean_held_channels(stored.held_channels) == ("email", "chrome", MACOS)

@@ -20,7 +20,7 @@ from ...notifications.catalog import CHROME, EMAIL, MACOS, SLACK
 from ...notifications.channels import vapid_public_key
 from ...notifications.comms import mailable, resolve_email
 from ...notifications.native import claim_native, confirm_native
-from ...notifications.preferences import clean_held_channels, merge_grid
+from ...notifications.preferences import clean_held_channels, lock_preferences, merge_grid
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..email_sender import email_configured
@@ -155,10 +155,7 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
             The channel states and the macOS settings after the change.
         """
         with Session(job_store.engine) as session:
-            row = session.get(NotificationPreferenceModel, user.username)
-            if row is None:
-                row = NotificationPreferenceModel(username=user.username)
-                session.add(row)
+            row = lock_preferences(session, user.username)
             if body.grid:
                 grid = merge_grid(row.channel_grid)
                 for event, on in body.grid.items():

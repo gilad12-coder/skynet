@@ -32,10 +32,10 @@ from sqlalchemy.orm import Session
 from alembic import command
 from core.config import app_env, settings
 from core.notifications.catalog import MACOS
-from core.notifications.dispatch import notify
+from core.notifications.dispatch import notify, release_held
 from core.notifications.native import CLAIM_BATCH, CLAIM_LEASE, EXPIRE_BATCH, claim_native, confirm_native
 from core.notifications.preferences import configure_notification_preferences
-from core.storage.models import NotificationModel
+from core.storage.models import NotificationModel, NotificationPreferenceModel
 from core.storage.tests.test_remote_jobstore_postgres import _reset_legacy_schema
 
 TEST_DB_URL = app_env("APP_TEST_DB_URL")
@@ -215,3 +215,31 @@ def test_expiry_filters_on_postgres(engine: Engine, user: str) -> None:
     assert _state(engine, on_screen) == "sent"
     claim_native(engine, user, now=poll)
     assert {_state(engine, notification_id) for notification_id in stale} == {"expired"}
+
+
+def test_claim_window_counts_from_the_hold_release_on_postgres(engine: Engine, user: str) -> None:
+    """A row held for a full day is claimable after release; a row queued without ``since`` still expires by age."""
+    with Session(engine) as session:
+        session.add(NotificationPreferenceModel(username=user, hold_minutes=1440, held_channels=[MACOS]))
+        session.add(
+            NotificationModel(
+                username=user,
+                event_type="finished",
+                title="Old run",
+                created_at=_T0 - timedelta(days=2),
+                deliveries={MACOS: {"state": "queued", "at": (_T0 - timedelta(days=2)).isoformat()}},
+            )
+        )
+        session.commit()
+        legacy = session.scalars(select(NotificationModel.id).where(NotificationModel.username == user)).one()
+    try:
+        (held,) = _seed(user, 1, _T0, prefix="held")
+        released_at = _T0 + timedelta(minutes=1440)
+        assert release_held(engine, now=released_at) >= 1
+
+        assert [item.id for item in claim_native(engine, user, now=released_at + timedelta(seconds=2))] == [held]
+        assert _state(engine, legacy) == "expired"
+    finally:
+        with Session(engine) as session:
+            session.execute(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == user))
+            session.commit()

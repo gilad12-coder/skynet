@@ -13,7 +13,7 @@ from core.config import settings
 from core.notifications import channels as channels_module
 from core.notifications.catalog import CHANNELS, DEFAULT_GRID, MACOS
 from core.notifications.channels import Delivery, EmailChannel, MacOSChannel, get_channel
-from core.notifications.dispatch import notify
+from core.notifications.dispatch import notify, release_held
 from core.notifications.native import CLAIM_BATCH, CLAIM_LEASE, EXPIRE_BATCH, claim_native, confirm_native
 from core.notifications.preferences import (
     clean_held_channels,
@@ -174,6 +174,25 @@ def test_notify_holds_macos_when_the_user_holds_it(engine, local_mode: None) -> 
         assert row is not None
         assert row.deliveries[MACOS]["state"] == "held"
         assert row.hold_until is not None
+
+
+def test_a_macos_hold_of_a_full_day_still_shows_the_banner(engine, local_mode: None) -> None:
+    """The claim window starts when the hold releases the row, so the longest hold never expires it unseen."""
+    with Session(engine) as session:
+        session.add(NotificationPreferenceModel(username=_USER, hold_minutes=1440, held_channels=[MACOS]))
+        session.commit()
+    first = notify(_USER, "finished", "opt-1", title="Ticket triage", now=_T0)
+    second = notify(_USER, "failed", "opt-2", title="Invoice parser", now=_T0)
+    released_at = _T0 + timedelta(minutes=1440)
+
+    assert release_held(engine, now=released_at) == 2
+    claimed = claim_native(engine, _USER, now=released_at + timedelta(seconds=2))
+    assert [item.id for item in claimed] == [first, second]
+    assert confirm_native(engine, _USER, [first], now=released_at + timedelta(seconds=3)) == 1
+
+    assert claim_native(engine, _USER, now=released_at + timedelta(days=1, seconds=1)) == []
+    assert _macos_state(engine, first)["state"] == "sent"
+    assert _macos_state(engine, second)["state"] == "expired"
 
 
 def _macos_state(engine, notification_id: str) -> dict:
