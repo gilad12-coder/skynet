@@ -198,18 +198,17 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _account_created_at(session: Session, username: str) -> datetime | None:
-    """Return when the ``users`` row for ``username`` was created.
+def _account_exists(session: Session, username: str) -> bool:
+    """Return whether a ``users`` row exists for ``username``.
 
     Args:
         session: Open ORM session.
         username: Lowercased account identity (the email).
 
     Returns:
-        The row's ``created_at`` in UTC, or None when no account row exists.
+        True when the account row exists.
     """
-    created_at = session.scalar(select(UserModel.created_at).where(UserModel.email == username))
-    return None if created_at is None else _as_utc(created_at)
+    return session.scalar(select(UserModel.email).where(UserModel.email == username)) is not None
 
 
 def _require_account(request: Request, username: str) -> None:
@@ -234,7 +233,7 @@ def _require_account(request: Request, username: str) -> None:
     if engine is None:
         raise DomainError("auth.not_configured", status=500)
     with Session(engine) as session:
-        if _account_created_at(session, username) is None:
+        if not _account_exists(session, username):
             raise DomainError("auth.account_not_found", status=401)
 
 
@@ -255,9 +254,8 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
 
     Raises:
         DomainError: 500 when the store is unavailable; 401 when the token
-            matches no active row, is older than :data:`API_TOKEN_MAX_AGE`,
-            belongs to an account that no longer exists, or predates the
-            account that now holds its username.
+            matches no active row, is older than :data:`API_TOKEN_MAX_AGE`, or
+            belongs to an account that no longer exists.
     """
     job_store = getattr(request.app.state, "job_store", None)
     if job_store is None:
@@ -269,12 +267,11 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
         if row is None or _as_utc(row.created_at) + API_TOKEN_MAX_AGE <= now:
             raise DomainError("auth.invalid_token", status=401)
         username = str(row.username)
-        # A token minted while its account was being deleted can outlive the
-        # deletion's token sweep; the account row decides (SKY-150). A row
-        # re-created by a later sign-up with the same email must not revive
-        # that orphan, so a token older than the account is refused too.
-        account_created_at = _account_created_at(session, username)
-        if account_created_at is None or _as_utc(row.created_at) < account_created_at:
+        # Token creation and account deletion lock the users row, so no new
+        # token outlives a deletion; this refuses a token row left by any older
+        # path. No created_at comparison: OAuth accounts got their first row only
+        # at a sign-in after 2026-08-28, later than PATs they already held.
+        if not _account_exists(session, username):
             raise DomainError("auth.invalid_token", status=401)
         row.last_used_at = now
         session.commit()

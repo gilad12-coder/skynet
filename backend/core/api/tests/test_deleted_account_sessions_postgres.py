@@ -4,6 +4,8 @@ Skipped unless ``APP_BUDGET_TEST_DB_URL`` points at Postgres, like
 ``test_metric_views_postgres.py``. Each test runs in its own schema with only
 the ``users`` and ``api_tokens`` tables, so PostgreSQL's timezone-aware
 ``created_at`` values and its case-sensitive text comparison are exercised.
+The two lock tests create the full schema, because account deletion touches
+every table, and run one request in a thread while the test holds a row lock.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import base64
 import hashlib
 import hmac
 import json
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -20,13 +23,19 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from core.api import auth as auth_mod
+from core.api.account_data_service import delete_account
 from core.api.auth import generate_api_token, get_authenticated_user, hash_api_token
+from core.api.errors import DomainError
+from core.api.routers.account_data import create_account_data_router
+from core.api.routers.api_tokens import create_api_tokens_router
 from core.config import app_env
 from core.storage.models import ApiTokenModel, Base, UserModel
 
@@ -38,7 +47,6 @@ pytestmark = pytest.mark.skipif(
 
 _SECRET = "pg-test-secret"
 _EMAIL = "owner@example.com"
-_ACCOUNT_CREATED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -52,8 +60,29 @@ def database() -> Iterator[Engine]:
     try:
         Base.metadata.create_all(engine, tables=[UserModel.__table__, ApiTokenModel.__table__])
         with Session(engine) as session:
-            # Older than any aged token below: a PAT that predates its account is refused.
-            session.add(UserModel(email=_EMAIL, name="Owner", password_hash="x", created_at=_ACCOUNT_CREATED_AT))
+            session.add(UserModel(email=_EMAIL, name="Owner", password_hash="x"))
+            session.commit()
+        yield engine
+    finally:
+        engine.dispose()
+        with admin.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
+
+@pytest.fixture
+def full_database() -> Iterator[Engine]:
+    """Isolate a test in its own schema holding every table and one OAuth-style account."""
+    schema = f"sky150_full_{uuid4().hex}"
+    admin = create_engine(TEST_DB_URL)
+    with admin.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    # public stays on the path so the pgvector types resolve.
+    engine = create_engine(TEST_DB_URL, connect_args={"options": f"-csearch_path={schema},public"})
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            session.add(UserModel(email=_EMAIL, name="Owner", password_hash=""))
             session.commit()
         yield engine
     finally:
@@ -181,16 +210,103 @@ def test_pat_age_check_uses_aware_postgres_timestamps(database: Engine) -> None:
     assert exc.value.status_code == 401
 
 
-def test_pat_older_than_its_account_is_refused_on_postgres(database: Engine) -> None:
-    """A PAT created before the current account row (a re-signup) gets 401."""
-    with Session(database) as session:
-        account = session.get(UserModel, _EMAIL)
-        assert account is not None
-        account.created_at = datetime.now(UTC)
-        session.commit()
-    orphan = _add_pat(database, timedelta(days=1))
+def _client(engine: Engine) -> TestClient:
+    """Serve the account-deletion and token routers over ``engine`` with real auth.
 
-    with pytest.raises(HTTPException) as exc:
-        get_authenticated_user(_request(database), f"Bearer {orphan}")
+    Args:
+        engine: Schema-scoped PostgreSQL engine.
 
-    assert exc.value.status_code == 401
+    Returns:
+        A test client that renders DomainError as ``{"code": ...}``.
+    """
+    store = SimpleNamespace(engine=engine)
+    app = FastAPI()
+    app.state.job_store = store
+
+    @app.exception_handler(DomainError)
+    async def _domain_error(request: Request, exc: DomainError) -> JSONResponse:
+        """Render a DomainError with its code, like the app's handler.
+
+        Args:
+            request: Incoming request.
+            exc: Raised error.
+
+        Returns:
+            JSON error body.
+        """
+        return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
+
+    app.include_router(create_account_data_router(job_store=store))
+    app.include_router(create_api_tokens_router(job_store=store))
+    return TestClient(app)
+
+
+def _start(call: Any) -> tuple[threading.Thread, dict[str, Any]]:
+    """Run ``call`` in a thread and keep its result.
+
+    Args:
+        call: Zero-argument callable that sends one request.
+
+    Returns:
+        The started thread and the dict that receives ``response``.
+    """
+    result: dict[str, Any] = {}
+    worker = threading.Thread(target=lambda: result.update(response=call()), daemon=True)
+    worker.start()
+    return worker, result
+
+
+def _token_count(engine: Engine) -> int:
+    """Count the owner's ``api_tokens`` rows.
+
+    Args:
+        engine: Schema-scoped PostgreSQL engine.
+
+    Returns:
+        The number of rows.
+    """
+    with Session(engine) as session:
+        return session.scalar(select(func.count()).select_from(ApiTokenModel).where(ApiTokenModel.username == _EMAIL))
+
+
+def test_token_create_waits_for_a_deletion_and_adds_no_orphan(full_database: Engine) -> None:
+    """A token create that races an account deletion waits, then gets 401 and stores nothing."""
+    client = _client(full_database)
+    bearer = {"Authorization": f"Bearer {_jwt(_EMAIL)}"}
+    with Session(full_database) as deleter:
+        assert deleter.get(UserModel, _EMAIL, with_for_update=True) is not None
+        worker, result = _start(lambda: client.post("/settings/api-token", headers=bearer))
+        worker.join(timeout=1.0)
+        assert worker.is_alive(), "the create must wait for the deletion's account lock"
+        delete_account(deleter, _EMAIL)
+        deleter.commit()
+    worker.join(timeout=10.0)
+
+    assert result["response"].status_code == 401
+    assert result["response"].json()["code"] == "auth.account_not_found"
+    assert _token_count(full_database) == 0
+
+
+def test_deletion_waits_for_a_token_create_and_sweeps_its_token(full_database: Engine) -> None:
+    """An account deletion that races a token create waits, then deletes that new token too."""
+    client = _client(full_database)
+    bearer = {"Authorization": f"Bearer {_jwt(_EMAIL)}"}
+    token = generate_api_token()
+    with Session(full_database) as creator:
+        assert creator.get(UserModel, _EMAIL, with_for_update={"read": True}) is not None
+        creator.add(
+            ApiTokenModel(
+                username=_EMAIL, token_hash=hash_api_token(token), last4=token[-4:], created_at=datetime.now(UTC)
+            )
+        )
+        creator.flush()
+        worker, result = _start(lambda: client.post("/account/delete", headers=bearer, json={"password": ""}))
+        worker.join(timeout=1.0)
+        assert worker.is_alive(), "the deletion must wait for the create's account lock"
+        creator.commit()
+    worker.join(timeout=10.0)
+
+    assert result["response"].status_code == 200
+    assert _token_count(full_database) == 0
+    with Session(full_database) as session:
+        assert session.get(UserModel, _EMAIL) is None

@@ -32,7 +32,6 @@ from ..routers.api_tokens import create_api_tokens_router
 
 # The decided PAT lifetime (SKY-150): one year from generation.
 _MAX_AGE = timedelta(days=365)
-_ACCOUNT_CREATED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def test_generate_api_token_is_prefixed_and_unique() -> None:
@@ -88,8 +87,7 @@ def token_app() -> FastAPI:
     ApiTokenModel.__table__.create(engine)
     UserModel.__table__.create(engine)
     with Session(engine) as session:
-        # Older than any aged token below: a PAT that predates its account is refused.
-        session.add(UserModel(email="alice", name="Alice", password_hash="x", created_at=_ACCOUNT_CREATED_AT))
+        session.add(UserModel(email="alice", name="Alice", password_hash="x"))
         session.commit()
     store = _Store(engine)
     app = FastAPI()
@@ -198,3 +196,31 @@ def test_token_past_max_age_is_refused(token_app: FastAPI) -> None:
     fresh = client.post("/settings/api-token").json()["token"]
     token_app.dependency_overrides.clear()
     assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {fresh}"}).status_code == 200
+
+
+def test_create_refuses_when_the_account_row_is_gone(token_app: FastAPI) -> None:
+    """A caller whose account was deleted after authenticating cannot add a token row."""
+    _bypass_as(token_app, "deleted-user")
+    client = TestClient(token_app)
+
+    response = client.post("/settings/api-token")
+
+    assert response.status_code == 401
+    with Session(token_app.state.job_store.engine) as session:
+        assert session.get(ApiTokenModel, "deleted-user") is None
+
+
+def test_token_older_than_its_account_row_still_works(token_app: FastAPI) -> None:
+    """An OAuth user's PAT predates the row their first later sign-in created; it keeps working."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    token = client.post("/settings/api-token").json()["token"]
+    _age_token(token_app, timedelta(days=30))
+    with Session(token_app.state.job_store.engine) as session:
+        account = session.get(UserModel, "alice")
+        assert account is not None
+        account.created_at = datetime.now(UTC)
+        session.commit()
+
+    token_app.dependency_overrides.clear()
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code == 200
