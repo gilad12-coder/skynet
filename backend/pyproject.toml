@@ -231,4 +231,5 @@ markers = [
     "e2e: full end-to-end tests requiring a live LLM (slow, costs API credits)",
     "slow: tests that take > 30 s to complete",
     "load: concurrency / latency stress tests",
+    "docker: tests that need a running Docker daemon and a built local sandbox image",
 ]

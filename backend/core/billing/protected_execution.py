@@ -7,6 +7,10 @@ import re
 from typing import Any
 
 from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
+from ..service_gateway.optimization.blackbox.docker_sandbox import (
+    DockerSandboxRuntime,
+    docker_sandbox_unavailable_reason,
+)
 from ..service_gateway.optimization.blackbox.sandbox import (
     JOB_TAG,
     VercelCredentials,
@@ -20,6 +24,23 @@ from .operation_pricing import UnpricedOperationError
 from .vercel_usage import vercel_sandbox_cost_range
 
 _IMMUTABLE_IMAGE = re.compile(r"^\S+@sha256:[0-9a-f]{64}$")
+# A locally built image has no registry digest, only its content-addressed id.
+_LOCAL_IMAGE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _immutable(settings: Settings, image: str) -> bool:
+    """Check that ``image`` is an immutable reference this deployment may boot.
+
+    Args:
+        settings: Trusted backend configuration.
+        image: Image reference to check.
+
+    Returns:
+        Whether the image is a bare local image id in local mode, or a
+        registry digest reference on any other deployment.
+    """
+    pattern = _LOCAL_IMAGE if settings.local_mode else _IMMUTABLE_IMAGE
+    return bool(pattern.fullmatch(image))
 
 
 def protected_image(settings: Settings, workflow: str) -> str | None:
@@ -30,10 +51,14 @@ def protected_image(settings: Settings, workflow: str) -> str | None:
         workflow: DSPy or Anything execution family.
 
     Returns:
-        The pinned image reference when configured, otherwise None.
+        The pinned image reference when configured, otherwise None. Local
+        mode uses one local image for every workflow.
     """
-    image = settings.dspy_sandbox_image if workflow == "dspy" else settings.vercel_sandbox_image
-    return image if image and _IMMUTABLE_IMAGE.fullmatch(image) else None
+    if settings.local_mode:
+        image = settings.local_sandbox_image
+    else:
+        image = settings.dspy_sandbox_image if workflow == "dspy" else settings.vercel_sandbox_image
+    return image if image and _immutable(settings, image) else None
 
 
 def protected_vercel_unavailable_reason(settings: Settings, workflow: str) -> str | None:
@@ -45,7 +70,10 @@ def protected_vercel_unavailable_reason(settings: Settings, workflow: str) -> st
 
     Returns:
         A configuration reason, or None when real setup verification may proceed.
+        Local mode reports the local Docker daemon and image instead of Vercel.
     """
+    if settings.local_mode:
+        return docker_sandbox_unavailable_reason(settings)
     reason = sandbox_unavailable_reason(settings)
     if reason:
         return reason
@@ -63,8 +91,17 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
         runtime: Managed sandbox identity.
 
     Returns:
-        Machine-readable session bounds, including the usage markup.
+        Machine-readable session bounds, including the usage markup. A local
+        Docker box costs nothing, so its bounds are zero.
     """
+    if runtime == "docker":
+        return {
+            "billing_basis": "at_cost",
+            "minimum_session_cents": "0",
+            "maximum_session_cents": "0",
+            "maximum_lifetime_seconds": None,
+            "vcpus": 2,
+        }
     image = protected_image(settings, workflow)
     if runtime != "vercel" or image is None:
         return {
@@ -107,7 +144,8 @@ def bind_protected_sandbox(
 
     Args:
         gateway: Existing generation-fenced model and spend authority.
-        settings: Trusted Vercel account and deployment image configuration.
+        settings: Trusted Vercel account and deployment image configuration,
+            or the local Docker image in local mode.
         workflow: Execution family selecting its immutable prebuilt image.
         owner_id: Stable job or setup identity used for cleanup after interruption.
         lifetime_seconds: Optional shorter ceiling for one bounded interaction.
@@ -127,23 +165,27 @@ def bind_protected_sandbox(
         raise UnpricedOperationError(reason)
     if image is None:
         image = protected_image(settings, workflow)
-    elif not _IMMUTABLE_IMAGE.fullmatch(image):
+    elif not _immutable(settings, image):
         raise UnpricedOperationError("The run's pinned sandbox image is not an immutable reference.")
     assert image is not None
-    assert settings.vercel_token is not None
     configured_lifetime = settings.vercel_sandbox_max_lifetime_seconds
     lifetime = min(
         lifetime_seconds or configured_lifetime, configured_lifetime, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
     )
-    runtime = VercelSandboxRuntime(
-        VercelCredentials(
-            token=settings.vercel_token.get_secret_value(),
-            team_id=str(settings.vercel_team_id),
-            project_id=str(settings.vercel_project_id),
-        ),
-        image=image,
-        budget=gateway.runtime,
-    )
+    runtime: DockerSandboxRuntime | VercelSandboxRuntime
+    if settings.local_mode:
+        runtime = DockerSandboxRuntime(image, docker_bin=settings.docker_bin, budget=gateway.runtime)
+    else:
+        assert settings.vercel_token is not None
+        runtime = VercelSandboxRuntime(
+            VercelCredentials(
+                token=settings.vercel_token.get_secret_value(),
+                team_id=str(settings.vercel_team_id),
+                project_id=str(settings.vercel_project_id),
+            ),
+            image=image,
+            budget=gateway.runtime,
+        )
     mailbox = ModelMailbox(gateway.dispatch_guest)
     broker = SandboxBroker(
         runtime,

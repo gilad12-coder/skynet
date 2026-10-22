@@ -21,22 +21,25 @@ def execution_runtime_catalog(*, has_image_inputs: bool = False) -> dict[str, An
 
     Returns:
         The managed sandbox with its deployment availability and cost profile.
+        Local mode reports the local Docker sandbox instead.
     """
+    runtime = "docker" if settings.local_mode else "vercel"
     reason = protected_vercel_unavailable_reason(settings, "dspy")
-    if settings.openrouter_api_key is None:
+    # Local mode calls models through the user's CLI subscriptions, not OpenRouter.
+    if settings.openrouter_api_key is None and not settings.local_mode:
         reason = reason or "Managed model routing is not configured."
     return {
         "runtimes": [
             {
-                "id": "vercel",
+                "id": runtime,
                 "available": reason is None,
                 "unavailable_reason": reason,
-                "cost": runtime_cost_profile(settings, "dspy", "vercel"),
+                "cost": runtime_cost_profile(settings, "dspy", runtime),
                 "checkpoint_restore_supported": reason is None,
                 "checkpoint_restore_reason": reason,
             }
         ],
-        "default_runtime": "vercel",
+        "default_runtime": runtime,
         "run_recovery_eligibility": "Requires a supported optimizer, a compatible saved checkpoint, and funded headroom.",
     }
 

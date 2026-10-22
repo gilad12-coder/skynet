@@ -294,6 +294,8 @@
     "optimization.resume_not_resumable": "لا يملك هذا التحسين أي نقطة استئناف محفوظة — شغّله من جديد بدلاً من ذلك.",
     "optimization.resume_wrong_status": "لا يمكن استئناف سوى عمليات التحسين التي توقّفت في منتصف التشغيل — هذه في الحالة '{status}'.",
     "optimization.protected_interactive_sandbox_required": "لا يمكن تقييم هذا التحسين المحمي أو تقديمه داخل عملية API. يلزم صندوق تشغيل {runtime} مستقل ومحتسب التكلفة، وهو غير متاح بعد في نقطة النهاية هذه.",
+    "sandbox.docker_unavailable": "Docker لا يعمل على هذا الكمبيوتر. شغّل Docker Desktop أو OrbStack ثم حاول مرة أخرى.",
+    "sandbox.docker_image_missing": "صورة بيئة العزل المحلية لم تُبنَ بعد. أعد تشغيل التطبيق لبنائها.",
     "optimization.retry_no_payload": "لا يملك التحسين المصدر أي حمولة محفوظة لإعادة المحاولة.",
     "optimization.retry_wrong_status": "لا يمكن إعادة محاولة سوى عمليات التحسين في حالة 'failed' أو 'cancelled' — هذه في الحالة '{status}'. استنسخها بدلاً من ذلك.",
     "quota.reached": "لقد بلغتَ الحد الأقصى وهو {quota, plural, one {عملية تحسين واحدة} two {عمليتا تحسين} few {# عمليات تحسين} many {# عملية تحسين} other {# عملية تحسين}}. احذف عمليات تحسين قديمة لإنشاء عمليات جديدة.",

@@ -232,7 +232,7 @@ class SandboxBroker:
         """Bind one parent-owned runtime and deployment-selected resource profile.
 
         Args:
-            runtime: Metered Vercel runtime held only in the trusted parent.
+            runtime: Metered Vercel runtime (or free local Docker runtime) held only in the trusted parent.
             image: Deployment-selected immutable prebuilt image digest.
             max_lifetime_seconds: Largest session the parent will authorize.
             vcpus: Fixed allocation selected by the parent.
@@ -242,16 +242,19 @@ class SandboxBroker:
         self._runtime = runtime
         self._image = image
         self._maximum = _duration(max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
-        quote_vercel_sandbox(
-            {
-                "image": image,
-                "lifetime_ms": math.ceil(self._maximum * 1000),
-                "vcpus": vcpus,
-                "network_disabled": True,
-                "ports": [],
-                "persistent": False,
-            }
-        )
+        # A local Docker box is free and its image is a bare local id, which
+        # the Vercel price check would refuse.
+        if getattr(runtime, "billable", True):
+            quote_vercel_sandbox(
+                {
+                    "image": image,
+                    "lifetime_ms": math.ceil(self._maximum * 1000),
+                    "vcpus": vcpus,
+                    "network_disabled": True,
+                    "ports": [],
+                    "persistent": False,
+                }
+            )
         self._vcpus = vcpus
         self._tags = dict(tags or {})
         self._command_runner = command_runner
