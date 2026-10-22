@@ -72,8 +72,9 @@ Skynet enforces them in three places:
    this text and continues: "Illegal action. Read the constraints file. You
    cannot do this action. Do not repeat it, because it wastes time." This is
    the same for the parent's check and for the sandbox's early checks:
-   AutoResearch `eval.sh`, Meta-Harness `save.sh` and its candidate check, and
-   the AutoSaddler verifier. A blocked version uses no scoring budget.
+   AutoResearch `eval.sh`, Meta-Harness `save.sh` and its candidate check, the
+   AutoSaddler verifier, and the ShinkaEvolve file-edit check (model and agent
+   editors). A blocked version uses no scoring budget.
 2. **Judge during the run.** About every 15 agent actions, a fast judge model
    reads the recent actions and the current diff against the rules. When it
    sees work that goes toward a violation, the agent's next scoring reply
@@ -105,6 +106,11 @@ Limits:
 
 - A Meta-Harness `save.sh` block reaches the run log when the agent's
   session turn ends, not at the moment of the block.
+- A ShinkaEvolve agent-editor block also arrives when the agent's session
+  ends. The whole version is refused, and the block text is the version's
+  error, which ShinkaEvolve keeps as the failed attempt's message.
+- Without a constraints file, the ShinkaEvolve agent editor still drops
+  changes outside the editable paths without a message, as before.
 - Without a constraints file, the sandbox checks keep their earlier messages,
   which name the refused paths, and they write no `rule.block` event.
 - The fast judge counts each answered model call of the agent as one action.

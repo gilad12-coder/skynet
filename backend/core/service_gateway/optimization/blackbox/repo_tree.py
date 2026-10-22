@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 # Payload key naming the packed tree. The parent sets it to a file on its own
 # disk; the sandbox supervisor uploads that file and rewrites the key into
@@ -30,6 +31,26 @@ ILLEGAL_ACTION_MESSAGE = (
 )
 RULE_BLOCK_EVENT = "rule.block"
 PATH_RULE = "optimize.toml [paths]"
+
+
+def rule_block_record(reason: str) -> dict[str, Any]:
+    """Build the structured run-log record a sandboxed engine sends for one path-rule block.
+
+    Args:
+        reason: Why the path rules refused the action.
+
+    Returns:
+        The record the parent forwards to the run log as a ``rule.block`` event.
+    """
+    return {
+        "level": "WARNING",
+        "logger": "app.engine",
+        "message": f"Illegal action blocked: {PATH_RULE}. {reason}",
+        "source": "engine",
+        "event": RULE_BLOCK_EVENT,
+        "fields": {"rule": PATH_RULE, "reason": reason},
+    }
+
 
 # The shipped tree's commit. Versions diff against this ref rather than HEAD,
 # so an agent that commits in its checkout cannot hide those edits.

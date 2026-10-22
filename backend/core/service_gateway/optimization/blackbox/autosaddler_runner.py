@@ -337,17 +337,7 @@ def rule_blocker(mailbox: EvaluatorMailbox) -> Callable[[str], None]:
         Args:
             reason: Why the path rules refused the version.
         """
-        mailbox.emit(
-            _LOG_PREFIX,
-            {
-                "level": "WARNING",
-                "logger": "app.engine",
-                "message": f"Illegal action blocked: {repo_tree.PATH_RULE}. {reason}",
-                "source": "engine",
-                "event": repo_tree.RULE_BLOCK_EVENT,
-                "fields": {"rule": repo_tree.PATH_RULE, "reason": reason},
-            },
-        )
+        mailbox.emit(_LOG_PREFIX, repo_tree.rule_block_record(reason))
 
     return block
 
