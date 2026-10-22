@@ -23,6 +23,7 @@ const {
   subscriptionMenuModels,
   subscriptionModelConfig,
   subscriptionModelId,
+  withChosenCli,
   withSupportedHostCli,
 } = await import("./subscription-model.ts");
 
@@ -472,4 +473,24 @@ test("a proposer with a CLI the app does not offer sends no host CLI", () => {
   assert.deepEqual(withSupportedHostCli({ harness: "codex", host_cli: null }), {
     harness: "codex",
   });
+});
+
+test("choosing a CLI keeps the model only when that CLI serves it", () => {
+  const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
+  const stale = {
+    name: "droid/glm-4.6",
+    token_source: "subscription" as const,
+    cli_provider: null,
+  };
+  assert.deepEqual(withChosenCli(stale, "codex", status([codex])), {
+    ...stale,
+    cli_provider: "codex",
+    name: "",
+  });
+  const served = { ...stale, name: "openai/gpt-5" };
+  assert.deepEqual(withChosenCli(served, "codex", status([codex])), {
+    ...served,
+    cli_provider: "codex",
+  });
+  assert.equal(withChosenCli(served, "claude", null).name, "");
 });

@@ -25,6 +25,7 @@ export {
   subscriptionMenuModels,
   subscriptionModelConfig,
   subscriptionModelId,
+  withChosenCli,
   withSupportedHostCli,
   type CliState,
   type CliStatus,

@@ -85,6 +85,19 @@ export function firstReadyCli(
   )?.id;
 }
 
+/**
+ * A model config on a newly chosen CLI. The model stays only when that CLI
+ * serves it, so a Save never pairs a CLI with a model it cannot run.
+ */
+export function withChosenCli<T extends { name: string; cli_provider?: CliProvider | null }>(
+  config: T,
+  cli: CliProvider,
+  status: LocalStatus | null | undefined,
+): T {
+  const served = findCli(status, cli)?.models.includes(config.name);
+  return { ...config, cli_provider: cli, name: served ? config.name : "" };
+}
+
 /** `subscription/<cli>/<catalog-slug>`, the agent-request model shorthand. */
 export function subscriptionModelId(cli: CliProvider, slug: string): string {
   return `${SUBSCRIPTION_MODEL_PREFIX}${cli}/${slug}`;

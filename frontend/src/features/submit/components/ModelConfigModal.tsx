@@ -11,6 +11,7 @@ import {
   isCliProvider,
   subscriptionCatalogModels,
   useLocalStatus,
+  withChosenCli,
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
@@ -169,8 +170,8 @@ export function ModelConfigModal({
   const readyCli = firstReadyCli(local.status);
   React.useEffect(() => {
     if (mode !== "subscription" || draft.cli_provider || !readyCli) return;
-    setDraft((current) => ({ ...current, cli_provider: readyCli }));
-  }, [mode, draft.cli_provider, readyCli]);
+    setDraft((current) => withChosenCli(current, readyCli, local.status));
+  }, [mode, draft.cli_provider, readyCli, local.status]);
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -425,10 +426,7 @@ export function ModelConfigModal({
                 <SubscriptionSourcePicker
                   value={draft.cli_provider}
                   onChange={(cli) =>
-                    setDraft((current) => {
-                      const served = findCli(local.status, cli)?.models.includes(current.name);
-                      return { ...current, cli_provider: cli, name: served ? current.name : "" };
-                    })
+                    setDraft((current) => withChosenCli(current, cli, local.status))
                   }
                   status={local.status}
                   loading={local.loading}
