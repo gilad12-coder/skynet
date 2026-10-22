@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -39,6 +40,8 @@ from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
 from .test_agent_engine import _status
+from .test_protected_submissions import _Harness, _payload
+from .test_protected_submissions import harness as _harness_fixture
 from .test_submissions_router import (
     _billing_engine,
     _FakeJobStore,
@@ -46,6 +49,8 @@ from .test_submissions_router import (
     make_client,
     unified_payload,
 )
+
+harness = _harness_fixture
 
 _SECRET = "test-internal-secret"
 _REAL_ENSURE_API_BUDGET = _sub_mod._ensure_api_budget
@@ -681,3 +686,58 @@ def test_blackbox_proposer_follows_the_agent_engine(monkeypatch: pytest.MonkeyPa
     fill_proposer_host_cli(None, "alice", request)
 
     assert request.proposer.host_cli == "claude"
+
+
+@pytest.mark.parametrize("route", ["/wizard/preflight", "/wizard/preflight/stream"])
+def test_local_wizard_check_evidence_starts_a_run_on_the_engine_cli(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    """The wizard check fills the proposer CLI like the run, so its evidence starts the run.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        route: The plain or streamed wizard check route.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="engine")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+
+    response = harness.client.post(
+        route,
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    checked = frames[-1] if route.endswith("/stream") else response.json()
+    assert checked["status"] == "succeeded", checked
+    assert harness.calls[0]["payload"]["optimizer"]["proposer"]["host_cli"] == "claude"
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "claude"
