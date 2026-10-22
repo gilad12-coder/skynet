@@ -335,10 +335,11 @@ builds the images that production also runs (ECR is shared), so keep the
 `.github/workflows/terraform.yml` runs on every PR that changes
 `infra/terraform`: `fmt -check`, `validate` for every root, tflint, checkov,
 then a read-only `plan -lock=false` of `global`, `staging` and `production`. It
-posts only the `Plan:` lines as a PR comment. It never applies. The plan job
-fails when an environment plan would destroy an ECS service or the HTTPS
-listener (for example a go-live switch set back to `false`); the comment names
-those resources. The plan job
+posts a PR comment with the `Plan:` lines and, when present, the addresses of
+the ECS services or HTTPS listener that the plan would delete. It never
+applies. The plan job fails when an environment plan would delete an ECS
+service or the HTTPS listener (for example a go-live switch set back to
+`false`). The plan job
 skips with a notice when the PR comes from a fork (no OIDC token) or when the
 two variables are not set.
 
