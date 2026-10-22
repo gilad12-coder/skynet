@@ -11,6 +11,10 @@ import {
   cellEditable,
   cellExists,
   cellShownOn,
+  channelHeaderTip,
+  channelHeld,
+  heldChannels,
+  HELD_CHANNELS,
   itemLine,
   localOffChannels,
   localOffReason,
@@ -127,6 +131,7 @@ function localState(
     macos: Object.fromEntries(
       EVENT_TYPES.map((e) => [e, false]),
     ) as LocalNotificationChannels["macos"],
+    macos_held: false,
   };
 }
 
@@ -177,4 +182,34 @@ test("the Mac app lists the channels that are not set up, in column order", () =
   assert.deepEqual(localOffChannels(localState({ email: true })), ["chrome", "slack"]);
   assert.deepEqual(localOffChannels(localState({ email: true, chrome: true, slack: true })), []);
   assert.deepEqual(localOffChannels(null), []);
+});
+
+test("the hold covers macOS only in the Mac app", () => {
+  assert.deepEqual(heldChannels(null), HELD_CHANNELS);
+  assert.ok(!heldChannels(null).includes("macos"));
+  assert.deepEqual(heldChannels(localState()), [...HELD_CHANNELS, "macos"]);
+});
+
+test("the macOS hold comes from the Mac app's state, the others from the preferences", () => {
+  const local = { ...localState(), macos_held: true };
+  assert.equal(channelHeld("macos", [], local), true);
+  assert.equal(channelHeld("macos", [], localState()), false);
+  assert.equal(channelHeld("macos", [], null), false);
+  assert.equal(channelHeld("email", ["email"], local), true);
+  assert.equal(channelHeld("chrome", ["email"], local), false);
+  assert.equal(channelHeld("inbox", ["email"], local), false);
+});
+
+test("a hosted header keeps its own Slack wording, without the channel prefix", () => {
+  assert.deepEqual(channelHeaderTip("slack", false, null), ["notifications.slack.unavailable"]);
+  assert.deepEqual(channelHeaderTip("slack", true, null), ["notifications.channel.slack"]);
+  assert.deepEqual(channelHeaderTip("email", false, null), ["notifications.channel.email"]);
+});
+
+test("a Mac app header names the channel and why it is off", () => {
+  assert.deepEqual(channelHeaderTip("slack", false, localState()), [
+    "notifications.channel.slack",
+    "notifications.local.not_configured",
+  ]);
+  assert.deepEqual(channelHeaderTip("macos", false, localState()), ["notifications.channel.macos"]);
 });

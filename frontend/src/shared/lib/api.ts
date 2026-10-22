@@ -1049,6 +1049,8 @@ export interface LocalNotificationChannels {
   channels: Record<NotificationHeldChannel | "macos", boolean>;
   /** Event type -> whether it shows as a macOS notification. */
   macos: Record<NotificationEventType, boolean>;
+  /** Whether non-urgent macOS notifications wait the hold. */
+  macos_held: boolean;
 }
 
 /** One queued macOS notification for the Mac app to show. */
@@ -1080,6 +1082,14 @@ export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType
   return request<LocalNotificationChannels>("/local/notifications/macos", {
     method: "PATCH",
     body: JSON.stringify({ grid }),
+  });
+}
+
+/** Add macOS to, or take it out of, the held channels in the Mac app. */
+export function updateLocalMacosHeld(held: boolean) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ held }),
   });
 }
 

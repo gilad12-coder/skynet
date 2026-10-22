@@ -20,7 +20,7 @@ from ...notifications.catalog import CHROME, EMAIL, MACOS, SLACK
 from ...notifications.channels import vapid_public_key
 from ...notifications.comms import mailable, resolve_email
 from ...notifications.native import claim_native, confirm_native
-from ...notifications.preferences import merge_grid
+from ...notifications.preferences import clean_held_channels, merge_grid
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..email_sender import email_configured
@@ -34,10 +34,14 @@ AcceptLanguageDep = Annotated[str | None, Header(include_in_schema=False)]
 class LocalNotificationChannels(BaseModel):
     channels: dict[str, bool] = Field(description="Delivery channel -> whether this Mac can deliver on it now.")
     macos: dict[EventTypeValue, bool] = Field(description="Event type -> whether it shows as a macOS notification.")
+    macos_held: bool = Field(description="Whether non-urgent macOS notifications wait the hold.")
 
 
 class MacOSCellsUpdate(BaseModel):
-    grid: dict[EventTypeValue, bool] = Field(description="macOS cells to change; others keep their value.")
+    grid: dict[EventTypeValue, bool] = Field(
+        default_factory=dict, description="macOS cells to change; others keep their value."
+    )
+    held: bool | None = Field(default=None, description="Whether macOS joins the held channels; None keeps it.")
 
 
 class NativeNotificationItem(BaseModel):
@@ -99,6 +103,22 @@ def _macos_cells(row: NotificationPreferenceModel | None) -> dict[str, bool]:
     return {event: cells[MACOS] for event, cells in grid.items()}
 
 
+def _local_state(username: str, row: NotificationPreferenceModel | None) -> LocalNotificationChannels:
+    """Render the channel states and the caller's macOS settings.
+
+    Args:
+        username: The signed-in local user.
+        row: The stored preferences, or ``None``.
+
+    Returns:
+        The channel states, the macOS column and whether macOS is held.
+    """
+    held = clean_held_channels(row.held_channels if row is not None else None)
+    return LocalNotificationChannels(
+        channels=_channel_states(username), macos=_macos_cells(row), macos_held=MACOS in held
+    )
+
+
 def create_local_notifications_router(*, job_store) -> APIRouter:
     """Build the Mac app's notification router.
 
@@ -121,33 +141,36 @@ def create_local_notifications_router(*, job_store) -> APIRouter:
             The channel states and the macOS column.
         """
         with Session(job_store.engine) as session:
-            row = session.get(NotificationPreferenceModel, user.username)
-            return LocalNotificationChannels(channels=_channel_states(user.username), macos=_macos_cells(row))
+            return _local_state(user.username, session.get(NotificationPreferenceModel, user.username))
 
     @router.patch("/local/notifications/macos", include_in_schema=False)
     def update_macos_cells(body: MacOSCellsUpdate, user: AuthenticatedUserDep) -> LocalNotificationChannels:
-        """Change the caller's macOS cells.
+        """Change the caller's macOS cells and whether macOS is held.
 
         Args:
-            body: The cells to change.
+            body: The cells to change, and the hold choice.
             user: The signed-in local user.
 
         Returns:
-            The channel states and the macOS column after the change.
+            The channel states and the macOS settings after the change.
         """
         with Session(job_store.engine) as session:
             row = session.get(NotificationPreferenceModel, user.username)
             if row is None:
                 row = NotificationPreferenceModel(username=user.username)
                 session.add(row)
-            grid = merge_grid(row.channel_grid)
-            for event, on in body.grid.items():
-                grid[event][MACOS] = on
-            row.channel_grid = merge_grid(grid)
+            if body.grid:
+                grid = merge_grid(row.channel_grid)
+                for event, on in body.grid.items():
+                    grid[event][MACOS] = on
+                row.channel_grid = merge_grid(grid)
+            if body.held is not None:
+                others = [ch for ch in clean_held_channels(row.held_channels) if ch != MACOS]
+                row.held_channels = list(clean_held_channels([*others, MACOS] if body.held else others))
             row.updated_at = datetime.now(UTC)
             session.commit()
             session.refresh(row)
-            return LocalNotificationChannels(channels=_channel_states(user.username), macos=_macos_cells(row))
+            return _local_state(user.username, row)
 
     @router.post("/local/notifications/native/claim", include_in_schema=False)
     def claim_native_notifications(

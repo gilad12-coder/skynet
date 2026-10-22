@@ -141,6 +141,42 @@ def test_patch_macos_cells_saves_and_keeps_news_inbox_only(harness, local_mode: 
     assert client.get("/account/notification-preferences").json()["grid"]["finished"] == DEFAULT_GRID["finished"]
 
 
+def test_macos_is_not_held_by_default(harness, local_mode: None) -> None:
+    """macOS starts outside the held channels, like the hosted push channel."""
+    client, _ = harness
+    assert client.get("/local/notifications/channels").json()["macos_held"] is False
+
+
+def test_patch_holds_macos_without_touching_the_hosted_contract(harness, local_mode: None) -> None:
+    """Holding macOS saves; the shared preference API keeps listing only hosted channels."""
+    client, _ = harness
+    response = client.patch("/local/notifications/macos", json={"held": True})
+    assert response.status_code == 200
+    assert response.json()["macos_held"] is True
+    assert client.get("/local/notifications/channels").json()["macos_held"] is True
+    assert client.get("/account/notification-preferences").json()["held_channels"] == ["email"]
+
+    assert client.patch("/local/notifications/macos", json={"held": False}).json()["macos_held"] is False
+    assert client.get("/account/notification-preferences").json()["held_channels"] == ["email"]
+
+
+def test_hosted_hold_change_keeps_the_macos_hold(harness, local_mode: None) -> None:
+    """Changing the hosted held channels does not drop a macOS hold the hosted contract cannot name."""
+    client, _ = harness
+    client.patch("/local/notifications/macos", json={"held": True})
+    response = client.patch("/account/notification-preferences", json={"held_channels": ["chrome"]})
+    assert response.status_code == 200
+    assert response.json()["held_channels"] == ["chrome"]
+    assert client.get("/local/notifications/channels").json()["macos_held"] is True
+
+
+def test_hosted_contract_rejects_a_macos_hold(harness) -> None:
+    """A hosted server has no macOS channel to hold."""
+    client, _ = harness
+    response = client.patch("/account/notification-preferences", json={"held_channels": ["macos"]})
+    assert response.status_code == 422
+
+
 def test_patch_rejects_an_unknown_event(harness, local_mode: None) -> None:
     """Unknown event names are a validation error."""
     client, _ = harness

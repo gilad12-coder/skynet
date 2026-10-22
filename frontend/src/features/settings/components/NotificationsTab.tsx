@@ -16,9 +16,12 @@ import {
   cellEditable,
   cellExists,
   cellShownOn,
+  channelHeaderTip,
+  channelHeld,
   channelLive,
   chromeCellAction,
   currentPushSubscription,
+  heldChannels,
   localOffChannels,
   localOffReason,
   nativePermission,
@@ -37,12 +40,12 @@ import {
   getSlackConnection,
   startSlackOAuth,
   updateLocalMacosCells,
+  updateLocalMacosHeld,
   updateNotificationPreferences,
   type LocalNotificationChannels,
   type SlackConnection,
   type NotificationChannel,
   type NotificationEventType,
-  type NotificationHeldChannel,
   type NotificationPreferences,
   type NotificationPreferencesPatch,
 } from "@/shared/lib/api";
@@ -141,14 +144,12 @@ function ChannelHeader({
   local: LocalNotificationChannels | null;
 }) {
   const ChannelIcon = CHANNEL_ICONS[channel];
-  const off = local
-    ? localOffReason(channel, local)
-    : channelLive(channel, slackReady)
-      ? null
-      : "notifications.slack.unavailable";
-  const live = off === null;
+  const live = local ? localOffReason(channel, local) === null : channelLive(channel, slackReady);
+  const tip = channelHeaderTip(channel, slackReady, local)
+    .map((key) => msg(key))
+    .join(": ");
   return (
-    <Tip tip={off ? `${msg(CHANNEL_KEYS[channel])}: ${msg(off)}` : msg(CHANNEL_KEYS[channel])}>
+    <Tip tip={tip}>
       <ChannelIcon
         className={cn("size-4", live ? "text-muted-foreground" : "text-muted-foreground/45")}
         aria-label={msg(CHANNEL_KEYS[channel])}
@@ -402,8 +403,23 @@ export function NotificationsTab() {
     }, HOLD_SAVE_DELAY_MS);
   };
 
-  const toggleHeld = (channel: NotificationHeldChannel) => {
-    if (!prefs) return;
+  // The macOS hold lives on the Mac app's own route; same optimistic save as the grid.
+  const toggleMacosHeld = async () => {
+    if (!local) return;
+    const before = local;
+    setLocal({ ...local, macos_held: !local.macos_held });
+    try {
+      setLocal(await updateLocalMacosHeld(!before.macos_held));
+      toast.success(msg("settings.notifications.prefs_saved"));
+    } catch {
+      setLocal(before);
+      toast.error(msg("settings.notifications.prefs_save_error"));
+    }
+  };
+
+  const toggleHeld = (channel: GridChannel) => {
+    if (channel === "macos") return void toggleMacosHeld();
+    if (!prefs || channel === "inbox") return;
     const held = prefs.held_channels.includes(channel)
       ? prefs.held_channels.filter((c) => c !== channel)
       : HELD_CHANNELS.filter((c) => c === channel || prefs.held_channels.includes(c));
@@ -452,9 +468,11 @@ export function NotificationsTab() {
           ? "notifications.push.unsupported"
           : null;
 
+  const holdable = heldChannels(local);
+  const heldNow = prefs ? holdable.filter((c) => channelHeld(c, prefs.held_channels, local)) : [];
   const heldSummary =
-    prefs && prefs.held_channels.length > 0
-      ? prefs.held_channels.map((c) => msg(CHANNEL_KEYS[c])).join(", ")
+    heldNow.length > 0
+      ? heldNow.map((c) => msg(CHANNEL_KEYS[c])).join(", ")
       : msg("settings.notifications.hold.none");
 
   return (
@@ -670,9 +688,9 @@ export function NotificationsTab() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-44">
-              {HELD_CHANNELS.map((channel) => {
+              {holdable.map((channel) => {
                 const ChannelIcon = CHANNEL_ICONS[channel];
-                const on = prefs?.held_channels.includes(channel) ?? false;
+                const on = heldNow.includes(channel);
                 return (
                   <DropdownMenuItem
                     key={channel}

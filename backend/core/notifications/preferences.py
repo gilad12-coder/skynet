@@ -108,7 +108,7 @@ def clamp_hold_minutes(value: Any) -> int:
 
 
 def clean_held_channels(value: Any) -> tuple[str, ...]:
-    """Keep only known delivery channels, in canonical order.
+    """Keep only this deployment's delivery channels, in canonical order.
 
     Args:
         value: Candidate list of channel names, or ``None`` for the default.
@@ -121,7 +121,7 @@ def clean_held_channels(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list | tuple):
         return DEFAULT_HELD_CHANNELS
     chosen = set(value)
-    return tuple(channel for channel in DELIVERY_CHANNELS if channel in chosen)
+    return tuple(channel for channel in delivery_channels() if channel in chosen)
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,21 @@ export const LOCAL_CHANNELS: readonly GridChannel[] = [...CHANNELS, "macos"];
 
 export const HELD_CHANNELS: readonly NotificationHeldChannel[] = ["email", "chrome", "slack"];
 
+/** The channels the hold can apply to: every delivery channel, so macOS too in the Mac app. */
+export function heldChannels(local: LocalNotificationChannels | null): readonly GridChannel[] {
+  return local ? [...HELD_CHANNELS, "macos"] : HELD_CHANNELS;
+}
+
+/** Whether a channel waits the hold. The macOS hold lives on the Mac app's own route. */
+export function channelHeld(
+  channel: GridChannel,
+  held: readonly NotificationHeldChannel[],
+  local: LocalNotificationChannels | null,
+): boolean {
+  if (channel === "macos") return local?.macos_held ?? false;
+  return channel !== "inbox" && held.includes(channel);
+}
+
 /*
  * Channels every server delivers on. Slack is live only where the server has
  * a Slack app set up; elsewhere its column stays visible and disabled.
@@ -68,6 +83,25 @@ export function cellShownOn(
   local: LocalNotificationChannels | null,
 ): boolean {
   return stored && localOffReason(channel, local) === null;
+}
+
+/**
+ * The message keys of a column header's tooltip, joined with ": ". Hosted
+ * keeps its own wording for an unset Slack; the Mac app names the channel
+ * and why it is off.
+ */
+export function channelHeaderTip(
+  channel: GridChannel,
+  slackReady: boolean,
+  local: LocalNotificationChannels | null,
+): MessageKey[] {
+  if (!local) {
+    return channelLive(channel, slackReady)
+      ? [CHANNEL_KEYS[channel]]
+      : ["notifications.slack.unavailable"];
+  }
+  const off = localOffReason(channel, local);
+  return off ? [CHANNEL_KEYS[channel], off] : [CHANNEL_KEYS[channel]];
 }
 
 /** In the Mac app, the columns that are not set up on this Mac, in column order. */

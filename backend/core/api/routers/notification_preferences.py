@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ...notifications.catalog import CHANNELS, MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
+from ...notifications.catalog import CHANNELS, DELIVERY_CHANNELS, LOCAL_CHANNELS, MAX_HOLD_MINUTES, MIN_HOLD_MINUTES
 from ...notifications.preferences import clean_held_channels, merge_grid, settings_from_row
 from ...storage.models import NotificationPreferenceModel
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -62,12 +62,12 @@ def _response(row: NotificationPreferenceModel | None) -> NotificationPreference
         The effective preferences.
     """
     settings = settings_from_row(row)
-    # Local-only columns (macOS) have their own route, so this contract is the hosted one.
+    # Local-only channels (macOS cells and hold) have their own route, so this contract is the hosted one.
     grid = {event: {ch: on for ch, on in cells.items() if ch in CHANNELS} for event, cells in settings.grid.items()}
     return NotificationPreferencesResponse(
         grid=grid,
         hold_minutes=settings.hold_minutes,
-        held_channels=list(settings.held_channels),
+        held_channels=[ch for ch in settings.held_channels if ch in DELIVERY_CHANNELS],
         stuck_fraction=settings.stuck_fraction,
         budget_alert_fraction=settings.budget_alert_fraction,
     )
@@ -134,7 +134,9 @@ def create_notification_preferences_router(*, job_store) -> APIRouter:
             if body.hold_minutes is not None:
                 row.hold_minutes = body.hold_minutes
             if body.held_channels is not None:
-                row.held_channels = list(clean_held_channels(body.held_channels))
+                # This contract names only the hosted channels; keep the Mac app's own holds as they are.
+                kept = [ch for ch in clean_held_channels(row.held_channels) if ch in LOCAL_CHANNELS]
+                row.held_channels = list(clean_held_channels([*body.held_channels, *kept]))
             if body.stuck_fraction is not None:
                 row.stuck_fraction = body.stuck_fraction
             if body.budget_alert_fraction is not None:

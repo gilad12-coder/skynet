@@ -15,7 +15,12 @@ from core.notifications.catalog import CHANNELS, DEFAULT_GRID, MACOS
 from core.notifications.channels import Delivery, EmailChannel, MacOSChannel, get_channel
 from core.notifications.dispatch import notify
 from core.notifications.native import CLAIM_BATCH, CLAIM_LEASE, EXPIRE_BATCH, claim_native, confirm_native
-from core.notifications.preferences import configure_notification_preferences, default_grid, merge_grid
+from core.notifications.preferences import (
+    clean_held_channels,
+    configure_notification_preferences,
+    default_grid,
+    merge_grid,
+)
 
 from ...storage.models import Base, NotificationModel, NotificationPreferenceModel
 
@@ -147,6 +152,28 @@ def test_notify_respects_a_macos_opt_out(engine, local_mode: None) -> None:
         row = session.get(NotificationModel, notification_id)
         assert row is not None
         assert MACOS not in row.deliveries
+
+
+def test_macos_can_be_held_only_in_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every local delivery channel can be held; a hosted server drops a stray macOS hold."""
+    assert clean_held_channels([MACOS, "email"]) == ("email",)
+    monkeypatch.setattr(settings, "local_mode", True)
+    assert clean_held_channels([MACOS, "email"]) == ("email", MACOS)
+
+
+def test_notify_holds_macos_when_the_user_holds_it(engine, local_mode: None) -> None:
+    """A held macOS channel waits the hold like the hosted held channels."""
+    with Session(engine) as session:
+        session.add(NotificationPreferenceModel(username=_USER, held_channels=["email", MACOS]))
+        session.commit()
+
+    notification_id = notify(_USER, "finished", "opt-1", title="Ticket triage", now=_T0)
+
+    with Session(engine) as session:
+        row = session.get(NotificationModel, notification_id)
+        assert row is not None
+        assert row.deliveries[MACOS]["state"] == "held"
+        assert row.hold_until is not None
 
 
 def _macos_state(engine, notification_id: str) -> dict:
