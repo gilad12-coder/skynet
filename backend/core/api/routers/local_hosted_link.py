@@ -157,7 +157,8 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
             user: The signed-in local user.
 
         Returns:
-            ``{"hosted_revoked": bool}``; false means the Mac was offline.
+            ``{"hosted_revoked": bool}``; false means hosted was not told (the Mac
+            was offline or the stored link cannot be read).
         """
         return {"hosted_revoked": hosted_link.unlink(engine, user.username)}
 

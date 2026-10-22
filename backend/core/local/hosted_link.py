@@ -509,8 +509,9 @@ def unlink(engine: Engine, username: str) -> bool:
         username: The local user.
 
     Returns:
-        Whether hosted confirmed the revoke. ``False`` means the link stays on
-        the account until the user removes it on the website or it idles out.
+        Whether hosted confirmed the revoke. ``False`` means hosted was not told
+        (offline or the stored link cannot be read), so the link stays on the
+        account until the user removes it on the website or it idles out.
     """
     # The refresh locks keep a refresh in flight from saving a new pair after
     # the clear, which would show the Mac as linked again. The revoke call is
@@ -518,8 +519,14 @@ def unlink(engine: Engine, username: str) -> bool:
     with _REFRESH_LOCK, engine.connect() as conn, conn.begin():
         if engine.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _REFRESH_LOCK_KEY})
-        secret = ConnectorVault(engine).resolve(username, PROVIDER)
-        revoked = True
+        try:
+            secret = ConnectorVault(engine).resolve(username, PROVIDER)
+            revoked = True
+        except DomainError as exc:
+            # A changed or missing vault key must not trap the user in a link
+            # they cannot remove; hosted is not told, as when offline.
+            logger.warning("Cannot read the stored hosted link, so hosted is not told of the unlink (%s)", exc.code)
+            secret, revoked = None, False
         if secret is not None:
             try:
                 with _client() as client:

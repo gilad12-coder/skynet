@@ -381,6 +381,27 @@ def test_unlink_offline_still_deletes_local_data(engine: Engine, hosted: FakeHos
     assert hosted_link.link_status(engine, _USER) is None
 
 
+@pytest.mark.parametrize("new_key", [Fernet.generate_key().decode(), None], ids=["new_vault_key", "no_vault_key"])
+def test_unlink_with_an_unreadable_link_still_deletes_local_data(
+    engine: Engine, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch, new_key: str | None
+) -> None:
+    """A stored link the vault cannot decrypt is still deleted, and hosted is not told.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to change the vault key.
+        new_key: The replacement vault key, or ``None`` for no key.
+    """
+    _link(engine, hosted)
+    monkeypatch.setattr(settings, "byok_vault_key", SecretStr(new_key) if new_key else None)
+
+    assert hosted_link.unlink(engine, _USER) is False
+
+    assert hosted.revoke_bodies == []
+    assert hosted_link.link_status(engine, _USER) is None
+
+
 def test_unlink_waits_for_a_refresh_in_flight(
     tmp_path: Path, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
