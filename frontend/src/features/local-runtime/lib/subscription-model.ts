@@ -538,12 +538,19 @@ export function menuModelGroup(model: CatalogModel): MenuModelGroup {
 }
 
 /**
- * Whether a saved pick is a Local model that a given menu with no Local rows
- * (the OpenRouter engine menu) cannot list. The menu counts it as no pick but
- * keeps it saved, so the pick comes back with a CLI engine.
+ * Whether a saved pick is a Local model that the OpenRouter engine menu hides.
+ * The menu counts it as no pick but keeps it saved, so the pick comes back
+ * with a CLI engine. A CLI engine menu with no Local rows (a role CLI that is
+ * missing or lists no models) does not hide the pick: there it is stale, so
+ * the chip and the request both use the first listed model.
  */
-export function hiddenLocalPick(pick: string | null, models: CatalogModel[] | undefined): boolean {
+export function hiddenLocalPick(
+  pick: string | null,
+  models: CatalogModel[] | undefined,
+  openRouterEngine: boolean,
+): boolean {
   return (
+    openRouterEngine &&
     !!pick?.startsWith(SUBSCRIPTION_MODEL_PREFIX) &&
     !!models &&
     !models.some((model) => menuModelGroup(model) === "local")

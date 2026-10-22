@@ -50,6 +50,11 @@ interface ComposerModelMenuProps {
    * subscription models. The first one runs with no pick.
    */
   models?: CatalogModel[];
+  /**
+   * The given list is the OpenRouter engine menu, which hides Local models.
+   * A saved Local pick it does not list stays saved for a CLI engine.
+   */
+  openRouterEngine?: boolean;
 }
 
 // Caps the fallback list when the catalog flags no featured models (a
@@ -95,6 +100,7 @@ export function ComposerModelMenu({
   disabled,
   defaultFlag = "is_default",
   models,
+  openRouterEngine = false,
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
@@ -129,7 +135,7 @@ export function ComposerModelMenu({
     !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
   // A Local pick the OpenRouter engine menu hides is no pick here, but it
   // stays saved for a CLI engine.
-  const stale = unlisted && !hiddenLocalPick(savedValue, models);
+  const stale = unlisted && !hiddenLocalPick(savedValue, models, openRouterEngine);
   const value = savedValue && !unlisted ? savedValue : null;
   React.useEffect(() => {
     if (stale) {

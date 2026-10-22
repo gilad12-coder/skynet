@@ -1063,18 +1063,46 @@ test("the OpenRouter engine menu keeps a saved Local pick for a CLI engine", () 
   // The OpenRouter engine menu has no Local rows, so it hides the pick and
   // does not clear it.
   assert.equal(
-    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, true)),
+    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, true), true),
     true,
   );
   // A CLI engine menu lists Local rows, so an unlisted Local pick is stale as before.
   assert.equal(
-    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, false)),
+    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, false), false),
     false,
   );
   // A key pick is never hidden; the hosted menu (no given list) is unchanged.
-  assert.equal(hiddenLocalPick("openrouter/openai/gpt-5", keyRows), false);
-  assert.equal(hiddenLocalPick(localPick, undefined), false);
-  assert.equal(hiddenLocalPick(null, keyRows), false);
+  assert.equal(hiddenLocalPick("openrouter/openai/gpt-5", keyRows, true), false);
+  assert.equal(hiddenLocalPick(localPick, undefined, true), false);
+  assert.equal(hiddenLocalPick(null, keyRows, true), false);
+});
+
+test("a CLI engine menu with no Local rows clears a saved Local pick, so the chip and the request agree", async () => {
+  // The CLI engine is claude, but the role runs on codex, which is missing and
+  // lists no models. With a verified key the menu lists only the key's rows.
+  const loaded = status([
+    cli(),
+    cli({ id: "codex", path: null, version: null, version_ok: false, models: [] }),
+  ]);
+  const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  const localPick = "subscription/codex/openai/gpt-5";
+  const cliRows = subscriptionMenuModels(findCli(loaded, roleCli("codex", loaded, "claude")), []);
+  const menu = localMenuModels(cliRows, keyMenuModels(keyRows, localPick), localPick, false);
+  assert.deepEqual(
+    menu.map((m) => m.value),
+    ["openrouter/google/gemini-3-pro"],
+  );
+  // The menu does not hide the pick, so it clears it as stale.
+  assert.equal(hiddenLocalPick(localPick, menu, false), false);
+  // With no pick, the request sends the key model that the chip shows (menu[0]).
+  const sent = await resolveLocalAgentModel(null, "codex", {
+    loadStatus: async () => loaded,
+    peekStatus: () => loaded,
+    keyVerified: async () => true,
+    keyRows: () => keyRows,
+    engine: "claude",
+  });
+  assert.equal(sent, menu[0]?.value);
 });
 
 test("a stored OpenRouter engine with no verified key runs agents on the default CLI", () => {

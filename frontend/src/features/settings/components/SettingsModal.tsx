@@ -245,7 +245,7 @@ function TaggingTab() {
 
 function AgentTab() {
   const { prefs, setPref } = useUserPrefs();
-  const localMenuModels = useLocalAgentMenuModels(
+  const localMenu = useLocalAgentMenuModels(
     agentSubscriptionFor("generalist"),
     prefs.composerModel,
   );
@@ -264,7 +264,8 @@ function AgentTab() {
           onChange={(v) => setPref("composerModel", v)}
           effort={prefs.composerEffort}
           onEffortChange={(v) => setPref("composerEffort", v)}
-          models={localMenuModels}
+          models={localMenu.models}
+          openRouterEngine={localMenu.openRouterEngine}
         />
       </SettingsRow>
 

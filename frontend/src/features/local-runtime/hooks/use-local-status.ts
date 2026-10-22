@@ -177,16 +177,16 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
 export function useLocalAgentMenuModels(
   cli: CliProvider | null,
   pick: string | null,
-): CatalogModel[] | undefined {
+): { models: CatalogModel[] | undefined; openRouterEngine: boolean } {
   const local = isLocalMode();
   const { status } = useLocalStatus(local);
   const { engine: stored } = useAgentEngine();
   const keys = useByokKeys();
   const engine = effectiveAgentEngine(stored, menuKeyVerified(keys));
   const keyModels = useLocalKeyModels(local);
-  return React.useMemo(() => {
+  const viaKey = local && engine === OPENROUTER_ENGINE;
+  const models = React.useMemo(() => {
     if (!local) return undefined;
-    const viaKey = engine === OPENROUTER_ENGINE;
     const cliModels = status
       ? subscriptionMenuModels(
           findCli(status, roleCli(cli, status, engine)),
@@ -194,7 +194,8 @@ export function useLocalAgentMenuModels(
         )
       : null;
     return localMenuModels(cliModels, keyModels && keyMenuModels(keyModels, pick), pick, viaKey);
-  }, [local, status, cli, engine, keyModels, pick]);
+  }, [local, status, cli, engine, keyModels, pick, viaKey]);
+  return { models, openRouterEngine: viaKey };
 }
 
 /**

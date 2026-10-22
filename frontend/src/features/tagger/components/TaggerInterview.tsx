@@ -138,7 +138,7 @@ export function TaggerInterview({
   onConfirmRubric,
 }: Props) {
   useCompletionNotification(busy, () => msg("notify.interview.turn"));
-  const localMenuModels = useLocalAgentMenuModels(
+  const localMenu = useLocalAgentMenuModels(
     agentSubscriptionFor("tagger"),
     interviewComposerModel(assist),
   );
@@ -282,7 +282,8 @@ export function TaggerInterview({
                 effort={interviewComposerEffort(assist)}
                 onEffortChange={onSetInterviewEffort}
                 defaultFlag="is_interview_default"
-                models={localMenuModels}
+                models={localMenu.models}
+                openRouterEngine={localMenu.openRouterEngine}
               />
             }
           />
