@@ -147,6 +147,11 @@ void describe("hostedSignInUrl", () => {
     assert.equal(hostedSignInUrl(), "https://app.example.com/login");
   });
 
+  void it("uses the hosted app when the configured URL is empty", () => {
+    process.env.NEXT_PUBLIC_HOSTED_APP_URL = "";
+    assert.equal(hostedSignInUrl(), "https://skynetml.com/login");
+  });
+
   void it("does not use the site URL of this deployment", () => {
     process.env.NEXT_PUBLIC_SITE_URL = "https://site.example.com";
     assert.equal(hostedSignInUrl(), "https://skynetml.com/login");

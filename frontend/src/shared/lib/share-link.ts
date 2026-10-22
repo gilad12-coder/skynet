@@ -28,6 +28,6 @@ export function shareLinkUrl(path: string): string | null {
  * this computer.
  */
 export function hostedSignInUrl(): string | null {
-  const url = new URL("/login", process.env.NEXT_PUBLIC_HOSTED_APP_URL ?? FALLBACK_HOSTED_APP_URL);
+  const url = new URL("/login", process.env.NEXT_PUBLIC_HOSTED_APP_URL || FALLBACK_HOSTED_APP_URL);
   return LOOPBACK_HOSTS.has(url.hostname) ? null : url.toString();
 }
