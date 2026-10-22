@@ -17,6 +17,7 @@ const { AgentEngineSelect, EngineChoice } = await import("./AgentEngineSetting")
 const { AgentRoleRow } = await import("./AgentLocalRunSetting");
 const { Select } = await import("@/shared/ui/primitives/select");
 const {
+  agentEngineLoaded,
   agentEngineOptions,
   loadAgentEngine,
   loadLocalStatus,
@@ -64,6 +65,35 @@ function render(
     />,
   );
 }
+
+// Runs first: later tests load and save the engine into the shared module cache.
+void describe("agent engine load state (SKY-123 R11-1)", () => {
+  void it("a failed first load leaves the engine unknown, not a CLI engine; a later load settles it", async () => {
+    const realFetch = globalThis.fetch;
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    let fails = true;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(fails ? { detail: "boom" } : { engine: "openrouter" }), {
+        status: fails ? 500 : 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+    try {
+      // Before any load, the engine is unknown.
+      assert.equal(agentEngineLoaded(), false);
+      assert.equal(await loadAgentEngine(), null);
+      assert.equal(agentEngineLoaded(), false);
+      fails = false;
+      assert.equal(await loadAgentEngine(), "openrouter");
+      assert.equal(agentEngineLoaded(), true);
+      assert.equal(peekAgentEngine(), "openrouter");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+});
 
 void describe("AgentEngineSelect", () => {
   void it("hosted builds show OpenRouter with the hosted description and no warning", () => {

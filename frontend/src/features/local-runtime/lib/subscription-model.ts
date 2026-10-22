@@ -545,6 +545,55 @@ export function hiddenLocalPick(
 }
 
 /**
+ * Whether the composer menu lists a saved pick, and whether the pick is stale
+ * (the menu clears it). Only a non-empty list judges a pick, so a list that
+ * still loads or failed never clears one. A Local pick the OpenRouter engine
+ * menu hides is not stale.
+ */
+export function menuPickState(
+  pick: string | null,
+  listed: CatalogModel[] | undefined,
+  models: CatalogModel[] | undefined,
+  openRouterEngine: boolean,
+): { unlisted: boolean; stale: boolean } {
+  const unlisted =
+    !!pick && !!listed && listed.length > 0 && !listed.some((model) => model.value === pick);
+  return { unlisted, stale: unlisted && !hiddenLocalPick(pick, models, openRouterEngine) };
+}
+
+/**
+ * The local agent menu's rows for a role on `cli`, from the state
+ * `useLocalAgentMenuModels` reads. Before `GET /account/agent-engine` loads,
+ * or when that load failed, the engine is unknown: the menu has no rows, so it
+ * never judges a saved pick stale. An unknown engine is not a CLI engine,
+ * since an OpenRouter engine lists key picks that a CLI menu would clear.
+ */
+export function localAgentMenu(state: {
+  engineLoaded: boolean;
+  /** The stored engine; null when none was chosen and no CLI is ready. */
+  stored: AgentEngine | null;
+  keyVerified: boolean | null;
+  status: LocalStatus | null;
+  cli: CliProvider | null;
+  /** All the saved key's rows; null while they load or failed. */
+  keyModels: CatalogModel[] | null;
+  pick: string | null;
+  catalog: CatalogModel[] | undefined;
+}): { models: CatalogModel[]; openRouterEngine: boolean } {
+  if (!state.engineLoaded) return { models: [], openRouterEngine: false };
+  const engine = effectiveAgentEngine(state.stored, state.keyVerified);
+  const openRouterEngine = engine === OPENROUTER_ENGINE;
+  const cliModels = state.status
+    ? subscriptionMenuModels(
+        findCli(state.status, roleCli(state.cli, state.status, engine)),
+        state.catalog,
+      )
+    : null;
+  const keyModels = state.keyModels && keyMenuModels(state.keyModels, state.pick);
+  return { models: localMenuModels(cliModels, keyModels, openRouterEngine), openRouterEngine };
+}
+
+/**
  * The agent model for a role, resolved against a loaded status: the CLI's
  * slugs decide what the request sends, so the request waits for the status.
  * A role with no CLI runs on `defaultAgentCli` for the agent engine. A failed

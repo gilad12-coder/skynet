@@ -8,6 +8,7 @@ export {
 } from "./hooks/use-local-status";
 export {
   useAgentEngine,
+  agentEngineLoaded,
   loadAgentEngine,
   peekAgentEngine,
   saveAgentEngine,
@@ -20,6 +21,7 @@ export {
   MENU_GROUP_LABELS,
   menuModelGroup,
   hiddenLocalPick,
+  menuPickState,
   roleCli,
   OPENROUTER_ENGINE,
   type AgentEngine,

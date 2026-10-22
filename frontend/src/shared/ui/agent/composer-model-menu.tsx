@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import {
-  hiddenLocalPick,
   MENU_GROUP_LABELS,
   menuModelGroup,
+  menuPickState,
   RETIRED_AUTO_MODEL,
 } from "@/features/local-runtime";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
@@ -130,12 +130,9 @@ export function ComposerModelMenu({
   const listed = models ?? catalog?.models;
   // A saved pick the live catalog no longer lists (a withdrawn model) would
   // name a dead id on the chip. Only judged against a loaded, non-empty
-  // catalog so a gateway outage never wipes a valid pick.
-  const unlisted =
-    !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
-  // A Local pick the OpenRouter engine menu hides is no pick here, but it
-  // stays saved for a CLI engine.
-  const stale = unlisted && !hiddenLocalPick(savedValue, models, openRouterEngine);
+  // catalog so a gateway outage never wipes a valid pick. A Local pick the
+  // OpenRouter engine menu hides is no pick here, but it stays saved for a CLI engine.
+  const { unlisted, stale } = menuPickState(savedValue, listed, models, openRouterEngine);
   const value = savedValue && !unlisted ? savedValue : null;
   React.useEffect(() => {
     if (stale) {

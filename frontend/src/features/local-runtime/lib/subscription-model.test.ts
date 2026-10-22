@@ -22,8 +22,10 @@ const {
   keyRetryDelayMs,
   localKeyRows,
   localKeyStamp,
+  localAgentMenu,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
+  menuPickState,
   MENU_GROUP_LABELS,
   menuModelGroup,
   hiddenLocalPick,
@@ -661,6 +663,74 @@ test("a CLI engine clears a saved key pick, and the request sends the CLI model 
   assert.deepEqual(localMenuModels([], [keyRow(pick)], false), []);
   const noModels = localDeps({ loadStatus: async () => status([cli({ models: [] })]) });
   assert.equal(await resolveLocalAgentModel(pick, "claude", noModels), pick);
+});
+
+test("an agent engine that has not loaded, or failed to load, lists no rows, so a saved key pick survives (Settings > Agent panel and composer)", () => {
+  const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
+  const pick = "openrouter/anthropic/claude-sonnet-4.5";
+  const base = {
+    engineLoaded: false,
+    stored: null,
+    keyVerified: true,
+    status: loaded,
+    keyModels: [] as CatalogRow[],
+    pick,
+    catalog: [] as CatalogRow[],
+  };
+  // Mirrors ComposerModelMenu, which the Settings > Agent panel and every
+  // agent composer render with the hook's rows: a stale pick is cleared.
+  const judge = (menu: ReturnType<typeof localAgentMenu>) =>
+    menuPickState(pick, menu.models, menu.models, menu.openRouterEngine);
+  // The Settings panel uses the generalist role; composers can pin a CLI.
+  for (const role of [null, "codex", "claude"] as const) {
+    // GET /account/agent-engine still loads, or it failed (both leave it unknown).
+    for (const keyVerified of [true, null, false]) {
+      const menu = localAgentMenu({ ...base, cli: role, keyVerified });
+      assert.deepEqual(menu.models, [], `${role} ${keyVerified}`);
+      assert.deepEqual(judge(menu), { unlisted: false, stale: false }, `${role} ${keyVerified}`);
+    }
+    // The engine loads as OpenRouter with the verified key: the pick is listed.
+    const openRouter = localAgentMenu({
+      ...base,
+      cli: role,
+      engineLoaded: true,
+      stored: "openrouter",
+      keyModels: [keyRow(pick)],
+    });
+    assert.equal(openRouter.openRouterEngine, true);
+    assert.deepEqual(
+      openRouter.models.map((m) => m.value),
+      [pick],
+    );
+    assert.equal(judge(openRouter).stale, false);
+    // Only a loaded CLI engine judges the key pick stale.
+    const cliEngine = localAgentMenu({ ...base, cli: role, engineLoaded: true, stored: "claude" });
+    assert.equal(cliEngine.openRouterEngine, false);
+    assert.equal(cliEngine.models.length > 0, true);
+    assert.equal(judge(cliEngine).stale, true);
+  }
+  // A loaded engine with nothing chosen and no CLI ready still lists the default CLI.
+  assert.deepEqual(
+    localAgentMenu({ ...base, cli: null, engineLoaded: true }).models.map((m) => m.value),
+    ["subscription/codex/openai/gpt-5"],
+  );
+});
+
+test("the composer clears only a pick that a non-empty menu omits, and keeps a Local pick the OpenRouter menu hides", () => {
+  const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  const local = "subscription/claude/anthropic/claude-sonnet-4.5";
+  assert.deepEqual(menuPickState(local, [], [], false), { unlisted: false, stale: false });
+  assert.deepEqual(menuPickState(local, undefined, undefined, false), {
+    unlisted: false,
+    stale: false,
+  });
+  assert.deepEqual(menuPickState(local, keyRows, keyRows, true), { unlisted: true, stale: false });
+  assert.deepEqual(menuPickState(local, keyRows, keyRows, false), { unlisted: true, stale: true });
+  assert.deepEqual(menuPickState(null, keyRows, keyRows, false), { unlisted: false, stale: false });
+  assert.deepEqual(menuPickState(keyRows[0]!.value, keyRows, keyRows, false), {
+    unlisted: false,
+    stale: false,
+  });
 });
 
 test("the optimization picker is unchanged: it lists each CLI's own models, whatever the agent engine", () => {
