@@ -268,25 +268,19 @@ export function keyRetryDelayMs(attempt: number): number {
 }
 
 /**
- * The local composer menu: the CLI's subscription models, then the saved
- * key's models. `null` CLI models mean `/local/status` has not loaded; `null`
- * key models mean the key's list still loads. The menu stays empty until the
- * rows that can hold `pick` are known, so the menu never judges a saved key
- * pick stale (and clears it) too early. Only an OpenRouter pick waits for the
- * key rows, as only that pick is sent as a key model. With the OpenRouter
- * engine every agent runs on the key, so the menu lists only the key's models
- * (no Local group) and waits for them.
+ * The local composer menu lists only the agent engine's models. A CLI engine
+ * lists the CLI's subscription models; `null` means `/local/status` has not
+ * loaded, so the menu stays empty and never judges a saved pick stale (and
+ * clears it) too early. The OpenRouter engine runs every agent on the saved
+ * key, so it lists only the key's models (no Local group); `null` means they
+ * still load.
  */
 export function localMenuModels(
   cliModels: CatalogModel[] | null,
   keyModels: CatalogModel[] | null,
-  pick: string | null,
   openRouterEngine = false,
 ): CatalogModel[] {
-  if (openRouterEngine) return keyModels ?? [];
-  if (cliModels === null) return [];
-  if (keyModels === null) return isOpenRouterModelId(pick) ? [] : cliModels;
-  return [...cliModels, ...keyModels];
+  return (openRouterEngine ? keyModels : cliModels) ?? [];
 }
 
 /**
@@ -333,14 +327,14 @@ function resolveOpenRouterEngineModel(
 
 /**
  * The model id a local agent request sends, matching what the composer chip
- * shows. A subscription pick resolves on the CLI and waits for nothing else.
- * An OpenRouter pick is sent unchanged unless the app knows there is no
- * verified key. With no pick and no CLI model, the chip shows the key's first
- * model, so the request sends that model; while the menu's key list or key
- * model list loads or failed, the chip shows the default label and nothing is
- * sent. The OpenRouter engine runs every role on the saved key, whatever CLI
+ * shows. The OpenRouter engine runs every role on the saved key, whatever CLI
  * the role has; with that key removed or unverified, roles run on their CLIs
- * as with no engine (`effectiveAgentEngine`).
+ * as with no engine (`effectiveAgentEngine`). On a CLI the menu lists no key
+ * models, so the request reads no key state: a subscription pick resolves on
+ * the CLI, and an OpenRouter pick is not listed, so like no pick it sends the
+ * CLI's first model. With no CLI model the menu is empty: the chip names a
+ * saved OpenRouter pick, which is sent unchanged, or shows the default label
+ * with no pick, and nothing is sent.
  */
 export async function resolveLocalAgentModel(
   model: string | null,
@@ -362,18 +356,11 @@ export async function resolveLocalAgentModel(
     engine = effectiveAgentEngine(engine, await deps.keyVerified());
     if (engine === OPENROUTER_ENGINE) return resolveOpenRouterEngineModel(model, deps.keyRows);
   }
-  const viaCli = () => resolveAgentModel(model, cli, deps.loadStatus, deps.peekStatus, engine);
-  if (isOpenRouterModelId(model)) {
-    // Sending it unchanged lets the backend run it on the key, or refuse it
-    // visibly; a CLI stand-in would run a model the chip does not name.
-    return (await deps.keyVerified()) === false ? viaCli() : model;
+  if (model && !isOpenRouterModelId(model)) {
+    return resolveAgentModel(model, cli, deps.loadStatus, deps.peekStatus, engine);
   }
-  if (model) return viaCli();
   const status = await deps.loadStatus().catch(() => deps.peekStatus());
-  const sent = subscriptionAgentModel(null, cli ?? defaultAgentCli(status, engine), status);
-  if (sent || !status || !(await deps.keyVerified())) return sent;
-  const rows = deps.keyRows();
-  return rows ? (keyMenuModels(rows)[0]?.value ?? null) : null;
+  return subscriptionAgentModel(null, cli ?? defaultAgentCli(status, engine), status) ?? model;
 }
 
 /**
@@ -540,9 +527,9 @@ export function menuModelGroup(model: CatalogModel): MenuModelGroup {
 /**
  * Whether a saved pick is a Local model that the OpenRouter engine menu hides.
  * The menu counts it as no pick but keeps it saved, so the pick comes back
- * with a CLI engine. A CLI engine menu with no Local rows (a role CLI that is
- * missing or lists no models) does not hide the pick: there it is stale, so
- * the chip and the request both use the first listed model.
+ * with a CLI engine. A CLI engine menu never hides a pick: a pick it does not
+ * list (such as a key pick) is stale, so the chip and the request both use the
+ * first listed model.
  */
 export function hiddenLocalPick(
   pick: string | null,

@@ -152,9 +152,9 @@ export function ComposerModelMenu({
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [models, available]);
-  // A given list that mixes groups (the local build: Local CLI models and the
-  // saved key's models) labels each group, since two groups can list the same
-  // model name.
+  // A given list that mixes groups labels each group, since two groups can
+  // list the same model name. A local agent menu lists one engine's models, so
+  // it shows no labels.
   const grouped = !!models && new Set(models.map(menuModelGroup)).size > 1;
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.

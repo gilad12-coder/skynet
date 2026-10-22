@@ -590,7 +590,7 @@ test("the key's menu lists only models the request sends as key models", () => {
   );
 });
 
-test("the local menu lists the CLI's models, then the key's, and waits only when it must", () => {
+test("a CLI engine menu lists only that CLI's models, never the key's", () => {
   const codex = cli({ id: "codex", models: ["openai/gpt-5"] });
   const cliRows = subscriptionMenuModels(codex, [
     keyRow("openrouter/openai/gpt-5", { byok_provider: "openrouter" }),
@@ -598,23 +598,87 @@ test("the local menu lists the CLI's models, then the key's, and waits only when
   // A catalog hit must not mark the CLI row as an own-key row.
   assert.equal(cliRows[0]!.byok_provider, null);
   const keyRows = [keyRow("openrouter/anthropic/claude-sonnet-4.5")];
-  const cliPick = "subscription/codex/openai/gpt-5";
-  const keyPick = "openrouter/anthropic/claude-sonnet-4.5";
   assert.deepEqual(
-    localMenuModels(cliRows, keyRows, null).map((m) => m.value),
-    [cliPick, keyPick],
+    localMenuModels(cliRows, keyRows, false).map((m) => m.value),
+    ["subscription/codex/openai/gpt-5"],
   );
-  // No key: exactly the SKY-115 menu.
-  assert.deepEqual(localMenuModels(cliRows, [], cliPick), cliRows);
-  // Status not loaded (or failed): no rows, so key rows alone never make a
-  // saved CLI pick look stale.
-  assert.deepEqual(localMenuModels(null, keyRows, cliPick), []);
-  assert.deepEqual(localMenuModels(null, keyRows, null), []);
-  // Key models still loading: a saved key pick waits; a CLI pick or no pick
-  // shows the CLI rows at once.
-  assert.deepEqual(localMenuModels(cliRows, null, keyPick), []);
-  assert.deepEqual(localMenuModels(cliRows, null, cliPick), cliRows);
-  assert.deepEqual(localMenuModels(cliRows, null, null), cliRows);
+  // No key, or key rows that still load: the same CLI rows, at once.
+  assert.deepEqual(localMenuModels(cliRows, [], false), cliRows);
+  assert.deepEqual(localMenuModels(cliRows, null, false), cliRows);
+  // Status not loaded (or failed): no rows, so the menu never judges a saved pick stale too early.
+  assert.deepEqual(localMenuModels(null, keyRows, false), []);
+});
+
+test("each engine's agent menu lists only that engine's models; a role's pinned CLI overrides the engine", () => {
+  const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
+  const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  const claudeRows = [
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+    "subscription/claude/anthropic/claude-opus-4.1",
+  ];
+  // Mirrors useLocalAgentMenuModels.
+  const menu = (role: "codex" | "claude" | null, engine: "codex" | "claude" | "openrouter") =>
+    localMenuModels(
+      subscriptionMenuModels(findCli(loaded, roleCli(role, loaded, engine)), []),
+      keyRows,
+      engine === "openrouter",
+    );
+  const values = (rows: CatalogRow[]) => rows.map((m) => m.value);
+  assert.deepEqual(values(menu(null, "codex")), ["subscription/codex/openai/gpt-5"]);
+  assert.deepEqual(values(menu(null, "claude")), claudeRows);
+  assert.deepEqual(values(menu(null, "openrouter")), ["openrouter/google/gemini-3-pro"]);
+  // A role pinned to a CLI lists that CLI's models on the other CLI engine.
+  assert.deepEqual(values(menu("codex", "claude")), ["subscription/codex/openai/gpt-5"]);
+  assert.deepEqual(values(menu("claude", "codex")), claudeRows);
+  // Each menu has one group, so the composer shows no group labels.
+  for (const engine of ["codex", "claude", "openrouter"] as const) {
+    assert.equal(new Set(menu(null, engine).map(menuModelGroup)).size, 1, engine);
+  }
+});
+
+test("a CLI engine clears a saved key pick, and the request sends the CLI model the chip shows", async () => {
+  const cliRows = subscriptionMenuModels(cli(), []);
+  const pick = "openrouter/anthropic/claude-opus-4.1";
+  const menu = localMenuModels(cliRows, [keyRow(pick)], false);
+  // Mirrors ComposerModelMenu: the menu omits the pick, so it is stale and the
+  // chip shows the first row.
+  assert.equal(
+    menu.some((m) => m.value === pick),
+    false,
+  );
+  assert.equal(hiddenLocalPick(pick, menu, false), false);
+  const chip = menu[0]!.value;
+  assert.equal(chip, "subscription/claude/anthropic/claude-sonnet-4.5");
+  // The request sends the same CLI model, even with a verified key that lists
+  // the pick, and reads no key state.
+  for (const engine of ["claude", null] as const) {
+    const deps = localDeps({ keyRows: () => [keyRow(pick)], engine });
+    assert.equal(await resolveLocalAgentModel(pick, "claude", deps), chip, String(engine));
+    assert.deepEqual(deps.calls, ["status"]);
+  }
+  // A CLI with no models gives an empty menu, which judges no pick stale: the
+  // chip names the pick, and the request sends it.
+  assert.deepEqual(localMenuModels([], [keyRow(pick)], false), []);
+  const noModels = localDeps({ loadStatus: async () => status([cli({ models: [] })]) });
+  assert.equal(await resolveLocalAgentModel(pick, "claude", noModels), pick);
+});
+
+test("the optimization picker is unchanged: it lists each CLI's own models, whatever the agent engine", () => {
+  const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
+  assert.deepEqual(
+    subscriptionCatalogModels(findCli(loaded, "codex"), []).map((m) => m.value),
+    ["openai/gpt-5"],
+  );
+  assert.deepEqual(
+    subscriptionCatalogModels(findCli(loaded, "claude"), []).map((m) => m.value),
+    ["anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1"],
+  );
+  // The model config modal reads no agent engine and no agent menu.
+  const modal = readFileSync(
+    new URL("../../submit/components/ModelConfigModal.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(modal, /useAgentEngine|useLocalAgentMenuModels|localMenuModels/);
 });
 
 test("a saved key pick the key lists stays in the menu when the shortlist leaves it out", () => {
@@ -642,7 +706,7 @@ test("a saved key pick the key lists stays in the menu when the shortlist leaves
   );
 });
 
-test("a failed key list or key model list keeps the key rows unknown, so a saved pick survives", () => {
+test("with the OpenRouter engine, a failed key list or key model list keeps the key rows unknown, so a saved pick survives", () => {
   const cliRows = [
     keyRow("subscription/claude/anthropic/claude-sonnet-4.6", { byok_provider: null }),
   ];
@@ -660,7 +724,7 @@ test("a failed key list or key model list keeps the key rows unknown, so a saved
     listed.length > 0 && !listed.some((m) => m.value === pick);
   const menu = (state: Parameters<typeof localKeyRows>[0]) => {
     const keyRows = localKeyRows(state);
-    return localMenuModels(cliRows, keyRows && keyMenuModels(keyRows, pick), pick);
+    return localMenuModels(cliRows, keyRows && keyMenuModels(keyRows, pick), true);
   };
 
   // GET /billing/byok/keys failed: the provider has no keys, but that is not "no key".
@@ -730,49 +794,54 @@ const localDeps = (
   };
 };
 
-test("while key rows are unknown, the chip and the request agree for every pick type", async () => {
+test("on a CLI engine, the chip and the request agree for every pick type, with or without key rows", async () => {
   const cliRows = subscriptionMenuModels(cli(), []);
   // Mirrors ComposerModelMenu: the retired auto pick counts as no pick, and a
   // pick a non-empty menu omits is stale, so the chip names the menu's first row.
   const chip = (pick: string) => {
     const saved = pick === "auto:intelligent" ? null : pick;
-    const listed = localMenuModels(cliRows, null, pick);
+    const listed = localMenuModels(cliRows, null, false);
     const stale = !!saved && listed.length > 0 && !listed.some((m) => m.value === saved);
     return (saved && !stale ? saved : null) ?? listed[0]?.value ?? null;
   };
-  const deps = () => localDeps({ keyVerified: async () => null, keyRows: () => null });
-  for (const pick of [
-    "auto:intelligent",
-    "anthropic/claude-haiku-3",
-    "openrouter/google/gemini-3-pro",
-    "subscription/claude/anthropic/claude-opus-4.1",
+  for (const deps of [
+    () => localDeps({ keyVerified: async () => null, keyRows: () => null }),
+    () => localDeps({ keyRows: () => [keyRow("openrouter/google/gemini-3-pro")] }),
   ]) {
-    assert.equal(chip(pick), await resolveLocalAgentModel(pick, "claude", deps()), pick);
+    for (const pick of [
+      "auto:intelligent",
+      "anthropic/claude-haiku-3",
+      "openrouter/google/gemini-3-pro",
+      "subscription/claude/anthropic/claude-opus-4.1",
+    ]) {
+      assert.equal(chip(pick), await resolveLocalAgentModel(pick, "claude", deps()), pick);
+    }
   }
-  // Only a key pick waits for the key rows.
-  assert.deepEqual(localMenuModels(cliRows, null, "openrouter/google/gemini-3-pro"), []);
-  assert.deepEqual(localMenuModels(cliRows, null, "auto:intelligent"), cliRows);
-  assert.deepEqual(localMenuModels(cliRows, null, "anthropic/claude-haiku-3"), cliRows);
 });
 
-test("a key pick goes unchanged, even when the key's model list is empty", async () => {
+test("with the OpenRouter engine, a key pick goes unchanged, even when the key's model list is empty", async () => {
   const pick = "openrouter/google/gemini-3-pro";
-  const deps = localDeps();
+  const deps = localDeps({ engine: "openrouter" });
   assert.equal(await resolveLocalAgentModel(pick, "claude", deps), pick);
   assert.deepEqual(deps.calls, ["keys"]);
   // Key state unknown: still unchanged, so the backend decides visibly.
   assert.equal(
-    await resolveLocalAgentModel(pick, "claude", localDeps({ keyVerified: async () => null })),
+    await resolveLocalAgentModel(
+      pick,
+      "claude",
+      localDeps({ engine: "openrouter", keyVerified: async () => null }),
+    ),
     pick,
   );
-  // Known to have no verified key: the SKY-115 CLI route.
+  // Known to have no verified key: the default CLI engine, whose menu lists
+  // no key rows, so the request sends the CLI model the chip shows.
   assert.equal(
     await resolveLocalAgentModel(
       "openrouter/anthropic/claude-opus-4.1",
       "claude",
-      localDeps({ keyVerified: async () => false }),
+      localDeps({ engine: "openrouter", keyVerified: async () => false }),
     ),
-    "subscription/claude/anthropic/claude-opus-4.1",
+    "subscription/claude/anthropic/claude-sonnet-4.5",
   );
 });
 
@@ -796,7 +865,8 @@ test("no pick sends the model the chip shows", async () => {
     "subscription/claude/anthropic/claude-sonnet-4.5",
   );
   assert.deepEqual(deps.calls, ["status"]);
-  // No CLI model: the chip shows the key's first menu row.
+  // No CLI model: the menu is empty, even with a verified key, so the chip
+  // shows "Default" and nothing is sent.
   const noCli = {
     loadStatus: async () => status([cli({ path: null, models: [] })]),
     keyRows: () => [
@@ -804,19 +874,7 @@ test("no pick sends the model the chip shows", async () => {
       keyRow("openrouter/openai/gpt-5-mini"),
     ],
   };
-  assert.equal(
-    await resolveLocalAgentModel(null, "claude", localDeps(noCli)),
-    "openrouter/google/gemini-3-pro",
-  );
-  // No CLI model and no verified key: the chip shows "Default"; nothing is sent.
-  assert.equal(
-    await resolveLocalAgentModel(
-      null,
-      "claude",
-      localDeps({ ...noCli, keyVerified: async () => false }),
-    ),
-    null,
-  );
+  assert.equal(await resolveLocalAgentModel(null, "claude", localDeps(noCli)), null);
   // Status failed with nothing cached: the menu is empty; nothing is sent.
   assert.equal(
     await resolveLocalAgentModel(
@@ -833,27 +891,32 @@ test("a saved retired auto pick counts as no pick, as the chip shows", async () 
     keyRow("openrouter/google/gemini-3-pro"),
     keyRow("openrouter/openai/gpt-5-mini"),
   ];
-  // A CLI with no models: the chip shows the key's first menu row.
+  // A CLI with models: its first model, as with no pick.
+  assert.equal(
+    await resolveLocalAgentModel("auto:intelligent", "claude", localDeps({ keyRows })),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
+  // A CLI with no models: the CLI engine menu is empty, so nothing is sent.
   assert.equal(
     await resolveLocalAgentModel(
       "auto:intelligent",
       "claude",
       localDeps({ loadStatus: async () => status([cli({ path: null, models: [] })]), keyRows }),
     ),
-    "openrouter/google/gemini-3-pro",
+    null,
   );
-  // No CLI entries at all: the same key row, not a CLI model.
+  // The OpenRouter engine: the key's first menu row.
   assert.equal(
     await resolveLocalAgentModel(
       "auto:intelligent",
       null,
-      localDeps({ loadStatus: async () => status([]), keyRows }),
+      localDeps({ loadStatus: async () => status([]), keyRows, engine: "openrouter" }),
     ),
     "openrouter/google/gemini-3-pro",
   );
 });
 
-test("no pick sends nothing while the menu's key list loads or failed, as the chip shows", async () => {
+test("on a CLI engine with no CLI model, no pick sends nothing in any key list state, as the chip shows", async () => {
   const verifiedKey = { provider: "openrouter", status: "verified" };
   const noCli = {
     loadStatus: async () => status([cli({ path: null, models: [] })]),
@@ -867,8 +930,8 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
     // No provider state yet.
     null,
   ];
-  for (const keys of unknown) {
-    // The menu has no key rows and no CLI rows: the chip shows "Default".
+  for (const keys of [...unknown, { loading: false, failed: false, keys: [verifiedKey] }]) {
+    // The CLI engine menu has no CLI rows and lists no key rows: the chip shows "Default".
     const keyRows = localKeyRows({
       keysLoading: keys?.loading ?? true,
       keysFailed: keys?.failed ?? false,
@@ -876,8 +939,7 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
       loaded: null,
       cached: null,
     });
-    assert.deepEqual(localMenuModels([], keyRows, null), []);
-    assert.equal(menuKeyVerified(keys), null);
+    assert.deepEqual(localMenuModels([], keyRows, false), []);
     assert.equal(
       await resolveLocalAgentModel(
         null,
@@ -887,6 +949,7 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
       null,
     );
   }
+  for (const keys of unknown) assert.equal(menuKeyVerified(keys), null);
   // A loaded list decides from the same keys the menu shows.
   assert.equal(menuKeyVerified({ loading: false, failed: false, keys: [verifiedKey] }), true);
   assert.equal(
@@ -900,21 +963,9 @@ test("no pick sends nothing while the menu's key list loads or failed, as the ch
     }),
     false,
   );
-  assert.equal(
-    await resolveLocalAgentModel(
-      null,
-      "claude",
-      localDeps({
-        ...noCli,
-        keyVerified: async () =>
-          menuKeyVerified({ loading: false, failed: false, keys: [verifiedKey] }),
-      }),
-    ),
-    "openrouter/google/gemini-3-pro",
-  );
 });
 
-test("no pick sends nothing while the key's model list loads or failed, as the chip shows", async () => {
+test("with the OpenRouter engine, no pick sends nothing while the key's model list loads or failed, as the chip shows", async () => {
   const key = { id: "k1", provider: "openrouter", status: "verified", addedAt: "t1" };
   const keys = { loading: false, failed: false, keys: [key] };
   const stamp = localKeyStamp(key);
@@ -938,14 +989,18 @@ test("no pick sends nothing while the key's model list loads or failed, as the c
   for (const { loaded, cached, sent } of cases) {
     // The chip reads the menu's first row, or shows "Default" with no rows.
     const menuRows = localKeyRows({ keysLoading: false, keysFailed: false, stamp, loaded, cached });
-    const menu = localMenuModels([], menuRows && keyMenuModels(menuRows, null), null);
+    const menu = localMenuModels([], menuRows && keyMenuModels(menuRows, null), true);
     assert.equal(menu[0]?.value ?? null, sent);
     assert.deepEqual(requestKeyRows(keys, loaded, cached), menuRows);
     assert.equal(
       await resolveLocalAgentModel(
         null,
         "claude",
-        localDeps({ ...noCli, keyRows: () => requestKeyRows(keys, loaded, cached) }),
+        localDeps({
+          ...noCli,
+          engine: "openrouter",
+          keyRows: () => requestKeyRows(keys, loaded, cached),
+        }),
       ),
       sent,
     );
@@ -1036,7 +1091,7 @@ test("the OpenRouter engine menu lists only the key's models, with no Local grou
   const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
   const cliRows = subscriptionMenuModels(findCli(loaded, "codex"), []);
   const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
-  const menu = localMenuModels(cliRows, keyRows, null, true);
+  const menu = localMenuModels(cliRows, keyRows, true);
   assert.deepEqual(
     menu.map((m) => m.value),
     ["openrouter/google/gemini-3-pro"],
@@ -1046,13 +1101,8 @@ test("the OpenRouter engine menu lists only the key's models, with no Local grou
     false,
   );
   // The menu waits only for the key rows; the CLI status does not matter.
-  assert.deepEqual(localMenuModels(null, keyRows, null, true), keyRows);
-  assert.deepEqual(localMenuModels(cliRows, null, null, true), []);
-  // A saved Local pick is not listed, so the chip shows the key's first model.
-  assert.deepEqual(
-    localMenuModels(cliRows, keyRows, "subscription/codex/openai/gpt-5", true),
-    keyRows,
-  );
+  assert.deepEqual(localMenuModels(null, keyRows, true), keyRows);
+  assert.deepEqual(localMenuModels(cliRows, null, true), []);
 });
 
 test("the OpenRouter engine menu keeps a saved Local pick for a CLI engine", () => {
@@ -1062,24 +1112,18 @@ test("the OpenRouter engine menu keeps a saved Local pick for a CLI engine", () 
   const localPick = "subscription/codex/openai/gpt-5";
   // The OpenRouter engine menu has no Local rows, so it hides the pick and
   // does not clear it.
-  assert.equal(
-    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, true), true),
-    true,
-  );
+  assert.equal(hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, true), true), true);
   // A CLI engine menu lists Local rows, so an unlisted Local pick is stale as before.
-  assert.equal(
-    hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, localPick, false), false),
-    false,
-  );
+  assert.equal(hiddenLocalPick(localPick, localMenuModels(cliRows, keyRows, false), false), false);
   // A key pick is never hidden; the hosted menu (no given list) is unchanged.
   assert.equal(hiddenLocalPick("openrouter/openai/gpt-5", keyRows, true), false);
   assert.equal(hiddenLocalPick(localPick, undefined, true), false);
   assert.equal(hiddenLocalPick(null, keyRows, true), false);
 });
 
-test("a CLI engine menu with no Local rows clears a saved Local pick, so the chip and the request agree", async () => {
+test("a CLI engine menu with no Local rows lists no key rows, so the chip and the request agree", async () => {
   // The CLI engine is claude, but the role runs on codex, which is missing and
-  // lists no models. With a verified key the menu lists only the key's rows.
+  // lists no models. A verified key adds no rows on a CLI engine.
   const loaded = status([
     cli(),
     cli({ id: "codex", path: null, version: null, version_ok: false, models: [] }),
@@ -1087,22 +1131,22 @@ test("a CLI engine menu with no Local rows clears a saved Local pick, so the chi
   const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
   const localPick = "subscription/codex/openai/gpt-5";
   const cliRows = subscriptionMenuModels(findCli(loaded, roleCli("codex", loaded, "claude")), []);
-  const menu = localMenuModels(cliRows, keyMenuModels(keyRows, localPick), localPick, false);
-  assert.deepEqual(
-    menu.map((m) => m.value),
-    ["openrouter/google/gemini-3-pro"],
-  );
-  // The menu does not hide the pick, so it clears it as stale.
+  const menu = localMenuModels(cliRows, keyMenuModels(keyRows, localPick), false);
+  assert.deepEqual(menu, []);
+  // The menu does not hide the pick on a CLI engine.
   assert.equal(hiddenLocalPick(localPick, menu, false), false);
-  // With no pick, the request sends the key model that the chip shows (menu[0]).
-  const sent = await resolveLocalAgentModel(null, "codex", {
+  const deps = {
     loadStatus: async () => loaded,
     peekStatus: () => loaded,
     keyVerified: async () => true,
     keyRows: () => keyRows,
-    engine: "claude",
-  });
-  assert.equal(sent, menu[0]?.value);
+    engine: "claude" as const,
+  };
+  // An empty menu judges no pick stale, so the chip names the saved pick, and
+  // the request sends it.
+  assert.equal(await resolveLocalAgentModel(localPick, "codex", deps), localPick);
+  // With no pick the chip shows "Default" (no menu[0]), and nothing is sent.
+  assert.equal(await resolveLocalAgentModel(null, "codex", deps), menu[0]?.value ?? null);
 });
 
 test("a stored OpenRouter engine with no verified key runs agents on the default CLI", () => {
@@ -1120,7 +1164,7 @@ test("key removed after OpenRouter was chosen: the chip and the request name the
   const engine = effectiveAgentEngine("openrouter", false);
   // The menu with the key gone: the default CLI's models, no key rows.
   const cliRows = subscriptionMenuModels(findCli(loaded, roleCli(null, loaded, engine)), []);
-  const chip = localMenuModels(cliRows, [], null, engine === "openrouter")[0]?.value ?? null;
+  const chip = localMenuModels(cliRows, [], engine === "openrouter")[0]?.value ?? null;
   assert.equal(chip, "subscription/claude/anthropic/claude-sonnet-4.5");
   const deps = localDeps({
     engine: "openrouter",
@@ -1173,8 +1217,6 @@ test("the Agent settings name the agent engine and describe each engine truthful
     en["settings.agent_engine.description_openrouter"],
     "Every agent runs on your saved OpenRouter key",
   );
-  // A CLI engine's menus also list the saved key's models.
-  assert.doesNotMatch(en["settings.agent_engine.description_local"]!, /only its models/);
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
     const loc = JSON.parse(readFileSync(new URL(file, dir), "utf8")) as Record<string, string>;
     if (!loc["settings.agent_engine.label"]) continue;

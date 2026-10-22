@@ -74,13 +74,12 @@ export function peekLocalStatus(): LocalStatus | null {
 
 /**
  * The model id an agent request sends for a role set to run on `cli`: the
- * model the composer chip shows. A subscription pick waits for
- * `/local/status`, since the CLI's models decide the id. An OpenRouter pick is
- * sent unchanged for the saved key. A local role with no CLI runs on the agent
- * engine's CLI, else the default CLI. The OpenRouter engine runs every role on
- * the saved key, so the engine loads even for a role with its own CLI; with
- * that key removed or unverified, roles run on their CLIs again. Hosted
- * builds send the composer's choice unchanged.
+ * model the composer chip shows. On a CLI the request waits for
+ * `/local/status`, since the CLI's models decide the id. A local role with no
+ * CLI runs on the agent engine's CLI, else the default CLI. The OpenRouter
+ * engine runs every role on the saved key, so the engine loads even for a role
+ * with its own CLI; with that key removed or unverified, roles run on their
+ * CLIs again. Hosted builds send the composer's choice unchanged.
  */
 export async function localAgentModel(
   model: string | null,
@@ -167,12 +166,11 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
 
 /**
  * The composer menu's models for an agent role on `cli` in the local build:
- * that CLI's models (the agent engine's CLI when the role has none), then the
- * models of a saved, verified OpenRouter key. With the OpenRouter engine the
- * menu lists only the key's models; with that key removed or unverified, the
- * menu is the default CLI's, as with no engine. `pick` is the role's saved
- * model, which decides what the menu waits for. Hosted builds get undefined
- * and keep the catalog.
+ * only that CLI's models (the agent engine's CLI when the role has none). With
+ * the OpenRouter engine the menu lists only the saved key's models; with that
+ * key removed or unverified, the menu is the default CLI's, as with no engine.
+ * `pick` is the role's saved model, which keeps a saved key pick listed past
+ * the key's shortlist. Hosted builds get undefined and keep the catalog.
  */
 export function useLocalAgentMenuModels(
   cli: CliProvider | null,
@@ -183,7 +181,8 @@ export function useLocalAgentMenuModels(
   const { engine: stored } = useAgentEngine();
   const keys = useByokKeys();
   const engine = effectiveAgentEngine(stored, menuKeyVerified(keys));
-  const keyModels = useLocalKeyModels(local);
+  // Only the OpenRouter engine lists the key's models, so no other engine loads them.
+  const keyModels = useLocalKeyModels(local && stored === OPENROUTER_ENGINE);
   const viaKey = local && engine === OPENROUTER_ENGINE;
   const models = React.useMemo(() => {
     if (!local) return undefined;
@@ -193,7 +192,7 @@ export function useLocalAgentMenuModels(
           cachedCatalog()?.models,
         )
       : null;
-    return localMenuModels(cliModels, keyModels && keyMenuModels(keyModels, pick), pick, viaKey);
+    return localMenuModels(cliModels, keyModels && keyMenuModels(keyModels, pick), viaKey);
   }, [local, status, cli, engine, keyModels, pick, viaKey]);
   return { models, openRouterEngine: viaKey };
 }
