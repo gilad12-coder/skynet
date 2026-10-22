@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -685,12 +686,22 @@ class _DropFirstAnswer:
             with conn:
                 data = b""
                 while b"\r\n\r\n" not in data:
-                    data += conn.recv(65536)
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                if b"\r\n\r\n" not in data:
+                    continue
                 head, _sep, rest = data.partition(b"\r\n\r\n")
                 match = re.search(rb"content-length: *(\d+)", head, re.IGNORECASE)
                 length = int(match.group(1)) if match else 0
                 while len(rest) < length:
-                    rest += conn.recv(65536)
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    rest += chunk
+                if len(rest) < length:
+                    continue
                 self.bodies.append(json.loads(rest))
                 if len(self.bodies) > 1:
                     payload = b'{"ok": true}'
@@ -701,6 +712,9 @@ class _DropFirstAnswer:
 
     def close(self) -> None:
         """Stop the server."""
+        # On Linux, close() alone does not wake a thread blocked in accept().
+        with contextlib.suppress(OSError):
+            self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
         self.thread.join(timeout=5)
 
