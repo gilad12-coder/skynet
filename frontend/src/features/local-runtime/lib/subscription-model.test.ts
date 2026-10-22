@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const {
@@ -11,6 +11,7 @@ const {
   usageCostNoteKey,
   cliState,
   defaultAgentCli,
+  effectiveAgentEngine,
   findCli,
   hostCliPatch,
   isAgentEngine,
@@ -25,7 +26,6 @@ const {
   LOCAL_MODEL_REFUSED_CODE,
   MENU_GROUP_LABELS,
   menuModelGroup,
-  openRouterMenuCliModels,
   roleCli,
   menuKeyVerified,
   requestKeyRows,
@@ -1015,40 +1015,77 @@ test("with the OpenRouter engine, no pick sends the key's first model, not a CLI
   );
 });
 
-test("with the OpenRouter engine, a picked model runs where the picker says", async () => {
-  const deps = () => localDeps({ engine: "openrouter" });
+test("with the OpenRouter engine, a key pick runs on the key and a Local pick is no pick", async () => {
+  const rows = [keyRow("openrouter/google/gemini-3-pro")];
+  const deps = () => localDeps({ engine: "openrouter", keyRows: () => rows });
   // A key pick goes unchanged.
   assert.equal(
     await resolveLocalAgentModel("openrouter/openai/gpt-5-mini", "claude", deps()),
     "openrouter/openai/gpt-5-mini",
   );
-  // A Local pick runs on its own CLI, whatever CLI the role had.
+  // The picker hides the Local group, so a saved Local pick is not listed: the
+  // chip shows the key's first model, and the request sends it.
   assert.equal(
     await resolveLocalAgentModel("subscription/claude/anthropic/claude-opus-4.1", "codex", deps()),
-    "subscription/claude/anthropic/claude-opus-4.1",
+    "openrouter/google/gemini-3-pro",
   );
 });
 
-test("the OpenRouter engine menu lists the key's models first, then every CLI's models", () => {
+test("the OpenRouter engine menu lists only the key's models, with no Local group", () => {
   const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
-  const cliRows = openRouterMenuCliModels(loaded, []);
-  assert.deepEqual(
-    cliRows.map((m) => m.value),
-    [
-      "subscription/codex/openai/gpt-5",
-      "subscription/claude/anthropic/claude-sonnet-4.5",
-      "subscription/claude/anthropic/claude-opus-4.1",
-    ],
-  );
+  const cliRows = subscriptionMenuModels(findCli(loaded, "codex"), []);
   const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  const menu = localMenuModels(cliRows, keyRows, null, true);
   assert.deepEqual(
-    localMenuModels(cliRows, keyRows, null, true).map((m) => m.value),
-    ["openrouter/google/gemini-3-pro", ...cliRows.map((m) => m.value)],
+    menu.map((m) => m.value),
+    ["openrouter/google/gemini-3-pro"],
   );
-  // The chip's default is the key's first row, so the menu waits for both lists.
+  assert.equal(
+    menu.some((m) => menuModelGroup(m) === "local"),
+    false,
+  );
+  // The menu waits only for the key rows; the CLI status does not matter.
+  assert.deepEqual(localMenuModels(null, keyRows, null, true), keyRows);
   assert.deepEqual(localMenuModels(cliRows, null, null, true), []);
-  assert.deepEqual(localMenuModels(null, keyRows, null, true), []);
-  assert.deepEqual(openRouterMenuCliModels(null, []), []);
+  // A saved Local pick is not listed, so the chip shows the key's first model.
+  assert.deepEqual(
+    localMenuModels(cliRows, keyRows, "subscription/codex/openai/gpt-5", true),
+    keyRows,
+  );
+});
+
+test("a stored OpenRouter engine with no verified key runs agents on the default CLI", () => {
+  // OpenRouter is not an engine without a verified key; a list that loads or
+  // failed is not "no key".
+  assert.equal(effectiveAgentEngine("openrouter", false), null);
+  assert.equal(effectiveAgentEngine("openrouter", null), "openrouter");
+  assert.equal(effectiveAgentEngine("openrouter", true), "openrouter");
+  assert.equal(effectiveAgentEngine("codex", false), "codex");
+  assert.equal(effectiveAgentEngine(null, false), null);
+});
+
+test("key removed after OpenRouter was chosen: the chip and the request name the same CLI model", async () => {
+  const loaded = status([cli()]);
+  const engine = effectiveAgentEngine("openrouter", false);
+  // The menu with the key gone: the default CLI's models, no key rows.
+  const cliRows = subscriptionMenuModels(findCli(loaded, roleCli(null, loaded, engine)), []);
+  const chip = localMenuModels(cliRows, [], null, engine === "openrouter")[0]?.value ?? null;
+  assert.equal(chip, "subscription/claude/anthropic/claude-sonnet-4.5");
+  const deps = localDeps({
+    engine: "openrouter",
+    keyVerified: async () => false,
+    keyRows: () => [],
+  });
+  assert.equal(await resolveLocalAgentModel(null, null, deps), chip);
+  // A role with its own CLI runs on it again.
+  assert.equal(
+    await resolveLocalAgentModel(
+      null,
+      "claude",
+      localDeps({ engine: "openrouter", keyVerified: async () => false, keyRows: () => [] }),
+    ),
+    "subscription/claude/anthropic/claude-sonnet-4.5",
+  );
 });
 
 test("the model picker groups are Skynet credits, Bring your own key and Local", () => {
@@ -1075,4 +1112,28 @@ test("no UI locale keeps the old My subscription or My OpenRouter key labels", (
   assert.equal(en["agent.model_menu.group_byok"], "Bring your own key");
   assert.equal(en["agent.model_menu.group_own_key"], undefined);
   assert.equal(en["agent.model_menu.group_subscription"], undefined);
+});
+
+test("the Agent settings name the agent engine and describe each engine truthfully", () => {
+  const dir = new URL("../../../../../i18n/locales/ui/", import.meta.url);
+  const en = JSON.parse(readFileSync(new URL("en.json", dir), "utf8")) as Record<string, string>;
+  assert.equal(en["settings.agent_local.title"], "Agent engine");
+  assert.equal(
+    en["settings.agent_engine.description_openrouter"],
+    "Every agent runs on your saved OpenRouter key",
+  );
+  // A CLI engine's menus also list the saved key's models.
+  assert.doesNotMatch(en["settings.agent_engine.description_local"]!, /only its models/);
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
+    const loc = JSON.parse(readFileSync(new URL(file, dir), "utf8")) as Record<string, string>;
+    if (!loc["settings.agent_engine.label"]) continue;
+    assert.equal(loc["settings.agent_local.title"], loc["settings.agent_engine.label"], file);
+    for (const key of [
+      "settings.agent_engine.description_openrouter",
+      "settings.agent_engine.openrouter_fallback",
+    ]) {
+      assert.ok(loc[key], `${file} ${key}`);
+    }
+    assert.match(loc["settings.agent_engine.openrouter_fallback"]!, /\{cli\}/, file);
+  }
 });

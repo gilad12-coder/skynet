@@ -335,13 +335,26 @@ void describe("OpenRouter engine (SKY-123 AC3)", () => {
     assert.match(html, /settings\.agent_engine\.openrouter_local/);
   });
 
-  void it("the selected OpenRouter engine shows its name, and a warning only when the key is gone", () => {
+  void it("the selected OpenRouter engine shows its name and its own description", () => {
     const ok = render(true, "openrouter", s, true);
     assert.match(ok, /data-engine-logo="openrouter"/);
+    assert.match(ok, /settings\.agent_engine\.description_openrouter</);
+    assert.doesNotMatch(ok, /settings\.agent_engine\.description_local/);
     assert.doesNotMatch(ok, /role="status"/);
+    // While the key list loads, the engine stays OpenRouter with no warning.
+    const loading = render(true, "openrouter", s, null);
+    assert.match(loading, /data-engine-logo="openrouter"/);
+    assert.doesNotMatch(loading, /role="status"/);
+  });
+
+  void it("a stored OpenRouter engine with the key gone shows the CLI agents run on, and why", () => {
     const gone = render(true, "openrouter", s, false);
+    // The trigger names the default CLI, not OpenRouter.
+    assert.match(gone, /data-engine-logo="codex"/);
+    assert.doesNotMatch(gone, /data-engine-logo="openrouter"/);
+    assert.match(gone, /settings\.agent_engine\.description_local</);
     assert.match(gone, /role="status"/);
-    assert.match(gone, /settings\.agent_engine\.openrouter_local/);
+    assert.match(gone, /settings\.agent_engine\.openrouter_fallback/);
   });
 
   void it("an agent role on the OpenRouter engine shows OpenRouter and no CLI choice", () => {

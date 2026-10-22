@@ -14,6 +14,7 @@ export {
 } from "./hooks/use-agent-engine";
 export {
   agentEngineOptions,
+  effectiveAgentEngine,
   isAgentEngine,
   LOCAL_KEY_PROVIDER,
   MENU_GROUP_LABELS,

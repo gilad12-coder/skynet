@@ -5,12 +5,15 @@ import {
   CLI_PROVIDERS,
   cliLabel,
   defaultAgentCli,
+  effectiveAgentEngine,
   isCliProvider,
+  LOCAL_KEY_PROVIDER,
   OPENROUTER_ENGINE,
   useAgentEngine,
   useLocalStatus,
 } from "@/features/local-runtime";
 import type { CliProvider } from "@/features/billing";
+import { useByokKeys } from "@/features/billing/providers/byok-provider";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ChatCenteredDots, Code, Robot, Tag, Terminal } from "@/shared/ui/icons";
@@ -87,12 +90,17 @@ export function AgentRoleRow({
  * Local desktop build only: per agent role, the CLI subscription it runs on.
  * The local backend has no managed models, so there is no "off": a role the
  * user never set shows the CLI it runs on by default, the agent engine's CLI.
- * The OpenRouter engine runs every role on the saved key, with no CLI choice.
+ * The OpenRouter engine runs every role on the saved key, with no CLI choice;
+ * with that key removed or unverified, the CLI choices come back.
  */
 export function AgentLocalRunSetting() {
   const { prefs, setPref } = useUserPrefs();
   const { status } = useLocalStatus();
-  const { engine } = useAgentEngine();
+  const { engine: stored } = useAgentEngine();
+  const keys = useByokKeys();
+  const keyVerified =
+    keys.loading || keys.failed ? null : keys.keyFor(LOCAL_KEY_PROVIDER)?.status === "verified";
+  const engine = effectiveAgentEngine(stored, keyVerified);
   const current = prefs.agentSubscription ?? {};
   const openRouter = engine === OPENROUTER_ENGINE;
   const fallback = defaultAgentCli(status, engine);
