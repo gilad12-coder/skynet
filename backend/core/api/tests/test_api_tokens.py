@@ -32,6 +32,7 @@ from ..routers.api_tokens import create_api_tokens_router
 
 # The decided PAT lifetime (SKY-150): one year from generation.
 _MAX_AGE = timedelta(days=365)
+_ACCOUNT_CREATED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def test_generate_api_token_is_prefixed_and_unique() -> None:
@@ -87,7 +88,8 @@ def token_app() -> FastAPI:
     ApiTokenModel.__table__.create(engine)
     UserModel.__table__.create(engine)
     with Session(engine) as session:
-        session.add(UserModel(email="alice", name="Alice", password_hash="x"))
+        # Older than any aged token below: a PAT that predates its account is refused.
+        session.add(UserModel(email="alice", name="Alice", password_hash="x", created_at=_ACCOUNT_CREATED_AT))
         session.commit()
     store = _Store(engine)
     app = FastAPI()

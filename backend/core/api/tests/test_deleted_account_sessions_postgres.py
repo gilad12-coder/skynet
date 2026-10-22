@@ -38,6 +38,7 @@ pytestmark = pytest.mark.skipif(
 
 _SECRET = "pg-test-secret"
 _EMAIL = "owner@example.com"
+_ACCOUNT_CREATED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -51,7 +52,8 @@ def database() -> Iterator[Engine]:
     try:
         Base.metadata.create_all(engine, tables=[UserModel.__table__, ApiTokenModel.__table__])
         with Session(engine) as session:
-            session.add(UserModel(email=_EMAIL, name="Owner", password_hash="x"))
+            # Older than any aged token below: a PAT that predates its account is refused.
+            session.add(UserModel(email=_EMAIL, name="Owner", password_hash="x", created_at=_ACCOUNT_CREATED_AT))
             session.commit()
         yield engine
     finally:
@@ -175,5 +177,20 @@ def test_pat_age_check_uses_aware_postgres_timestamps(database: Engine) -> None:
 
     with pytest.raises(HTTPException) as exc:
         get_authenticated_user(_request(database), f"Bearer {old}")
+
+    assert exc.value.status_code == 401
+
+
+def test_pat_older_than_its_account_is_refused_on_postgres(database: Engine) -> None:
+    """A PAT created before the current account row (a re-signup) gets 401."""
+    with Session(database) as session:
+        account = session.get(UserModel, _EMAIL)
+        assert account is not None
+        account.created_at = datetime.now(UTC)
+        session.commit()
+    orphan = _add_pat(database, timedelta(days=1))
+
+    with pytest.raises(HTTPException) as exc:
+        get_authenticated_user(_request(database), f"Bearer {orphan}")
 
     assert exc.value.status_code == 401

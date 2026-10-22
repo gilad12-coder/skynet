@@ -187,7 +187,7 @@ def test_deleted_account_jwt_is_refused(harness: SimpleNamespace, method: str, p
     response = _call(harness.client, method, path, token)
 
     assert response.status_code == 401
-    assert response.json()["code"] == "auth.invalid_token"
+    assert response.json()["code"] == "auth.account_not_found"
 
 
 def test_deleted_account_cannot_mint_a_permanent_api_token(harness: SimpleNamespace) -> None:
@@ -246,3 +246,42 @@ def test_new_account_under_the_same_email_gets_access_again(harness: SimpleNames
     assert again.status_code == 201
 
     assert _call(harness.client, "GET", "/account/model-privacy", _session_jwt()).status_code == 200
+
+
+def test_orphan_api_token_is_not_revived_by_a_new_sign_up(harness: SimpleNamespace) -> None:
+    """A PAT that outlived its account stays refused after the same email signs up again."""
+    token = _session_jwt()
+    pat = harness.client.post("/settings/api-token", headers=_bearer(token)).json()["token"]
+    with Session(harness.engine) as session:
+        session.delete(session.get(UserModel, _EMAIL))
+        session.commit()
+    again = harness.client.post(
+        "/auth/register",
+        json={"email": _EMAIL, "password": _PASSWORD},
+        headers={"X-Internal-Auth": _SECRET},
+    )
+    assert again.status_code == 201
+
+    response = _call(harness.client, "GET", "/account/model-privacy", pat)
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "auth.invalid_token"
+
+
+def test_api_token_made_after_a_new_sign_up_works(harness: SimpleNamespace) -> None:
+    """Control: the re-created account can mint a fresh PAT that authenticates."""
+    token = _session_jwt()
+    assert (
+        harness.client.post("/account/delete", headers=_bearer(token), json={"password": _PASSWORD}).status_code == 200
+    )
+    assert (
+        harness.client.post(
+            "/auth/register",
+            json={"email": _EMAIL, "password": _PASSWORD},
+            headers={"X-Internal-Auth": _SECRET},
+        ).status_code
+        == 201
+    )
+    pat = harness.client.post("/settings/api-token", headers=_bearer(_session_jwt())).json()["token"]
+
+    assert _call(harness.client, "GET", "/account/model-privacy", pat).status_code == 200

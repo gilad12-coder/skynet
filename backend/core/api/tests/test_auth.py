@@ -26,6 +26,7 @@ from ..auth import (
     hash_api_token,
     require_admin_user,
 )
+from ..errors import DomainError
 
 # Tests that fail before any store lookup (bad header, signature, audience)
 # pass a placeholder for ``request``.
@@ -234,10 +235,12 @@ def test_session_jwt_for_a_deleted_account_is_refused(monkeypatch: pytest.Monkey
     monkeypatch.setattr(auth_mod.settings, "max_monthly_active_users", 0)
     request = _store_request("someone-else@example.com")
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         get_authenticated_user(request, f"Bearer {_sign(_payload())}")
 
     assert exc.value.status_code == 401
+    # A distinct code lets the web app sign the browser out instead of retrying.
+    assert exc.value.code == "auth.account_not_found"
 
 
 def test_session_jwt_without_a_store_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

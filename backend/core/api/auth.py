@@ -198,17 +198,18 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _account_exists(session: Session, username: str) -> bool:
-    """Return whether a ``users`` row exists for ``username``.
+def _account_created_at(session: Session, username: str) -> datetime | None:
+    """Return when the ``users`` row for ``username`` was created.
 
     Args:
         session: Open ORM session.
         username: Lowercased account identity (the email).
 
     Returns:
-        True when the account row exists.
+        The row's ``created_at`` in UTC, or None when no account row exists.
     """
-    return session.scalar(select(UserModel.email).where(UserModel.email == username)) is not None
+    created_at = session.scalar(select(UserModel.created_at).where(UserModel.email == username))
+    return None if created_at is None else _as_utc(created_at)
 
 
 def _require_account(request: Request, username: str) -> None:
@@ -224,16 +225,17 @@ def _require_account(request: Request, username: str) -> None:
         username: Identity from the verified JWT.
 
     Raises:
-        DomainError: 500 when the store is unavailable; 401 when the account
-            row is gone.
+        DomainError: 500 when the store is unavailable; 401
+            ``auth.account_not_found`` when the account row is gone, so the
+            web app can sign the browser out instead of retrying forever.
     """
     job_store = getattr(getattr(getattr(request, "app", None), "state", None), "job_store", None)
     engine = getattr(job_store, "engine", None)
     if engine is None:
         raise DomainError("auth.not_configured", status=500)
     with Session(engine) as session:
-        if not _account_exists(session, username):
-            raise DomainError("auth.invalid_token", status=401)
+        if _account_created_at(session, username) is None:
+            raise DomainError("auth.account_not_found", status=401)
 
 
 def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
@@ -253,8 +255,9 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
 
     Raises:
         DomainError: 500 when the store is unavailable; 401 when the token
-            matches no active row, is older than :data:`API_TOKEN_MAX_AGE`, or
-            belongs to an account that no longer exists.
+            matches no active row, is older than :data:`API_TOKEN_MAX_AGE`,
+            belongs to an account that no longer exists, or predates the
+            account that now holds its username.
     """
     job_store = getattr(request.app.state, "job_store", None)
     if job_store is None:
@@ -267,8 +270,11 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
             raise DomainError("auth.invalid_token", status=401)
         username = str(row.username)
         # A token minted while its account was being deleted can outlive the
-        # deletion's token sweep; the account row decides (SKY-150).
-        if not _account_exists(session, username):
+        # deletion's token sweep; the account row decides (SKY-150). A row
+        # re-created by a later sign-up with the same email must not revive
+        # that orphan, so a token older than the account is refused too.
+        account_created_at = _account_created_at(session, username)
+        if account_created_at is None or _as_utc(row.created_at) < account_created_at:
             raise DomainError("auth.invalid_token", status=401)
         row.last_used_at = now
         session.commit()
