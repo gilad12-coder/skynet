@@ -11,7 +11,7 @@ locals {
     migrate  = [aws_secretsmanager_secret.manual["app"].arn, aws_secretsmanager_secret.app_generated.arn]
     frontend = [aws_secretsmanager_secret.manual["frontend"].arn]
     litellm  = [aws_secretsmanager_secret.manual["litellm"].arn, aws_secretsmanager_secret.litellm_generated.arn]
-    dbadmin  = [aws_secretsmanager_secret.db_admin.arn, aws_secretsmanager_secret.litellm_generated.arn]
+    dbadmin  = [aws_secretsmanager_secret.db_admin.arn, aws_secretsmanager_secret.app_generated.arn, aws_secretsmanager_secret.litellm_generated.arn]
   }
 }
 

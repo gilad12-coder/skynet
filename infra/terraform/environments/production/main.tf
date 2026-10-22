@@ -21,7 +21,7 @@ module "env" {
 
   db_instance_class        = var.db_instance_class
   db_multi_az              = var.db_multi_az
-  db_backup_retention_days = 14
+  db_backup_retention_days = 35
   db_deletion_protection   = true
 
   cache_node_count = var.cache_node_count

@@ -15,18 +15,22 @@ Nobody ran `terraform apply` yet. Read-only plans of every stack pass (see
 - "Advanced AWS features" are on, so the managed SCP no longer denies
   `iam:*Provider*`. A read-only `aws iam list-open-id-connect-providers` works
   and returns an empty list. `global` creates the GitHub Actions OIDC provider
-  and the deploy role (`enable_github_oidc` defaults to `true`).
+  and the GitHub roles (`enable_github_oidc` defaults to `true`).
+- Spend limit: the plan is $460 per month for both environments. The lean
+  variants (about $373) fit. The full variants (about $671) do not; raise the
+  limit before you apply `full.tfvars` in both environments.
 
 ## Layout
 
 | Path | Stack | Creates |
 |------|-------|---------|
 | `bootstrap/` | local state | The S3 state bucket (versioned, encrypted, TLS only). |
-| `global/` | `global/terraform.tfstate` | ECR repos `skynet/backend`, `skynet/frontend`, `skynet/litellm`. GitHub OIDC provider and the `skynet-github-deploy` role (`enable_github_oidc`, default `true`). |
+| `global/` | `global/terraform.tfstate` | ECR repos `skynet/backend`, `skynet/frontend`, `skynet/litellm`. GitHub OIDC provider and four GitHub roles (see "GitHub roles"; `enable_github_oidc`, default `true`). |
 | `environments/staging/` | `staging/terraform.tfstate` | One environment from `modules/environment`. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `environments/production/` | `production/terraform.tfstate` | The same module. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `modules/environment/` | module | VPC, ALB, ACM, ECS cluster, services, task definitions, RDS, Valkey, secrets, logs, alarms. |
-| `scripts/` | shell | Build and push, deploy (migrate first), secrets, litellm database, DB tunnel, Railway restore. |
+| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel, Railway restore. |
+| `.checkov.yaml` | config | checkov skips, each with its reason. |
 
 Remote state uses the S3 backend with native S3 locking (`use_lockfile = true`).
 There is no DynamoDB table.
@@ -43,9 +47,14 @@ There is no DynamoDB table.
   The backend and the worker reach litellm at `litellm.<env>.skynet.internal:4000`
   (Cloud Map). ECS Exec is on. Deployment circuit breaker with rollback is on.
 - One-off task families: `migrate` (`python manage.py migrate`) and `dbadmin`
-  (psql tools, for the litellm database, the tunnel and the restore).
+  (psql tools, for the database roles, the tunnel and the restore). The dbadmin
+  image is `postgres:18-alpine` pinned by digest.
 - RDS PostgreSQL 18.6 (`rds.force_ssl=1`, gp3, encrypted, Performance Insights).
-  pgvector is an RDS extension; `create-litellm-db.sh` enables it.
+  pgvector is an RDS extension; `create-db-roles.sh` enables it.
+- Database users: backend, worker and migrate connect as `skynet_app`, the
+  owner of the `skynet` database. litellm connects as `litellm`, the owner of
+  the `litellm` database. Only the dbadmin task uses the RDS master user.
+- Backups: 35 days in production (the RDS maximum), 3 days in staging.
 - ElastiCache Valkey 8.1 (TLS, AUTH token). One shared cache for app and litellm,
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
@@ -54,8 +63,12 @@ There is no DynamoDB table.
 
 ### Choices
 
-- **One RDS instance holds two databases** (`skynet` and `litellm`), with a
-  separate owner role for litellm. It saves the cost of a second instance
+- **PostgreSQL 18.6, not 16.** The Railway source runs 18.6 (all four backup
+  `info.json` files say `18.6 (Debian 18.6-1.pgdg13+2)`). `pg_restore` cannot
+  load an 18 archive into an older server, and a downgrade adds a dump format
+  risk for no gain. RDS supports 18.6, so the target matches the source.
+- **One RDS instance holds two databases** (`skynet` and `litellm`), each with
+  its own owner role. It saves the cost of a second instance
   (about $25 per month in staging, about $95 in production) and keeps backups and
   maintenance in one place. The databases and roles stay separate, so a split
   later is a `pg_dump` / `pg_restore`.
@@ -98,7 +111,7 @@ What each lean cut costs in availability:
 | Cut | Saves per month | Availability trade-off |
 |-----|-----------------|------------------------|
 | 1 task per service, 0.5 vCPU tasks (production) | ~$111 | A task crash or an AZ outage stops that service for 1-3 minutes until ECS starts a replacement. Deploys stay zero-downtime. A single litellm task stops all LLM calls while it restarts. |
-| Single-AZ RDS (production) | ~$73 with the class change | An instance failure or OS patch means minutes of database downtime. An AZ outage means a point-in-time restore into the other AZ (about 30-60 minutes, up to 5 minutes of writes lost). Deletion protection and 14-day backups stay. |
+| Single-AZ RDS (production) | ~$73 with the class change | An instance failure or OS patch means minutes of database downtime. An AZ outage means a point-in-time restore into the other AZ (about 30-60 minutes, up to 5 minutes of writes lost). Deletion protection and 35-day backups stay. |
 | db.t4g.small in place of medium (production) | included above | 2 GB RAM, about 200 connections. The burstable CPU bills extra credits under sustained load. |
 | 1 Valkey node (production) | ~$9 | A node failure loses the cache and stops Valkey for minutes until ElastiCache replaces the node. App sessions and rate limits in Valkey reset. |
 | 1 NAT gateway (production) | ~$37 | All egress goes through one AZ. If that AZ fails, tasks in the other AZ lose internet access (LLM providers, Stripe, OAuth). |
@@ -136,9 +149,12 @@ definitions read single JSON keys by ARN (`<arn>:<KEY>::`).
 | `skynet/<env>/app` | You fill them | backend, worker, migrate |
 | `skynet/<env>/frontend` | You fill them | frontend |
 | `skynet/<env>/litellm` | You fill them | litellm |
-| `skynet/<env>/app-generated` | Terraform (`REMOTE_DB_URL`, `REDIS_URL`) | backend, worker, migrate |
-| `skynet/<env>/litellm-generated` | Terraform (`LITELLM_DATABASE_URL`, `REDIS_PASSWORD`) | litellm |
-| `skynet/<env>/db-admin` | Terraform (master and litellm passwords) | dbadmin |
+| `skynet/<env>/app-generated` | Terraform: `REMOTE_DB_URL` (as `skynet_app`), `REDIS_URL`, `APP_DB_PASSWORD` | backend, worker, migrate (the URLs); dbadmin (`APP_DB_PASSWORD`) |
+| `skynet/<env>/litellm-generated` | Terraform: `LITELLM_DATABASE_URL` (as `litellm`), `REDIS_PASSWORD`, `LITELLM_DB_PASSWORD` | litellm (the URL and Redis password); dbadmin (`LITELLM_DB_PASSWORD`) |
+| `skynet/<env>/db-admin` | Terraform: the RDS master `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | dbadmin |
+
+`restore-railway.sh` also reads `app-generated` and `litellm-generated` on your
+laptop to restore each dump as its owner role.
 
 The key names come from the Railway export (SKY-155). ECS does not start a task
 when a referenced key is missing. An empty string is allowed.
@@ -146,7 +162,7 @@ when a referenced key is missing. An empty string is allowed.
 Load the values (key names only pass through the script, never values):
 
 ```bash
-cd infra/aws
+cd infra/terraform
 scripts/secrets.sh template staging app      > ~/skynet-secrets/staging-app.json
 scripts/secrets.sh template staging frontend > ~/skynet-secrets/staging-frontend.json
 scripts/secrets.sh template staging litellm  > ~/skynet-secrets/staging-litellm.json
@@ -164,7 +180,7 @@ Terraform state; the state bucket is private and encrypted.
 
 ```bash
 aws login --profile skynet
-infra/aws/scripts/build-push.sh staging <git-sha>
+infra/terraform/scripts/build-push.sh staging <git-sha>
 ```
 
 The script runs `docker buildx build --platform linux/arm64 --push` for
@@ -190,14 +206,14 @@ the Session Manager plugin (`brew install --cask session-manager-plugin`) and
 ```bash
 aws login --profile skynet
 export AWS_PROFILE=skynet AWS_REGION=us-east-2
-cd infra/aws
+cd infra/terraform
 
 # 1. State bucket (local state, once per account).
 terraform -chdir=bootstrap init
 terraform -chdir=bootstrap apply
 BUCKET=$(terraform -chdir=bootstrap output -raw state_bucket)
 
-# 2. Global: ECR repos, the GitHub OIDC provider and the deploy role.
+# 2. Global: ECR repos, the GitHub OIDC provider and the GitHub roles.
 terraform -chdir=global init -backend-config="bucket=$BUCKET"
 terraform -chdir=global apply
 
@@ -215,12 +231,13 @@ terraform -chdir=environments/staging output acm_validation_records
 
 # 5. Give the ACM validation records to Gilad. He creates them by hand.
 
-# 6. Secrets (see "Secrets"), then the litellm role and database, and pgvector.
+# 6. Secrets (see "Secrets"), then the database roles (skynet_app, litellm),
+#    the litellm database and pgvector.
 scripts/secrets.sh put staging app      ~/skynet-secrets/staging-app.json
 scripts/secrets.sh put staging frontend ~/skynet-secrets/staging-frontend.json
 scripts/secrets.sh put staging litellm  ~/skynet-secrets/staging-litellm.json
 scripts/secrets.sh check staging
-scripts/create-litellm-db.sh staging
+scripts/create-db-roles.sh staging
 
 # 7. Restore the Railway data (see "Restore"). Then migrate.
 scripts/deploy.sh staging "$SHA" --migrate-only
@@ -240,8 +257,8 @@ Optional: `-var alert_email=<address>` subscribes an email to the alarms.
 ## Deploys after the first apply
 
 ```bash
-infra/aws/scripts/build-push.sh staging <sha>
-infra/aws/scripts/deploy.sh staging <sha>
+infra/terraform/scripts/build-push.sh staging <sha>
+infra/terraform/scripts/deploy.sh staging <sha>
 ```
 
 `deploy.sh` registers new task definition revisions with the new image,
@@ -252,10 +269,48 @@ Terraform ignores the service `task_definition` and `desired_count`. A Terraform
 change to a task definition (for example a new secret key) takes effect at the
 next `deploy.sh` run.
 
-`.github/workflows/aws-deploy.yml` does the same with the OIDC role. It runs on
-`workflow_dispatch` only. After `global` is applied, set the repository variable
-`AWS_DEPLOY_ROLE_ARN` (output `github_deploy_role_arn` of `global`) and create
-the GitHub environments `aws-staging` and `aws-production`.
+`.github/workflows/aws-deploy.yml` does the same with the OIDC role of the
+chosen environment. It runs on `workflow_dispatch` only. See "GitHub roles" for
+the setup.
+
+## GitHub roles and CI
+
+`global` creates one GitHub OIDC provider and four roles. None has static keys.
+
+| Role | Trusted OIDC subject | Reaches |
+|------|----------------------|---------|
+| `skynet-github-deploy-staging` | `repo:<repo>:environment:aws-staging` | ECR push (images are shared), task definitions, the `skynet-staging` services, RunTask of `skynet-staging-migrate` only, PassRole on the exact staging task and execution roles, `/ecs/skynet-staging/*` logs, `/skynet/staging/*` SSM. |
+| `skynet-github-deploy-production` | `repo:<repo>:environment:aws-production` | The same, for production resources only. |
+| `skynet-github-terraform-plan` | `repo:<repo>:pull_request` | `ReadOnlyAccess`, the state objects, and `GetSecretValue` on the generated secrets (Terraform refresh reads their versions). |
+| `skynet-github-terraform-apply` | `repo:<repo>:ref:refs/heads/staging` and `.../main` | `PowerUserAccess` plus IAM writes on `role/skynet-*` and the GitHub OIDC provider. No workflow uses it yet. |
+
+No deploy role can run or pass the roles of the `dbadmin` task family; only a
+person with their own AWS login runs dbadmin.
+
+Set up GitHub (Settings > Environments) after `global` is applied:
+
+1. `aws-staging`: deployment branches = `staging` only. Variable
+   `AWS_DEPLOY_ROLE_ARN` = `github_deploy_role_arns["staging"]`.
+2. `aws-production`: deployment branches = `main` only. Required reviewers =
+   Gilad. Variable `AWS_DEPLOY_ROLE_ARN` = `github_deploy_role_arns["production"]`.
+3. Repository variables for the PR plan: `AWS_PLAN_ROLE_ARN` =
+   `github_plan_role_arn` and `TF_STATE_BUCKET` = `state_bucket_name`.
+
+The branch rules matter: the OIDC trust checks only the environment name, and
+GitHub enforces which branch may use that environment. The staging pipeline
+builds the images that production also runs (ECR is shared), so keep the
+`aws-staging` branch rule on.
+
+`.github/workflows/terraform.yml` runs on every PR that changes
+`infra/terraform`: `fmt -check`, `validate` for every root, tflint, checkov,
+then a read-only `plan -lock=false` of `global`, `staging` and `production`. It
+posts only the `Plan:` lines as a PR comment. It never applies. The plan job
+skips with a notice when the PR comes from a fork (no OIDC token) or when the
+two variables are not set.
+
+Risk to know: the plan role can read the state, and the state holds the
+generated database and cache passwords. Any same-repository PR branch can use
+the plan role. Only people with write access can push such a branch.
 
 ## Restore the Railway backups
 
@@ -270,14 +325,15 @@ brew install postgresql@18
 export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
 
 # Terminal 1: tunnel localhost:15432 to RDS through a dbadmin task.
-infra/aws/scripts/db-tunnel.sh staging
+infra/terraform/scripts/db-tunnel.sh staging
 
 # Terminal 2:
-infra/aws/scripts/restore-railway.sh staging
+infra/terraform/scripts/restore-railway.sh staging
 ```
 
-The script restores with `--no-owner --no-acl`, so the objects belong to the
-restoring role. It then runs a row count check. After the restore, run
+The script restores with `--no-owner --no-acl` as the owner role of each
+database (`skynet_app` for the app dump, `litellm` for the litellm dump), so
+the app's migrations can alter every object. It then runs a row count check. After the restore, run
 `deploy.sh <env> <sha> --migrate-only`; it applies only newer migrations.
 
 ## DNS cutover
@@ -312,17 +368,27 @@ not in the Price List API; the estimate assumes 70% off (AWS: "up to 70%").
 | ALB (hours + LCU) | ~$20 | ~$20 | ~$25 | ~$25 |
 | NAT gateway hours | $0 | ~$33 (1) | ~$33 (1) | ~$66 (2) |
 | Public IPv4 | ~$22 (2 ALB + 4 tasks) | ~$11 (3) | ~$11 (3) | ~$15 (4) |
-| CloudWatch (logs, alarms, Container Insights, monitoring) | ~$10 | ~$10 | ~$20 | ~$20 |
+| CloudWatch (Container Insights about $40, logs, alarms, monitoring) | ~$45 | ~$45 | ~$50 | ~$50 |
 | Secrets Manager, S3, ECR storage | ~$5 | ~$5 | ~$5 | ~$5 |
-| **Total** | **~$112** | **~$180** | **~$196** | **~$426** |
+| **Total** | **~$147** | **~$215** | **~$226** | **~$456** |
 
-Lean total: about $308 per month. Full total: about $606 per month.
+Lean total: about $373 per month, below the $460 spend limit. Full total:
+about $671 per month, above the $460 spend limit. Production full alone
+(about $456) uses almost all of it.
+
+Container Insights is the largest CloudWatch item: about $40-50 per month per
+environment (custom metrics per task and service, plus performance log
+ingestion). Turning it off saves that, at the cost of the per-task CPU and
+memory views and the "running < desired" alarm, which reads a Container
+Insights metric.
 
 Not included: data transfer out, NAT data processing ($0.045 per GB), LLM provider
 costs, RDS CPU credits beyond the baseline, WAF (off by default; about $10 per
 month plus requests when on). Autoscaled tasks add about $20 (backend) or $9
 (frontend) per task-month, plus $3.65 per public IP in `public_ip` mode.
-If Spot is only 50% off, staging lean costs about $125. The ECR repos and the
+If Spot is only 50% off, staging lean costs about $160. The 35-day production
+backups add a few dollars of backup storage beyond the free allowance (the
+database size). The ECR repos and the
 state bucket are shared and cost a few dollars per month. A Compute Savings
 Plan cuts on-demand Fargate by about 20% to 50%.
 
@@ -338,7 +404,7 @@ Plan cuts on-demand Fargate by about 20% to 50%.
 ## Plan
 
 The environment stacks build the ECR URLs from the account ID, so they plan
-before `global` exists. To plan without the state bucket, copy `infra/aws` to a
+before `global` exists. To plan without the state bucket, copy `infra/terraform` to a
 temporary folder, add `backend_override.tf` with `terraform { backend "local" {} }`
 to each stack, then run `terraform init` and `terraform plan -var image_tag=<sha>`.
 
@@ -347,11 +413,11 @@ Results on 2026-10-21 (account 669242775630, us-east-2, empty account):
 | Stack | Pass 1 | Pass 2 (`services_enabled`, `enable_https`) |
 |-------|--------|------|
 | bootstrap | 7 to add | - |
-| global | 9 to add (3 ECR repos, 3 lifecycle policies, OIDC provider, deploy role, role policy) | - |
-| staging lean | 151 to add | 172 to add |
-| staging full (`-var-file=full.tfvars`) | 155 to add | 176 to add |
-| production lean | 155 to add | 176 to add |
-| production full (`-var-file=full.tfvars`) | 157 to add | 178 to add |
+| global | 17 to add (3 ECR repos, 3 lifecycle policies, OIDC provider, 2 deploy roles and 2 policies, plan role with policy and attachment, apply role with policy and attachment) | - |
+| staging lean | 152 to add | 173 to add |
+| staging full (`-var-file=full.tfvars`) | 156 to add | 177 to add |
+| production lean | 156 to add | 177 to add |
+| production full (`-var-file=full.tfvars`) | 158 to add | 179 to add |
 
 Staging lean has no NAT gateway, Elastic IP or NAT routes (4 fewer). Production
 lean has one NAT gateway and one Elastic IP (2 fewer than full). Pass 2 adds 21
@@ -361,13 +427,14 @@ resources in every variant: 4 services, 2 scaling targets, 2 scaling policies,
 ## Checks
 
 ```bash
-cd infra/aws
+cd infra/terraform
 terraform fmt -recursive -check
 for d in bootstrap global environments/staging environments/production; do
   terraform -chdir=$d init -backend=false && terraform -chdir=$d validate
 done
 tflint --init && tflint --recursive --config "$PWD/.tflint.hcl"
 trivy config --severity HIGH,CRITICAL .
+checkov --directory . --config-file .checkov.yaml
 ```
 
 Trivy findings that the design accepts carry a `#trivy:ignore` comment with the

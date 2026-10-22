@@ -1,16 +1,20 @@
-# Builds the arm64 images and deploys one commit to AWS ECS (SKY-162).
+# Builds the arm64 images and deploys one commit to AWS ECS (SKY-156; it also
+# covers the deploy part of SKY-162).
 # Manual only (workflow_dispatch) until the AWS stack is live and approved.
 # Needs the global stack applied first (it creates the OIDC provider and the
-# role), then vars.AWS_DEPLOY_ROLE_ARN set to its github_deploy_role_arn output.
-# Auth: GitHub OIDC -> role skynet-github-deploy (infra/aws/global). No static
-# AWS keys. The role trusts only the GitHub environments aws-staging and
-# aws-production; add required reviewers to aws-production.
+# roles).
+# Auth: GitHub OIDC -> one role per environment (infra/terraform/global). No
+# static AWS keys. skynet-github-deploy-staging trusts only the GitHub
+# environment aws-staging and reaches only staging resources;
+# skynet-github-deploy-production trusts only aws-production and reaches only
+# production resources. Restrict aws-staging to the staging branch and
+# aws-production to main with required reviewers (see infra/terraform/README.md).
 #
-# Configuration (Settings > Secrets and variables > Actions):
-#   vars.AWS_DEPLOY_ROLE_ARN                     output github_deploy_role_arn
+# Configuration (Settings > Environments > aws-<env> > variables and secrets):
+#   vars.AWS_DEPLOY_ROLE_ARN                     github_deploy_role_arns[<env>]
 #   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
-#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional, per environment)
-#   secrets.SENTRY_AUTH_TOKEN                    (optional, per environment)
+#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional)
+#   secrets.SENTRY_AUTH_TOKEN                    (optional)
 name: aws deploy
 
 on:
@@ -55,7 +59,7 @@ jobs:
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: infra/aws/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+        run: infra/terraform/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
 
       - name: Migrate and deploy
-        run: infra/aws/scripts/deploy.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+        run: infra/terraform/scripts/deploy.sh "${{ inputs.environment }}" "$GITHUB_SHA"

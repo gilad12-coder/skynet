@@ -2,7 +2,7 @@
 # Forwards localhost:<port> to the environment's RDS instance through a
 # dbadmin task (ECS Exec / SSM). The task stops itself after 4 hours.
 #
-#   infra/aws/scripts/db-tunnel.sh <staging|production> [local-port=15432]
+#   infra/terraform/scripts/db-tunnel.sh <staging|production> [local-port=15432]
 #
 # Needs the Session Manager plugin: brew install --cask session-manager-plugin
 # Press Ctrl-C to close the tunnel; the script then stops the task.

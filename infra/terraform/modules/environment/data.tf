@@ -1,16 +1,22 @@
 # One RDS PostgreSQL instance per environment holds two databases:
-#   skynet  - the app database (pgvector), owned by the master user
-#   litellm - the LiteLLM proxy database, owned by its own role
+#   skynet  - the app database (pgvector), owned by the skynet_app role
+#   litellm - the LiteLLM proxy database, owned by the litellm role
+# The master user is for the dbadmin task only (role setup, restores).
 # One instance is cheaper than two (about $25-95 per month saved per
 # environment) and still keeps the data apart: separate databases and roles.
-# The litellm role and database are created by scripts/create-litellm-db.sh,
-# because Terraform cannot reach the isolated subnets.
+# scripts/create-db-roles.sh creates the app and litellm roles and the
+# litellm database, because Terraform cannot reach the isolated subnets.
 #
 # No RDS Proxy / PgBouncer: at 2-4 app tasks with a 20+20 SQLAlchemy pool the
 # connection count stays far below max_connections, and direct connections
 # keep advisory locks and FOR UPDATE SKIP LOCKED semantics unchanged.
 
 resource "random_password" "db_master" {
+  length  = 40
+  special = false
+}
+
+resource "random_password" "db_app" {
   length  = 40
   special = false
 }

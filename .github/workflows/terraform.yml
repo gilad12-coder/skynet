@@ -1,0 +1,142 @@
+# Checks the AWS Terraform (infra/terraform) on every PR that touches it
+# (SKY-156). This workflow never applies; apply stays a manual step.
+#   check: fmt, validate (every root), tflint, checkov. Needs no AWS access.
+#   plan:  read-only plan of global, staging and production through the
+#          GitHub OIDC role skynet-github-terraform-plan. It skips with a
+#          notice when the variables below are not set, or when the PR comes
+#          from a fork (GitHub gives fork PRs no OIDC token).
+#
+# Configuration (Settings > Secrets and variables > Actions, repository level):
+#   vars.AWS_PLAN_ROLE_ARN   global output github_plan_role_arn
+#   vars.TF_STATE_BUCKET     global output state_bucket_name
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - infra/terraform/**
+      - .github/workflows/terraform.yml
+
+concurrency:
+  group: terraform-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: 1.17.0
+  TF_IN_AUTOMATION: "1"
+  ROOTS: infra/terraform/bootstrap infra/terraform/global infra/terraform/environments/staging infra/terraform/environments/production
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: fmt
+        run: terraform -chdir=infra/terraform fmt -check -recursive -diff
+
+      - name: validate
+        run: |
+          for root in $ROOTS; do
+            echo "::group::$root"
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.64.0
+
+      - name: tflint
+        working-directory: infra/terraform
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          tflint --recursive --config "$PWD/.tflint.hcl"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: checkov
+        run: |
+          pip install --quiet checkov==3.3.30
+          checkov --directory infra/terraform --config-file infra/terraform/.checkov.yaml
+
+  plan:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    env:
+      PLAN_ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Decide whether to plan
+        id: gate
+        run: |
+          if [ "$SAME_REPO" != "true" ]; then
+            echo "::notice::Plan skipped: fork PRs get no AWS credentials."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          elif [ -z "$PLAN_ROLE" ] || [ -z "$STATE_BUCKET" ]; then
+            echo "::notice::Plan skipped: vars.AWS_PLAN_ROLE_ARN or vars.TF_STATE_BUCKET is not set."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-2
+
+      # -lock=false: the plan role is read-only and cannot write the lock file.
+      # Only the "Plan:" summary lines leave the job; the full plan stays in
+      # the job log, which only repository members can read.
+      - name: plan
+        if: steps.gate.outputs.run == 'true'
+        env:
+          IMAGE_TAG: ${{ github.event.pull_request.head.sha }}
+        run: |
+          summary="$RUNNER_TEMP/plan-summary.md"
+          echo "### Terraform plan (read-only, ${IMAGE_TAG:0:8})" >"$summary"
+          for root in global environments/staging environments/production; do
+            dir="infra/terraform/$root"
+            terraform -chdir="$dir" init -input=false -backend-config="bucket=$STATE_BUCKET"
+            args=(-input=false -lock=false -no-color)
+            [ "$root" = global ] || args+=(-var "image_tag=$IMAGE_TAG")
+            terraform -chdir="$dir" plan "${args[@]}" | tee "$RUNNER_TEMP/plan.txt"
+            line="$(grep -E '^(Plan:|No changes\.)' "$RUNNER_TEMP/plan.txt" | head -1)"
+            echo "- \`$root\`: ${line:-no summary line}" >>"$summary"
+          done
+          cat "$summary" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: comment
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/plan-summary.md"

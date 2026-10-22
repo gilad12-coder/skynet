@@ -74,7 +74,9 @@ locals {
     backend  = "${var.ecr_repository_urls["backend"]}:${var.image_tag}"
     frontend = "${var.ecr_repository_urls["frontend"]}:${var.image_tag}-${var.environment}"
     litellm  = "${var.ecr_repository_urls["litellm"]}:${var.image_tag}"
-    dbadmin  = "public.ecr.aws/docker/library/postgres:18-alpine"
+    # Pinned by digest (the multi-arch index of postgres:18-alpine, 18.6,
+    # 2026-10-21): this task holds the RDS master password.
+    dbadmin = "public.ecr.aws/docker/library/postgres:18-alpine@sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792"
   }
 
   app_common_env = {
@@ -148,6 +150,7 @@ locals {
     )
     dbadmin = concat(
       [for k in ["PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGSSLMODE"] : { name = k, valueFrom = "${aws_secretsmanager_secret.db_admin.arn}:${k}::" }],
+      [{ name = "APP_DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.app_generated.arn}:APP_DB_PASSWORD::" }],
       [{ name = "LITELLM_DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.litellm_generated.arn}:LITELLM_DB_PASSWORD::" }],
     )
   }

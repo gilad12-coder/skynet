@@ -109,7 +109,7 @@ variable "waf_rate_limit_per_5m" {
 # ---------------------------------------------------------------- database
 
 variable "postgres_engine_version" {
-  description = "RDS PostgreSQL engine version. 18.6 is the newest RDS 18.x (2026-10) and matches Railway's 18.6. Raise it to upgrade the minor version."
+  description = "RDS PostgreSQL engine version. 18.6 matches the Railway source (the 2026-10-21 dumps report server 18.6), so the pg_dump 18 archives restore without a downgrade. Raise it to upgrade the minor version."
   type        = string
   default     = "18.6"
 }
@@ -197,7 +197,8 @@ variable "services" {
     Size, count and capacity per ECS service. spot = true runs the service on
     Fargate Spot (about 70% cheaper; AWS may stop a task with a 2-minute
     SIGTERM warning, and a one-task service is down until Spot capacity
-    returns). A change to spot takes effect at the next deployment.
+    returns). A change to spot starts a new deployment of the service at
+    apply (force_new_deployment), so the tasks move at once.
   EOT
   type = map(object({
     cpu           = number

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the three images for linux/arm64 (Graviton) and pushes them to ECR.
 #
-#   infra/aws/scripts/build-push.sh <staging|production> [git-sha]
+#   infra/terraform/scripts/build-push.sh <staging|production> [git-sha]
 #
 # Tags: backend and litellm get <sha>; the frontend gets <sha>-<env>, because
 # Next.js bakes NEXT_PUBLIC_* values into the bundle at build time.

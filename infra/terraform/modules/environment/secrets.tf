@@ -3,8 +3,9 @@
 #   skynet/<env>/app               backend + worker settings   (values: filled by hand)
 #   skynet/<env>/frontend          frontend settings           (values: filled by hand)
 #   skynet/<env>/litellm           litellm settings            (values: filled by hand)
-#   skynet/<env>/app-generated     REMOTE_DB_URL, REDIS_URL    (values: Terraform)
-#   skynet/<env>/litellm-generated LITELLM_DATABASE_URL, REDIS_PASSWORD (values: Terraform)
+#   skynet/<env>/app-generated     REMOTE_DB_URL, REDIS_URL, APP_DB_PASSWORD (values: Terraform)
+#   skynet/<env>/litellm-generated LITELLM_DATABASE_URL, REDIS_PASSWORD, LITELLM_DB_PASSWORD (values: Terraform)
+#   skynet/<env>/db-admin          PG* master connection values (values: Terraform)
 #
 # Task definitions reference single JSON keys ("<arn>:<KEY>::"). ECS refuses
 # to start a task when a referenced key is missing, so every key listed below
@@ -146,6 +147,7 @@ locals {
 
   redis_endpoint = aws_elasticache_replication_group.this.primary_endpoint_address
   db_endpoint    = aws_db_instance.this.address
+  app_db_user    = "skynet_app"
 }
 
 resource "aws_secretsmanager_secret" "manual" {
@@ -163,11 +165,15 @@ resource "aws_secretsmanager_secret" "app_generated" {
   recovery_window_in_days = var.environment == "production" ? 30 : 7
 }
 
+# The app connects as skynet_app (owner of the skynet database), never as the
+# RDS master. scripts/create-db-roles.sh creates the role.
 resource "aws_secretsmanager_secret_version" "app_generated" {
   secret_id = aws_secretsmanager_secret.app_generated.id
   secret_string = jsonencode({
-    REMOTE_DB_URL = "postgresql://${aws_db_instance.this.username}:${random_password.db_master.result}@${local.db_endpoint}:5432/${aws_db_instance.this.db_name}?sslmode=require"
+    REMOTE_DB_URL = "postgresql://${local.app_db_user}:${random_password.db_app.result}@${local.db_endpoint}:5432/${aws_db_instance.this.db_name}?sslmode=require"
     REDIS_URL     = "rediss://:${random_password.valkey_auth.result}@${local.redis_endpoint}:6379/0"
+    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
+    APP_DB_PASSWORD = random_password.db_app.result
   })
 }
 
@@ -182,7 +188,7 @@ resource "aws_secretsmanager_secret_version" "litellm_generated" {
   secret_string = jsonencode({
     LITELLM_DATABASE_URL = "postgresql://litellm:${random_password.db_litellm.result}@${local.db_endpoint}:5432/litellm?sslmode=require"
     REDIS_PASSWORD       = random_password.valkey_auth.result
-    # Used only by scripts/create-litellm-db.sh to create the role.
+    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
     LITELLM_DB_PASSWORD = random_password.db_litellm.result
   })
 }

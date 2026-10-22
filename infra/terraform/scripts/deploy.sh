@@ -5,7 +5,7 @@
 #   2. runs `python manage.py migrate` as a one-off task and stops on failure,
 #   3. updates the services and waits until they are stable.
 #
-#   infra/aws/scripts/deploy.sh <staging|production> <git-sha> [--migrate-only]
+#   infra/terraform/scripts/deploy.sh <staging|production> <git-sha> [--migrate-only]
 #
 # Build and push the images first (scripts/build-push.sh).
 # Rollback: run this script again with the previous SHA. Migrations do not

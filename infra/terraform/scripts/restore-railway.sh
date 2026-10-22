@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Restores the Railway pg_dump backups (custom format) into RDS.
 #
-#   1. In one terminal:     infra/aws/scripts/db-tunnel.sh <env>
-#   2. In another terminal: infra/aws/scripts/restore-railway.sh <env> [backup-dir] [local-port=15432]
+#   1. In one terminal:     infra/terraform/scripts/db-tunnel.sh <env>
+#   2. In another terminal: infra/terraform/scripts/restore-railway.sh <env> [backup-dir] [local-port=15432]
 #
 # backup-dir defaults to ~/Library/Application Support/Skynet Backups/railway-2026-10-21
 # and must hold <env>-Postgres.dump (app) and <env>-Postgres-ZPeG.dump (litellm).
-# Run create-litellm-db.sh first. Restore into empty databases only: run this
+# Run create-db-roles.sh first. The app dump restores as skynet_app and the
+# litellm dump as litellm, so each role owns its objects (the app's
+# migrations must be able to alter them). Restore into empty databases only: run this
 # before the first migration and before the services start.
 #
 # Needs pg_restore 18 (the dumps come from pg_dump 18.6):
@@ -36,7 +38,7 @@ secret() {
 }
 
 export PGHOST=127.0.0.1 PGPORT="$port" PGSSLMODE=require
-admin="$(secret "skynet/$env/db-admin")"
+app="$(secret "skynet/$env/app-generated")"
 llm="$(secret "skynet/$env/litellm-generated")"
 
 # Non-superusers on RDS cannot COMMENT ON EXTENSION; drop those entries.
@@ -52,10 +54,10 @@ restore() {
   rm -f "$list"
 }
 
-restore "$app_dump" skynet "$(jq -r .PGUSER <<<"$admin")" "$(jq -r .PGPASSWORD <<<"$admin")"
+restore "$app_dump" skynet skynet_app "$(jq -r .APP_DB_PASSWORD <<<"$app")"
 restore "$llm_dump" litellm litellm "$(jq -r .LITELLM_DB_PASSWORD <<<"$llm")"
 
 echo "row counts (compare with $env-Postgres.info.json):"
-PGUSER="$(jq -r .PGUSER <<<"$admin")" PGPASSWORD="$(jq -r .PGPASSWORD <<<"$admin")" psql -d skynet -Atc \
+PGUSER=skynet_app PGPASSWORD="$(jq -r .APP_DB_PASSWORD <<<"$app")" psql -d skynet -Atc \
   "SELECT 'users=' || count(*) FROM users UNION ALL SELECT 'jobs=' || count(*) FROM jobs;"
-echo "next: infra/aws/scripts/deploy.sh $env <sha> --migrate-only"
+echo "next: infra/terraform/scripts/deploy.sh $env <sha> --migrate-only"

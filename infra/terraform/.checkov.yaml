@@ -1,0 +1,63 @@
+# checkov settings for infra/terraform (used by .github/workflows/terraform.yml).
+# Each skip below is a deliberate choice for a small two-environment stack.
+# Remove a skip when the reason stops being true.
+framework:
+  - terraform
+compact: true
+quiet: true
+skip-check:
+  # Cost: a customer managed KMS key per use is $1/month each plus API calls.
+  # AWS managed keys encrypt these at rest already.
+  - CKV_AWS_149   # Secrets Manager with a CMK
+  - CKV_AWS_158   # CloudWatch log groups with a CMK
+  - CKV_AWS_191   # ElastiCache with a CMK
+  - CKV_AWS_354   # Performance Insights with a CMK
+  - CKV_AWS_145   # ALB log bucket with KMS: ALB access logs support only SSE-S3
+  - CKV2_AWS_34   # SSM deploy parameter holds names and ARNs, no secrets
+  # Rotation: the generated passwords are written into connection URLs and
+  # the database roles by scripts/create-db-roles.sh; rotation is a manual
+  # runbook step, not a Lambda rotator. Manual secrets are third-party keys.
+  - CKV2_AWS_57
+  # Sizing is per variant in tfvars. The lean variants run RDS and Valkey in
+  # one AZ; production full turns on Multi-AZ RDS and Valkey failover.
+  # Production always has deletion protection; staging does not.
+  - CKV_AWS_157   # RDS Multi-AZ
+  - CKV2_AWS_50   # Valkey automatic failover
+  - CKV_AWS_293   # RDS deletion protection
+  # The engine version is pinned (18.6 = the Railway source). Minor upgrades
+  # go through a reviewed Terraform change, not a maintenance-window surprise.
+  - CKV_AWS_226
+  # Single Region account (us-east-2 only): cross-Region replication is not
+  # allowed. Access logs, event notifications and versioning on the state
+  # bucket and the 30-day ALB log bucket add cost and no recovery value here.
+  - CKV_AWS_144
+  - CKV_AWS_18
+  - CKV2_AWS_62
+  - CKV_AWS_21    # ALB log bucket versioning (logs expire after 30 days)
+  # Port 80 stays open only to redirect to HTTPS. Before the certificate is
+  # issued (enable_https = false) it forwards, so the first apply works.
+  # The ALB ends TLS; targets in private subnets take HTTP inside the VPC.
+  - CKV_AWS_2
+  - CKV_AWS_103
+  - CKV2_AWS_20
+  - CKV_AWS_260
+  - CKV_AWS_378
+  # WAF: request sampling and CloudWatch metrics are on. Full WAF logging
+  # costs per GB. The Log4j rule set does not apply (no Java services).
+  - CKV2_AWS_31
+  - CKV2_AWS_76
+  # Container Insights and ECS Exec logging are on (OVERRIDE to a log group);
+  # the check also wants a KMS key for exec sessions (see the KMS note above).
+  - CKV_AWS_224
+  # Log retention is 14-30 days (90 for ECS Exec) by choice; one year costs more than the logs
+  # are worth here. Database backups keep 35 days in production.
+  - CKV_AWS_338
+  # The security groups are attached to ECS services and tasks that are
+  # created later (services_enabled) or by RunTask (dbadmin, migrate).
+  - CKV2_AWS_5
+  # The availability zone list is filtered by state and sliced to the first
+  # zones; the subnets pin their AZ at create time.
+  - CKV_AWS_394
+  # The apply role needs iam:Get*/List* on * for Terraform refresh; writes are
+  # scoped to role/skynet-* and the GitHub OIDC provider.
+  - CKV_AWS_356
