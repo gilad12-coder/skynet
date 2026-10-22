@@ -150,6 +150,19 @@ def model_token_prices(model_id: str) -> TokenPrices:
     return TokenPrices(prompt=FALLBACK_INPUT_COST_PER_TOKEN, completion=FALLBACK_OUTPUT_COST_PER_TOKEN)
 
 
+def known_token_prices(model_id: str) -> TokenPrices | None:
+    """Return a model's per-token USD prices only when a price table knows the model.
+
+    Args:
+        model_id: The model id as recorded.
+
+    Returns:
+        Live OpenRouter prices, else LiteLLM's static prices, else ``None``
+        (never the fallback rates, which exist to bill safely, not to estimate).
+    """
+    return live_prices(model_id) or _static_prices(model_id)
+
+
 def model_token_costs(model_id: str) -> tuple[float, float]:
     """Return a model's ``(input, output)`` per-token cost in USD, at cost.
 
@@ -163,11 +176,12 @@ def model_token_costs(model_id: str) -> tuple[float, float]:
     return prices.prompt, prices.completion
 
 
-def usage_cost_usd(usage: ModelUsage) -> float:
+def usage_cost_usd(usage: ModelUsage, prices: TokenPrices | None = None) -> float:
     """Price one model's usage at provider cost (USD, before markup).
 
     Args:
         usage: The model's token usage and any cost the provider reported.
+        prices: Per-token prices the caller already looked up; ``None`` looks them up.
 
     Returns:
         The reported cost plus the per-token price of the tokens it does not cover.
@@ -177,7 +191,8 @@ def usage_cost_usd(usage: ModelUsage) -> float:
     cost = max(0.0, usage.reported_cost_usd)
     if unreported_in == 0 and unreported_out == 0:
         return cost
-    prices = model_token_prices(usage.model)
+    if prices is None:
+        prices = model_token_prices(usage.model)
     cache_read = min(max(0, usage.cache_read_tokens), unreported_in)
     cache_write = min(max(0, usage.cache_write_tokens), unreported_in - cache_read)
     reasoning = min(max(0, usage.reasoning_tokens), unreported_out)

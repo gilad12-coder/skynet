@@ -18,6 +18,7 @@ import {
 } from "@/shared/ui/icons";
 import { formatBudgetUsd, formatCentsUsd, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 
@@ -88,6 +89,12 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
   const { budget, budgetBusy, budgetError, minimumTotalCents } = useExecutionBudget();
   const locale = getActiveIntlLocale();
   const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
+  // The local build charges no managed spend, so its budgets are always
+  // uncapped: the card offers no limit and only says who pays.
+  const localMode = isLocalMode();
+  useEffect(() => {
+    if (localMode && !budgetUncapped) setBudgetUncapped(true);
+  }, [localMode, budgetUncapped, setBudgetUncapped]);
 
   // The field is typed in dollars; the wizard state stays in cents. The field
   // owns its text so the user can clear it or leave a typo visible with its
@@ -175,27 +182,29 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
     <StepCard
       title={msg("submit.budget.label")}
       trailing={
-        <Segmented<"limit" | "uncapped">
-          size="sm"
-          label={msg("submit.budget.label")}
-          value={budgetUncapped ? "uncapped" : "limit"}
-          onChange={(value) => setBudgetUncapped(value === "uncapped")}
-          options={[
-            {
-              value: "limit",
-              label: msg("submit.budget.mode.limit"),
-              tip: msg("submit.budget.explainer"),
-            },
-            {
-              value: "uncapped",
-              label: msg("submit.budget.mode.uncapped"),
-              tip: msg("submit.budget.uncapped.warning"),
-            },
-          ]}
-        />
+        localMode ? undefined : (
+          <Segmented<"limit" | "uncapped">
+            size="sm"
+            label={msg("submit.budget.label")}
+            value={budgetUncapped ? "uncapped" : "limit"}
+            onChange={(value) => setBudgetUncapped(value === "uncapped")}
+            options={[
+              {
+                value: "limit",
+                label: msg("submit.budget.mode.limit"),
+                tip: msg("submit.budget.explainer"),
+              },
+              {
+                value: "uncapped",
+                label: msg("submit.budget.mode.uncapped"),
+                tip: msg("submit.budget.uncapped.warning"),
+              },
+            ]}
+          />
+        )
       }
     >
-      {!budgetUncapped && (
+      {!localMode && !budgetUncapped && (
         <div className="space-y-2">
           <Label htmlFor="totalBudgetInput" className="sr-only">
             {msg("submit.budget.label")}
@@ -337,9 +346,14 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
         </div>
       )}
 
-      {!budgetUncapped && mode === "byok" && (
+      {!localMode && !budgetUncapped && mode === "byok" && (
         <p className="text-xs leading-relaxed text-muted-foreground" dir="auto">
           {msg("submit.budget.byok_note")}
+        </p>
+      )}
+      {localMode && (
+        <p className="text-xs leading-relaxed text-muted-foreground" dir="auto">
+          {msg("submit.budget.local_note")}
         </p>
       )}
     </StepCard>

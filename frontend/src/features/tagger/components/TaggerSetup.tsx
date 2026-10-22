@@ -710,6 +710,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
         catalogModels={catalogModels ?? undefined}
         recentConfigs={recentConfigs}
         onRemoveRecent={removeRecentConfig}
+        byokOnlyLocally
       />
       <WizardStepper
         steps={activeSteps}

@@ -97,7 +97,7 @@ export function InputsColumnsCard({
           {inference.inferError && (
             <div className="flex items-center justify-between gap-3">
               <p role="alert" className="text-xs text-destructive">
-                {t("submit.v2.inputs.confirm.infer_error")}
+                {inference.inferErrorMessage ?? t("submit.v2.inputs.confirm.infer_error")}
               </p>
               <RetryIconButton label={t("submit.v2.inputs.confirm.retry")} onClick={inference.reinfer} />
             </div>
