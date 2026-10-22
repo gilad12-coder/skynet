@@ -1,6 +1,12 @@
 "use client";
 
 import * as React from "react";
+import {
+  MENU_GROUP_LABELS,
+  menuModelGroup,
+  menuPickState,
+  RETIRED_AUTO_MODEL,
+} from "@/features/local-runtime";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -19,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -43,11 +50,12 @@ interface ComposerModelMenuProps {
    * subscription models. The first one runs with no pick.
    */
   models?: CatalogModel[];
+  /**
+   * The given list is the OpenRouter engine menu, which hides Local models.
+   * A saved Local pick it does not list stays saved for a CLI engine.
+   */
+  openRouterEngine?: boolean;
 }
-
-// The retired "Auto · Intelligent" entry; saved prefs and conversations may
-// still carry it, and the backend runs the default for it like for null.
-const RETIRED_AUTO_MODEL = "auto:intelligent";
 
 // Caps the fallback list when the catalog flags no featured models (a
 // listing that carries no release dates or benchmarks).
@@ -92,6 +100,7 @@ export function ComposerModelMenu({
   disabled,
   defaultFlag = "is_default",
   models,
+  openRouterEngine = false,
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
@@ -121,10 +130,10 @@ export function ComposerModelMenu({
   const listed = models ?? catalog?.models;
   // A saved pick the live catalog no longer lists (a withdrawn model) would
   // name a dead id on the chip. Only judged against a loaded, non-empty
-  // catalog so a gateway outage never wipes a valid pick.
-  const stale =
-    !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
-  const value = savedValue && !stale ? savedValue : null;
+  // catalog so a gateway outage never wipes a valid pick. A Local pick the
+  // OpenRouter engine menu hides is no pick here, but it stays saved for a CLI engine.
+  const { unlisted, stale } = menuPickState(savedValue, listed, models, openRouterEngine);
+  const value = savedValue && !unlisted ? savedValue : null;
   React.useEffect(() => {
     if (stale) {
       onChange(null);
@@ -140,6 +149,10 @@ export function ComposerModelMenu({
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [models, available]);
+  // A given list that mixes groups labels each group, since two groups can
+  // list the same model name. A local agent menu lists one engine's models, so
+  // it shows no labels.
+  const grouped = !!models && new Set(models.map(menuModelGroup)).size > 1;
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -222,14 +235,21 @@ export function ComposerModelMenu({
                   onSelect={() => pick(currentExtra.value)}
                 />
               )}
-              {featured.map((m) => (
-                <MenuItem
-                  key={m.value}
-                  selected={effective === m.value}
-                  label={modelDisplayName(m.value, available)}
-                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
-                  onSelect={() => pick(m.value)}
-                />
+              {featured.map((m, i) => (
+                <React.Fragment key={m.value}>
+                  {grouped &&
+                    (i === 0 || menuModelGroup(featured[i - 1]!) !== menuModelGroup(m)) && (
+                      <DropdownMenuLabel>
+                        {msg(MENU_GROUP_LABELS[menuModelGroup(m)])}
+                      </DropdownMenuLabel>
+                    )}
+                  <MenuItem
+                    selected={effective === m.value}
+                    label={modelDisplayName(m.value, available)}
+                    icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
+                    onSelect={() => pick(m.value)}
+                  />
+                </React.Fragment>
               ))}
             </div>
           </DropdownMenuSubContent>

@@ -232,7 +232,7 @@ function TaskInterviewPanel({
 
   // Answers typed while the interviewer is replying wait for it to finish.
   const { midTurn } = useSteerQueue({ busy: interview.busy, send: interview.send });
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("interview"));
+  const localMenu = useLocalAgentMenuModels(agentSubscriptionFor("interview"), interview.model);
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
@@ -315,7 +315,8 @@ function TaskInterviewPanel({
             effort={interview.reasoningEffort}
             onEffortChange={interview.setReasoningEffort}
             defaultFlag="is_interview_default"
-            models={localMenuModels}
+            models={localMenu.models}
+            openRouterEngine={localMenu.openRouterEngine}
           />
         }
       />

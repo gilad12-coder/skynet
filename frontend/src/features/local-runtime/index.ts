@@ -8,13 +8,21 @@ export {
 } from "./hooks/use-local-status";
 export {
   useAgentEngine,
+  agentEngineLoaded,
   loadAgentEngine,
   peekAgentEngine,
   saveAgentEngine,
 } from "./hooks/use-agent-engine";
 export {
   agentEngineOptions,
+  effectiveAgentEngine,
   isAgentEngine,
+  LOCAL_KEY_PROVIDER,
+  MENU_GROUP_LABELS,
+  menuModelGroup,
+  hiddenLocalPick,
+  menuPickState,
+  roleCli,
   OPENROUTER_ENGINE,
   type AgentEngine,
   type AgentEngineOption,
@@ -30,6 +38,7 @@ export {
   isCliProvider,
   isLocalModelRefusal,
   parseSubscriptionModelId,
+  RETIRED_AUTO_MODEL,
   subscriptionAgentModel,
   subscriptionCatalogModels,
   subscriptionMenuModels,

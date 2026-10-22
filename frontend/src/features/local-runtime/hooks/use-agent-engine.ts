@@ -3,7 +3,12 @@
 import * as React from "react";
 import { getAgentEngine, updateAgentEngine } from "@/shared/lib/api";
 import { isLocalMode } from "@/shared/lib/runtime-env";
-import { OPENROUTER_ENGINE, isAgentEngine, type AgentEngine } from "../lib/subscription-model";
+import {
+  OPENROUTER_ENGINE,
+  isAgentEngine,
+  keyRetryDelayMs,
+  type AgentEngine,
+} from "../lib/subscription-model";
 
 // With no stored engine the backend picks the first ready CLI, which changes
 // when a CLI signs out or hits its cap. So each CLI status refresh marks the
@@ -61,6 +66,14 @@ export function refreshAgentEngine(): void {
   void loadAgentEngine();
 }
 
+/**
+ * Whether any engine load succeeded. Until then the engine is unknown: a null
+ * engine can mean "not loaded" or "load failed", not only "none chosen".
+ */
+export function agentEngineLoaded(): boolean {
+  return !isLocalMode() || cached !== null;
+}
+
 /** The last engine any caller loaded, for code outside React. */
 export function peekAgentEngine(): AgentEngine | null {
   if (!isLocalMode()) return OPENROUTER_ENGINE;
@@ -79,20 +92,39 @@ export async function saveAgentEngine(engine: AgentEngine): Promise<AgentEngine 
   return saved;
 }
 
-/** The caller's agent engine, re-rendering when any caller loads or saves it. */
+/**
+ * The caller's agent engine, re-rendering when any caller loads or saves it.
+ * `loaded` is false until a load succeeds; a failed first load retries with a
+ * growing delay.
+ */
 export function useAgentEngine(): {
   engine: AgentEngine | null;
+  loaded: boolean;
   save: (engine: AgentEngine) => Promise<AgentEngine | null>;
 } {
   const [, rerender] = React.useReducer((n: number) => n + 1, 0);
+  const [tries, setTries] = React.useState(0);
 
   React.useEffect(() => {
     listeners.add(rerender);
-    void loadAgentEngine();
     return () => {
       listeners.delete(rerender);
     };
   }, []);
 
-  return { engine: peekAgentEngine(), save: saveAgentEngine };
+  React.useEffect(() => {
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    void loadAgentEngine().then(() => {
+      if (active && !agentEngineLoaded()) {
+        retry = setTimeout(() => setTries((n) => n + 1), keyRetryDelayMs(tries));
+      }
+    });
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [tries]);
+
+  return { engine: peekAgentEngine(), loaded: agentEngineLoaded(), save: saveAgentEngine };
 }

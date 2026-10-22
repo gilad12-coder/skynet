@@ -284,13 +284,13 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   );
 
   const { openTo: openSettingsTo } = useSettingsModal();
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("generalist"));
   const agent = useGeneralistAgent({
     wizardState: effectiveWizard,
     trustMode,
     onToolEnd: handleToolEnd,
     onConversationMeta: handleConversationMeta,
   });
+  const localMenu = useLocalAgentMenuModels(agentSubscriptionFor("generalist"), agent.model);
   const streaming = agent.status === "streaming";
   // Each conversation on view gets fresh turn components, so one chat's
   // timers and "already shown" text never carry into another. A new chat
@@ -912,7 +912,8 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             onChange={agent.setModel}
             effort={agent.reasoningEffort}
             onEffortChange={agent.setReasoningEffort}
-            models={localMenuModels}
+            models={localMenu.models}
+            openRouterEngine={localMenu.openRouterEngine}
           />
         }
         leadingControls={

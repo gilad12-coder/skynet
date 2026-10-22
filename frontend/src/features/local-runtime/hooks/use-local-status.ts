@@ -3,19 +3,31 @@
 import * as React from "react";
 import { fetchWithAuthRetry } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
-import { cachedCatalog } from "@/shared/lib/model-catalog";
+import { cachedByokCatalog, cachedCatalog, getByokModelCatalog } from "@/shared/lib/model-catalog";
 import { getRuntimeEnv, isLocalMode } from "@/shared/lib/runtime-env";
 import type { CliProvider } from "@/features/billing";
+import { peekByokKeys, useByokKeys } from "@/features/billing/providers/byok-provider";
 import type { CatalogModel } from "@/shared/types/api";
 import {
-  defaultAgentCli,
-  findCli,
   isLocalModelRefusal,
-  resolveAgentModel,
-  subscriptionMenuModels,
+  keyRetryDelayMs,
+  LOCAL_KEY_PROVIDER,
+  localAgentMenu,
+  localKeyRows,
+  localKeyStamp,
+  menuKeyVerified,
+  OPENROUTER_ENGINE,
+  requestKeyRows,
+  resolveLocalAgentModel,
+  type AgentEngine,
   type LocalStatus,
 } from "../lib/subscription-model";
-import { loadAgentEngine, refreshAgentEngine, useAgentEngine } from "./use-agent-engine";
+import {
+  agentEngineLoaded,
+  loadAgentEngine,
+  refreshAgentEngine,
+  useAgentEngine,
+} from "./use-agent-engine";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -24,6 +36,8 @@ const STATUS_MAX_AGE_MS = 15_000;
 let cached: { status: LocalStatus; at: number } | null = null;
 let inflight: Promise<LocalStatus> | null = null;
 const listeners = new Set<() => void>();
+// The last key model load of any menu, so a request reads the rows the menu shows.
+let lastKeyLoad: { stamp: string; models: CatalogModel[] | null } | null = null;
 
 async function fetchLocalStatus(): Promise<LocalStatus> {
   const res = await fetchWithAuthRetry(`${getRuntimeEnv().apiUrl}/local/status`, {
@@ -59,44 +73,132 @@ export function peekLocalStatus(): LocalStatus | null {
 }
 
 /**
- * The model id an agent request sends for a role set to run on `cli`. It waits
- * for `/local/status`, since the CLI's models decide the id. A local role with
- * no CLI runs on the agent engine's CLI, else the default CLI, since the local
- * backend has no managed models. Hosted builds send the composer's choice
- * unchanged.
+ * The model id an agent request sends for a role set to run on `cli`: the
+ * model the composer chip shows. On a CLI the request waits for
+ * `/local/status`, since the CLI's models decide the id. A local role with no
+ * CLI runs on the agent engine's CLI, else the default CLI. The OpenRouter
+ * engine runs every role on the saved key, so the engine loads even for a role
+ * with its own CLI; with that key removed or unverified, roles run on their
+ * CLIs again. Hosted builds send the composer's choice unchanged.
  */
 export async function localAgentModel(
   model: string | null,
   cli: CliProvider | null,
 ): Promise<string | null> {
   if (!isLocalMode()) return model;
-  if (cli) return resolveAgentModel(model, cli, loadLocalStatus, peekLocalStatus);
   // A status refresh can change the engine, so load the engine after the status.
   await loadLocalStatus().catch(() => null);
-  const engine = await loadAgentEngine();
-  return resolveAgentModel(model, null, loadLocalStatus, peekLocalStatus, engine);
+  const engine: AgentEngine | null = await loadAgentEngine();
+  return resolveLocalAgentModel(model, cli, {
+    loadStatus: loadLocalStatus,
+    peekStatus: peekLocalStatus,
+    keyVerified: async () => menuKeyVerified(peekByokKeys()),
+    keyRows: () => requestKeyRows(peekByokKeys(), lastKeyLoad, cachedByokCatalog()?.models ?? null),
+    engine,
+    engineLoaded: agentEngineLoaded(),
+  });
+}
+
+/**
+ * All the saved OpenRouter key's rows in the local build: empty with no
+ * verified key, `null` while the key list or its models still load or failed
+ * to load. A failed load retries with a growing delay.
+ */
+function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
+  const { keyFor, loading, failed, reload } = useByokKeys();
+  const key = keyFor(LOCAL_KEY_PROVIDER);
+  // A new or re-verified key changes this stamp, which fetches its models again.
+  const stamp = enabled ? localKeyStamp(key) : null;
+  const [loaded, setLoaded] = React.useState<{
+    stamp: string;
+    models: CatalogModel[] | null;
+  } | null>(null);
+  const [modelTries, setModelTries] = React.useState(0);
+  const [keyTries, setKeyTries] = React.useState(0);
+
+  // A new key, or a list that loaded, starts the next failure's retries at 2 s.
+  React.useEffect(() => setModelTries(0), [stamp]);
+  React.useEffect(() => {
+    if (!failed) setKeyTries(0);
+  }, [failed]);
+
+  React.useEffect(() => {
+    if (!stamp) return;
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    void getByokModelCatalog().then((catalog) => {
+      if (!active) return;
+      // A failed load resolves an empty catalog and leaves the cache unset.
+      const ok = cachedByokCatalog() !== null;
+      lastKeyLoad = { stamp, models: ok ? catalog.models : null };
+      setLoaded(lastKeyLoad);
+      if (ok) setModelTries(0);
+      else retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));
+    });
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [stamp, modelTries]);
+
+  React.useEffect(() => {
+    if (!enabled || !failed) return;
+    let active = true;
+    const retry = setTimeout(() => {
+      void reload().finally(() => {
+        if (active) setKeyTries((n) => n + 1);
+      });
+    }, keyRetryDelayMs(keyTries));
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [enabled, failed, reload, keyTries]);
+
+  if (!enabled) return [];
+  return localKeyRows({
+    keysLoading: loading,
+    keysFailed: failed,
+    stamp,
+    loaded,
+    cached: cachedByokCatalog()?.models ?? null,
+  });
 }
 
 /**
  * The composer menu's models for an agent role on `cli` in the local build:
- * only that CLI's models (the agent engine's CLI when the role has none),
- * since the local backend has no managed models and agent turns cannot bill a
- * provider key. Hosted builds get undefined and keep the catalog.
+ * only that CLI's models (the agent engine's CLI when the role has none). With
+ * the OpenRouter engine the menu lists only the saved key's models; with that
+ * key removed or unverified, the menu is the default CLI's, as with no engine.
+ * Until the engine loads (or while its load fails) the menu has no rows, so a
+ * saved pick is never cleared. `pick` is the role's saved model, which keeps a
+ * saved key pick listed past the key's shortlist. Hosted builds get undefined
+ * and keep the catalog.
  */
-export function useLocalAgentMenuModels(cli: CliProvider | null): CatalogModel[] | undefined {
+export function useLocalAgentMenuModels(
+  cli: CliProvider | null,
+  pick: string | null,
+): { models: CatalogModel[] | undefined; openRouterEngine: boolean } {
   const local = isLocalMode();
   const { status } = useLocalStatus(local);
-  const { engine } = useAgentEngine();
-  return React.useMemo(
-    () =>
-      local
-        ? subscriptionMenuModels(
-            findCli(status, cli ?? defaultAgentCli(status, engine)),
-            cachedCatalog()?.models,
-          )
-        : undefined,
-    [local, status, cli, engine],
-  );
+  const { engine: stored, loaded: engineLoaded } = useAgentEngine();
+  const keys = useByokKeys();
+  const keyVerified = menuKeyVerified(keys);
+  // Only the OpenRouter engine lists the key's models, so no other engine loads them.
+  const keyModels = useLocalKeyModels(local && stored === OPENROUTER_ENGINE);
+  return React.useMemo(() => {
+    if (!local) return { models: undefined, openRouterEngine: false };
+    return localAgentMenu({
+      engineLoaded,
+      stored,
+      keyVerified,
+      status,
+      cli,
+      keyModels,
+      pick,
+      catalog: cachedCatalog()?.models,
+    });
+  }, [local, engineLoaded, stored, keyVerified, status, cli, keyModels, pick]);
 }
 
 /**
