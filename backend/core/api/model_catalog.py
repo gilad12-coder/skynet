@@ -1650,6 +1650,26 @@ def agent_model_id(configured: str = "") -> str:
     return default or DEFAULT_AGENT_MODEL_ID
 
 
+def strongest_model_id(configured: str = "") -> str:
+    """Return the model a server-side job runs when it needs the most careful reading.
+
+    Reads only the already-built catalog, like :func:`agent_model_id`.
+
+    Args:
+        configured: An operator-set model id (e.g. ``RULE_JUDGE_MODEL``);
+            it wins whenever non-empty.
+
+    Returns:
+        The configured id, else the catalog's flagged strongest model, else
+        :func:`agent_model_id`.
+    """
+    if configured.strip():
+        return configured.strip()
+    snapshot = _cached_response
+    strongest = next((m.value for m in snapshot.models if m.is_strongest), None) if snapshot else None
+    return strongest or agent_model_id()
+
+
 def _refresh_catalog_in_background() -> None:
     """Rebuild the catalog and swap it into the cache; never raises.
 

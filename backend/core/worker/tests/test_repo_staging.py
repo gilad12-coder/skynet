@@ -5,12 +5,14 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from core.billing.model_dispatch import ModelHTTPResult
+from core.billing.operation_pricing import ChargePolicy
 from core.billing.protected_credentials import has_exposed_execution_credentials
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.connectors.github_publish import PublishedChange, RepoPublishError
@@ -162,6 +164,60 @@ def test_a_resumed_run_with_different_rules_is_refused(monkeypatch: pytest.Monke
         _stage_with({}, monkeypatch, resumed)
 
 
+_RULED = (
+    _CONSTRAINTS
+    + """
+[rules]
+illegal = ["Do not hardcode answers for dataset cases.", "Do not call an outside geocoding service."]
+"""
+)
+
+
+def test_staging_keeps_the_plain_language_rules_for_the_judges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rules reach the parent's judges and the recorded environment, and a resume must keep them."""
+    first, staged = _stage_with({"optimize.toml": _RULED}, monkeypatch)
+    staged.cleanup()
+
+    assert staged.constrained is True
+    assert staged.rules == (
+        "Do not hardcode answers for dataset cases.",
+        "Do not call an outside geocoding service.",
+    )
+    assert first["target"]["repo"]["environment"]["rules"] == list(staged.rules)
+    assert "- Rule 2: Do not call an outside geocoding service." in first["background"]
+
+    resumed = _payload("c" * 40)
+    resumed["target"]["repo"]["environment"] = first["target"]["repo"]["environment"]
+    with pytest.raises(ConstraintsError, match=r"\(rules\)"):
+        _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
+
+
+def test_a_run_recorded_before_rules_existed_resumes_without_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An environment saved before the rules field existed counts as having no rules."""
+    first, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch)
+    staged.cleanup()
+    resumed = _payload("c" * 40)
+    resumed["target"]["repo"]["environment"] = {
+        key: value for key, value in first["target"]["repo"]["environment"].items() if key != "rules"
+    }
+
+    _, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
+    staged.cleanup()
+    assert staged.rules == ()
+
+    with pytest.raises(ConstraintsError, match=r"\(rules\)"):
+        _stage_with({"optimize.toml": _RULED}, monkeypatch, resumed)
+
+
+def test_a_tree_without_a_constraints_file_is_not_constrained(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without optimize.toml the run keeps its old behavior: no judge and no fixed block message."""
+    _, staged = _stage_with({}, monkeypatch)
+    staged.cleanup()
+
+    assert staged.constrained is False
+    assert staged.rules == ()
+
+
 @pytest.mark.parametrize("commit", [None, "b" * 40])
 def test_staging_pins_the_commit_and_keeps_secrets_in_the_parent(
     commit: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -276,6 +332,63 @@ class _Gateway:
         self.evaluator: Any = None
         self.boxes: list[_Box] = []
         self._cutoff_works = cutoff_works
+        self.routes: dict[str, dict[str, Any]] = {}
+        self.observers: dict[str, list[Any]] = {}
+        self.judged: list[tuple[str, str]] = []
+        self.watched = threading.Event()
+
+    def register(
+        self, *, model: str, api_key: str, role: str, policy: ChargePolicy, parent_only: bool = False
+    ) -> dict[str, str]:
+        """Record one model route.
+
+        Args:
+            model: Model slug.
+            api_key: Provider credential.
+            role: Usage role.
+            policy: Charge policy.
+            parent_only: Whether readiness probes skip the route.
+
+        Returns:
+            A fake route.
+        """
+        token = f"token-{len(self.routes)}"
+        self.routes[token] = {
+            "model": model,
+            "api_key": api_key,
+            "role": role,
+            "policy": policy.kind,
+            "parent_only": parent_only,
+        }
+        return {"url": "u", "token": token, "model": model, "role": role}
+
+    def observe_role(self, role: str, observer: Any) -> None:
+        """Keep an observer of one role's model calls.
+
+        Args:
+            role: Route role.
+            observer: Receives each answered request body.
+        """
+        self.observers.setdefault(role, []).append(observer)
+
+    def dispatch_guest(self, token: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Answer a judge call with a legal verdict.
+
+        Args:
+            token: Route token.
+            path: Protocol path.
+            body: Chat request.
+            headers: Protocol headers.
+
+        Returns:
+            A model response.
+        """
+        self.judged.append((self.routes[token]["model"], body["messages"][0]["content"]))
+        if "recent actions" in body["messages"][0]["content"].lower():
+            self.watched.set()
+        verdict = json.dumps({"violation": False, "rule": None, "reason": "fine"})
+        reply = {"choices": [{"message": {"content": verdict}}]}
+        return ModelHTTPResult(200, "application/json", json.dumps(reply).encode())
 
     def parent_sandbox_runtime(self) -> Any:
         """Return a runtime that opens recording boxes."""
@@ -355,6 +468,91 @@ def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> N
     staged.close_scorers()
     assert staged.scorers == []
     assert box.closed
+
+
+def _ruled_binding(tmp_path: Path, rules: tuple[str, ...]) -> tuple[dict[str, Any], repo_staging.StagedRepository]:
+    """Build a staged repository whose optimize.toml has the given plain-language rules.
+
+    Args:
+        tmp_path: Scratch folder.
+        rules: The file's rules.
+
+    Returns:
+        The payload and the staged tree.
+    """
+    payload, staged = _binding(tmp_path, None)
+    return payload, repo_staging.StagedRepository(
+        snapshot=staged.snapshot,
+        secrets=staged.secrets,
+        workdir=staged.workdir,
+        constrained=True,
+        rules=rules,
+    )
+
+
+def test_rules_bind_two_managed_judges_billed_to_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The watch and final judges run on the managed key under the run's budget, never on a guest route."""
+    monkeypatch.setattr(repo_staging, "agent_model_id", lambda configured="": "vendor/fast")
+    monkeypatch.setattr(repo_staging, "strongest_model_id", lambda configured="": "vendor/strong")
+    payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="managed-key")
+
+    assert sorted(tuple(route.values()) for route in gateway.routes.values()) == [
+        ("vendor/fast", "managed-key", "judge", "managed_model", True),
+        ("vendor/strong", "managed-key", "judge", "managed_model", True),
+    ]
+    assert "managed-key" not in repr(payload)
+    judge = gateway.evaluator._rule_judge
+    assert judge.rules == ("Do not hardcode answers.",)
+    assert not judge.judge_version("diff --git a/x b/x\n+x = 1\n").violated
+    assert gateway.judged[0][0] == "vendor/strong"
+    assert "Rule 1: Do not hardcode answers." in gateway.judged[0][1]
+
+    (observer,) = gateway.observers["optimization"]
+    for index in range(15):
+        observer({"messages": [{"role": "user", "content": f"edit {index}"}]})
+    assert gateway.watched.wait(5)
+    assert gateway.judged[-1][0] == "vendor/fast"
+    staged.close_scorers()
+
+
+def test_rules_without_the_managed_key_fail_setup(tmp_path: Path) -> None:
+    """Rules nobody can check stop the run before the guest starts, instead of going unenforced."""
+    payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
+    gateway = _Gateway()
+
+    with pytest.raises(ConstraintsError, match="judge"):
+        repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="")
+
+    assert gateway.boxes == []
+    assert "_skynet_evaluator_route" not in payload
+
+
+def test_a_constraints_file_without_rules_blocks_without_judge_models(tmp_path: Path) -> None:
+    """Path rules alone still get the fixed block message, and no judge model is registered or paid for."""
+    payload, staged = _ruled_binding(tmp_path, ())
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
+
+    assert gateway.routes == {}
+    assert gateway.observers == {}
+    assert gateway.evaluator._rule_judge.rules == ()
+    staged.close_scorers()
+
+
+def test_a_run_without_a_constraints_file_has_no_rule_judge(tmp_path: Path) -> None:
+    """Without optimize.toml the scorer keeps its earlier refusals and no judge exists."""
+    payload, staged = _binding(tmp_path, None)
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="managed-key")
+
+    assert gateway.evaluator._rule_judge is None
+    assert gateway.routes == {}
+    staged.close_scorers()
 
 
 def test_setup_runs_online_in_the_parent_before_the_guest_gets_a_route(tmp_path: Path) -> None:

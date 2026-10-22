@@ -173,3 +173,55 @@ def test_an_oversized_file_is_refused() -> None:
     """The file is read into memory and into the agent's brief, so its size is capped."""
     with pytest.raises(ConstraintsError, match="larger than 64 KiB"):
         parse_constraints(b"#" * (64 * 1024 + 1))
+
+
+_RULES = b"""
+[rules]
+illegal = [
+  "Do not hardcode answers for dataset cases.",
+  "Do not call an outside geocoding service.",
+]
+"""
+
+
+def test_plain_language_rules_are_numbered_recorded_and_put_in_the_brief() -> None:
+    """Every rule reaches the agent at the start, numbered, and is saved with the run's environment."""
+    constraints = parse_constraints(_RULES)
+
+    environment = effective_environment(constraints, approved_editable=["bot"], approved_setup=None)
+
+    assert environment.rules == (
+        "Do not hardcode answers for dataset cases.",
+        "Do not call an outside geocoding service.",
+    )
+    record = environment.record(repository="cfca/bot", commit="a" * 40, readonly_paths=[], secret_names=[])
+    assert record["rules"] == list(environment.rules)
+    brief = instructions_brief(environment)
+    assert "Rule 1: Do not hardcode answers for dataset cases." in brief
+    assert "Rule 2: Do not call an outside geocoding service." in brief
+    assert "score of 0" in brief
+
+
+def test_a_file_without_rules_records_an_empty_list() -> None:
+    """Runs without rules record none, so a resumed run that adds rules is detected."""
+    environment = effective_environment(None, approved_editable=["src"], approved_setup=None)
+
+    assert environment.rules == ()
+    assert environment.record(repository="o/r", commit="a" * 40, readonly_paths=[], secret_names=[])["rules"] == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        (b"[rules]\nillegal = []\n", r"\[rules\] illegal must list 1 to 50 rules"),
+        (b'[rules]\nillegal = "one"\n', r"\[rules\] illegal must list 1 to 50 rules"),
+        (b'[rules]\nillegal = [""]\n', r"\[rules\] illegal must be text"),
+        (b'[rules]\nallowed = ["x"]\n', r"\[rules\] allowed is not a supported setting"),
+        (b"[rules]\nillegal = [" + b'"x",' * 51 + b"]\n", r"must list 1 to 50 rules"),
+        (b'[rules]\nillegal = ["' + b"x" * 501 + b'"]\n', r"\[rules\] illegal must be text of 1 to 500"),
+    ],
+)
+def test_malformed_rules_fail_with_a_reason(raw: bytes, message: str) -> None:
+    """A rule list the judges cannot read is refused rather than dropped."""
+    with pytest.raises(ConstraintsError, match=message):
+        parse_constraints(raw)

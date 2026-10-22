@@ -1002,6 +1002,23 @@ class Settings(BaseSettings):
         ),
     )
 
+    rule_watch_model: str = Field(
+        default="",
+        description=(
+            "Model id of the fast judge that watches a repository run's recent "
+            "actions against its plain-language rules. Empty follows the model "
+            "catalog's best-value default."
+        ),
+    )
+    rule_judge_model: str = Field(
+        default="",
+        description=(
+            "Model id of the judge that reads each repository version's full diff "
+            "against its plain-language rules before it is scored. Empty follows "
+            "the model catalog's strongest model."
+        ),
+    )
+
     tagger_assist_model: str = Field(
         default="",
         description=(

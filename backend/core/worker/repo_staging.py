@@ -13,9 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..api.model_catalog import agent_model_id, strongest_model_id
+from ..billing.operation_pricing import ChargePolicy
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..brand import APP_NAME
+from ..config import settings
 from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
 from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
@@ -29,6 +32,7 @@ from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
 from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_command
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
 from ..service_gateway.optimization.blackbox.repo_workspace import RepoWorkspace
+from ..service_gateway.optimization.blackbox.rule_judge import RuleJudge, describe_model_call, run_log_emitter
 from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -36,8 +40,12 @@ logger = logging.getLogger(__name__)
 PULL_REQUEST_DETAIL = "pull_request"
 ENVIRONMENT_KEY = "environment"
 # Rules the run is held to; a resumed run must arrive at exactly these again.
-_ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_paths", "services")
+_ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_paths", "services", "rules")
+# Environments recorded before a field existed hold its empty value.
+_ENFORCED_DEFAULTS: dict[str, Any] = {"rules": []}
 _SETUP_ANSWER_TOKENS = 1_024
+_JUDGE_ANSWER_TOKENS = 600
+_JUDGE_ROLE = "judge"
 
 
 @dataclass(frozen=True)
@@ -49,6 +57,8 @@ class StagedRepository:
     workdir: Path
     scorers: list[RepoScorer] = field(default_factory=list)
     protected_paths: tuple[str, ...] = ()
+    constrained: bool = False
+    rules: tuple[str, ...] = ()
 
     def close_scorers(self) -> None:
         """Close the parent's scoring boxes; the gateway still stops any that fail to close."""
@@ -145,7 +155,12 @@ def stage_repository(
         "secret_names": sorted(secrets),
     }
     return result, StagedRepository(
-        snapshot=snapshot, secrets=secrets, workdir=workdir, protected_paths=environment.protected_paths
+        snapshot=snapshot,
+        secrets=secrets,
+        workdir=workdir,
+        protected_paths=environment.protected_paths,
+        constrained=environment.constraints is not None,
+        rules=environment.rules,
     )
 
 
@@ -161,7 +176,11 @@ def _ensure_unchanged(previous: Any, current: dict[str, Any]) -> None:
     """
     if not isinstance(previous, dict):
         return
-    changed = [name for name in _ENFORCED_FIELDS if previous.get(name) != current.get(name)]
+    changed = [
+        name
+        for name in _ENFORCED_FIELDS
+        if previous.get(name, _ENFORCED_DEFAULTS.get(name)) != current.get(name, _ENFORCED_DEFAULTS.get(name))
+    ]
     if changed:
         raise ConstraintsError(
             f"The run's environment changed since it was recorded ({', '.join(changed)}); clone the run to review it."
@@ -210,6 +229,91 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
     return ask
 
 
+def _route_asker(gateway: Any, route: dict[str, str], max_tokens: int) -> Callable[[str], str | None]:
+    """Return a metered one-shot chat call through one registered model route.
+
+    Args:
+        gateway: The run's model gateway.
+        route: A route the parent registered.
+        max_tokens: Answer length limit.
+
+    Returns:
+        A function sending one prompt and returning the reply text, or
+        ``None`` when the provider refused it.
+    """
+
+    def ask(prompt: str) -> str | None:
+        """Send one prompt through the route.
+
+        Args:
+            prompt: The question.
+
+        Returns:
+            The model's reply, or ``None`` when the provider refused it.
+        """
+        body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
+        response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
+        if not 200 <= response.status < 300:
+            return None
+        content = json.loads(response.body)["choices"][0]["message"].get("content")
+        return content if isinstance(content, str) else None
+
+    return ask
+
+
+def _rule_judge(staged: StagedRepository, gateway: Any, *, owner_id: str, managed_key: str) -> RuleJudge | None:
+    """Build the judge that enforces the repository's constraints file, when it has one.
+
+    Both judge models run on the managed key through routes only the parent
+    holds, so their cost counts in the run's budget and the guest cannot call them.
+
+    Args:
+        staged: The fetched tree and its constraints.
+        gateway: The run's model gateway.
+        owner_id: Job identity that owns the rule events.
+        managed_key: The platform's OpenRouter key, or ``""`` when not configured.
+
+    Returns:
+        The judge, or ``None`` when the repository has no ``optimize.toml``.
+
+    Raises:
+        ConstraintsError: When the file has plain-language rules but no judge model can be reached.
+    """
+    if not staged.constrained:
+        return None
+    if not staged.rules:
+        return RuleJudge(
+            (), ask_fast=lambda _prompt: None, ask_strong=lambda _prompt: None, emit=run_log_emitter(owner_id)
+        )
+    if not managed_key:
+        raise ConstraintsError(
+            "optimize.toml has [rules], but the judge models that check them are not configured on this server."
+        )
+    policy = ChargePolicy("managed_model")
+    fast = gateway.register(
+        model=agent_model_id(settings.rule_watch_model),
+        api_key=managed_key,
+        role=_JUDGE_ROLE,
+        policy=policy,
+        parent_only=True,
+    )
+    strong = gateway.register(
+        model=strongest_model_id(settings.rule_judge_model),
+        api_key=managed_key,
+        role=_JUDGE_ROLE,
+        policy=policy,
+        parent_only=True,
+    )
+    judge = RuleJudge(
+        staged.rules,
+        ask_fast=_route_asker(gateway, fast, _JUDGE_ANSWER_TOKENS),
+        ask_strong=_route_asker(gateway, strong, _JUDGE_ANSWER_TOKENS),
+        emit=run_log_emitter(owner_id),
+    )
+    gateway.observe_role("optimization", lambda body: judge.record_action(describe_model_call(body)))
+    return judge
+
+
 def infer_repo_setup(payload: dict[str, Any], staged: StagedRepository, gateway: Any) -> str | None:
     """Fill in the target's setup command from the fetched tree when the client sent none.
 
@@ -230,7 +334,9 @@ def infer_repo_setup(payload: dict[str, Any], staged: StagedRepository, gateway:
     return command
 
 
-def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway: Any, *, owner_id: str) -> None:
+def bind_repo_scorer(
+    payload: dict[str, Any], staged: StagedRepository, gateway: Any, *, owner_id: str, managed_key: str = ""
+) -> None:
     """Score the run's versions in a parent-owned box and hand the guest only its route.
 
     The box is opened in-process through the gateway's parent-only runtime,
@@ -245,7 +351,13 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
         staged: The fetched tree and decrypted secrets.
         gateway: The run's model gateway, already bound to its sandbox broker.
         owner_id: Job identity naming the box's operations.
+        managed_key: The platform's OpenRouter key, which pays for the rule
+            judges under the run's budget; ``""`` when not configured.
+
+    Raises:
+        ConstraintsError: When the repository's plain-language rules cannot be judged.
     """
+    rule_judge = _rule_judge(staged, gateway, owner_id=owner_id, managed_key=managed_key)
     descriptor = payload["_budget_gateway_descriptor"]
     target = payload["target"]
     scorer_spec = payload["scorer"]
@@ -269,6 +381,7 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
         ),
         str(scorer_spec["metric_code"]),
         timeout_seconds=float(scorer_spec["timeout_seconds"]),
+        rule_judge=rule_judge,
     )
     environment = target["repo"].get(ENVIRONMENT_KEY)
     if isinstance(environment, dict):
