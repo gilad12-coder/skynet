@@ -8,6 +8,7 @@ test reaches OpenRouter.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import re
 import socket
@@ -288,6 +289,55 @@ def test_save_route_and_clear_the_key(local: list[object]) -> None:
     with pytest.raises(DomainError) as caught:
         model_router.route_agent_model(agent_engine.engine_agent_model(store, _USER, None))
     assert caught.value.code == "models.managed_unavailable_local"
+
+
+@pytest.mark.parametrize("stored", [None, "droid"])
+def test_get_engine_reports_openrouter_when_turns_run_on_the_saved_key(local: list[object], stored: str | None) -> None:
+    """Report ``openrouter`` when no CLI is ready and turns run on the saved key.
+
+    Args:
+        local: The blocked remote addresses.
+        stored: The saved engine row: none, or a ``droid`` row this build no longer knows.
+    """
+    engine = _engine()
+    store = SimpleNamespace(engine=engine)
+    client = _client(store)
+    if stored is not None:
+        with Session(engine) as session:
+            session.add(AgentEnginePreferenceModel(username=_USER, engine=stored))
+            session.commit()
+    assert client.get("/account/agent-engine").json() == {"engine": None}
+    assert model_router.route_local_byok_model(None, job_store=store, username=_USER) is None
+
+    _save(client)
+    assert client.get("/account/agent-engine").json() == {"engine": "openrouter"}
+    picked = agent_engine.engine_agent_model(store, _USER, None)
+    routed = model_router.route_local_byok_model(picked, job_store=store, username=_USER)
+    assert routed is not None
+    assert (routed.token_source, routed.byok_provider) == (TOKEN_SOURCE_BYOK, "openrouter")
+
+    client.delete("/billing/byok/keys/openrouter")
+    assert client.get("/account/agent-engine").json() == {"engine": None}
+
+
+def test_get_engine_prefers_a_ready_cli_over_the_saved_key(
+    local: list[object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the first ready CLI as the default when a verified key is also saved.
+
+    Args:
+        local: The blocked remote addresses.
+        monkeypatch: Makes the Codex CLI ready.
+    """
+    ready = dataclasses.replace(_status("codex"), path="/usr/local/bin/codex", version_ok=True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [ready])
+    store = SimpleNamespace(engine=_engine())
+    client = _client(store)
+    _save(client)
+    assert client.get("/account/agent-engine").json() == {"engine": "codex"}
+    assert (
+        agent_engine.engine_agent_model(store, _USER, None) == f"subscription/codex/{next(iter(CLI_MODELS['codex']))}"
+    )
 
 
 def test_explicit_pick_routes_on_the_saved_key_with_the_real_empty_catalog(

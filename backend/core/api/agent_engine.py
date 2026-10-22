@@ -3,8 +3,8 @@
 Hosted mode always runs on OpenRouter, so it never reads the stored setting.
 Local mode runs agent turns on the engine the user chose: a subscription CLI,
 or OpenRouter with the user's verified key. With no choice, it runs them on the
-first CLI that is ready on this machine. A CLI engine never falls back to
-OpenRouter.
+first CLI that is ready on this machine, else on the user's verified OpenRouter
+key. A CLI engine never falls back to OpenRouter.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Literal, get_args
 
 from sqlalchemy.orm import Session
 
+from ..billing.byok_vault import ProviderKeyVault
 from ..config import settings
 from ..local.cli_catalog import CLI_MODELS, CliProvider, parse_subscription_model_id
 from ..local.cli_probe import CliStatus, probe_clis
@@ -91,8 +92,17 @@ def effective_agent_engine(job_store: object | None, username: str) -> AgentEngi
 
     Returns:
         The stored engine, else the default (see :func:`default_agent_engine`).
+        In local mode with neither, ``openrouter`` when the caller has a
+        verified OpenRouter key, because the model router then runs the turn
+        on that key; else ``None``.
     """
-    return stored_agent_engine(job_store, username) or default_agent_engine()
+    chosen = stored_agent_engine(job_store, username) or default_agent_engine()
+    if chosen is not None or not settings.local_mode:
+        return chosen
+    engine = getattr(job_store, "engine", None)
+    if engine is not None and ProviderKeyVault(engine=engine).has_verified_connection(username, OPENROUTER_ENGINE):
+        return OPENROUTER_ENGINE
+    return None
 
 
 def engine_agent_model(job_store: object | None, username: str, model: str | None) -> str | None:

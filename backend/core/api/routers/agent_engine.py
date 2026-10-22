@@ -29,7 +29,8 @@ _ENGINE_DESCRIPTION = (
 class AgentEnginePreference(BaseModel):
     engine: AgentEngine | None = Field(
         description=_ENGINE_DESCRIPTION
-        + " Null in the Mac app when no engine was chosen and no subscription CLI is ready."
+        + " Null in the Mac app when no engine was chosen, no subscription CLI is ready and no verified"
+        + " OpenRouter key is saved."
     )
 
 
@@ -57,7 +58,8 @@ def create_agent_engine_router(*, job_store) -> APIRouter:
         """Return the caller's effective engine.
 
         Hosted mode always answers ``openrouter``. The Mac app answers the
-        stored engine, else the first ready subscription CLI.
+        stored engine, else the first ready subscription CLI, else
+        ``openrouter`` when the caller has a verified OpenRouter key.
 
         Args:
             user: Authenticated caller whose setting is requested.
