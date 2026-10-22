@@ -7,7 +7,8 @@ gives each call an environment and flags that keep that setup out, but keep
 the subscription login:
 
 * ``codex``: a temporary ``HOME`` and ``CODEX_HOME`` that hold only a copy of
-  ``auth.json``, plus ``--ignore-user-config --ignore-rules --ephemeral``.
+  ``auth.json``, plus ``--ignore-user-config --ignore-rules --ephemeral``, no
+  ``AGENTS.md`` project docs and no skill list.
 * ``claude``: the real config directory (its macOS Keychain login does not work
   from another one), with flags that load no settings, MCP servers or slash
   commands. Never ``--bare``: it ignores the subscription login.
@@ -55,8 +56,12 @@ CODEX_ARGS = (
     "--ephemeral",
     "-c",
     "mcp_servers={}",
+    "-c",
+    "project_doc_max_bytes=0",
+    "-c",
+    "skills.include_instructions=false",
 )
-"""``codex exec`` flags: no ``config.toml``, no execpolicy rules, no session files, no MCP servers."""
+"""``codex exec`` flags: no ``config.toml``, rules, session files, MCP servers, ``AGENTS.md`` or skill list."""
 
 CODEX_AUTH_FILE = "auth.json"
 _LOCK_SUFFIX = ".skynet.lock"
