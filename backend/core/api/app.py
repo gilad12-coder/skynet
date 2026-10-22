@@ -1038,7 +1038,7 @@ def create_app(
             A :class:`JSONResponse` with media type ``application/problem+json``.
         """
         body: dict[str, Any] = {
-            "type": f"https://errors.skynet.app/{code}" if code else "about:blank",
+            "type": f"https://api.skynetml.com/errors/{code}" if code else "about:blank",
             "title": title
             or (
                 code.replace("_", " ").replace(".", " ").capitalize()
