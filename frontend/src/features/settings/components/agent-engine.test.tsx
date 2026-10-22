@@ -83,6 +83,10 @@ void describe("agent engine load state (SKY-123 R11-1)", () => {
       assert.equal(agentEngineLoaded(), false);
       assert.equal(await loadAgentEngine(), null);
       assert.equal(agentEngineLoaded(), false);
+      // The empty menu keeps a key pick on the chip, so the request sends it unchanged.
+      const pick = "openrouter/anthropic/claude-sonnet-4.5";
+      assert.equal(await localAgentModel(pick, null), pick);
+      assert.equal(await localAgentModel(null, null), null);
       fails = false;
       assert.equal(await loadAgentEngine(), "openrouter");
       assert.equal(agentEngineLoaded(), true);

@@ -716,6 +716,24 @@ test("an agent engine that has not loaded, or failed to load, lists no rows, so 
   );
 });
 
+test("with the agent engine load failed, the request sends what the empty menu's chip shows", async () => {
+  const pick = "openrouter/anthropic/claude-sonnet-4.5";
+  const deps = () => localDeps({ engine: null, engineLoaded: false });
+  // The chip names the kept key pick, so the request sends it unchanged.
+  assert.equal(await resolveLocalAgentModel(pick, "claude", deps()), pick);
+  // No pick (or the retired auto pick): the chip shows the default label, so nothing is sent.
+  assert.equal(await resolveLocalAgentModel(null, null, deps()), null);
+  assert.equal(await resolveLocalAgentModel("auto:intelligent", null, deps()), null);
+  // A Local pick still runs on its CLI.
+  const local = "subscription/claude/anthropic/claude-opus-4.1";
+  assert.equal(await resolveLocalAgentModel(local, "claude", deps()), local);
+  // A loaded engine with nothing chosen keeps the default CLI.
+  assert.match(
+    (await resolveLocalAgentModel(null, null, localDeps({ engine: null }))) ?? "",
+    /^subscription\/claude\//,
+  );
+});
+
 test("the composer clears only a pick that a non-empty menu omits, and keeps a Local pick the OpenRouter menu hides", () => {
   const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
   const local = "subscription/claude/anthropic/claude-sonnet-4.5";

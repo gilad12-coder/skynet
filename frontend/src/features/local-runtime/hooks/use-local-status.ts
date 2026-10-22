@@ -22,7 +22,12 @@ import {
   type AgentEngine,
   type LocalStatus,
 } from "../lib/subscription-model";
-import { loadAgentEngine, refreshAgentEngine, useAgentEngine } from "./use-agent-engine";
+import {
+  agentEngineLoaded,
+  loadAgentEngine,
+  refreshAgentEngine,
+  useAgentEngine,
+} from "./use-agent-engine";
 
 // CLI logins and usage caps change outside the app, so a cached status goes
 // stale quickly; a picker opened after this long fetches again.
@@ -90,6 +95,7 @@ export async function localAgentModel(
     keyVerified: async () => menuKeyVerified(peekByokKeys()),
     keyRows: () => requestKeyRows(peekByokKeys(), lastKeyLoad, cachedByokCatalog()?.models ?? null),
     engine,
+    engineLoaded: agentEngineLoaded(),
   });
 }
 
