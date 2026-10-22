@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { RETIRED_AUTO_MODEL } from "@/features/local-runtime";
+import { MENU_GROUP_LABELS, menuModelGroup, RETIRED_AUTO_MODEL } from "@/features/local-runtime";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -50,11 +50,6 @@ interface ComposerModelMenuProps {
 // Caps the fallback list when the catalog flags no featured models (a
 // listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
-
-/** Whether a listed model runs on a saved provider key, not a subscription. */
-function keyGroup(model: CatalogModel): boolean {
-  return !!model.byok_provider;
-}
 
 function effortHint(level: string | null): string {
   switch (level) {
@@ -143,10 +138,10 @@ export function ComposerModelMenu({
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [models, available]);
-  // A given list that mixes subscription models with own-key models (the local
-  // build with a saved OpenRouter key) labels each group, since both can list
-  // the same model name.
-  const grouped = !!models && models.some((m) => keyGroup(m)) && models.some((m) => !keyGroup(m));
+  // A given list that mixes groups (the local build: Local CLI models and the
+  // saved key's models) labels each group, since two groups can list the same
+  // model name.
+  const grouped = !!models && new Set(models.map(menuModelGroup)).size > 1;
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -231,15 +226,12 @@ export function ComposerModelMenu({
               )}
               {featured.map((m, i) => (
                 <React.Fragment key={m.value}>
-                  {grouped && (i === 0 || keyGroup(featured[i - 1]!) !== keyGroup(m)) && (
-                    <DropdownMenuLabel>
-                      {msg(
-                        keyGroup(m)
-                          ? "agent.model_menu.group_own_key"
-                          : "agent.model_menu.group_subscription",
-                      )}
-                    </DropdownMenuLabel>
-                  )}
+                  {grouped &&
+                    (i === 0 || menuModelGroup(featured[i - 1]!) !== menuModelGroup(m)) && (
+                      <DropdownMenuLabel>
+                        {msg(MENU_GROUP_LABELS[menuModelGroup(m)])}
+                      </DropdownMenuLabel>
+                    )}
                   <MenuItem
                     selected={effective === m.value}
                     label={modelDisplayName(m.value, available)}

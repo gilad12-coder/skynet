@@ -79,7 +79,7 @@ export function cliStateText(state: CliState, version: string | null): string {
 }
 
 /**
- * The "My subscription" source's CLI choice: one segment per supported CLI,
+ * The "Local" source's CLI choice: one segment per supported CLI,
  * then the chosen CLI's state (signed in, too old, signed out, capped).
  */
 export function SubscriptionSourcePicker({

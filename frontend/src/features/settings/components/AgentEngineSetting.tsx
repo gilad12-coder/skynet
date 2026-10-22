@@ -11,6 +11,7 @@ import {
   defaultAgentCli,
   findCli,
   isAgentEngine,
+  LOCAL_KEY_PROVIDER,
   OPENROUTER_ENGINE,
   useAgentEngine,
   useLocalStatus,
@@ -18,6 +19,7 @@ import {
   type AgentEngineOption,
   type LocalStatus,
 } from "@/features/local-runtime";
+import { useByokKeys } from "@/features/billing/providers/byok-provider";
 import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
@@ -86,7 +88,6 @@ function OptionReason({
   failed: boolean;
 }) {
   if (!option.disabled) return null;
-  // SKY-123 replaces this line when a saved OpenRouter key can run agents.
   if (option.engine === OPENROUTER_ENGINE) {
     return <>{msg("settings.agent_engine.openrouter_local")}</>;
   }
@@ -136,13 +137,15 @@ export function EngineChoice({
 /**
  * The "Agent engine" row. `value` is the engine agent turns run on now; a
  * disabled choice says why, and a current engine that is no longer ready
- * shows that reason under the row.
+ * shows that reason under the row. `keyVerified` is whether the saved
+ * OpenRouter key is verified (null while the key list loads or failed).
  */
 export function AgentEngineSelect({
   local,
   status,
   failed = false,
   value,
+  keyVerified = false,
   saving,
   onChange,
 }: {
@@ -150,11 +153,16 @@ export function AgentEngineSelect({
   status: LocalStatus | null;
   failed?: boolean;
   value: AgentEngine;
+  keyVerified?: boolean | null;
   saving: boolean;
   onChange: (engine: AgentEngine) => void;
 }) {
-  const options = agentEngineOptions(status, local);
+  const options = agentEngineOptions(status, local, new Date(), keyVerified);
   const current = options.find((option) => option.engine === value);
+  // A key list that still loads is no reason to warn about the OpenRouter engine.
+  const warn =
+    !!current?.disabled &&
+    (current.engine === OPENROUTER_ENGINE ? keyVerified === false : !!status);
   return (
     <div>
       <SettingsRow
@@ -190,7 +198,7 @@ export function AgentEngineSelect({
           </SelectContent>
         </Select>
       </SettingsRow>
-      {current?.disabled && current.engine !== OPENROUTER_ENGINE && status && (
+      {warn && current && (
         <div
           role="status"
           className="mb-2 flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-[var(--warning)]"
@@ -209,14 +217,19 @@ export function AgentEngineSelect({
  * Settings > Agent: which engine runs every agent that has no model or CLI of
  * its own. Hosted builds offer only OpenRouter. The local build offers the
  * subscription CLIs on this computer, and the agent model menus then list
- * only that CLI's models.
+ * only that CLI's models. It also offers OpenRouter once the saved OpenRouter
+ * key is verified; that engine runs every agent on the key.
  */
 export function AgentEngineSetting() {
   const local = isLocalMode();
   const { status, failed } = useLocalStatus(local);
   const { engine, save } = useAgentEngine();
+  const keys = useByokKeys();
   const [saving, setSaving] = React.useState(false);
-  const value: AgentEngine = local ? defaultAgentCli(status, engine) : OPENROUTER_ENGINE;
+  let value: AgentEngine = OPENROUTER_ENGINE;
+  if (local && engine !== OPENROUTER_ENGINE) value = defaultAgentCli(status, engine);
+  const keyVerified =
+    keys.loading || keys.failed ? null : keys.keyFor(LOCAL_KEY_PROVIDER)?.status === "verified";
 
   const onChange = (next: AgentEngine) => {
     setSaving(true);
@@ -233,6 +246,7 @@ export function AgentEngineSetting() {
       status={status}
       failed={failed}
       value={value}
+      keyVerified={keyVerified}
       saving={saving}
       onChange={onChange}
     />

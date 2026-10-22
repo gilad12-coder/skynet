@@ -15,6 +15,10 @@ export {
 export {
   agentEngineOptions,
   isAgentEngine,
+  LOCAL_KEY_PROVIDER,
+  MENU_GROUP_LABELS,
+  menuModelGroup,
+  roleCli,
   OPENROUTER_ENGINE,
   type AgentEngine,
   type AgentEngineOption,

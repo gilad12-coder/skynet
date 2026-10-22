@@ -23,6 +23,10 @@ const {
   localKeyStamp,
   localMenuModels,
   LOCAL_MODEL_REFUSED_CODE,
+  MENU_GROUP_LABELS,
+  menuModelGroup,
+  openRouterMenuCliModels,
+  roleCli,
   menuKeyVerified,
   requestKeyRows,
   isOpenRouterModelId,
@@ -947,4 +951,128 @@ test("no pick sends nothing while the key's model list loads or failed, as the c
   }
   // No provider state: no key rows.
   assert.equal(requestKeyRows(null, { stamp: "k1:t1", models: [gemini] }, [gemini]), null);
+});
+
+// SKY-123 AC3: with a saved, verified OpenRouter key, OpenRouter is an agent engine.
+
+test("OpenRouter is a local engine choice only with a verified OpenRouter key", () => {
+  const now = new Date("2026-10-21T10:00:00Z");
+  const loaded = status([cli({ id: "codex" }), cli()]);
+  const openRouter = (keyVerified: boolean | null | undefined) =>
+    agentEngineOptions(loaded, true, now, keyVerified).find((o) => o.engine === "openrouter");
+  assert.deepEqual(openRouter(true), { engine: "openrouter", disabled: false });
+  // No key, an unverified key, or a key list that still loads or failed.
+  assert.deepEqual(openRouter(false), { engine: "openrouter", disabled: true });
+  assert.deepEqual(openRouter(null), { engine: "openrouter", disabled: true });
+  assert.deepEqual(openRouter(undefined), { engine: "openrouter", disabled: true });
+  // Hosted builds keep their one choice.
+  assert.deepEqual(agentEngineOptions(null, false, now, false), [
+    { engine: "openrouter", disabled: false },
+  ]);
+});
+
+test("the OpenRouter engine runs every role on OpenRouter, even a role with its own CLI", () => {
+  const loaded = status([cli({ id: "codex" }), cli()]);
+  assert.equal(roleCli(null, loaded, "openrouter"), null);
+  assert.equal(roleCli("codex", loaded, "openrouter"), null);
+  // A CLI engine keeps the SKY-121 rules: a role's own CLI wins, else the engine.
+  assert.equal(roleCli("codex", loaded, "claude"), "codex");
+  assert.equal(roleCli(null, loaded, "codex"), "codex");
+  // No engine: the first ready CLI.
+  assert.equal(roleCli(null, loaded, null), "codex");
+});
+
+test("with the OpenRouter engine, no pick sends the key's first model, not a CLI model", async () => {
+  const rows = [keyRow("openrouter/google/gemini-3-pro"), keyRow("openrouter/openai/gpt-5-mini")];
+  for (const role of [null, "claude", "codex"] as const) {
+    assert.equal(
+      await resolveLocalAgentModel(
+        null,
+        role,
+        localDeps({ engine: "openrouter", keyRows: () => rows }),
+      ),
+      "openrouter/google/gemini-3-pro",
+    );
+  }
+  // The retired auto pick is no pick.
+  assert.equal(
+    await resolveLocalAgentModel(
+      "auto:intelligent",
+      "claude",
+      localDeps({ engine: "openrouter", keyRows: () => rows }),
+    ),
+    "openrouter/google/gemini-3-pro",
+  );
+  // Key rows still load: the chip shows the default label, and the backend
+  // runs the key's default model.
+  assert.equal(
+    await resolveLocalAgentModel(
+      null,
+      "claude",
+      localDeps({ engine: "openrouter", keyRows: () => null }),
+    ),
+    null,
+  );
+});
+
+test("with the OpenRouter engine, a picked model runs where the picker says", async () => {
+  const deps = () => localDeps({ engine: "openrouter" });
+  // A key pick goes unchanged.
+  assert.equal(
+    await resolveLocalAgentModel("openrouter/openai/gpt-5-mini", "claude", deps()),
+    "openrouter/openai/gpt-5-mini",
+  );
+  // A Local pick runs on its own CLI, whatever CLI the role had.
+  assert.equal(
+    await resolveLocalAgentModel("subscription/claude/anthropic/claude-opus-4.1", "codex", deps()),
+    "subscription/claude/anthropic/claude-opus-4.1",
+  );
+});
+
+test("the OpenRouter engine menu lists the key's models first, then every CLI's models", () => {
+  const loaded = status([cli({ id: "codex", models: ["openai/gpt-5"] }), cli()]);
+  const cliRows = openRouterMenuCliModels(loaded, []);
+  assert.deepEqual(
+    cliRows.map((m) => m.value),
+    [
+      "subscription/codex/openai/gpt-5",
+      "subscription/claude/anthropic/claude-sonnet-4.5",
+      "subscription/claude/anthropic/claude-opus-4.1",
+    ],
+  );
+  const keyRows = [keyRow("openrouter/google/gemini-3-pro")];
+  assert.deepEqual(
+    localMenuModels(cliRows, keyRows, null, true).map((m) => m.value),
+    ["openrouter/google/gemini-3-pro", ...cliRows.map((m) => m.value)],
+  );
+  // The chip's default is the key's first row, so the menu waits for both lists.
+  assert.deepEqual(localMenuModels(cliRows, null, null, true), []);
+  assert.deepEqual(localMenuModels(null, keyRows, null, true), []);
+  assert.deepEqual(openRouterMenuCliModels(null, []), []);
+});
+
+test("the model picker groups are Skynet credits, Bring your own key and Local", () => {
+  const row = (value: string, byok: string | null = null) => ({
+    ...keyRow(value),
+    byok_provider: byok,
+  });
+  assert.equal(menuModelGroup(row("anthropic/claude-sonnet-4.5")), "credits");
+  assert.equal(menuModelGroup(row("openrouter/google/gemini-3-pro", "openrouter")), "byok");
+  assert.equal(menuModelGroup(row("subscription/codex/openai/gpt-5")), "local");
+  assert.deepEqual(MENU_GROUP_LABELS, {
+    credits: "agent.model_menu.group_credits",
+    byok: "agent.model_menu.group_byok",
+    local: "subscription.mode",
+  });
+});
+
+test("no UI locale keeps the old My subscription or My OpenRouter key labels", () => {
+  const en = JSON.parse(
+    readFileSync(new URL("../../../../../i18n/locales/ui/en.json", import.meta.url), "utf8"),
+  ) as Record<string, string>;
+  assert.equal(en["subscription.mode"], "Local");
+  assert.equal(en["agent.model_menu.group_credits"], "{term.appName} credits");
+  assert.equal(en["agent.model_menu.group_byok"], "Bring your own key");
+  assert.equal(en["agent.model_menu.group_own_key"], undefined);
+  assert.equal(en["agent.model_menu.group_subscription"], undefined);
 });

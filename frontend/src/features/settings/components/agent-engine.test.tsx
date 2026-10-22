@@ -14,6 +14,7 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 const { AgentEngineSelect, EngineChoice } = await import("./AgentEngineSetting");
+const { AgentRoleRow } = await import("./AgentLocalRunSetting");
 const {
   agentEngineOptions,
   loadAgentEngine,
@@ -44,10 +45,22 @@ const status = (clis: CliStatus[]): LocalStatus => ({
   clis,
 });
 
-function render(local: boolean, value: AgentEngine, s: LocalStatus | null): string {
+function render(
+  local: boolean,
+  value: AgentEngine,
+  s: LocalStatus | null,
+  keyVerified: boolean | null = false,
+): string {
   setClientLocale("en");
   return renderToStaticMarkup(
-    <AgentEngineSelect local={local} status={s} value={value} saving={false} onChange={() => {}} />,
+    <AgentEngineSelect
+      local={local}
+      status={s}
+      value={value}
+      keyVerified={keyVerified}
+      saving={false}
+      onChange={() => {}}
+    />,
   );
 }
 
@@ -295,5 +308,59 @@ void describe("loadAgentEngine", () => {
       if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
       else process.env.APP_LOCAL_MODE = realLocal;
     }
+  });
+});
+
+void describe("OpenRouter engine (SKY-123 AC3)", () => {
+  const s = status([cli("codex"), cli("claude")]);
+
+  void it("with a verified key, OpenRouter is a choice with no reason", () => {
+    setClientLocale("en");
+    const option = agentEngineOptions(s, true, new Date(), true).find(
+      (o) => o.engine === "openrouter",
+    )!;
+    assert.equal(option.disabled, false);
+    const html = renderToStaticMarkup(<EngineChoice option={option} status={s} failed={false} />);
+    assert.match(html, /settings\.agent_engine\.openrouter</);
+    assert.doesNotMatch(html, /settings\.agent_engine\.openrouter_local/);
+  });
+
+  void it("without a verified key, OpenRouter is disabled and says why", () => {
+    setClientLocale("en");
+    const option = agentEngineOptions(s, true, new Date(), false).find(
+      (o) => o.engine === "openrouter",
+    )!;
+    assert.equal(option.disabled, true);
+    const html = renderToStaticMarkup(<EngineChoice option={option} status={s} failed={false} />);
+    assert.match(html, /settings\.agent_engine\.openrouter_local/);
+  });
+
+  void it("the selected OpenRouter engine shows its name, and a warning only when the key is gone", () => {
+    const ok = render(true, "openrouter", s, true);
+    assert.match(ok, /data-engine-logo="openrouter"/);
+    assert.doesNotMatch(ok, /role="status"/);
+    const gone = render(true, "openrouter", s, false);
+    assert.match(gone, /role="status"/);
+    assert.match(gone, /settings\.agent_engine\.openrouter_local/);
+  });
+
+  void it("an agent role on the OpenRouter engine shows OpenRouter and no CLI choice", () => {
+    setClientLocale("en");
+    const html = renderToStaticMarkup(
+      <AgentRoleRow role="code" openRouter value="codex" onChange={() => {}} />,
+    );
+    assert.match(html, /data-engine-logo="openrouter"/);
+    assert.match(html, /settings\.agent_engine\.openrouter</);
+    assert.doesNotMatch(html, /role="combobox"/);
+    assert.doesNotMatch(html, /subscription\.cli\.codex/);
+  });
+
+  void it("an agent role on a CLI engine keeps its CLI choice", () => {
+    setClientLocale("en");
+    const html = renderToStaticMarkup(
+      <AgentRoleRow role="code" openRouter={false} value="codex" onChange={() => {}} />,
+    );
+    assert.match(html, /role="combobox"/);
+    assert.doesNotMatch(html, /data-engine-logo="openrouter"/);
   });
 });
