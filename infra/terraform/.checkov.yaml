@@ -58,6 +58,7 @@ skip-check:
   # The availability zone list is filtered by state and sliced to the first
   # zones; the subnets pin their AZ at create time.
   - CKV_AWS_394
-  # The apply role needs iam:Get*/List* on * for Terraform refresh; writes are
-  # scoped to role/skynet-* and the GitHub OIDC provider.
+  # The apply role needs iam:Get*/List* on * for Terraform refresh. Its writes
+  # are iam:* on role/skynet-staging-* and role/skynet-production-*, which
+  # makes it admin-equivalent (README "GitHub roles and CI").
   - CKV_AWS_356

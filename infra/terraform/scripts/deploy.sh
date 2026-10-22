@@ -10,6 +10,12 @@
 # Build and push the images first (scripts/build-push.sh).
 # Rollback: run this script again with the previous SHA. Migrations do not
 # roll back; write them so the previous release still runs on the new schema.
+#
+# Environment isolation: a new revision starts from the newest revision of
+# the family whose execution and task roles are this environment's own roles
+# (skynet-<env>-<family>-exec/-task). The other environment's deploy role
+# cannot pass these roles, so it cannot plant a revision this script uses.
+# New revisions carry the tag Environment=<env>; the deploy role must send it.
 
 source "$(dirname "$0")/lib.sh"
 need aws jq
@@ -37,15 +43,39 @@ for repo_tag in "backend:$sha" "litellm:$sha" "frontend:$sha$sfx"; do
     die "image skynet/$repo_tag is not in ECR. Run scripts/build-push.sh first."
 done
 
+account="$(aws sts get-caller-identity --query Account --output text)"
+
+# Prints the newest ACTIVE revision of a family whose roles are this
+# environment's roles for that family. Looks at the 20 newest revisions.
+trusted_revision() {
+  local family_key="$1" family want_exec want_task arn roles
+  family="$(jq -r --arg f "$family_key" '.families[$f]' <<<"$cfg")"
+  want_exec="arn:aws:iam::$account:role/skynet-$env-$family_key-exec"
+  want_task="arn:aws:iam::$account:role/skynet-$env-$family_key-task"
+  for arn in $(aws ecs list-task-definitions --family-prefix "$family" --status ACTIVE \
+    --sort DESC --max-items 20 --query 'taskDefinitionArns[]' --output text); do
+    [[ "${arn##*/}" == "$family:"* ]] || continue
+    roles="$(aws ecs describe-task-definition --task-definition "$arn" \
+      --query '[taskDefinition.executionRoleArn, taskDefinition.taskRoleArn]' --output text)"
+    if [[ "$roles" == "$want_exec"$'\t'"$want_task" ]]; then
+      echo "$arn"
+      return 0
+    fi
+    echo "skipping $arn: its roles are not skynet-$env-$family_key-exec/-task" >&2
+  done
+  die "no revision of $family with the $env roles in the 20 newest; run terraform apply for $env"
+}
+
 # Prints the new task definition ARN. (No associative arrays: macOS bash 3.2.)
 register() {
-  local family_key="$1" family image td
-  family="$(jq -r --arg f "$family_key" '.families[$f]' <<<"$cfg")"
+  local family_key="$1" image td src
   image="$(image_for "$family_key")"
-  td="$(aws ecs describe-task-definition --task-definition "$family" --query taskDefinition --output json)"
-  td="$(jq --arg img "$image" --arg sha "$sha" '
+  src="$(trusted_revision "$family_key")"
+  td="$(aws ecs describe-task-definition --task-definition "$src" --query taskDefinition --output json)"
+  td="$(jq --arg img "$image" --arg sha "$sha" --arg env "$env" '
       .containerDefinitions[0].image = $img
       | .containerDefinitions[0].environment |= map(if .name == "APP_GIT_SHA" then .value = $sha else . end)
+      | .tags = [{key: "Environment", value: $env}, {key: "Project", value: "skynet"}, {key: "ManagedBy", value: "deploy.sh"}]
       | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
             .registeredAt, .registeredBy, .deregisteredAt)' <<<"$td")"
   td="$(aws ecs register-task-definition --cli-input-json "$td" \
@@ -54,9 +84,9 @@ register() {
   echo "$td"
 }
 
-register migrate >/dev/null
+migrate_td="$(register migrate)"
 echo "running migration"
-task="$(run_task "$env" migrate)"
+task="$(run_task "$env" migrate "" "$migrate_td")"
 wait_task_ok "$env" "$task"
 echo "migration ok"
 

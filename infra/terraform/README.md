@@ -263,6 +263,10 @@ infra/terraform/scripts/deploy.sh staging <sha>
 
 `deploy.sh` registers new task definition revisions with the new image,
 runs the `migrate` task, stops if it fails, then updates the services and waits.
+It starts each new revision from the newest revision of the family whose
+execution and task roles are `skynet-<env>-<family>-exec` and `-task`, tags
+it `Environment=<env>`, and runs the exact migrate revision that it
+registered.
 Rollback: run `deploy.sh` with the previous SHA. Migrations do not roll back.
 
 Terraform ignores the service `task_definition` and `desired_count`. A Terraform
@@ -279,13 +283,26 @@ the setup.
 
 | Role | Trusted OIDC subject | Reaches |
 |------|----------------------|---------|
-| `skynet-github-deploy-staging` | `repo:<repo>:environment:aws-staging` | ECR push (images are shared), task definitions, the `skynet-staging` services, RunTask of `skynet-staging-migrate` only, PassRole on the exact staging task and execution roles, `/ecs/skynet-staging/*` logs, `/skynet/staging/*` SSM. |
+| `skynet-github-deploy-staging` | `repo:<repo>:environment:aws-staging` | ECR push (images are shared), task definitions tagged `Environment=staging` in the `skynet-staging-*` families, the `skynet-staging` services, RunTask of `skynet-staging-migrate` only, PassRole on the exact staging task and execution roles, `/ecs/skynet-staging/*` logs, `/skynet/staging/*` SSM. |
 | `skynet-github-deploy-production` | `repo:<repo>:environment:aws-production` | The same, for production resources only. |
 | `skynet-github-terraform-plan` | `repo:<repo>:pull_request` | `ReadOnlyAccess`, the state objects, and `GetSecretValue` on the generated secrets (Terraform refresh reads their versions). |
-| `skynet-github-terraform-apply` | `repo:<repo>:ref:refs/heads/staging` and `.../main` | `PowerUserAccess` plus IAM writes on `role/skynet-*` and the GitHub OIDC provider. No workflow uses it yet. |
+| `skynet-github-terraform-apply` | `repo:<repo>:ref:refs/heads/staging` and `.../main` **Admin-equivalent.** `PowerUserAccess` plus all IAM actions on `role/skynet-staging-*` and `role/skynet-production-*`. It can create a role there with any policy and pass it to a task, so it can reach any AWS permission. It cannot change the `skynet-github-*` roles or the OIDC provider. No workflow uses it yet. |
 
 No deploy role can run or pass the roles of the `dbadmin` task family; only a
 person with their own AWS login runs dbadmin.
+
+Environment isolation: `RegisterTaskDefinition` has no resource-level scope in
+IAM. Each deploy role may register a revision only with the request tag
+`Environment=<its env>`, and ECS checks `ecs:TagResource` on the new revision,
+which each role has only for its own families. A role also cannot pass the
+other environment's task roles, and `deploy.sh` skips any revision that does
+not carry its own environment's roles. `scripts/check-deploy-isolation.sh
+<global-plan.json>` proves this with the IAM policy simulator (read-only); the
+`terraform` workflow runs it after the global plan.
+
+The apply role is the strongest role. Its trust (staging and main branches
+only) and branch protection are the real control. The `global` stack stays a
+manual apply by a person.
 
 Set up GitHub (Settings > Environments) after `global` is applied:
 

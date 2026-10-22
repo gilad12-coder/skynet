@@ -145,15 +145,29 @@ locals {
   # roles it may pass. dbadmin is left out on purpose: it reads the RDS master
   # secret, so only an operator with the skynet profile starts it.
   deploy_families = ["backend", "worker", "frontend", "litellm", "migrate"]
-  environments    = toset(["staging", "production"])
+
+  # Built from the names, not from the resources, so the deploy policies are
+  # known at plan time and scripts/check-deploy-isolation.sh can test them
+  # before the first apply.
+  ecr_repository_arns = [
+    for r in var.image_repositories : "arn:aws:ecr:${var.region}:${local.account_id}:repository/skynet/${r}"
+  ]
+  environments = toset(["staging", "production"])
 }
 
 # ---------------------------------------------------------------- deploy roles
 # One role per environment. Each trusts only its own GitHub environment and
-# reaches only its own cluster, services, task roles, logs and parameters, so
-# a staging run cannot touch production. Configure in GitHub (README): the
-# aws-staging environment deploys from the staging branch only; aws-production
-# deploys from main only and needs a required reviewer.
+# reaches only its own cluster, services, task roles, logs and parameters.
+# Task definitions: RegisterTaskDefinition has no resource-level scope, so
+# each role must tag a new revision Environment=<env>. ECS authorizes that tag
+# as ecs:TagResource on the new revision, which EcsTags allows only for the
+# role's own families. scripts/deploy.sh also uses only revisions whose
+# execution and task roles are its own environment's roles; PassTaskRoles
+# keeps the staging role from putting production roles on any revision.
+# scripts/check-deploy-isolation.sh tests these rules with the IAM simulator.
+# Configure in GitHub (README): the aws-staging environment deploys from the
+# staging branch only; aws-production deploys from main only and needs a
+# required reviewer.
 
 data "aws_iam_policy_document" "github_deploy_trust" {
   for_each = var.enable_github_oidc ? local.environments : toset([])
@@ -213,18 +227,29 @@ data "aws_iam_policy_document" "github_deploy" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = [for r in aws_ecr_repository.this : r.arn]
+    resources = local.ecr_repository_arns
   }
 
   statement {
-    sid = "EcsTaskDefinitions"
-    # These actions do not support resource-level permissions. A registered
-    # revision can only use the roles that PassTaskRoles allows below.
+    sid = "EcsReadTaskDefinitions"
+    # No resource-level permissions for these read actions.
     actions = [
       "ecs:DescribeTaskDefinition",
-      "ecs:RegisterTaskDefinition",
+      "ecs:ListTaskDefinitions",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "EcsRegisterTaskDefinitions"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [each.key]
+    }
   }
 
   statement {
@@ -382,8 +407,13 @@ resource "aws_iam_role_policy" "github_plan" {
 
 # Apply role: only workflow runs on the staging and main branches. No
 # workflow in this repository assumes it yet; CI only plans. Adding an apply
-# job needs Gilad's approval (SKY-156 gate). PowerUserAccess has no IAM
-# rights, so IAM is limited to the skynet-* roles and the GitHub provider.
+# job needs Gilad's approval (SKY-156 gate).
+# This role is ADMIN-EQUIVALENT. PowerUserAccess plus IAM writes on the
+# skynet-staging-* and skynet-production-* roles let it create a role with
+# any policy and pass it to a task. Branch trust (staging, main) and branch
+# protection are the real control. It cannot change the skynet-github-*
+# roles (itself, plan, deploy) or the OIDC provider, so the global stack
+# stays a manual apply.
 
 data "aws_iam_policy_document" "github_apply_trust" {
   count = var.enable_github_oidc ? 1 : 0
@@ -431,11 +461,10 @@ resource "aws_iam_role_policy_attachment" "github_apply_poweruser" {
 
 data "aws_iam_policy_document" "github_apply_iam" {
   statement {
-    sid     = "ManageSkynetIam"
+    sid     = "ManageEnvironmentRoles"
     actions = ["iam:*"]
     resources = [
-      "arn:aws:iam::${local.account_id}:role/skynet-*",
-      "arn:aws:iam::${local.account_id}:oidc-provider/token.actions.githubusercontent.com",
+      for e in local.environments : "arn:aws:iam::${local.account_id}:role/skynet-${e}-*"
     ]
   }
 
