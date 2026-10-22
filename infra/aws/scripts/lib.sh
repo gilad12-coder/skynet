@@ -37,17 +37,20 @@ deploy_config() {
 # Runs a one-off task and waits for it to stop. Prints the task ARN.
 # Args: env family [overrides-json]
 run_task() {
-  local env="$1" family="$2" overrides="${3:-}" cfg subnets sg cluster arn
+  local env="$1" family="$2" overrides="${3:-}" cfg subnets sg cluster arn public_ip
   cfg="$(deploy_config "$env")"
   cluster="$(jq -r .cluster <<<"$cfg")"
   subnets="$(jq -r '.subnets | join(",")' <<<"$cfg")"
+  # Without NAT (egress_mode = public_ip) a task needs a public IP to pull
+  # images and read secrets.
+  public_ip="$(jq -r 'if .assign_public_ip then "ENABLED" else "DISABLED" end' <<<"$cfg")"
   sg="$(jq -r --arg f "$family" '.security_groups[$f]' <<<"$cfg")"
   local args=(
     --cluster "$cluster"
     --task-definition "$(jq -r --arg f "$family" '.families[$f]' <<<"$cfg")"
     --launch-type FARGATE
     --enable-execute-command
-    --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=DISABLED}"
+    --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=$public_ip}"
     --query 'tasks[0].taskArn' --output text
   )
   if [[ -n "$overrides" ]]; then

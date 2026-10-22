@@ -1,4 +1,4 @@
-# Staging: one task per service, single-AZ RDS, one Valkey node, one NAT.
+# Staging. Sizing comes from terraform.tfvars (lean) or full.tfvars (full).
 
 module "env" {
   source = "../../modules/environment"
@@ -9,31 +9,26 @@ module "env" {
 
   services_enabled = var.services_enabled
 
-  vpc_cidr           = "10.40.0.0/16"
-  az_count           = 2
-  nat_gateway_per_az = false
+  # ALB and RDS subnet groups need subnets in two AZs, so the VPC always
+  # spans two. The single-AZ choices are NAT, RDS and Valkey (tfvars).
+  vpc_cidr    = "10.40.0.0/16"
+  az_count    = 2
+  egress_mode = var.egress_mode
 
   frontend_domains = ["staging.skynetml.com"]
   api_domain       = "api-staging.skynetml.com"
   enable_https     = var.enable_https
 
-  db_instance_class        = "db.t4g.small"
-  db_multi_az              = false
+  db_instance_class        = var.db_instance_class
+  db_multi_az              = var.db_multi_az
   db_backup_retention_days = 3
   db_deletion_protection   = false
 
-  cache_node_count = 1
+  cache_node_count = var.cache_node_count
 
   ecr_repository_urls = local.ecr_repository_urls
 
-  # Railway staging memory peaks (7 days): backend 3.0 GB, worker 2.3 GB,
-  # litellm 2.6 GB, frontend 0.3 GB. CPU stayed below 0.02 vCPU.
-  services = {
-    backend  = { cpu = 512, memory = 3072, desired_count = 1 }
-    worker   = { cpu = 512, memory = 3072, desired_count = 1 }
-    frontend = { cpu = 256, memory = 512, desired_count = 1 }
-    litellm  = { cpu = 512, memory = 3072, desired_count = 1 }
-  }
+  services = var.services
 
   # Staging-only name from the Railway export.
   app_secret_keys_extra    = ["PREVIEW_GRANT_CENTS"]

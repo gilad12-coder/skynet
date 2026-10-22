@@ -38,9 +38,26 @@ variable "az_count" {
   }
 }
 
-variable "nat_gateway_per_az" {
-  description = "One NAT gateway per AZ (true) or one shared NAT gateway (false)."
-  type        = bool
+variable "egress_mode" {
+  description = <<-EOT
+    How ECS tasks reach the internet (LLM providers, Stripe, OAuth, SMTP, ECR):
+      nat_per_az - tasks in private subnets, one NAT gateway per AZ. An AZ
+                   outage cuts egress only in that AZ.
+      nat_single - tasks in private subnets, one shared NAT gateway. If its AZ
+                   fails, tasks in the other AZ lose egress too.
+      public_ip  - no NAT gateway. Tasks run in the public subnets with a
+                   public IPv4 address. Security groups still allow inbound
+                   traffic only from the ALB (or the backend/worker for
+                   litellm). Egress IPs change with every task.
+    Interface VPC endpoints cannot replace NAT: the tasks call third-party
+    APIs on the internet.
+  EOT
+  type        = string
+
+  validation {
+    condition     = contains(["nat_per_az", "nat_single", "public_ip"], var.egress_mode)
+    error_message = "egress_mode must be nat_per_az, nat_single or public_ip."
+  }
 }
 
 variable "flow_log_retention_days" {
@@ -176,11 +193,17 @@ variable "ecr_repository_urls" {
 }
 
 variable "services" {
-  description = "Size and count per ECS service."
+  description = <<-EOT
+    Size, count and capacity per ECS service. spot = true runs the service on
+    Fargate Spot (about 70% cheaper; AWS may stop a task with a 2-minute
+    SIGTERM warning, and a one-task service is down until Spot capacity
+    returns). A change to spot takes effect at the next deployment.
+  EOT
   type = map(object({
     cpu           = number
     memory        = number
     desired_count = number
+    spot          = optional(bool, false)
   }))
 
   validation {

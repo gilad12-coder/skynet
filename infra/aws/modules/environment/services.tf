@@ -293,12 +293,14 @@ locals {
 resource "aws_ecs_service" "this" {
   for_each = var.services_enabled ? local.services : {}
 
-  name                   = each.key
-  cluster                = aws_ecs_cluster.this.id
-  task_definition        = aws_ecs_task_definition.this[each.key].arn
-  desired_count          = var.services[each.key].desired_count
-  launch_type            = "FARGATE"
-  platform_version       = "LATEST"
+  name             = each.key
+  cluster          = aws_ecs_cluster.this.id
+  task_definition  = aws_ecs_task_definition.this[each.key].arn
+  desired_count    = var.services[each.key].desired_count
+  platform_version = "LATEST"
+  # ECS needs a new deployment to move running tasks between FARGATE and
+  # FARGATE_SPOT; without it a spot change waits for the next deploy.
+  force_new_deployment   = true
   enable_execute_command = true
   propagate_tags         = "SERVICE"
   wait_for_steady_state  = false
@@ -312,10 +314,17 @@ resource "aws_ecs_service" "this" {
     rollback = true
   }
 
+  # A capacity provider strategy (not launch_type) lets a service move between
+  # on-demand and Spot in place.
+  capacity_provider_strategy {
+    capacity_provider = var.services[each.key].spot ? "FARGATE_SPOT" : "FARGATE"
+    weight            = 1
+  }
+
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = local.tasks_public ? aws_subnet.public[*].id : aws_subnet.private[*].id
     security_groups  = [aws_security_group.this[each.key].id]
-    assign_public_ip = false
+    assign_public_ip = local.tasks_public
   }
 
   dynamic "load_balancer" {
@@ -383,7 +392,8 @@ resource "aws_ssm_parameter" "deploy" {
   type = "String"
   value = jsonencode({
     cluster          = aws_ecs_cluster.this.name
-    subnets          = aws_subnet.private[*].id
+    subnets          = local.tasks_public ? aws_subnet.public[*].id : aws_subnet.private[*].id
+    assign_public_ip = local.tasks_public
     security_groups  = { for k in ["migrate", "dbadmin"] : k => aws_security_group.this[k].id }
     families         = { for k, v in aws_ecs_task_definition.this : k => v.family }
     services         = keys(local.services)

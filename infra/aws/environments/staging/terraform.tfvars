@@ -1,0 +1,19 @@
+# Lean staging (default). Scale up with -var-file=full.tfvars or edit here.
+#
+# Railway staging memory peaks (7 days): backend 3.0 GB, worker 2.3 GB,
+# litellm 2.6 GB, frontend 0.3 GB. CPU stayed below 0.02 vCPU. One task per
+# service carries this load; Fargate Spot is acceptable for staging.
+
+egress_mode = "public_ip"
+
+db_instance_class = "db.t4g.small"
+db_multi_az       = false
+
+cache_node_count = 1
+
+services = {
+  backend  = { cpu = 512, memory = 3072, desired_count = 1, spot = true }
+  worker   = { cpu = 512, memory = 3072, desired_count = 1, spot = true }
+  frontend = { cpu = 256, memory = 512, desired_count = 1, spot = true }
+  litellm  = { cpu = 512, memory = 3072, desired_count = 1, spot = true }
+}

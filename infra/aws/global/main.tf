@@ -55,13 +55,13 @@ variable "github_repository" {
 
 variable "enable_github_oidc" {
   description = <<-EOT
-    Create the GitHub Actions OIDC provider and the deploy role. Keep false:
-    the managed SCP of this AWS account (free and paid plan) denies
-    iam:*Provider*, so CreateOpenIDConnectProvider fails. Set true only after
-    "Activate advanced AWS features" removes that deny.
+    Create the GitHub Actions OIDC provider and the deploy role. The account
+    has "advanced AWS features" on, so the managed SCP no longer denies
+    iam:*Provider*. Set false only if that deny comes back; deploys then run
+    from a laptop with scripts/deploy.sh.
   EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "image_repositories" {

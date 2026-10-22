@@ -1,7 +1,7 @@
 # Builds the arm64 images and deploys one commit to AWS ECS (SKY-162).
 # Manual only (workflow_dispatch) until the AWS stack is live and approved.
-# Blocked today: the account SCP denies the OIDC provider (iam:*Provider*), so
-# global/enable_github_oidc stays false and vars.AWS_DEPLOY_ROLE_ARN is unset.
+# Needs the global stack applied first (it creates the OIDC provider and the
+# role), then vars.AWS_DEPLOY_ROLE_ARN set to its github_deploy_role_arn output.
 # Auth: GitHub OIDC -> role skynet-github-deploy (infra/aws/global). No static
 # AWS keys. The role trusts only the GitHub environments aws-staging and
 # aws-production; add required reviewers to aws-production.

@@ -70,6 +70,41 @@ variable "alert_email" {
   default     = ""
 }
 
+# ---------------------------------------------------------------- sizing
+# Sizing lives in tfvars, so scaling up or down changes no .tf file:
+#   terraform.tfvars - lean variant (loaded automatically)
+#   full.tfvars      - full variant: add -var-file=full.tfvars to plan/apply
+
+variable "egress_mode" {
+  description = "Task egress: nat_per_az, nat_single or public_ip (see the module variable)."
+  type        = string
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class (Graviton)."
+  type        = string
+}
+
+variable "db_multi_az" {
+  description = "Run RDS as Multi-AZ (standby in a second AZ)."
+  type        = bool
+}
+
+variable "cache_node_count" {
+  description = "Valkey nodes: 1 = no replica; 2+ = automatic failover across AZs."
+  type        = number
+}
+
+variable "services" {
+  description = "cpu, memory, desired_count and spot per ECS service (backend, worker, frontend, litellm)."
+  type = map(object({
+    cpu           = number
+    memory        = number
+    desired_count = number
+    spot          = optional(bool, false)
+  }))
+}
+
 # ECR repositories come from the global stack. The URLs follow a fixed
 # pattern, so this stack does not read the global state and can be planned
 # before the global stack exists. scripts/deploy.sh checks that the images exist.

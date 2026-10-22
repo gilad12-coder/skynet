@@ -1,12 +1,12 @@
 # VPC with three subnet tiers per AZ:
-#   public   - ALB and NAT gateways only
+#   public   - ALB and NAT gateways (and ECS tasks when egress_mode = public_ip)
 #   private  - ECS tasks (egress through NAT)
 #   isolated - RDS and ElastiCache (no route to the internet)
 #
 # Interface VPC endpoints (ECR, Secrets Manager, Logs, STS) are not created:
-# at 3 AZs they cost about $110 per month per environment, more than the NAT
-# data they would save at current traffic. The S3 gateway endpoint is free and
-# carries ECR image layers.
+# at 2 AZs they cost about $100 per month per environment, more than a NAT
+# gateway, and they cannot carry the third-party API traffic. The S3 gateway
+# endpoint is free and carries ECR image layers.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -20,7 +20,13 @@ locals {
   private_cidrs  = [for i in range(var.az_count) : cidrsubnet(var.vpc_cidr, 4, i + 4)]
   isolated_cidrs = [for i in range(var.az_count) : cidrsubnet(var.vpc_cidr, 4, i + 8)]
 
-  nat_count = var.nat_gateway_per_az ? var.az_count : 1
+  nat_count = {
+    nat_per_az = var.az_count
+    nat_single = 1
+    public_ip  = 0
+  }[var.egress_mode]
+
+  tasks_public = var.egress_mode == "public_ip"
 }
 
 resource "aws_vpc" "this" {
@@ -107,10 +113,10 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route" "private_nat" {
-  count                  = var.az_count
+  count                  = local.nat_count > 0 ? var.az_count : 0
   route_table_id         = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[var.nat_gateway_per_az ? count.index : 0].id
+  nat_gateway_id         = aws_nat_gateway.this[local.nat_count > 1 ? count.index : 0].id
 }
 
 resource "aws_route_table_association" "private" {

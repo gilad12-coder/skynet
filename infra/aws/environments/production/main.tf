@@ -1,5 +1,4 @@
-# Production: two tasks per service, Multi-AZ RDS, two Valkey nodes with
-# automatic failover, one NAT gateway per AZ.
+# Production. Sizing comes from terraform.tfvars (lean) or full.tfvars (full).
 
 module "env" {
   source = "../../modules/environment"
@@ -10,31 +9,26 @@ module "env" {
 
   services_enabled = var.services_enabled
 
-  vpc_cidr           = "10.50.0.0/16"
-  az_count           = 2
-  nat_gateway_per_az = true
+  # ALB and RDS subnet groups need subnets in two AZs, so the VPC always
+  # spans two. The single-AZ choices are NAT, RDS and Valkey (tfvars).
+  vpc_cidr    = "10.50.0.0/16"
+  az_count    = 2
+  egress_mode = var.egress_mode
 
   frontend_domains = ["skynetml.com", "www.skynetml.com"]
   api_domain       = "api.skynetml.com"
   enable_https     = var.enable_https
 
-  db_instance_class        = "db.t4g.medium"
-  db_multi_az              = true
+  db_instance_class        = var.db_instance_class
+  db_multi_az              = var.db_multi_az
   db_backup_retention_days = 14
   db_deletion_protection   = true
 
-  cache_node_count = 2
+  cache_node_count = var.cache_node_count
 
   ecr_repository_urls = local.ecr_repository_urls
 
-  # Railway production memory (7 days, summed over 3/3/2/2 replicas):
-  # backend 1.6 GB, worker 1.3 GB, litellm 1.3 GB, frontend 0.3 GB.
-  services = {
-    backend  = { cpu = 1024, memory = 2048, desired_count = 2 }
-    worker   = { cpu = 1024, memory = 2048, desired_count = 2 }
-    frontend = { cpu = 512, memory = 1024, desired_count = 2 }
-    litellm  = { cpu = 512, memory = 2048, desired_count = 2 }
-  }
+  services = var.services
 
   # Production-only names from the Railway export.
   app_secret_keys_extra = [
