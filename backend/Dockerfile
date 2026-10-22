@@ -205,4 +205,7 @@ EXPOSE 8000
 # inject it and route edge traffic to it) so the bound port always matches
 # settings.port and the generalist agent's derived MCP self-dial URL. The
 # sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# Uvicorn trusts X-Forwarded-For/-Proto only from FORWARDED_ALLOW_IPS; behind a
+# load balancer, set it to the balancer's subnet CIDRs. Unset keeps uvicorn's
+# own default (127.0.0.1).
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\"; fi"]

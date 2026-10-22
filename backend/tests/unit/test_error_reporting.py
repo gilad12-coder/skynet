@@ -45,6 +45,26 @@ def test_configure_uses_private_low_volume_defaults(monkeypatch: pytest.MonkeyPa
     assert captured["before_send"] is error_reporting._scrub_event
 
 
+@pytest.mark.parametrize(("git_sha", "release"), [("0f5104ee" * 5, "0f5104ee" * 5), ("", None)])
+def test_configure_tags_the_deployed_commit_as_release(
+    monkeypatch: pytest.MonkeyPatch, git_sha: str, release: str | None
+) -> None:
+    """The Sentry release is the deployed commit, or unset when none is known."""
+    monkeypatch.setattr(settings, "sentry_dsn", SecretStr("https://key@example.invalid/1"))
+    monkeypatch.setattr(settings, "app_git_sha", git_sha)
+    captured: dict[str, object] = {}
+
+    def fake_init(**kwargs: object) -> None:
+        """Capture Sentry initialization options."""
+        captured.update(kwargs)
+
+    monkeypatch.setattr(error_reporting.sentry_sdk, "init", fake_init)
+    monkeypatch.setattr(error_reporting.sentry_sdk, "set_tag", lambda *args: None)
+
+    assert error_reporting.configure_error_reporting("backend") is True
+    assert captured["release"] == release
+
+
 def test_scrub_event_removes_sensitive_request_fields() -> None:
     """The final transport filter strips identity and request secrets."""
     event = {

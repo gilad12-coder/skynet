@@ -778,7 +778,7 @@ def test_new_account_without_wallet_row_funds_budget_only_in_preview(
 ) -> None:
     """A brand-new account's preview grant funds a budget; elsewhere it still has no funded wallet."""
     monkeypatch.setattr(settings, "preview_grant_cents", 1000)
-    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    monkeypatch.setattr(settings, "app_environment", environment_name)
     service = BudgetService(engine=engine)
     if not funded:
         with pytest.raises(BudgetInsufficientError):
