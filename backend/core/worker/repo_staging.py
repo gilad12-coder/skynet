@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..api.model_catalog import agent_model_id, strongest_model_id
+from ..api.model_catalog import REASONING_EFFORTS, agent_model_id, catalog_snapshot, strongest_model_id
 from ..billing.operation_pricing import ChargePolicy
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
@@ -32,7 +32,13 @@ from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
 from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_command
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
 from ..service_gateway.optimization.blackbox.repo_workspace import RepoWorkspace
-from ..service_gateway.optimization.blackbox.rule_judge import RuleJudge, describe_model_call, run_log_emitter
+from ..service_gateway.optimization.blackbox.rule_judge import (
+    JUDGE_ANSWER_TOKENS,
+    JUDGE_REASONING_TOKENS,
+    RuleJudge,
+    describe_model_call,
+    run_log_emitter,
+)
 from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -44,7 +50,6 @@ _ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_pat
 # Environments recorded before a field existed hold its empty value.
 _ENFORCED_DEFAULTS: dict[str, Any] = {"rules": []}
 _SETUP_ANSWER_TOKENS = 1_024
-_JUDGE_ANSWER_TOKENS = 600
 _JUDGE_ROLE = "judge"
 
 
@@ -153,6 +158,7 @@ def stage_repository(
         "commit": commit,
         "readonly_paths": list(snapshot.readonly_paths),
         "secret_names": sorted(secrets),
+        "constrained": environment.constraints is not None,
     }
     return result, StagedRepository(
         snapshot=snapshot,
@@ -229,18 +235,44 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
     return ask
 
 
-def _route_asker(gateway: Any, route: dict[str, str], max_tokens: int) -> Callable[[str], str | None]:
+def _judge_limits(model: str) -> dict[str, Any]:
+    """Return the length limit and reasoning control for one judge model's requests.
+
+    Args:
+        model: Catalog model id of the judge.
+
+    Returns:
+        ``max_tokens`` with room for reasoning, plus the lowest effort from
+        ``low`` up when the model reasons; only the answer limit for a model
+        the catalog says does not reason.
+    """
+    snapshot = catalog_snapshot()
+    entry = next((m for m in snapshot.models if m.value == model), None) if snapshot is not None else None
+    roomy = {"max_tokens": JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS}
+    if entry is None:
+        return roomy
+    if not (entry.reasoning_efforts or entry.reasoning_default_enabled or entry.reasoning_mandatory):
+        return {"max_tokens": JUDGE_ANSWER_TOKENS}
+    floor = REASONING_EFFORTS.index("low")
+    effort = next(
+        (e for e in entry.reasoning_efforts or [] if e in REASONING_EFFORTS and REASONING_EFFORTS.index(e) >= floor),
+        None,
+    )
+    return {**roomy, "reasoning": {"effort": effort}} if effort else roomy
+
+
+def _route_asker(gateway: Any, route: dict[str, str]) -> Callable[[str], str | None]:
     """Return a metered one-shot chat call through one registered model route.
 
     Args:
         gateway: The run's model gateway.
         route: A route the parent registered.
-        max_tokens: Answer length limit.
 
     Returns:
         A function sending one prompt and returning the reply text, or
         ``None`` when the provider refused it.
     """
+    limits = _judge_limits(route["model"])
 
     def ask(prompt: str) -> str | None:
         """Send one prompt through the route.
@@ -251,7 +283,7 @@ def _route_asker(gateway: Any, route: dict[str, str], max_tokens: int) -> Callab
         Returns:
             The model's reply, or ``None`` when the provider refused it.
         """
-        body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
+        body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], **limits}
         response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
         if not 200 <= response.status < 300:
             return None
@@ -306,8 +338,8 @@ def _rule_judge(staged: StagedRepository, gateway: Any, *, owner_id: str, manage
     )
     judge = RuleJudge(
         staged.rules,
-        ask_fast=_route_asker(gateway, fast, _JUDGE_ANSWER_TOKENS),
-        ask_strong=_route_asker(gateway, strong, _JUDGE_ANSWER_TOKENS),
+        ask_fast=_route_asker(gateway, fast),
+        ask_strong=_route_asker(gateway, strong),
         emit=run_log_emitter(owner_id),
     )
     gateway.observe_role("optimization", lambda body: judge.record_action(describe_model_call(body)))

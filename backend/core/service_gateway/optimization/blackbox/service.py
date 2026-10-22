@@ -1031,6 +1031,7 @@ def _run_job(
                     "chunks": [str(Path(chunk).resolve()) for chunk in repo_snapshot["chunks"]],
                     "editable_paths": list(target.repo.editable_paths),
                     "readonly_paths": list(repo_snapshot.get("readonly_paths") or ()),
+                    "constrained": bool(repo_snapshot.get("constrained")),
                 }
                 if target.repo is not None and repo_snapshot is not None
                 else None

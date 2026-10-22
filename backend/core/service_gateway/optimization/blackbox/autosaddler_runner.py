@@ -33,7 +33,7 @@ import threading
 import time
 import traceback
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -74,6 +74,7 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
 
 _RPC_PREFIX = "APP_NATIVE_RPC "
 _PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _PROC_ROOT = Path("/proc")
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -320,13 +321,51 @@ def workspace_patch(workspace: Path, base: str, changed_paths: Sequence[Any]) ->
         return _git_output(workspace, "diff", "--cached", "--binary", "--no-color", "--no-ext-diff", base, env=env)
 
 
-def repo_verifier(base: str, editable_paths: Sequence[str], readonly_paths: Sequence[str]) -> Any:
+def rule_blocker(mailbox: EvaluatorMailbox) -> Callable[[str], None]:
+    """Build the callback that sends a path-rule block to the parent's run log.
+
+    Args:
+        mailbox: Parent connection.
+
+    Returns:
+        A function taking the block's reason.
+    """
+
+    def block(reason: str) -> None:
+        """Send one ``rule.block`` run event.
+
+        Args:
+            reason: Why the path rules refused the version.
+        """
+        mailbox.emit(
+            _LOG_PREFIX,
+            {
+                "level": "WARNING",
+                "logger": "app.engine",
+                "message": f"Illegal action blocked: {repo_tree.PATH_RULE}. {reason}",
+                "source": "engine",
+                "event": repo_tree.RULE_BLOCK_EVENT,
+                "fields": {"rule": repo_tree.PATH_RULE, "reason": reason},
+            },
+        )
+
+    return block
+
+
+def repo_verifier(
+    base: str,
+    editable_paths: Sequence[str],
+    readonly_paths: Sequence[str],
+    on_block: Callable[[str], None] | None = None,
+) -> Any:
     """Build the upstream verifier that refuses versions the trusted scorer would refuse.
 
     Args:
         base: Starting commit of the run.
         editable_paths: Paths a version may change.
         readonly_paths: Submodules and Git LFS files that stay as fetched.
+        on_block: Under a constraints file, receives each path-rule refusal's
+            reason, and the agent reads only the illegal-action message.
 
     Returns:
         A ``GitVerifier`` for upstream's ``GitHarnessSpace``.
@@ -346,6 +385,9 @@ def repo_verifier(base: str, editable_paths: Sequence[str], readonly_paths: Sequ
         except UnicodeDecodeError:
             return GitVerificationVerdict(False, "utf8", "A changed text file is not UTF-8.", ())
         problems = repo_tree.patch_violations(patch, editable_paths, readonly_paths)
+        if problems and on_block is not None:
+            on_block(" ".join(problems))
+            return GitVerificationVerdict(False, "repository-rules", repo_tree.ILLEGAL_ACTION_MESSAGE, ())
         if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
             problems.append("The change is larger than a version may be.")
         if problems:
@@ -355,14 +397,22 @@ def repo_verifier(base: str, editable_paths: Sequence[str], readonly_paths: Sequ
     return verify
 
 
-def repo_space(repo: Mapping[str, Any], seed_patch: Any, run_dir: Path, proposer: dict[str, Any]) -> tuple[Any, str]:
+def repo_space(
+    repo: Mapping[str, Any],
+    seed_patch: Any,
+    run_dir: Path,
+    proposer: dict[str, Any],
+    mailbox: EvaluatorMailbox,
+) -> tuple[Any, str]:
     """Unpack the shipped repository and open upstream's Git candidate space on it.
 
     Args:
-        repo: Parent payload's ``repo`` entry: tree chunks and path rules.
+        repo: Parent payload's ``repo`` entry: tree chunks, path rules and
+            whether a constraints file governs the run.
         seed_patch: Starting version as a patch against the fetched commit, or empty.
         run_dir: Upstream run directory.
         proposer: Serialized harness launch, whose workspace files never join a version.
+        mailbox: Parent connection that receives path-rule blocks.
 
     Returns:
         The Git harness space and the fetched commit every version is diffed against.
@@ -390,7 +440,9 @@ def repo_space(repo: Mapping[str, Any], seed_patch: Any, run_dir: Path, proposer
         worktree_root=run_dir / "worktrees",
         writable_paths=[PurePosixPath(path) for path in editable],
         forbidden_paths=[PurePosixPath(path) for path in readonly],
-        verifier=repo_verifier(base, editable, readonly),
+        verifier=repo_verifier(
+            base, editable, readonly, on_block=rule_blocker(mailbox) if repo.get("constrained") else None
+        ),
     )
     return space, base
 
@@ -1342,6 +1394,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     development_cases = build_cases("development", examples)
     run_dir = Path("autosaddler-run").resolve()
     store = LocalRunStore(run_dir=run_dir, run_id=f"app-{payload['nonce'][:12]}")
+    mailbox = EvaluatorMailbox(payload["nonce"], timeout)
     if repo is None:
         components = baseline_components(task.get("seed_candidate"))
         harness_space: Any = ComponentMapHarnessSpace(
@@ -1353,11 +1406,10 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         component_names = tuple(components)
         readonly_paths = None
     else:
-        harness_space, repo_base = repo_space(repo, task.get("seed_candidate"), run_dir, proposer)
+        harness_space, repo_base = repo_space(repo, task.get("seed_candidate"), run_dir, proposer, mailbox)
         component_names = tuple(str(path) for path in repo["editable_paths"])
         readonly_paths = tuple(str(path) for path in repo["readonly_paths"])
     prefix = "" if repo is None else _REPO_ASSETS
-    mailbox = EvaluatorMailbox(payload["nonce"], timeout)
     evaluator = AppEvaluator(
         mailbox=mailbox,
         harness_space=harness_space,

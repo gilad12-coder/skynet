@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import httpx
 
 from ....config import settings
-from .rule_judge import RuleJudge, RuleJudgeUnavailableError
+from .rule_judge import JUDGE_ANSWER_TOKENS, JUDGE_REASONING_TOKENS, RuleJudge, RuleJudgeUnavailableError
 
 SEEDED_RULES = (
     "Do not hardcode answers for dataset cases.",
@@ -251,7 +251,12 @@ def openrouter_asker(model: str, api_key: str, client: httpx.Client) -> Callable
         response = client.post(
             _OPENROUTER_CHAT_URL,
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 400},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "reasoning": {"effort": "low"},
+                "max_tokens": JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS,
+            },
             timeout=120,
         )
         if response.status_code != 200:

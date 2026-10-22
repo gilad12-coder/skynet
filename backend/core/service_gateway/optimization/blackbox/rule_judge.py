@@ -30,15 +30,18 @@ from typing import Any
 from .... import run_log
 from . import sandbox_log
 from .repo_constraints import CONSTRAINTS_FILE, numbered_rules
+from .repo_tree import ILLEGAL_ACTION_MESSAGE, PATH_RULE, RULE_BLOCK_EVENT
 
 logger = logging.getLogger(__name__)
 
-ILLEGAL_ACTION_MESSAGE = (
-    "Illegal action. Read the constraints file. You cannot do this action. Do not repeat it, because it wastes time."
-)
 ILLEGAL_APPROACH = "illegal approach"
 ILLEGAL_SCORE = 0.0
 WATCH_EVERY_ACTIONS = 15
+JUDGE_ANSWER_TOKENS = 600
+# OpenRouter counts reasoning tokens inside max_tokens. A judge that reasons
+# gets this much more, or its thinking can use the whole limit and leave an
+# empty verdict that is still billed.
+JUDGE_REASONING_TOKENS = 8_000
 # The final judge must read the whole diff; a larger one is refused rather
 # than judged in part, because the unread part could hold the violation.
 MAX_JUDGED_DIFF_CHARS = 400_000
@@ -50,7 +53,7 @@ _MAX_ACTION_CHARS = 2_000
 _ACTION_TURNS = 3
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
-EVENT_BLOCK = "rule.block"
+EVENT_BLOCK = RULE_BLOCK_EVENT
 EVENT_NOTE = "rule.note"
 EVENT_REJECTION = "rule.rejection"
 _EVENT_TITLES = {
@@ -299,7 +302,7 @@ class RuleJudge:
         self._emit(
             {
                 "kind": EVENT_BLOCK,
-                "rule": f"{CONSTRAINTS_FILE} [paths]",
+                "rule": PATH_RULE,
                 "reason": " ".join(problems),
             }
         )

@@ -22,6 +22,15 @@ REPO_SNAPSHOT_KEY = "_repo_snapshot"
 ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
 _GIT_IDENTITY = ["-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false"]
 
+# A run with a constraints file answers every refused action with this fixed
+# text, both in the sandbox and in the parent, and logs the reason as a
+# ``rule.block`` run event instead. ``rule_judge`` and its tests use these.
+ILLEGAL_ACTION_MESSAGE = (
+    "Illegal action. Read the constraints file. You cannot do this action. Do not repeat it, because it wastes time."
+)
+RULE_BLOCK_EVENT = "rule.block"
+PATH_RULE = "optimize.toml [paths]"
+
 # The shipped tree's commit. Versions diff against this ref rather than HEAD,
 # so an agent that commits in its checkout cannot hide those edits.
 BASE_REF = "refs/app/base"

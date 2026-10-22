@@ -7,6 +7,7 @@ import re
 
 import httpx
 
+from ..rule_judge import JUDGE_ANSWER_TOKENS, JUDGE_REASONING_TOKENS
 from ..rule_judge_eval import SEEDED_EDITS, SEEDED_RULES, measure, openrouter_asker
 
 # A stub judge with no model: it flags table lookups, network calls and label
@@ -94,3 +95,5 @@ def test_the_real_judge_call_sends_one_chat_request() -> None:
 
     assert seen[0]["model"] == "vendor/model"
     assert seen[0]["messages"] == [{"role": "user", "content": "PROMPT"}]
+    assert seen[0]["reasoning"] == {"effort": "low"}
+    assert seen[0]["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS

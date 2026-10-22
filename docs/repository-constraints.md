@@ -70,7 +70,10 @@ Skynet enforces them in three places:
 
 1. **Blocked versions.** When the path rules refuse a version, the agent gets
    this text and continues: "Illegal action. Read the constraints file. You
-   cannot do this action. Do not repeat it, because it wastes time."
+   cannot do this action. Do not repeat it, because it wastes time." This is
+   the same for the parent's check and for the sandbox's early checks:
+   AutoResearch `eval.sh`, Meta-Harness `save.sh` and its candidate check, and
+   the AutoSaddler verifier. A blocked version uses no scoring budget.
 2. **Judge during the run.** About every 15 agent actions, a fast judge model
    reads the recent actions and the current diff against the rules. When it
    sees work that goes toward a violation, the agent's next scoring reply
@@ -85,7 +88,8 @@ Skynet enforces them in three places:
 
 Each block, note and rejection is a run-log event (`rule.block`,
 `rule.note`, `rule.rejection`) that names the rule and the reason. The run's
-Logs tab shows them. The judges read only the rules, the agent's actions and
+Logs tab shows them. A block from the parent has the source `host`. A block
+from a sandbox check has the source `engine`. The judges read only the rules, the agent's actions and
 the diff. They never read the scorer's data or the test labels. Their model
 calls go through the run's metered model gateway on the managed key, so the
 run budget pays for them. Only the parent can call the judge routes.
@@ -99,9 +103,10 @@ characters, the version gets a scoring error. It is not marked illegal.
 
 Limits:
 
-- The fixed block message applies to versions that the parent refuses. The
-  sandbox's own early check of editable and read-only paths keeps its
-  earlier message.
+- A Meta-Harness `save.sh` block reaches the run log when the agent's
+  session turn ends, not at the moment of the block.
+- Without a constraints file, the sandbox checks keep their earlier messages,
+  which name the refused paths, and they write no `rule.block` event.
 - The fast judge counts each answered model call of the agent as one action.
   Its note arrives with the next scoring reply, not in the middle of a turn.
 - A version with no changes (the starting point) is not judged.
