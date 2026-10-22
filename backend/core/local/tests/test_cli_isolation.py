@@ -104,6 +104,22 @@ def test_keys_are_stripped_and_the_temporary_homes_are_removed(tmp_path: Path) -
     assert not codex_home.exists()
 
 
+def test_codex_gets_the_exact_isolation_flags(tmp_path: Path) -> None:
+    """Skip user config, rules, sessions, MCP servers, ``AGENTS.md`` project docs and the skill list."""
+    with isolated_cli("codex", base_env={"HOME": str(_user_home(tmp_path))}) as isolation:
+        assert isolation.args == (
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--ephemeral",
+            "-c",
+            "mcp_servers={}",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "skills.include_instructions=false",
+        )
+
+
 def test_codex_reads_the_login_from_codex_home(tmp_path: Path) -> None:
     """Copy the login from ``CODEX_HOME`` when it is set."""
     custom = tmp_path / "custom-codex"

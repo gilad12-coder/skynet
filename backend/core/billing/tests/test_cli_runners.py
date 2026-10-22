@@ -237,6 +237,165 @@ def test_claude_keeps_the_real_home_for_its_keychain_login(tmp_path: Path, monke
     assert call["argv"][call["argv"].index("--setting-sources") + 1] == ""
 
 
+# The exact flags, written out, so a change to them fails here.
+CLAUDE_FLAGS = [
+    "-p",
+    "--output-format",
+    "json",
+    "--tools",
+    "",
+    "--system-prompt",
+    "You are a helpful assistant. Answer the user's message directly. You have no tools.",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--setting-sources",
+    "",
+    "--no-session-persistence",
+    "--model",
+    "claude-haiku-4-5",
+]
+CODEX_DISABLED = [
+    "shell_tool",
+    "unified_exec",
+    "code_mode_host",
+    "apps",
+    "plugins",
+    "multi_agent",
+    "memories",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+    "view_image",
+    "hooks",
+    "skill_search",
+    "goals",
+    "sleep_tool",
+    "tool_suggest",
+]
+CODEX_CONFIG = [
+    "include_permissions_instructions=false",
+    "include_apps_instructions=false",
+    "include_environment_context=false",
+    "tools.update_plan.enabled=false",
+    "tools.experimental_request_user_input.enabled=false",
+    'features.code_mode.excluded_tool_namespaces=["functions"]',
+]
+
+
+def test_claude_gets_the_exact_flags(tmp_path: Path) -> None:
+    """Pass no tools, the fixed system prompt, and flags that load no settings, MCP servers or commands."""
+    fake_cli(tmp_path, "claude", printing(CLAUDE_SUCCESS))
+    cli_runners.run_claude("claude-haiku-4-5", "ping", None, local_settings(tmp_path), tmp_path)
+    [call] = calls(tmp_path, "claude")
+    assert call["argv"] == CLAUDE_FLAGS
+
+
+def test_codex_gets_the_exact_flags_and_the_fixed_instructions(tmp_path: Path) -> None:
+    """Pass the isolation flags, every disabled feature, the context config, and the fixed prompt file."""
+    events = "\n".join(json.dumps(event) for event in CODEX_EVENTS)
+    seen = tmp_path / "instructions.seen"
+    fake_cli(
+        tmp_path,
+        "codex",
+        "value = argv[argv.index('-c', argv.index('tool_suggest')) + 1]\n"
+        "path = json.loads(value.split('=', 1)[1])\n"
+        f"open({str(seen)!r}, 'w').write(open(path).read())\n"
+        f"print({events!r})",
+    )
+    cli_runners.run_codex("gpt-5.6-luna", "ping", None, local_settings(tmp_path), tmp_path)
+    [call] = calls(tmp_path, "codex")
+    instructions = call["argv"][call["argv"].index("tool_suggest") + 2]
+    assert instructions.startswith("model_instructions_file=")
+    assert call["argv"] == [
+        "exec",
+        "--json",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--ephemeral",
+        "-c",
+        "mcp_servers={}",
+        "-c",
+        "project_doc_max_bytes=0",
+        "-c",
+        "skills.include_instructions=false",
+        "-c",
+        'web_search="disabled"',
+        *(arg for feature in CODEX_DISABLED for arg in ("--disable", feature)),
+        "-c",
+        instructions,
+        *(arg for setting in CODEX_CONFIG for arg in ("-c", setting)),
+        "--model",
+        "gpt-5.6-luna",
+        "-",
+    ]
+    assert seen.read_text(encoding="utf-8") == cli_runners.SYSTEM_PROMPT
+    assert not Path(json.loads(instructions.split("=", 1)[1])).exists()
+
+
+def _plant_user_setup(home: Path, project: Path) -> None:
+    """Plant a user's codex and claude setup: instructions, config, hooks, MCP servers, rules and skills."""
+    files = {
+        home / ".codex" / "auth.json": "old-login",
+        home / ".codex" / "AGENTS.md": "user instructions",
+        home / ".codex" / "config.toml": 'developer_instructions = "x"\n[mcp_servers.x]\ncommand = "x"\n',
+        home / ".codex" / "hooks.json": "{}",
+        home / ".codex" / "rules" / "default.rules": "x",
+        home / ".codex" / "skills" / "x" / "SKILL.md": "x",
+        home / ".claude" / "CLAUDE.md": "user instructions",
+        home / ".claude" / "settings.json": '{"hooks": {}}',
+        home / ".claude.json": '{"mcpServers": {}}',
+        project / "AGENTS.md": "project instructions",
+        project / "CLAUDE.md": "project instructions",
+        project / ".mcp.json": '{"mcpServers": {}}',
+        project / ".codex" / "config.toml": 'developer_instructions = "x"\n',
+    }
+    for path, text in files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def test_codex_cannot_reach_the_user_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give codex homes that hold only the login, and flags that skip project config, docs and rules."""
+    home, project = tmp_path / "user", tmp_path / "project"
+    _plant_user_setup(home, project)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME")
+    events = "\n".join(json.dumps(event) for event in CODEX_EVENTS)
+    fake_cli(
+        tmp_path,
+        "codex",
+        "assert sorted(os.listdir(os.environ['CODEX_HOME'])) == ['auth.json']\n"
+        "assert os.listdir(os.environ['HOME']) == []\n"
+        f"print({events!r})",
+    )
+    cli_runners.run_codex("gpt-5.6-luna", "ping", None, local_settings(tmp_path), project)
+    [call] = calls(tmp_path, "codex")
+    assert str(home) not in json.dumps(call["env"])
+    for flag in ("--ignore-user-config", "--ignore-rules", "mcp_servers={}", "project_doc_max_bytes=0"):
+        assert flag in call["argv"]
+    assert ("--disable", "hooks") in zip(call["argv"], call["argv"][1:], strict=False)
+
+
+def test_claude_loads_no_user_setup_through_its_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep claude's HOME for the login, and turn off every setup source with flags, not paths."""
+    home, project = tmp_path / "user", tmp_path / "project"
+    _plant_user_setup(home, project)
+    monkeypatch.setenv("HOME", str(home))
+    fake_cli(tmp_path, "claude", printing(CLAUDE_SUCCESS))
+    cli_runners.run_claude("claude-haiku-4-5", "ping", None, local_settings(tmp_path), project)
+    [call] = calls(tmp_path, "claude")
+    argv = call["argv"]
+    assert argv[argv.index("--setting-sources") + 1] == ""
+    assert argv[argv.index("--tools") + 1] == ""
+    assert argv[argv.index("--system-prompt") + 1] == cli_runners.SYSTEM_PROMPT
+    assert {"--strict-mcp-config", "--disable-slash-commands"} <= set(argv)
+    assert "--mcp-config" not in argv
+    assert "--settings" not in argv
+
+
 def test_codex_failed_turn_with_a_limit_is_a_rate_limit(tmp_path: Path) -> None:
     """Report a capped codex turn as a cap, not as a failed call."""
     failed = {
