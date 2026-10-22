@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Header, Request
-from sqlalchemy import ColumnElement, exists, select
+from sqlalchemy import ColumnElement, exists, select, update
 from sqlalchemy.orm import Session
 
 from ..storage.models import DesktopLinkModel, DesktopTokenModel
@@ -152,14 +152,25 @@ def _resolve_principal(request: Request, token: str, scope: str) -> DesktopPrinc
         scopes = frozenset(link.scopes.split())
         if scope not in scopes:
             raise DomainError("desktop.scope_missing", status=403, scope=scope)
-        link.last_used_at = now
-        session.commit()
         principal = DesktopPrincipal(
             username=link.username,
             link_id=link.id,
             scopes=scopes,
             device_name=link.device_name,
         )
+        # A Core UPDATE, because account deletion can delete the link while
+        # this call waits for its row lock; the ORM would raise StaleDataError
+        # (R782F-2).
+        recorded = session.execute(
+            update(DesktopLinkModel)
+            .where(DesktopLinkModel.id == link.id, DesktopLinkModel.revoked_at.is_(None))
+            .values(last_used_at=now),
+            execution_options={"synchronize_session": False},
+        )
+        if recorded.rowcount == 0:
+            session.rollback()
+            raise DomainError("desktop.link_revoked", status=401)
+        session.commit()
     # Admin never applies to a desktop principal, so no MAU exemption either.
     enforce_monthly_active_user_limit(job_store, principal.username)
     return principal

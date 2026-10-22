@@ -1,4 +1,4 @@
-"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1, R782C-1, R782D-1, R782E-1).
+"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1 to R782F-2).
 
 SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
 COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import secrets
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -20,16 +23,29 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session
 
+from core.api import two_factor
 from core.api.account_data_service import delete_account
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
-from core.api.routers import desktop_link
+from core.api.passwords import hash_password
+from core.api.routers import account_security, accounts, desktop_link
 from core.api.routers.desktop_link import create_desktop_link_router
-from core.config import app_env
-from core.storage.models import Base, DesktopLinkCodeModel, DesktopLinkModel, DesktopTokenModel, UserModel
+from core.config import app_env, settings
+from core.storage.models import (
+    ApiTokenModel,
+    Base,
+    DesktopLinkCodeModel,
+    DesktopLinkModel,
+    DesktopTokenModel,
+    PackageRegistryPreferenceModel,
+    UserModel,
+    WebAuthnChallengeModel,
+    WebAuthnCredentialModel,
+)
 
 TEST_DB_URL = app_env("APP_DESKTOP_LINK_TEST_DB_URL")
 pytestmark = pytest.mark.skipif(
@@ -40,6 +56,18 @@ pytestmark = pytest.mark.skipif(
 REDIRECT = "http://127.0.0.1:54321/local/hosted-link/callback"
 MAC_HOLD_SECONDS = 0.5
 DELETION_HOLD_SECONDS = 0.5
+ALICE = "alice@example.test"
+ALICE_PASSWORD = "Correct-horse-9"
+INTERNAL_SECRET = "internal-test-secret"
+# Each statement locks one row that delete_account deletes. A blocker
+# transaction that holds it parks the deletion at that point (R782F-1).
+DELETION_STOPS = {
+    "api-tokens": "SELECT 1 FROM api_tokens WHERE username = :u FOR UPDATE",
+    "passkey-challenges": "SELECT 1 FROM webauthn_challenges WHERE user_email = :u FOR UPDATE",
+    "registry-preferences": "SELECT 1 FROM package_registry_preferences WHERE username = :u FOR UPDATE",
+    "desktop-tokens": "SELECT 1 FROM desktop_tokens FOR UPDATE",
+}
+SIGN_IN_STOPS = ["api-tokens", "passkey-challenges", "registry-preferences"]
 
 
 class _Store:
@@ -691,3 +719,265 @@ def test_account_deletion_during_an_authorize_removes_the_new_code(
         assert session.query(DesktopLinkCodeModel).count() == 0
     exchange = _exchange(client, results["authorize"].json()["code"], results["verifier"])
     assert exchange.status_code == 400
+
+
+def _lock_waiters(engine: Engine) -> int:
+    """Count the sessions of this database that wait for a row lock.
+
+    Args:
+        engine: Engine bound to the test database.
+
+    Returns:
+        The number of waiting sessions.
+    """
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity"
+                    " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            ).scalar_one()
+        )
+
+
+def _wait_for_lock_waiters(engine: Engine, count: int, timeout: float) -> bool:
+    """Wait until ``count`` sessions wait for a row lock.
+
+    Args:
+        engine: Engine bound to the test database.
+        count: Number of waiting sessions to wait for.
+        timeout: Seconds to wait.
+
+    Returns:
+        True when that many sessions wait before the timeout.
+    """
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if _lock_waiters(engine) >= count:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _run_during_parked_deletion(engine: Engine, stop: str, call: Callable[[], Any]) -> dict[str, Any]:
+    """Run ``call`` while a blocker parks the account deletion at ``stop``.
+
+    The blocker holds one row the deletion deletes. When the deletion and
+    ``call`` both wait, the blocker commits and both continue.
+
+    Args:
+        engine: Engine bound to the test schema.
+        stop: Key of :data:`DELETION_STOPS`.
+        call: The concurrent request; returns a response.
+
+    Returns:
+        ``deletion`` and ``call`` outcomes: "ok" or a status code, or the
+        exception class name.
+    """
+    results: dict[str, Any] = {}
+    blocker = engine.connect()
+    blocker_transaction = blocker.begin()
+    blocker.execute(text(DELETION_STOPS[stop]), {"u": ALICE})
+
+    def deletion() -> None:
+        """Delete the account in one transaction, like the account router."""
+        try:
+            with Session(engine) as session:
+                delete_account(session, ALICE)
+                session.commit()
+            results["deletion"] = "ok"
+        except Exception as exc:  # A deadlock error is the observed result.
+            results["deletion"] = type(exc).__name__
+
+    def request() -> None:
+        """Send the concurrent request."""
+        try:
+            response = call()
+            results["call"] = response.status_code
+            results["body"] = response.json()
+        except Exception as exc:  # A deadlock or stale-row error is the observed result.
+            results["call"] = type(exc).__name__
+            results["detail"] = repr(exc)[:300]
+
+    deletion_thread = threading.Thread(target=deletion)
+    request_thread = threading.Thread(target=request)
+    try:
+        deletion_thread.start()
+        assert _wait_for_lock_waiters(engine, 1, timeout=5), "the deletion did not reach the blocked row"
+        request_thread.start()
+        _wait_for_lock_waiters(engine, 2, timeout=2)
+        request_thread.join(timeout=0.5)
+    finally:
+        blocker_transaction.commit()
+        blocker.close()
+        deletion_thread.join(timeout=20)
+        request_thread.join(timeout=20)
+    return results
+
+
+@pytest.fixture
+def sign_in(full_database: Engine, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Give alice a password, email 2FA, a passkey, and rows at each deletion stop.
+
+    Only the passkey signature check is replaced: a test cannot produce a
+    signed assertion. The routes, their SQL, and the deletion are real.
+
+    Returns:
+        A client for the sign-in routes and alice's emailed sign-in code.
+    """
+    now = datetime.now(UTC)
+    with Session(full_database) as session:
+        alice = session.get(UserModel, ALICE)
+        assert alice is not None
+        alice.password_hash = hash_password(ALICE_PASSWORD)
+        alice.email_verified = True
+        alice.email_2fa_enabled = True
+        session.add(ApiTokenModel(username=ALICE, token_hash="h" * 64, last4="abcd"))
+        session.add(PackageRegistryPreferenceModel(username=ALICE, index_url="https://pypi.org/simple"))
+        session.add(
+            WebAuthnChallengeModel(
+                challenge="registerchallenge1",
+                purpose="register",
+                user_email=ALICE,
+                expires_at=now + timedelta(minutes=5),
+            )
+        )
+        session.add(
+            WebAuthnChallengeModel(
+                challenge="signinchallenge1", purpose="auth", user_email=None, expires_at=now + timedelta(minutes=5)
+            )
+        )
+        session.add(
+            WebAuthnCredentialModel(
+                credential_id=_b64url(b"mac-passkey1"),
+                user_email=ALICE,
+                public_key=_b64url(b"public-key12"),
+                sign_count=0,
+                nickname="Mac",
+            )
+        )
+        session.commit()
+        email_code = two_factor.issue_email_code(session, ALICE)
+        session.commit()
+    monkeypatch.setattr(settings, "backend_auth_secret", SecretStr(INTERNAL_SECRET))
+    monkeypatch.setattr(settings, "max_monthly_active_users", 0)
+    monkeypatch.setattr(two_factor, "email_configured", lambda: True)
+    monkeypatch.setattr(accounts, "email_configured", lambda: True)
+    monkeypatch.setattr(
+        account_security, "verify_authentication_response", lambda **kwargs: SimpleNamespace(new_sign_count=7)
+    )
+    store = _Store(full_database)
+    app = FastAPI()
+    app.add_exception_handler(DomainError, _domain_error_json)
+    app.include_router(accounts.create_accounts_router(job_store=store))
+    app.include_router(account_security.create_account_security_router(job_store=store))
+    return SimpleNamespace(client=TestClient(app), email_code=email_code)
+
+
+def _b64url(raw: bytes) -> str:
+    """Encode bytes as unpadded base64url, like WebAuthn.
+
+    Args:
+        raw: Bytes to encode.
+
+    Returns:
+        The encoded text.
+    """
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _assert_account_gone(engine: Engine) -> None:
+    """Check that the deletion removed alice and her sign-in rows.
+
+    Args:
+        engine: Engine bound to the test schema.
+    """
+    with Session(engine) as session:
+        assert session.query(UserModel).count() == 0
+        assert session.query(WebAuthnCredentialModel).count() == 0
+
+
+@pytest.mark.parametrize("stop", SIGN_IN_STOPS)
+def test_passkey_sign_in_during_account_deletion_does_not_deadlock(
+    full_database: Engine, sign_in: SimpleNamespace, stop: str
+) -> None:
+    """Passkey sign-in and account deletion lock their rows in one order (R782F-1).
+
+    Passkey sign-in writes the passkey row, then the user row. When the
+    deletion locked the user row first and deleted passkeys later, the two
+    transactions waited on each other and PostgreSQL aborted one of them.
+    """
+    client_data = _b64url(json.dumps({"challenge": "signinchallenge1"}).encode())
+    credential = {
+        "id": _b64url(b"mac-passkey1"),
+        "rawId": _b64url(b"mac-passkey1"),
+        "response": {"clientDataJSON": client_data},
+    }
+
+    def passkey_sign_in() -> Any:
+        """Finish a passkey sign-in."""
+        return sign_in.client.post(
+            "/auth/webauthn/verify", json={"credential": credential}, headers={"X-Internal-Auth": INTERNAL_SECRET}
+        )
+
+    results = _run_during_parked_deletion(full_database, stop, passkey_sign_in)
+
+    assert results["deletion"] == "ok", results
+    # A sign-in that commits first succeeds. A sign-in that waits for the
+    # deletion finds its passkey row gone (StaleDataError, as on staging).
+    assert results["call"] in (200, "StaleDataError"), results
+    _assert_account_gone(full_database)
+
+
+@pytest.mark.parametrize("stop", SIGN_IN_STOPS)
+def test_email_code_sign_in_during_account_deletion_does_not_deadlock(
+    full_database: Engine, sign_in: SimpleNamespace, stop: str
+) -> None:
+    """Email-code sign-in and account deletion lock their rows in one order (R782F-1).
+
+    Password sign-in with an emailed code writes the user row, then deletes
+    the code. The deletion must lock the user row before it deletes codes, or
+    the two transactions wait on each other.
+    """
+
+    def email_code_sign_in() -> Any:
+        """Sign in with the password and the emailed code."""
+        return sign_in.client.post(
+            "/auth/login",
+            json={"email": ALICE, "password": ALICE_PASSWORD, "email_code": sign_in.email_code},
+            headers={"X-Internal-Auth": INTERNAL_SECRET},
+        )
+
+    results = _run_during_parked_deletion(full_database, stop, email_code_sign_in)
+
+    assert results["deletion"] == "ok", results
+    # A sign-in that commits first succeeds; one that waits finds no account.
+    assert results["call"] in (200, 401, "StaleDataError"), results
+    _assert_account_gone(full_database)
+
+
+def test_desktop_call_during_account_deletion_reports_a_revoked_link(
+    full_database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A desktop call that waits on a deleted link gets 401, not 500 (R782F-2).
+
+    The deletion parks after it deletes the links. The call reads the link
+    before that delete commits, then waits to record its use. After the
+    deletion commits, the update matches no row.
+    """
+    monkeypatch.setattr(desktop_link, "_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(desktop_link, "_send_notice", lambda *args: None)
+    client = _client(full_database)
+    pair = _link_pair(client)
+
+    def whoami() -> Any:
+        """Call a desktop route with the Mac's access token."""
+        return client.get("/desktop/v1/whoami", headers={"Authorization": f"Bearer {pair['access_token']}"})
+
+    results = _run_during_parked_deletion(full_database, "desktop-tokens", whoami)
+
+    assert results["deletion"] == "ok", results
+    assert results["call"] == 401, results
+    assert results["body"] == {"code": "desktop.link_revoked"}
+    assert whoami().status_code == 401
