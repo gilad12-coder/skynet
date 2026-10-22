@@ -112,6 +112,7 @@ from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.experience import create_experience_router
 from .routers.folders import create_folders_router
 from .routers.generalist_agent import create_generalist_agent_router
+from .routers.local_notifications import create_local_notifications_router
 from .routers.local_runtime import create_local_runtime_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
@@ -1338,6 +1339,7 @@ def create_app(
     app.include_router(create_local_runtime_router(), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_local_notifications_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notifications_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_experience_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
