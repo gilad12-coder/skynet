@@ -469,7 +469,9 @@ def test_a_slower_implementation_is_observed_as_slower() -> None:
 
     fast_ms = fast["observation"]["timing"]["task_ms"]
     slow_ms = slow["observation"]["timing"]["task_ms"]
-    assert slow_ms >= 400
+    # The parent times the child's start and reply markers as it reads them from the pipe, so
+    # read jitter can trim a fraction of a millisecond off the 400 ms sleep (CI saw 399.9).
+    assert slow_ms >= 390
     assert slow_ms - fast_ms >= 300
     assert slow["side_info"]["seen_ms"] == slow_ms
     assert slow["observation"]["timing"]["boundary"] == "run_call"
