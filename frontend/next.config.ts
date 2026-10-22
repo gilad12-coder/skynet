@@ -85,8 +85,8 @@ export default withSentryConfig(nextConfig, {
   authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
   sourcemaps: { disable: isPreviewBuild },
-  // A set name makes the plugin set commits and finalize the release, so previews
-  // leave it unset and make no release calls. Elsewhere an unset name (no SHA
+  // A set name makes the plugin finalize the release, so previews leave it unset;
+  // there the plugin only sets commits, as before. Elsewhere an unset name (no SHA
   // known) falls back to the plugin's own detection (SENTRY_RELEASE, CI variables, git).
   release: { name: isPreviewBuild ? undefined : deployGitSha(), create: !isPreviewBuild },
   webpack: { treeshake: { removeDebugLogging: true } },
