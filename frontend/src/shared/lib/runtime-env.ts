@@ -20,6 +20,9 @@
 export interface RuntimeEnv {
   apiUrl: string;
   appVersion: string;
+  // Present (and true) only when the server runs with APP_LOCAL_MODE=1, the
+  // single-user desktop build; hosted deploys never serialize the key.
+  localMode?: true;
 }
 
 declare global {
@@ -41,6 +44,7 @@ export function getServerRuntimeEnv(): RuntimeEnv {
     apiUrl: process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL,
     appVersion:
       process.env.APP_VERSION ?? process.env.NEXT_PUBLIC_APP_VERSION ?? DEFAULT_APP_VERSION,
+    ...(process.env.APP_LOCAL_MODE === "1" ? { localMode: true as const } : {}),
   };
 }
 
@@ -61,7 +65,13 @@ export function getRuntimeEnv(): RuntimeEnv {
     apiUrl: injected?.apiUrl ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL,
     appVersion:
       injected?.appVersion ?? process.env.NEXT_PUBLIC_APP_VERSION ?? DEFAULT_APP_VERSION,
+    ...(injected?.localMode === true ? { localMode: true as const } : {}),
   };
+}
+
+/** Whether this app runs as the local desktop build (``APP_LOCAL_MODE=1``). */
+export function isLocalMode(): boolean {
+  return getRuntimeEnv().localMode === true;
 }
 
 /**
