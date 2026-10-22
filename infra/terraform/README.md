@@ -286,7 +286,7 @@ the setup.
 | `skynet-github-deploy-staging` | `repo:<repo>:environment:aws-staging` | ECR push (images are shared), task definitions tagged `Environment=staging` in the `skynet-staging-*` families, the `skynet-staging` services, RunTask of `skynet-staging-migrate` only, PassRole on the exact staging task and execution roles, `/ecs/skynet-staging/*` logs, `/skynet/staging/*` SSM. |
 | `skynet-github-deploy-production` | `repo:<repo>:environment:aws-production` | The same, for production resources only. |
 | `skynet-github-terraform-plan` | `repo:<repo>:pull_request` | `ReadOnlyAccess`, the state objects, and `GetSecretValue` on the generated secrets (Terraform refresh reads their versions). |
-| `skynet-github-terraform-apply` | `repo:<repo>:ref:refs/heads/staging` and `.../main` **Admin-equivalent.** `PowerUserAccess` plus all IAM actions on `role/skynet-staging-*` and `role/skynet-production-*`. It can create a role there with any policy and pass it to a task, so it can reach any AWS permission. It cannot change the `skynet-github-*` roles or the OIDC provider. No workflow uses it yet. |
+| `skynet-github-terraform-apply` | `repo:<repo>:ref:refs/heads/staging` and `.../main` **Admin-equivalent.** `PowerUserAccess` plus all IAM actions on `role/skynet-staging-*` and `role/skynet-production-*`. It can create a role there with any policy and pass it to a task, so it can reach any AWS permission. It cannot change the `skynet-github-*` roles or the OIDC provider directly, but it can through a `skynet-<env>-*` role that it creates (for example with `AdministratorAccess`) and assumes. No permissions boundary stops this. No workflow uses it yet. |
 
 No deploy role can run or pass the roles of the `dbadmin` task family; only a
 person with their own AWS login runs dbadmin.
@@ -302,7 +302,9 @@ not carry its own environment's roles. `scripts/check-deploy-isolation.sh
 
 The apply role is the strongest role. Its trust (staging and main branches
 only) and branch protection are the real control. The `global` stack stays a
-manual apply by a person.
+manual apply by a person. That is a process rule, not an IAM control: the
+apply role can change the global resources through a role that it creates and
+assumes.
 
 Set up GitHub (Settings > Environments) after `global` is applied:
 

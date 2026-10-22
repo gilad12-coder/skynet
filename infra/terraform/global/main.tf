@@ -411,9 +411,12 @@ resource "aws_iam_role_policy" "github_plan" {
 # This role is ADMIN-EQUIVALENT. PowerUserAccess plus IAM writes on the
 # skynet-staging-* and skynet-production-* roles let it create a role with
 # any policy and pass it to a task. Branch trust (staging, main) and branch
-# protection are the real control. It cannot change the skynet-github-*
-# roles (itself, plan, deploy) or the OIDC provider, so the global stack
-# stays a manual apply.
+# protection are the real control. Its own policies do not let it change
+# the skynet-github-* roles (itself, plan, deploy) or the OIDC provider
+# directly. But it can create a skynet-<env>-* role with AdministratorAccess
+# that trusts the apply role, assume that role, and then change them. No
+# permissions boundary stops this. The global stack stays a manual apply by
+# a person; that is a process rule, not an IAM control.
 
 data "aws_iam_policy_document" "github_apply_trust" {
   count = var.enable_github_oidc ? 1 : 0
