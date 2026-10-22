@@ -4,8 +4,8 @@ Terraform for Skynet on AWS: ECS on Fargate (ARM64 / Graviton), RDS PostgreSQL 1
 ElastiCache Valkey, ALB with ACM, Secrets Manager, ECR and CloudWatch.
 Region: `us-east-2`. AWS CLI profile: `skynet`.
 
-Nobody ran `terraform apply` yet. Read-only plans of every stack pass (see
-"Plan" below). The first apply needs Gilad's approval through the orchestrator.
+`bootstrap` and `global` are applied in account 669242775630 (`us-east-2`).
+The environment stacks follow "First apply (staging, then production)" below.
 
 ## Account prerequisites
 

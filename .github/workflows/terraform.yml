@@ -116,11 +116,11 @@ jobs:
           aws-region: us-east-2
 
       # -lock=false: the plan role is read-only and cannot write the lock file.
-      # Only the "Plan:" summary lines and the addresses of ECS services or
-      # the HTTPS listener that a plan would delete leave the job; the full
-      # plan stays in the job log, which only repository members can read.
-      # shell: bash adds -o pipefail, so a failed plan fails the job even
-      # though its output goes through tee.
+      # The repository is public, so job logs are public too. The full plan
+      # goes only to a file on the runner. The job log and the PR comment get
+      # only the "Plan:" summary lines and the addresses of ECS services or the
+      # HTTPS listener that a plan would delete. A failed plan prints only the
+      # last lines of its output (the error) and fails the job.
       # destroys.txt lists ECS services and HTTPS listeners that a plan would
       # delete (for example a go-live switch set back to false in
       # terraform.tfvars); the "go-live guard" step fails the job on it.
@@ -141,7 +141,11 @@ jobs:
             else
               args+=(-var "image_tag=$IMAGE_TAG" -out="$RUNNER_TEMP/env.tfplan")
             fi
-            terraform -chdir="$dir" plan "${args[@]}" | tee "$RUNNER_TEMP/plan.txt"
+            if ! terraform -chdir="$dir" plan "${args[@]}" >"$RUNNER_TEMP/plan.txt" 2>&1; then
+              echo "terraform plan failed for $root:"
+              tail -n 40 "$RUNNER_TEMP/plan.txt"
+              exit 1
+            fi
             line="$(grep -E '^(Plan:|No changes\.)' "$RUNNER_TEMP/plan.txt" | head -1 || true)"
             echo "- \`$root\`: ${line:-no summary line}" >>"$summary"
             if [ "$root" != global ]; then
