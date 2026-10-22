@@ -356,6 +356,24 @@ def test_remove_idle_sandbox_networks_survives_a_missing_cli(tmp_path: Path) -> 
     assert remove_idle_sandbox_networks(str(tmp_path / "no-docker")) == 0
 
 
+@pytest.mark.parametrize("kind", ["directory", "not executable"])
+def test_remove_idle_sandbox_networks_survives_a_cli_path_that_cannot_run(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, kind: str
+) -> None:
+    """A Docker CLI path that cannot run is logged, not raised, so local startup goes on."""
+    docker_bin = tmp_path / "docker"
+    if kind == "directory":
+        docker_bin.mkdir()
+    else:
+        docker_bin.write_text("#!/bin/sh\nexit 0\n")
+        docker_bin.chmod(0o644)
+
+    with caplog.at_level("WARNING"):
+        assert remove_idle_sandbox_networks(str(docker_bin)) == 0
+
+    assert "could not list idle local sandbox networks" in caplog.text
+
+
 @pytest.mark.parametrize("local_mode", [True, False])
 def test_worker_start_removes_idle_sandbox_networks_only_in_local_mode(
     monkeypatch: pytest.MonkeyPatch, local_mode: bool

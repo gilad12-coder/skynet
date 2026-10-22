@@ -85,11 +85,15 @@ def _docker(
         The completed process with raw stdout and stderr.
 
     Raises:
-        ServiceError: When the CLI is missing or does not answer in time.
+        ServiceError: When the CLI is missing, cannot run, or does not answer in time.
     """
     try:
         return subprocess.run([docker_bin, *args], input=stdin, capture_output=True, timeout=timeout, check=False)
     except FileNotFoundError as error:
+        raise ServiceError(t("sandbox.docker_unavailable")) from error
+    except OSError as error:
+        # APP_DOCKER_BIN can name a directory or a file without the execute
+        # bit; report it like a missing CLI so callers degrade, not crash.
         raise ServiceError(t("sandbox.docker_unavailable")) from error
     except subprocess.TimeoutExpired as error:
         raise ServiceError(f"docker {args[0]} did not answer within {timeout:.0f}s.") from error
