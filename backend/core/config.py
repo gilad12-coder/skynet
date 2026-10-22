@@ -171,10 +171,22 @@ class Settings(BaseSettings):
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
     )
-    railway_environment_name: str = Field(
+    app_environment: str = Field(
         default="",
-        alias="RAILWAY_ENVIRONMENT_NAME",
-        description="Set by Railway. A name ending in -pr-<number> marks a PR preview environment.",
+        validation_alias=AliasChoices("APP_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME"),
+        description="Deployment environment name; Railway's RAILWAY_ENVIRONMENT_NAME is the fallback. "
+        "A name ending in -pr-<number> marks a PR preview environment.",
+    )
+    app_git_sha: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_GIT_SHA", "RAILWAY_GIT_COMMIT_SHA"),
+        description="Commit the deployed image was built from; Railway's RAILWAY_GIT_COMMIT_SHA is the fallback.",
+    )
+    app_service_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_SERVICE_NAME", "RAILWAY_SERVICE_NAME", "SERVICE_NAME"),
+        description="Service name attached to shipped logs; Railway's RAILWAY_SERVICE_NAME, then SERVICE_NAME, "
+        "are the fallbacks.",
     )
     preview_grant_cents: int = Field(
         default=0,
@@ -1397,8 +1409,8 @@ class Settings(BaseSettings):
 
     @property
     def is_preview_environment(self) -> bool:
-        """Return whether this deployment is a Railway PR preview environment."""
-        return re.search(r"-pr-\d+$", self.railway_environment_name) is not None
+        """Return whether this deployment is a PR preview environment."""
+        return re.search(r"-pr-\d+$", self.app_environment) is not None
 
     @property
     def is_stripe_configured(self) -> bool:

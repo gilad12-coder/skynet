@@ -1,11 +1,13 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
-// Railway names PR preview environments `<project>-pr-<n>` (the backend's
+import { deployGitSha, isPreviewEnvironment } from "./src/shared/lib/deploy-env";
+
+// PR preview environments are named `<project>-pr-<n>` (the backend's
 // `is_preview_environment` reads the same suffix). Nobody debugs a preview's
 // minified stack traces, and generating and uploading source maps adds time to
 // every preview build, so previews skip it; staging and production still upload.
-const isPreviewBuild = /-pr-\d+$/.test(process.env.RAILWAY_ENVIRONMENT_NAME ?? "");
+const isPreviewBuild = isPreviewEnvironment();
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -83,7 +85,8 @@ export default withSentryConfig(nextConfig, {
   authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
   sourcemaps: { disable: isPreviewBuild },
-  release: { create: !isPreviewBuild },
+  // Unset name keeps the plugin's own detection, which reads Railway's variable.
+  release: { name: deployGitSha(), create: !isPreviewBuild },
   webpack: { treeshake: { removeDebugLogging: true } },
   telemetry: false,
 });
