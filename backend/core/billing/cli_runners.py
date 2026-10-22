@@ -43,7 +43,10 @@ _CLOCK_RESET = re.compile(
     re.IGNORECASE,
 )
 _KILL_GRACE_SECONDS = 2.0
-SYSTEM_PROMPT = "You are a helpful assistant. Answer the user's message directly. You have no tools."
+SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer the user's message directly. "
+    "Do not run code or use tools, except a tool that returns your final answer in a required format."
+)
 """The system prompt each CLI gets in place of its own coding-agent prompt."""
 # Codex features that give the model a host tool. With them off, codex answers
 # from the prompt alone; the read-only sandbox would still let a shell read files.
@@ -350,7 +353,7 @@ def run_claude(
 
     Raises:
         SubscriptionRateLimitedError: When the subscription is capped.
-        CliRunError: When the call fails.
+        CliRunError: When the call fails, or gives no structured output for a schema.
     """
     # Without the isolation flags a large personal setup overflows the context.
     with cli_isolation.isolated_cli("claude") as isolation:
@@ -374,6 +377,10 @@ def run_claude(
     if raw.get("is_error"):
         raise _failure("claude", str(raw.get("result") or stderr))
     structured = raw.get("structured_output")
+    if json_schema is not None and structured is None:
+        # Claude Code asks once more for the StructuredOutput tool, then exits
+        # with success and free text; that text does not match the schema.
+        raise CliRunError("claude", "claude returned no structured output for the JSON schema", transient=True)
     text = json.dumps(structured) if structured is not None else str(raw.get("result") or "")
     usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
     prompt_tokens = (

@@ -163,6 +163,26 @@ def test_claude_prefers_structured_output_for_a_schema(tmp_path: Path) -> None:
     assert json.loads(call["argv"][call["argv"].index("--json-schema") + 1]) == schema
 
 
+def test_claude_schema_call_does_not_deny_the_answer_tool(tmp_path: Path) -> None:
+    """Send a system prompt that lets the model call the StructuredOutput tool a schema adds."""
+    fake_cli(tmp_path, "claude", printing({**CLAUDE_SUCCESS, "result": "", "structured_output": {"answer": 1}}))
+    schema = {"type": "object", "properties": {"answer": {"type": "integer"}}}
+    cli_runners.run_claude("claude-haiku-4-5", "q", schema, local_settings(tmp_path), tmp_path)
+    [call] = calls(tmp_path, "claude")
+    assert "--json-schema" in call["argv"]
+    assert "no tools" not in call["argv"][call["argv"].index("--system-prompt") + 1].lower()
+
+
+def test_claude_schema_call_without_structured_output_is_an_error(tmp_path: Path) -> None:
+    """Fail, not return free text, when claude skips the StructuredOutput tool for a schema."""
+    fake_cli(tmp_path, "claude", printing({**CLAUDE_SUCCESS, "num_turns": 2, "result": "The answer is 1."}))
+    schema = {"type": "object", "properties": {"answer": {"type": "integer"}}}
+    with pytest.raises(CliRunError) as caught:
+        cli_runners.run_claude("claude-haiku-4-5", "q", schema, local_settings(tmp_path), tmp_path)
+    assert caught.value.provider == "claude"
+    assert caught.value.transient
+
+
 def test_claude_limit_result_is_a_rate_limit_with_its_reset(tmp_path: Path) -> None:
     """Turn an error result about the usage limit into a cap with a parsed reset time."""
     message = "Claude AI usage limit reached|1893456000"
@@ -245,7 +265,8 @@ CLAUDE_FLAGS = [
     "--tools",
     "",
     "--system-prompt",
-    "You are a helpful assistant. Answer the user's message directly. You have no tools.",
+    "You are a helpful assistant. Answer the user's message directly. "
+    "Do not run code or use tools, except a tool that returns your final answer in a required format.",
     "--strict-mcp-config",
     "--disable-slash-commands",
     "--setting-sources",
