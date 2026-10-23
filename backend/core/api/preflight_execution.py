@@ -8,7 +8,7 @@ import logging
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, field_validator, model_serializer
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
 from ..billing.budgets import (
@@ -124,6 +124,24 @@ class WizardPreflightResponse(BaseModel):
     # The proposer CLI this check ran on. A submit sends it back so the server
     # does not pick another CLI from changed readiness and refuse the evidence.
     proposer_host_cli: Literal["codex", "claude"] | None = None
+
+    @model_serializer(mode="wrap")
+    def _keep_proposer_host_cli(self, handler: SerializerFunctionWrapHandler):
+        """Keep an execution check's proposer CLI in the output even when it is null.
+
+        The routes drop null fields, and a missing key lets the submit pick a
+        CLI from the engine as it is now. The null must reach the submit.
+
+        Args:
+            handler: Pydantic's default serializer for this model.
+
+        Returns:
+            The serialized response, with ``proposer_host_cli`` whenever the check set it.
+        """
+        data = handler(self)
+        if "proposer_host_cli" in self.model_fields_set:
+            data["proposer_host_cli"] = self.proposer_host_cli
+        return data
 
 
 def _proposer_host_cli(payload: dict[str, Any]) -> str | None:

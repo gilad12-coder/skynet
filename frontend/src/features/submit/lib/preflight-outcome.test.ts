@@ -122,5 +122,9 @@ test("a run sends back the proposer CLI its check ran on", () => {
       ?.host_cli,
     null,
   );
+  assert.equal(
+    checkedRunRequest(payload, response("succeeded", true)).optimizer.proposer?.host_cli,
+    null,
+  );
   assert.equal(payload.optimizer.proposer?.host_cli, undefined);
 });

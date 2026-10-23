@@ -797,3 +797,67 @@ def test_local_wizard_check_evidence_survives_a_cli_readiness_change(
     assert submitted.status_code == 201, submitted.text
     job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
     assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "codex"
+
+
+@pytest.mark.parametrize("route", ["/wizard/preflight", "/wizard/preflight/stream"])
+def test_local_wizard_check_without_a_cli_survives_a_new_engine_cli(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    """A check that ran with no proposer CLI sends that null back to the submit.
+
+    The routes drop null fields. Without the key, the wizard leaves host_cli
+    unset, the submit picks the CLI that became ready after the check, and
+    every retry gets a budget conflict.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        route: The plain or streamed wizard check route.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="no-cli")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+
+    response = harness.client.post(
+        route,
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    checked = frames[-1] if route.endswith("/stream") else response.json()
+    assert checked["status"] == "succeeded", checked
+    assert checked["proposer_host_cli"] is None
+    assert "pending_reason" not in checked
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("codex")])
+    optimizer = payload["optimizer"]
+    proposer = {**optimizer.get("proposer", {}), "host_cli": checked["proposer_host_cli"]}
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "optimizer": {**optimizer, "proposer": proposer},
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"].get("host_cli") is None

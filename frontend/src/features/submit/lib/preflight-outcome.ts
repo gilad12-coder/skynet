@@ -65,7 +65,8 @@ export function preflightPendingMessageKey(
 /**
  * Bind a run to its passed execution check. The proposer keeps the CLI the
  * check ran on, so the server does not pick another CLI from changed
- * readiness and refuse the evidence on every retry.
+ * readiness and refuse the evidence on every retry. A missing CLI means the
+ * check ran on none, so the run sends an explicit null.
  */
 export function checkedRunRequest(
   payload: UnifiedRunRequest,
@@ -74,10 +75,12 @@ export function checkedRunRequest(
   const proposer = payload.optimizer.proposer;
   return {
     ...payload,
-    optimizer:
-      proposer && checked.proposer_host_cli !== undefined
-        ? { ...payload.optimizer, proposer: { ...proposer, host_cli: checked.proposer_host_cli } }
-        : payload.optimizer,
+    optimizer: proposer
+      ? {
+          ...payload.optimizer,
+          proposer: { ...proposer, host_cli: checked.proposer_host_cli ?? null },
+        }
+      : payload.optimizer,
     execution_budget_id: checked.budget.id,
     execution_budget_revision: checked.budget.revision,
     preflight_id: checked.id,
