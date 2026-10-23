@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "Búsqueda evolutiva sobre una población de candidatos, con mutaciones y cruces escritos por un LLM.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "Mantiene un grupo de versiones y crea otras mejores a partir de las mejores.",
   "submit.v2.optimizer.picker.carousel_aria": "Optimizadores que encajan con esta configuración",
-  "submit.v2.optimizer.source.paper": "Artículo",
-  "submit.v2.optimizer.source.code": "Código",
   "submit.v2.optimizer.source.paper_aria": "Leer el artículo: {p1} (se abre en una pestaña nueva)",
   "submit.v2.optimizer.source.code_aria": "Ver el código original: {p1} (se abre en una pestaña nueva)",
   "submit.v2.optimizer.source.list_aria": "Fuentes de {p1}",

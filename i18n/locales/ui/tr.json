@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "Bir LLM tarafından yazılan mutasyon ve çaprazlamalarla, bir aday popülasyonu üzerinde evrimsel arama.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "Bir grup sürüm tutar ve en iyilerinden daha iyilerini üretir.",
   "submit.v2.optimizer.picker.carousel_aria": "Bu kuruluma uyan optimize ediciler",
-  "submit.v2.optimizer.source.paper": "Makale",
-  "submit.v2.optimizer.source.code": "Kod",
   "submit.v2.optimizer.source.paper_aria": "Makaleyi oku: {p1} (yeni sekmede açılır)",
   "submit.v2.optimizer.source.code_aria": "Özgün kodu görüntüle: {p1} (yeni sekmede açılır)",
   "submit.v2.optimizer.source.list_aria": "{p1} kaynakları",

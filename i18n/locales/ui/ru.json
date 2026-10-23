@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "Эволюционный поиск по популяции кандидатов с мутациями и скрещиваниями, которые пишет LLM.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "Держит группу версий и выводит из лучших ещё более удачные.",
   "submit.v2.optimizer.picker.carousel_aria": "Оптимизаторы, подходящие к этой настройке",
-  "submit.v2.optimizer.source.paper": "Статья",
-  "submit.v2.optimizer.source.code": "Код",
   "submit.v2.optimizer.source.paper_aria": "Читать статью: {p1} (откроется в новой вкладке)",
   "submit.v2.optimizer.source.code_aria": "Открыть исходный код: {p1} (откроется в новой вкладке)",
   "submit.v2.optimizer.source.list_aria": "Источники для {p1}",

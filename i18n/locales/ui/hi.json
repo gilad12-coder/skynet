@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "उम्मीदवारों की आबादी पर विकासवादी खोज, जिसमें म्यूटेशन और क्रॉसओवर LLM लिखता है।",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "कई संस्करण रखता है और सबसे अच्छों से बेहतर संस्करण तैयार करता है।",
   "submit.v2.optimizer.picker.carousel_aria": "इस सेटअप के अनुकूल ऑप्टिमाइज़र",
-  "submit.v2.optimizer.source.paper": "शोधपत्र",
-  "submit.v2.optimizer.source.code": "कोड",
   "submit.v2.optimizer.source.paper_aria": "शोधपत्र पढ़ें: {p1} (नए टैब में खुलता है)",
   "submit.v2.optimizer.source.code_aria": "मूल कोड देखें: {p1} (नए टैब में खुलता है)",
   "submit.v2.optimizer.source.list_aria": "{p1} के स्रोत",

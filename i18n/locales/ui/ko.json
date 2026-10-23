@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "LLM이 작성한 변이와 교차를 사용해 후보 집단에 대해 진화적 탐색을 수행합니다.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "여러 버전을 유지하며 가장 좋은 것들로부터 더 나은 버전을 키웁니다.",
   "submit.v2.optimizer.picker.carousel_aria": "이 설정에 맞는 옵티마이저",
-  "submit.v2.optimizer.source.paper": "논문",
-  "submit.v2.optimizer.source.code": "코드",
   "submit.v2.optimizer.source.paper_aria": "논문 읽기: {p1} (새 탭에서 열림)",
   "submit.v2.optimizer.source.code_aria": "원본 코드 보기: {p1} (새 탭에서 열림)",
   "submit.v2.optimizer.source.list_aria": "{p1} 출처",

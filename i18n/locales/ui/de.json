@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "Evolutionäre Suche über eine Population von Kandidaten, mit von einem LLM geschriebenen Mutationen und Kreuzungen.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "Hält eine Gruppe von Versionen und züchtet aus den besten bessere.",
   "submit.v2.optimizer.picker.carousel_aria": "Optimierer, die zu dieser Einrichtung passen",
-  "submit.v2.optimizer.source.paper": "Paper",
-  "submit.v2.optimizer.source.code": "Code",
   "submit.v2.optimizer.source.paper_aria": "Paper lesen: {p1} (öffnet in einem neuen Tab)",
   "submit.v2.optimizer.source.code_aria": "Originalcode ansehen: {p1} (öffnet in einem neuen Tab)",
   "submit.v2.optimizer.source.list_aria": "Quellen zu {p1}",

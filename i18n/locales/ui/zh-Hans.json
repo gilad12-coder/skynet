@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "在候选种群上进行进化搜索，由 LLM 编写变异和交叉。",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "保留多个版本，并从最好的版本中培育出更好的版本。",
   "submit.v2.optimizer.picker.carousel_aria": "适合此设置的优化器",
-  "submit.v2.optimizer.source.paper": "论文",
-  "submit.v2.optimizer.source.code": "代码",
   "submit.v2.optimizer.source.paper_aria": "阅读论文：{p1}（在新标签页中打开）",
   "submit.v2.optimizer.source.code_aria": "查看原始代码：{p1}（在新标签页中打开）",
   "submit.v2.optimizer.source.list_aria": "{p1} 的来源",

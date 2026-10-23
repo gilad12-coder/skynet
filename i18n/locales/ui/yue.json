@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "喺一群候選上做演化搜尋，由 LLM 寫變異同交叉。",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "保留幾個版本，再由最好嗰啲培育出更好嘅。",
   "submit.v2.optimizer.picker.carousel_aria": "啱呢個設定嘅優化器",
-  "submit.v2.optimizer.source.paper": "論文",
-  "submit.v2.optimizer.source.code": "程式碼",
   "submit.v2.optimizer.source.paper_aria": "閱讀論文：{p1}（喺新分頁開啟）",
   "submit.v2.optimizer.source.code_aria": "睇原始程式碼：{p1}（喺新分頁開啟）",
   "submit.v2.optimizer.source.list_aria": "{p1} 嘅來源",

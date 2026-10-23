@@ -213,8 +213,6 @@
   "submit.v2.optimizer.option.shinka_evolve.desc": "جست‌وجوی تکاملی روی جمعیتی از نامزدها، با جهش‌ها و آمیزش‌هایی که یک LLM می‌نویسد.",
   "submit.v2.optimizer.option.shinka_evolve.desc.guided": "چند نسخه نگه می‌دارد و از بهترین‌ها نسخه‌های بهتر پرورش می‌دهد.",
   "submit.v2.optimizer.picker.carousel_aria": "بهینه‌سازهای سازگار با این تنظیمات",
-  "submit.v2.optimizer.source.paper": "مقاله",
-  "submit.v2.optimizer.source.code": "کد",
   "submit.v2.optimizer.source.paper_aria": "خواندن مقاله: {p1} (در زبانه‌ای جدید باز می‌شود)",
   "submit.v2.optimizer.source.code_aria": "مشاهدهٔ کد اصلی: {p1} (در زبانه‌ای جدید باز می‌شود)",
   "submit.v2.optimizer.source.list_aria": "منابع {p1}",
