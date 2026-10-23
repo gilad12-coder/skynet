@@ -1,4 +1,4 @@
-"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1 to R782H-1).
+"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1 to R782I-1).
 
 SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
 COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
@@ -36,6 +36,7 @@ from core.api.routers.account_data import DeleteAccountRequest, create_account_d
 from core.api.routers.desktop_link import create_desktop_link_router
 from core.config import app_env, settings
 from core.storage.models import (
+    AgentConversationModel,
     ApiTokenModel,
     Base,
     DesktopLinkCodeModel,
@@ -63,13 +64,14 @@ INTERNAL_SECRET = "internal-test-secret"
 # Each statement locks one row that the account deletion deletes. A blocker
 # transaction that holds it parks the deletion at that point (R782F-1).
 DELETION_STOPS = {
+    "agent-conversations": "SELECT 1 FROM agent_conversations WHERE username = :u FOR UPDATE",
     "user-identities": "SELECT 1 FROM user_identities WHERE username = :u FOR UPDATE",
     "api-tokens": "SELECT 1 FROM api_tokens WHERE username = :u FOR UPDATE",
     "passkey-challenges": "SELECT 1 FROM webauthn_challenges WHERE user_email = :u FOR UPDATE",
     "registry-preferences": "SELECT 1 FROM package_registry_preferences WHERE username = :u FOR UPDATE",
     "desktop-tokens": "SELECT 1 FROM desktop_tokens FOR UPDATE",
 }
-SIGN_IN_STOPS = ["user-identities", "passkey-challenges", "api-tokens", "registry-preferences"]
+SIGN_IN_STOPS = ["agent-conversations", "passkey-challenges", "user-identities", "api-tokens", "registry-preferences"]
 
 
 class _Store:
@@ -845,6 +847,7 @@ def sign_in(full_database: Engine, monkeypatch: pytest.MonkeyPatch) -> SimpleNam
         alice.email_verified = True
         alice.email_2fa_enabled = True
         session.add(ApiTokenModel(username=ALICE, token_hash="h" * 64, last4="abcd"))
+        session.add(AgentConversationModel(id=str(uuid4()), username=ALICE, title="Notes"))
         session.add(UserIdentityModel(provider="github", provider_account_id="4242", username=ALICE))
         session.add(PackageRegistryPreferenceModel(username=ALICE, index_url="https://pypi.org/simple"))
         session.add(
@@ -967,6 +970,38 @@ def test_email_code_sign_in_during_account_deletion_does_not_deadlock(
     # A sign-in that commits first succeeds; one that waits finds no account.
     assert results["call"] in (200, 401, "StaleDataError"), results
     _assert_account_gone(full_database)
+
+
+@pytest.mark.parametrize("stop", SIGN_IN_STOPS)
+def test_first_oauth_sign_in_during_account_deletion_leaves_no_identity(
+    full_database: Engine, sign_in: SimpleNamespace, stop: str
+) -> None:
+    """A first Google sign-in during account deletion leaves no identity row (R782I-1).
+
+    The sign-in adds an identity row and writes the user row in one
+    transaction. When the deletion deleted identities before its user lock,
+    a sign-in that ran after that delete committed a new identity row that
+    the deletion never saw. The row outlived the account and would sign in
+    to a later account registered under the same email.
+    """
+
+    def first_oauth_sign_in() -> Any:
+        """Sign in with a Google account that is not linked yet."""
+        return sign_in.client.post(
+            "/auth/oauth/provision",
+            json={"email": ALICE, "name": "Alice", "provider": "google", "provider_account_id": "g-999"},
+            headers={"X-Internal-Auth": INTERNAL_SECRET},
+        )
+
+    results = _run_during_parked_deletion(full_database, stop, first_oauth_sign_in)
+
+    assert results["deletion"] == "ok", results
+    # A sign-in that commits first succeeds; one that waits for the user lock
+    # finds the user row gone.
+    assert results["call"] in (200, "StaleDataError"), results
+    _assert_account_gone(full_database)
+    with Session(full_database) as session:
+        assert session.query(UserIdentityModel).count() == 0
 
 
 def test_desktop_call_during_account_deletion_reports_a_revoked_link(

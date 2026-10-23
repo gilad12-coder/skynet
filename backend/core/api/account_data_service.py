@@ -526,7 +526,6 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(ConversationEmbeddingModel).where(ConversationEmbeddingModel.username == username))
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
-    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     # Passkey sign-in writes its passkey row, then the user row, so passkey
     # rows go before the user lock. Email-code sign-in writes the user row,
     # then deletes its code, so codes go after it. Either other order
@@ -538,6 +537,11 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     # API-token create takes a share lock on it, so it either commits before
     # the token sweep below or finds no account and adds no token (SKY-150).
     session.execute(select(UserModel.email).where(UserModel.email == username).with_for_update())
+    # A first provider sign-in adds its identity row and writes the user row
+    # in one transaction, so identities go after the user lock. Before it, a
+    # sign-in could add an identity after this delete and outlive the
+    # account (R782I-1).
+    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     # Codes, then links, then tokens. An exchange that got the user lock
