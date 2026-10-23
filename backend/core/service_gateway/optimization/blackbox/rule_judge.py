@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -54,7 +53,7 @@ _MAX_ACTION_CHARS = 2_000
 # The latest turns of a model call show the agent's last tool calls and their
 # results; older turns were already seen by earlier watches.
 _ACTION_TURNS = 3
-_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+_JSON_DECODER = json.JSONDecoder()
 
 EVENT_BLOCK = RULE_BLOCK_EVENT
 EVENT_NOTE = "rule.note"
@@ -153,6 +152,31 @@ def watch_prompt(rules: Sequence[str], actions: Sequence[str], diff: str) -> str
     )
 
 
+def _verdict_object(text: str | None) -> dict[str, Any] | None:
+    """Find the first JSON object with a boolean ``violation`` in a judge's reply.
+
+    Judges quote code, so braces in prose before or after the answer are
+    skipped instead of read as part of it.
+
+    Args:
+        text: The judge model's reply.
+
+    Returns:
+        The answer object, or ``None`` when the reply holds none.
+    """
+    reply = text or ""
+    start = reply.find("{")
+    while start != -1:
+        try:
+            answer, _ = _JSON_DECODER.raw_decode(reply, start)
+        except json.JSONDecodeError:
+            answer = None
+        if isinstance(answer, dict) and isinstance(answer.get("violation"), bool):
+            return answer
+        start = reply.find("{", start + 1)
+    return None
+
+
 def parse_verdict(text: str | None, rules: Sequence[str]) -> RuleVerdict | None:
     """Read a judge's answer.
 
@@ -163,16 +187,8 @@ def parse_verdict(text: str | None, rules: Sequence[str]) -> RuleVerdict | None:
     Returns:
         The verdict, or ``None`` when the reply is not a valid answer.
     """
-    if not text:
-        return None
-    match = _JSON_OBJECT.search(text)
-    if match is None:
-        return None
-    try:
-        answer = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(answer, dict) or not isinstance(answer.get("violation"), bool):
+    answer = _verdict_object(text)
+    if answer is None:
         return None
     reason = str(answer.get("reason") or "").strip()[:_MAX_REASON_CHARS]
     if not answer["violation"]:
