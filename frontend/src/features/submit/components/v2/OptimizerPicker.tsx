@@ -130,7 +130,8 @@ export function OptimizerPicker({
             const label = optimizerLabel(option.id, guided);
             const sources = optimizerSources(option.id);
             // Links cannot nest inside the radio button, so they sit beside it
-            // and overlay the slot EngineCard reserves at the card's foot.
+            // and overlay the slot EngineCard reserves at the card's foot,
+            // in the bottom-end corner.
             return (
               <div key={option.id} className="group/card relative flex">
                 <button
@@ -162,7 +163,7 @@ export function OptimizerPicker({
                 <OptimizerSourceLinks
                   optimizerName={label}
                   sources={sources}
-                  className="absolute start-3 bottom-3"
+                  className="absolute end-3 bottom-3"
                 />
               </div>
             );

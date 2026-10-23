@@ -9,7 +9,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { setClientLocale } from "@/shared/lib/runtime-locale";
-import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
+import { TooltipContent, TooltipProvider } from "@/shared/ui/primitives/tooltip";
 import { optimizerSources } from "../../lib/optimizer-sources";
 
 // The classic JSX transform the test loader applies reads a global React.
@@ -27,13 +27,25 @@ function render(id: Parameters<typeof optimizerSources>[0], name: string): strin
 
 type AnyElement = React.ReactElement<Record<string, unknown>>;
 
-/** Every `<a>` element in a rendered element tree, without mounting it. */
-function anchors(node: unknown): AnyElement[] {
-  if (Array.isArray(node)) return node.flatMap(anchors);
+/** Every element of one type in a rendered element tree, without mounting it. */
+function find(node: unknown, type: unknown): AnyElement[] {
+  if (Array.isArray(node)) return node.flatMap((child) => find(child, type));
   if (!React.isValidElement(node)) return [];
   const element = node as AnyElement;
-  const own = element.type === "a" ? [element] : [];
-  return [...own, ...anchors(element.props.children)];
+  const own = element.type === type ? [element] : [];
+  return [...own, ...find(element.props.children, type)];
+}
+
+function anchors(node: unknown): AnyElement[] {
+  return find(node, "a");
+}
+
+/** The plain text inside an element tree. */
+function text(node: unknown): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(text).join("");
+  if (!React.isValidElement(node)) return "";
+  return text((node as AnyElement).props.children);
 }
 
 void describe("OptimizerSourceLinks", () => {
@@ -49,7 +61,21 @@ void describe("OptimizerSourceLinks", () => {
     // The UI catalog does not load under jiti, so its strings render as their keys.
     assert.match(html, /<ul [^>]*aria-label="submit\.v2\.optimizer\.source\.list_aria"/);
     assert.match(html, /<a [^>]*aria-label="submit\.v2\.optimizer\.source\.paper_aria"/);
-    assert.match(html, />submit\.v2\.optimizer\.source\.paper</);
+  });
+
+  void it("shows only an icon in the link, with no visible text", () => {
+    const html = render("gepa", "GEPA");
+    const link = /<a [^>]*>([\s\S]*?)<\/a>/.exec(html)?.[1] ?? "";
+    assert.match(link, /^<svg[\s\S]*<\/svg>$/);
+    assert.equal(link.replace(/<[^>]*>/g, "").trim(), "");
+  });
+
+  void it("puts the source title in the link's tooltip", () => {
+    setClientLocale("en");
+    const tree = OptimizerSourceLinks({ optimizerName: "GEPA", sources: optimizerSources("gepa") });
+    const tips = find(tree, TooltipContent);
+    assert.equal(tips.length, 1);
+    assert.equal(text(tips[0]), "GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning");
   });
 
   void it("labels a repository as code, not as a paper", () => {

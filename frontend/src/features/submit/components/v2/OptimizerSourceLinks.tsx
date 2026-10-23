@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent, MouseEvent } from "react";
 
-import { ArrowUpRight, FileText, GithubLogo } from "@/shared/ui/icons";
+import { FileText, GithubLogo } from "@/shared/ui/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -17,8 +17,9 @@ function keepSelection(event: MouseEvent | KeyboardEvent) {
 }
 
 /**
- * The paper and code links of one optimizer card. They render beside the
- * card's radio button, never inside it, so each link stays a real link.
+ * The paper and code links of one optimizer card, as icon-only links whose
+ * tooltip names the source. They render beside the card's radio button,
+ * never inside it, so each link stays a real link.
  */
 export function OptimizerSourceLinks({
   optimizerName,
@@ -53,20 +54,9 @@ export function OptimizerSourceLinks({
                   )}
                   onClick={keepSelection}
                   onKeyDown={keepSelection}
-                  className="group/src inline-flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background/80 px-2 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="grid size-7 place-items-center rounded-md border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <Icon className="size-3 shrink-0" aria-hidden="true" />
-                  <span>
-                    {msg(
-                      source.kind === "paper"
-                        ? "submit.v2.optimizer.source.paper"
-                        : "submit.v2.optimizer.source.code",
-                    )}
-                  </span>
-                  <ArrowUpRight
-                    className="size-2.5 shrink-0 opacity-60 transition-opacity group-hover/src:opacity-100 rtl:-scale-x-100"
-                    aria-hidden="true"
-                  />
+                  <Icon className="size-3.5" aria-hidden="true" />
                 </a>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-72 leading-relaxed" dir={getActiveDir()}>

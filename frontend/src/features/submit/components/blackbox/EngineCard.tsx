@@ -95,7 +95,7 @@ export function EngineCard({
             </span>
           )
         )}
-        {footerSlot && <span aria-hidden="true" className="mt-auto h-6 shrink-0" />}
+        {footerSlot && <span aria-hidden="true" className="mt-auto h-7 shrink-0" />}
       </div>
     </>
   );
