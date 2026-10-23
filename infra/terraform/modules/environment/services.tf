@@ -65,8 +65,6 @@ resource "aws_service_discovery_service" "litellm" {
       ttl  = 10
     }
   }
-
-  health_check_custom_config {}
 }
 
 locals {
