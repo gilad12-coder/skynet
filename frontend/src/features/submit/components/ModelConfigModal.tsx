@@ -6,11 +6,12 @@ import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/fea
 import {
   SubscriptionSourcePicker,
   byokHintKey,
-  cliState,
   findCli,
+  firstReadyCli,
+  isCliProvider,
   subscriptionCatalogModels,
   useLocalStatus,
-  type LocalStatus,
+  withChosenCli,
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
@@ -103,11 +104,6 @@ function initialDraft(config: ModelConfig, local: boolean, byokOnly = false): Mo
     : draft;
 }
 
-/** The first CLI that can run models right now, as the subscription source's preselection. */
-function firstReadyCli(status: LocalStatus | null) {
-  return status?.clis.find((cli) => cliState(cli).kind === "ok" && cli.models.length > 0)?.id;
-}
-
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, cli_provider: cliProvider, ...rest } = config;
   const {
@@ -121,7 +117,10 @@ function withoutInlineConnection(config: ModelConfig): ModelConfig {
     ...rest,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? rest.byok_provider : undefined,
-    ...(tokenSource === "subscription" ? { cli_provider: cliProvider ?? null } : {}),
+    // A saved CLI the app no longer offers opens unchosen, so a ready one is preselected.
+    ...(tokenSource === "subscription"
+      ? { cli_provider: isCliProvider(cliProvider) ? cliProvider : null }
+      : {}),
     extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
   };
 }
@@ -171,8 +170,8 @@ export function ModelConfigModal({
   const readyCli = firstReadyCli(local.status);
   React.useEffect(() => {
     if (mode !== "subscription" || draft.cli_provider || !readyCli) return;
-    setDraft((current) => ({ ...current, cli_provider: readyCli }));
-  }, [mode, draft.cli_provider, readyCli]);
+    setDraft((current) => withChosenCli(current, readyCli, local.status));
+  }, [mode, draft.cli_provider, readyCli, local.status]);
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -427,10 +426,7 @@ export function ModelConfigModal({
                 <SubscriptionSourcePicker
                   value={draft.cli_provider}
                   onChange={(cli) =>
-                    setDraft((current) => {
-                      const served = findCli(local.status, cli)?.models.includes(current.name);
-                      return { ...current, cli_provider: cli, name: served ? current.name : "" };
-                    })
+                    setDraft((current) => withChosenCli(current, cli, local.status))
                   }
                   status={local.status}
                   loading={local.loading}
