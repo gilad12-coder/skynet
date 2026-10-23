@@ -200,6 +200,33 @@ def test_router_accepts_subscription_ids_in_local_mode() -> None:
     assert (caught.value.status_code, caught.value.code) == (422, "billing.subscription_unmapped_model")
 
 
+TERRA_SUBSCRIPTION_ID = "subscription/codex/openai/gpt-5.6-terra"
+
+
+@pytest.mark.usefixtures("local")
+@pytest.mark.parametrize(
+    "route", [model_router.route_menu_model, model_router.route_interview_model], ids=["menu", "interview"]
+)
+def test_local_mode_keeps_a_subscription_pick_that_matches_the_removed_pattern(route: object) -> None:
+    """Keep a subscription pick whose slug also matches the removed-model pattern.
+
+    Args:
+        route: The composer router under test.
+    """
+    assert route(TERRA_SUBSCRIPTION_ID) == TERRA_SUBSCRIPTION_ID
+
+
+def test_hosted_interview_still_replaces_a_removed_pick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the interview default for a removed pick in hosted mode, as before.
+
+    Args:
+        monkeypatch: Keeps local mode off and gives an interview default.
+    """
+    monkeypatch.setattr(model_router.settings, "local_mode", False)
+    monkeypatch.setattr(model_router, "interview_model_id", lambda: MANAGED_DEFAULT)
+    assert model_router.route_interview_model(TERRA_SUBSCRIPTION_ID) == MANAGED_DEFAULT
+
+
 MANAGED_DEFAULT = "openrouter/z-ai/glm-5.3-flash"
 
 

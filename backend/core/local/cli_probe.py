@@ -66,7 +66,10 @@ _PROBE_CACHE_SECONDS = 30.0
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 _LOGIN_HINTS: dict[CliProvider, str] = {
-    "codex": "Run `codex login` in a terminal.",
+    # Skynet reads the codex login from auth.json, so a Keychain-only login looks signed out.
+    "codex": (
+        'Sign in to codex with ChatGPT: set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login` in a terminal.'
+    ),
     "claude": "Run `claude auth login` in a terminal.",
 }
 
@@ -162,6 +165,42 @@ def _version_tuple(text: str) -> tuple[int, int, int] | None:
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
+def codex_subscription_login(document: object) -> bool:
+    """Tell whether a codex ``auth.json`` is a ChatGPT subscription login, by codex's own rule.
+
+    Codex takes an explicit ``auth_mode`` first. Without one, a non-empty
+    ``OPENAI_API_KEY`` makes it an API-key login, else a ChatGPT login. An
+    API-key login bills the user's API account, so only a ChatGPT login with
+    an access token counts.
+
+    Args:
+        document: The parsed ``auth.json``.
+
+    Returns:
+        True for a ChatGPT login with an access token.
+    """
+    if not isinstance(document, dict):
+        return False
+    mode = document.get("auth_mode")
+    if mode is None:
+        mode = "apikey" if document.get("OPENAI_API_KEY") else "chatgpt"
+    tokens = document.get("tokens")
+    return mode == "chatgpt" and isinstance(tokens, dict) and bool(tokens.get("access_token"))
+
+
+def _codex_login_file() -> object:
+    """Read the codex login file the probe's CLI uses.
+
+    Returns:
+        The parsed ``auth.json``, or None when it is missing or not JSON.
+    """
+    home = os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    try:
+        return json.loads((Path(home) / "auth.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def _logged_in(cli: CliProvider, path: str) -> bool | None:
     """Ask a CLI whether it has a signed-in subscription.
 
@@ -177,7 +216,9 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
         result = _run([path, "login", "status"])
         if result is None:
             return None
-        return result.returncode == 0 and "logged in" in (result.stdout + result.stderr).lower()
+        status = (result.stdout + result.stderr).lower()
+        # The host turn reads the same file with the same rule, so the app and the turn agree.
+        return result.returncode == 0 and "logged in" in status and codex_subscription_login(_codex_login_file())
     result = _run([path, "auth", "status"])
     if result is None:
         return None

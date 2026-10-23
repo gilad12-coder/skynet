@@ -38,6 +38,13 @@ from ..billing import (
     payload_uses_token_source,
 )
 from ..billing.budgets import BudgetService
+from ..billing.host_agent import (
+    attach_host_agent_token,
+    bind_host_agent,
+    failure_message,
+    host_agent_failure,
+    host_proposer,
+)
 from ..billing.metering import debit_at_fallback_price
 from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
@@ -916,6 +923,13 @@ class BackgroundWorker:
                         ),
                         allow_private_tools=settings.discover_allow_private,
                     )
+                    host = host_proposer(payload_dict)
+                    if host is not None:
+                        # The CLI and permission come from the stored run settings,
+                        # never from the guest, and only this run's proposer gets the token.
+                        attach_host_agent_token(
+                            payload_dict, bind_host_agent(budget_gateway, settings, cli=host[0], permission=host[1])
+                        )
                     # The wizard leaves the ceiling unset for a budget without a
                     # limit, while the guest's proposer still plans its spend
                     # against one, so the parent hands it the ledger's allowance.
@@ -1052,6 +1066,11 @@ class BackgroundWorker:
                     execution_budget_snapshot, settlement_error = self._close_budget_gateway(
                         optimization_id, closing_gateway, execution_generation
                     )
+                    host_failure = host_agent_failure(closing_gateway)
+                    if host_failure is not None:
+                        # A capped subscription stops every later turn, so the run
+                        # ends with the cap and its reset time, not a proposer error.
+                        raise OptimizerProcessError(failure_message(host_failure), "HostAgentRateLimited")
                     if settlement_error is not None and subprocess_error is None:
                         raise settlement_error
 

@@ -328,11 +328,12 @@ async def test_seed_turn_runs_on_the_seed_budget_and_ends_with_an_error(monkeypa
     _patch_seed_lanes(monkeypatch)
     built: list[tuple[Any, ...]] = []
 
-    def build(*args: Any) -> Any:
+    def build(*args: Any, **_kwargs: Any) -> Any:
         """Record the LM arguments.
 
         Args:
             *args: Model, effort and token budget.
+            **_kwargs: The resolved model config, unused here.
 
         Returns:
             A placeholder LM.

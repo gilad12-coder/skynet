@@ -46,10 +46,11 @@ from ...service_gateway.agents.steering import (
 )
 from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
+from ..agent_engine import engine_agent_model
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
-from ..model_router import effective_reasoning_effort, route_agent_model
+from ..model_router import effective_reasoning_effort, metering_token_source, route_agent_model, route_local_byok_model
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
@@ -732,7 +733,10 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         conversation_id, title = await asyncio.to_thread(_setup_turn)
 
         wizard_state: WizardState = {**req.wizard_state}  # type: ignore[typeddict-item]
-        model_config = route_agent_model(req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        model_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username
+        ) or route_agent_model(picked)
         effort = effective_reasoning_effort(model_config.name, req.reasoning_effort)
         if effort:
             model_config = model_config.model_copy(update={"extra": {**model_config.extra, "reasoning_effort": effort}})
@@ -755,6 +759,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Agent chat",
             usage_sink=usage_sink,
+            token_source=metering_token_source(model_config),
         )
         wrapped = _wrap_with_persistence(
             metered,

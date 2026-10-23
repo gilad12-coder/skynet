@@ -38,6 +38,7 @@ from .operation_pricing import ChargePolicy, UnpricedOperationError, operation_q
 from .runtime import BudgetRuntime, PaidResult
 
 __all__ = [
+    "THINKING_LABEL_ROLE",
     "CliDispatcher",
     "SubscriptionRateLimitedError",
     "local_subscription_route",
@@ -49,6 +50,12 @@ _UNSUPPORTED_PATHS = frozenset({"/responses", "/embeddings"})
 _RETRY_DELAYS_SECONDS = (2.0, 4.0, 8.0)
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
 _PRICE_TIMEOUT_SECONDS = 10
+# A thinking label is a side call the turn never waits for. It runs in its
+# own one-call pool and never waits there, so labels cannot hold the slots of
+# the turn's own CLI calls; its client gives up after 8 s, so a longer run is
+# stopped soon after, as nobody will read its answer.
+THINKING_LABEL_ROLE = "thinking_label"
+_LABEL_CLI_TIMEOUT_SECONDS = 10.0
 # Seams for tests: the back-off sleep and the price lookup.
 _sleep: Callable[[float], None] = time.sleep
 _prices_lock = threading.Lock()
@@ -435,6 +442,8 @@ class CliDispatcher:
             CliRunError: When the call still fails after the last retry.
         """
         runner = RUNNERS[provider]
+        if self.role == THINKING_LABEL_ROLE:
+            return self._run_label(provider, model_arg, prompt, schema)
         slots = _semaphore(provider, self.settings.cli_max_concurrency)
         for retry in range(len(_RETRY_DELAYS_SECONDS) + 1):
             try:
@@ -445,6 +454,33 @@ class CliDispatcher:
                     raise
                 _sleep(_RETRY_DELAYS_SECONDS[retry] * random.uniform(0.75, 1.25))
         raise AssertionError("unreachable")
+
+    def _run_label(self, provider: str, model_arg: str, prompt: str, schema: dict[str, Any] | None) -> CliCompletion:
+        """Run one thinking-label call in the label pool, or fail at once when it is busy.
+
+        Args:
+            provider: The CLI.
+            model_arg: Its ``--model`` value.
+            prompt: The full prompt.
+            schema: A JSON schema for the answer, or ``None``.
+
+        Returns:
+            The completion.
+
+        Raises:
+            SubscriptionRateLimitedError: When the subscription is capped.
+            CliRunError: When another label runs on this CLI, or the call fails or times out.
+        """
+        slot = _semaphore(f"{provider}:{THINKING_LABEL_ROLE}", 1)
+        if not slot.acquire(blocking=False):
+            raise CliRunError(provider, f"{provider} is already writing a thinking label", transient=False)
+        try:
+            timeout = min(self.settings.cli_call_timeout_seconds, _LABEL_CLI_TIMEOUT_SECONDS)
+            label_settings = self.settings.model_copy(update={"cli_call_timeout_seconds": timeout})
+            with tempfile.TemporaryDirectory(prefix="skynet-cli-") as cwd:
+                return RUNNERS[provider](model_arg, prompt, schema, label_settings, Path(cwd))
+        finally:
+            slot.release()
 
     def _usage(self, provider: str, completion: CliCompletion) -> dict[str, Any]:
         """Build the usage block, priced at the model's public list price.
