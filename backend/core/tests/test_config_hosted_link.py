@@ -22,8 +22,8 @@ _ENV_VARS = (
     "APP_HOSTED_API_URL",
     "APP_HOSTED_ALLOW_INSECURE_URL",
 )
-_STAGING_APP = "https://frontend-staging-102e.up.railway.app"
-_STAGING_API = "https://backend-staging-6295.up.railway.app"
+_STAGING_APP = "https://staging.skynetml.com"
+_STAGING_API = "https://api-staging.skynetml.com"
 _PRODUCTION_APP = "https://skynetml.com"
 _PRODUCTION_API = "https://api.skynetml.com"
 

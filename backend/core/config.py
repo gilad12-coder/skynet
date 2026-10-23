@@ -54,7 +54,7 @@ DEFAULT_API_HOST = "0.0.0.0"
 HOSTED_TARGET_STAMP = Path(__file__).parent / "hosted_target.txt"
 HOSTED_TARGET_URLS = {
     "production": ("https://skynetml.com", "https://api.skynetml.com"),
-    "staging": ("https://frontend-staging-102e.up.railway.app", "https://backend-staging-6295.up.railway.app"),
+    "staging": ("https://staging.skynetml.com", "https://api-staging.skynetml.com"),
 }
 
 
