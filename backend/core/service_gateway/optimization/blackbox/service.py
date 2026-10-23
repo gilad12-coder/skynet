@@ -682,7 +682,7 @@ def _best_legal_candidate(server: EvalServer, rejected: Candidate) -> Candidate 
         for record in server.history
         if candidate_key(record.candidate) != rejected_key
         and ILLEGAL_APPROACH_KEY not in record.side_info
-        and "error" not in record.side_info
+        and not record.crashed
     ]
     return max(legal, key=lambda record: record.mean_score).candidate if legal else None
 
