@@ -14,7 +14,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
+from ...storage.models import UserModel
 from .. import auth as auth_mod
 from ..routers.admin import create_admin_router
 
@@ -32,7 +36,12 @@ class _FakeStorageStore:
     """In-memory storage-budget override store for admin route tests."""
 
     def __init__(self) -> None:
-        """Initialize empty override state and a stable per-user footprint."""
+        """Initialize empty override state, a stable per-user footprint, and the admin account."""
+        self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        UserModel.__table__.create(self.engine)
+        with Session(self.engine) as session:
+            session.add(UserModel(email="admin@example.com", name="Admin", password_hash="x"))
+            session.commit()
         self.overrides: dict[str, int] = {}
         self.used_by_user = 512 * 1024 * 1024
 
@@ -56,9 +65,7 @@ class _FakeStorageStore:
         """Return a stable fake footprint for the user."""
         return _FakeUsage(total=self.used_by_user)
 
-    def set_user_storage_quota_override(
-        self, username: str, quota_bytes: int, updated_by: str | None = None
-    ) -> None:
+    def set_user_storage_quota_override(self, username: str, quota_bytes: int, updated_by: str | None = None) -> None:
         """Store an override."""
         self.overrides[username] = quota_bytes
 
@@ -103,8 +110,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(auth_mod.settings, "admin_usernames", "")
     monkeypatch.setattr(auth_mod.settings, "admin_groups", "skynet-admins")
     monkeypatch.setattr(auth_mod.settings, "user_storage_quota_bytes", _DEFAULT_BYTES)
+    store = _FakeStorageStore()
     app = FastAPI()
-    app.include_router(create_admin_router(job_store=_FakeStorageStore()))
+    app.state.job_store = store
+    app.include_router(create_admin_router(job_store=store))
     return TestClient(app)
 
 
@@ -117,9 +126,7 @@ def test_storage_quota_routes_reject_missing_bearer(client: TestClient) -> None:
 
 def test_storage_quota_routes_reject_non_admin_group(client: TestClient) -> None:
     """Signed users without an admin group cannot manage storage budgets."""
-    response = client.get(
-        "/admin/storage-quotas", headers={"Authorization": f"Bearer {_token(groups=['other'])}"}
-    )
+    response = client.get("/admin/storage-quotas", headers={"Authorization": f"Bearer {_token(groups=['other'])}"})
 
     assert response.status_code == 403
 
