@@ -637,6 +637,29 @@ def test_embed_finished_job_uses_free_summary_when_owner_has_no_balance() -> Non
     meter.assert_not_called()
 
 
+def test_embed_finished_job_never_bills_a_desktop_import() -> None:
+    """A run imported from the desktop gets the free summary even when its owner is funded."""
+    job = _success_job()
+    job["payload"] = None
+    job["payload_overview"]["imported_from"] = "desktop"
+    store = _FakeJobStore({"job-1": job})
+    billing = MagicMock()
+    billing.return_value.spendable_cents.return_value = 5000
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "get_embedder", return_value=_FakeEmbedder()),
+        patch.object(pipeline, "StripeBillingService", billing),
+        patch.object(pipeline, "summarize_task", return_value="Sentiment task") as summarize,
+        patch.object(pipeline, "meter_llm_run") as meter,
+        patch.object(pipeline, "Session", return_value=_summary_session()),
+    ):
+        assert pipeline.embed_finished_job("job-1", job_store=store) is True
+
+    assert summarize.call_args.kwargs["use_llm"] is False
+    billing.return_value.spendable_cents.assert_not_called()
+    meter.assert_not_called()
+
+
 def _sqlite_store(*, with_embedding_table: bool) -> SimpleNamespace:
     """Build a job store on in-memory SQLite, with or without a slim ``job_embeddings`` table.
 

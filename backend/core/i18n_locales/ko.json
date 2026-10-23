@@ -422,6 +422,18 @@
     "continuous.review_rejected": "새 후보를 거부했습니다. 이전 버전이 유지됩니다.",
     "local.not_available": "이 기능은 {term.appName} Mac 앱에서만 사용할 수 있습니다.",
     "models.subscription_local_only": "구독 모델과 호스트 CLI 제안자는 {term.appName} Mac 앱에서만 실행됩니다.",
-    "models.managed_unavailable_local": "Mac 앱은 관리형 모델을 사용할 수 없습니다. 구독 모델이나 직접 소유한 공급자 키를 선택하세요."
+    "models.managed_unavailable_local": "Mac 앱은 관리형 모델을 사용할 수 없습니다. 구독 모델이나 직접 소유한 공급자 키를 선택하세요.",
+    "sync.import_local_only_disabled": "가져오기는 호스팅된 {term.appName} 계정에서만 작동하며 Mac 앱에서는 작동하지 않습니다.",
+    "sync.unsupported_schema": "이 내보내기 파일은 지원되지 않는 형식({schema})입니다.",
+    "sync.invalid_bundle": "이 내보내기 파일이 손상되었거나 불완전합니다.",
+    "sync.bundle_too_large": "내보내기 파일이 {max_mb}MB보다 큽니다.",
+    "sync.export_not_finished": "완료된 실행만 내보낼 수 있습니다. 이 실행은 '{status}' 상태입니다.",
+    "sync.unsupported_run_type": "'{optimization_type}' 유형의 실행은 내보낼 수 없습니다.",
+    "serve.subscription_model_hosted": "이 실행은 로컬 구독 모델을 사용했습니다. {term.appName} Mac 앱에서 제공하거나, 관리형 모델 또는 본인의 공급자 키로 새 최적화를 시작하세요.",
+    "budget.insufficient": "사용 가능한 예산이나 계정 잔액으로 다음 작업의 비용을 충당할 수 없습니다.",
+    "budget.pending": "사용량을 아직 정산 중입니다. 진행 중인 작업이 끝난 후 계속하세요.",
+    "budget.conflict": "다른 탭에서 예산이 변경되었습니다. 수정하기 전에 잔액을 새로고침하세요.",
+    "budget.not_found": "이 예산은 현재 계정에서 사용할 수 없습니다. 새 설정 예산을 만드세요.",
+    "budget.invalid": "이미 지출되거나 예약된 사용량을 충당하는 지출 한도를 입력하세요."
   }
 }

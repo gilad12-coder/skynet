@@ -422,6 +422,18 @@
     "continuous.review_rejected": "Vous avez refusé le nouveau candidat. La version précédente est conservée.",
     "local.not_available": "Cette fonction est disponible uniquement dans l'app Mac {term.appName}.",
     "models.subscription_local_only": "Les modèles par abonnement et les proposeurs CLI locaux fonctionnent uniquement dans l'app Mac {term.appName}.",
-    "models.managed_unavailable_local": "L'app Mac ne peut pas utiliser les modèles gérés. Choisissez un modèle par abonnement ou votre propre clé de fournisseur."
+    "models.managed_unavailable_local": "L'app Mac ne peut pas utiliser les modèles gérés. Choisissez un modèle par abonnement ou votre propre clé de fournisseur.",
+    "sync.import_local_only_disabled": "L'importation fonctionne uniquement sur le compte {term.appName} hébergé, pas dans l'app Mac.",
+    "sync.unsupported_schema": "Ce fichier d'export utilise un format non pris en charge ({schema}).",
+    "sync.invalid_bundle": "Ce fichier d'export est endommagé ou incomplet.",
+    "sync.bundle_too_large": "Le fichier d'export dépasse {max_mb} Mo.",
+    "sync.export_not_finished": "Seule une exécution terminée peut être exportée. Cette exécution est '{status}'.",
+    "sync.unsupported_run_type": "Les exécutions de type '{optimization_type}' ne peuvent pas être exportées.",
+    "serve.subscription_model_hosted": "Cette exécution a utilisé un modèle d'abonnement local. Servez-la dans l'app Mac {term.appName}, ou lancez une nouvelle optimisation avec un modèle géré ou votre propre clé de fournisseur.",
+    "budget.insufficient": "Le budget disponible ou le solde du compte ne suffit pas à couvrir l’opération suivante.",
+    "budget.pending": "La consommation est encore en cours de règlement. Attendez la fin du travail en cours avant de continuer.",
+    "budget.conflict": "Ce budget a changé dans un autre onglet. Actualisez son solde avant de le modifier.",
+    "budget.not_found": "Ce budget n’est pas disponible pour votre compte. Créez un nouveau budget de configuration.",
+    "budget.invalid": "Saisissez un plafond de dépenses couvrant les montants déjà dépensés ou réservés."
   }
 }

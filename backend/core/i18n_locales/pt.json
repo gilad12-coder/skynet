@@ -422,6 +422,18 @@
     "continuous.review_rejected": "Rejeitou o novo candidato. A versão anterior mantém-se.",
     "local.not_available": "Esta funcionalidade só está disponível na app {term.appName} para Mac.",
     "models.subscription_local_only": "Os modelos por subscrição e os proponentes CLI locais só funcionam na app {term.appName} para Mac.",
-    "models.managed_unavailable_local": "A app para Mac não pode usar modelos geridos. Escolha um modelo por subscrição ou a sua própria chave de fornecedor."
+    "models.managed_unavailable_local": "A app para Mac não pode usar modelos geridos. Escolha um modelo por subscrição ou a sua própria chave de fornecedor.",
+    "sync.import_local_only_disabled": "A importação funciona apenas na conta {term.appName} hospedada, não no app para Mac.",
+    "sync.unsupported_schema": "Este arquivo de exportação usa um formato não suportado ({schema}).",
+    "sync.invalid_bundle": "Este arquivo de exportação está danificado ou incompleto.",
+    "sync.bundle_too_large": "O arquivo de exportação tem mais de {max_mb} MB.",
+    "sync.export_not_finished": "Só é possível exportar uma execução concluída. Esta execução está '{status}'.",
+    "sync.unsupported_run_type": "Execuções do tipo '{optimization_type}' não podem ser exportadas.",
+    "serve.subscription_model_hosted": "Esta execução usou um modelo de assinatura local. Sirva-a na app {term.appName} para Mac ou inicie uma nova otimização com um modelo gerido ou a sua própria chave de fornecedor.",
+    "budget.insufficient": "O orçamento disponível ou o saldo da conta não cobre a próxima operação.",
+    "budget.pending": "O consumo ainda está sendo contabilizado. Aguarde a conclusão do trabalho em andamento antes de continuar.",
+    "budget.conflict": "Este orçamento mudou em outra aba. Atualize o saldo antes de alterá-lo.",
+    "budget.not_found": "Este orçamento não está disponível para sua conta. Crie um novo orçamento de configuração.",
+    "budget.invalid": "Informe um limite de gastos que cubra os valores já gastos ou reservados."
   }
 }

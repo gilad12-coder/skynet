@@ -65,6 +65,11 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "billing.plan_unavailable": f"{APP_NAME} Pro isn't available on this deployment yet.",
     "billing.unknown_pack": "Unknown top-up pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",
+    "budget.conflict": "This budget changed in another tab. Refresh its balance before updating it.",
+    "budget.insufficient": "The available budget or account balance cannot cover the next operation.",
+    "budget.invalid": "Enter a spending limit that covers usage already spent or reserved.",
+    "budget.not_found": "This budget is unavailable for your account. Start a new setup budget.",
+    "budget.pending": "Usage is still being settled. Wait for work in progress to finish before continuing.",
     "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
     "code_agent.seed_lane_timeout": "The model thought for too long without writing the code, so the draft was stopped. Try again, or pick a faster model or a lower reasoning effort.",
     "code_agent.upstream_failed": "Code agent failed: {error}",
@@ -191,6 +196,10 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "optimization.not_success_status_for_test_results": "Optimization is in state '{status}' — only successfully completed optimizations have test results.",
     "serve.caller_tool_connection_required": "This optimization uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
     "serve.protected_interaction_failed": "The sandboxed request failed: {error}",
+    "serve.subscription_model_hosted": (
+        f"This run used a local subscription model. Serve it in the {APP_NAME} Mac app, "
+        "or start a new optimization with a managed model or your own provider key."
+    ),
     "serve.request_budget_required": "Set max_cost_cents for this one request.",
     "optimization.pairs_label": "{count} pairs",
     "optimization.payload_unavailable": "Optimization payload is unavailable.",

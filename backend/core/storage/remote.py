@@ -69,6 +69,7 @@ from .usage import (
     compute_user_storage,
     compute_user_storage_category_items,
     compute_user_storage_items,
+    imported_job_extra_bytes,
     json_byte_size,
 )
 
@@ -111,6 +112,29 @@ _IMMUTABLE_JOB_COLUMNS = frozenset({"optimization_id", "notified_at", "notificat
 # therefore make up ``jobs.stored_bytes``. ``latest_metrics`` / ``message`` are
 # tiny and intentionally excluded to keep the recompute read narrow.
 _STORED_BYTES_JSON_COLUMNS = ("payload", "result", "payload_overview")
+# The recompute also reads the two columns an imported run counts (SKY-117).
+_STORED_BYTES_EXTRA_COLUMNS = ("latest_metrics", "terminal_evidence")
+_STORED_BYTES_READ_COLUMNS = tuple(
+    getattr(JobModel, col) for col in (*_STORED_BYTES_JSON_COLUMNS, *_STORED_BYTES_EXTRA_COLUMNS)
+)
+
+
+def _recomputed_stored_bytes(stored_row: Any, update_values: dict[str, Any]) -> int:
+    """Return a job's ``stored_bytes`` after an update, from its stored row and the new values.
+
+    Args:
+        stored_row: The row read with ``_STORED_BYTES_READ_COLUMNS``, in that order.
+        update_values: Column values the update writes.
+
+    Returns:
+        The size of the main JSON columns, plus the metrics and terminal evidence
+        of a run imported from the desktop.
+    """
+    current = dict(zip((*_STORED_BYTES_JSON_COLUMNS, *_STORED_BYTES_EXTRA_COLUMNS), stored_row, strict=True))
+    current.update({col: value for col, value in update_values.items() if col in current})
+    return sum(json_byte_size(current[col]) for col in _STORED_BYTES_JSON_COLUMNS) + imported_job_extra_bytes(
+        current["payload_overview"], current["latest_metrics"], current["terminal_evidence"]
+    )
 
 
 def _log_record(log: LogEntryModel) -> LogEntryRecord:
@@ -925,20 +949,13 @@ class RemoteDBJobStore:
 
             if recompute_stored:
                 stored_row = (
-                    session.query(
-                        JobModel.payload,
-                        JobModel.result,
-                        JobModel.payload_overview,
-                    )
+                    session.query(*_STORED_BYTES_READ_COLUMNS)
                     .filter(JobModel.optimization_id == optimization_id)
                     .first()
                 )
                 if stored_row is None:
                     raise KeyError(f"Job '{optimization_id}' not found")
-                update_values["stored_bytes"] = sum(
-                    json_byte_size(update_values[col] if col in update_values else stored_row[i])
-                    for i, col in enumerate(_STORED_BYTES_JSON_COLUMNS)
-                )
+                update_values["stored_bytes"] = _recomputed_stored_bytes(stored_row, update_values)
 
             rows = (
                 session.query(JobModel)
@@ -991,15 +1008,12 @@ class RemoteDBJobStore:
         try:
             if set(_STORED_BYTES_JSON_COLUMNS) & set(update_values):
                 stored_row = (
-                    session.query(JobModel.payload, JobModel.result, JobModel.payload_overview)
+                    session.query(*_STORED_BYTES_READ_COLUMNS)
                     .filter(JobModel.optimization_id == optimization_id)
                     .first()
                 )
                 if stored_row is not None:
-                    update_values["stored_bytes"] = sum(
-                        json_byte_size(update_values[col] if col in update_values else stored_row[i])
-                        for i, col in enumerate(_STORED_BYTES_JSON_COLUMNS)
-                    )
+                    update_values["stored_bytes"] = _recomputed_stored_bytes(stored_row, update_values)
             query = (
                 session.query(JobModel)
                 .filter(JobModel.optimization_id == optimization_id)
@@ -2718,7 +2732,10 @@ class RemoteDBJobStore:
                 if "composition" in (overview or {}):
                     job.composition = (overview or {}).get("composition")  # type: ignore[assignment]
                 job.stored_bytes = (  # type: ignore[assignment]
-                    json_byte_size(job.payload) + json_byte_size(job.result) + json_byte_size(overview or {})
+                    json_byte_size(job.payload)
+                    + json_byte_size(job.result)
+                    + json_byte_size(overview or {})
+                    + imported_job_extra_bytes(overview, job.latest_metrics, job.terminal_evidence)
                 )
                 session.commit()
         finally:

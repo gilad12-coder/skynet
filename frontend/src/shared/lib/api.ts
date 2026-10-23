@@ -413,7 +413,7 @@ function parseError(text: string): {
 }
 
 /** Rendered message from an error body, or ``undefined`` for non-JSON bodies. */
-function parseErrorMessage(text: string): string | undefined {
+export function parseErrorMessage(text: string): string | undefined {
   return parseError(text).message;
 }
 
@@ -3560,7 +3560,9 @@ export async function serveProgramStream(
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
-      handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.5")));
+      handlers.onError(
+        parseErrorMessage(JSON.stringify(data)) ?? msg("auto.shared.lib.api.literal.5"),
+      );
     }
   };
   try {
@@ -3620,7 +3622,9 @@ export async function servePairProgramStream(
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
-      handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.8")));
+      handlers.onError(
+        parseErrorMessage(JSON.stringify(data)) ?? msg("auto.shared.lib.api.literal.8"),
+      );
     }
   };
   try {

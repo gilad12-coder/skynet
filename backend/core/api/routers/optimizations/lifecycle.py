@@ -633,6 +633,10 @@ def register_lifecycle_routes(
                 status=409,
                 params={"status": status.value},
             )
+        # A run imported from the desktop carries no payload; requeueing it would
+        # wipe its stored result and leave a pending row no worker can claim.
+        if job_data.get("payload") is None:
+            raise DomainError("optimization.retry_no_payload", status=409)
 
         if not job_store.requeue_for_rerun(optimization_id):
             raise DomainError("optimization.not_found", status=404)
