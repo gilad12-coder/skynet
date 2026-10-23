@@ -285,6 +285,8 @@ scripts/infisical-import.sh staging
 ```
 
 The script refuses if the Infisical environment already has secrets.
+It replaces `infisical secrets set --file`: values go from Secrets Manager
+to the Infisical API through a pipe, so no plain-text value file goes to a CLI.
 Repeat for production after its secret exists. The production values are
 now only in your local folder. Load them first with
 `scripts/secrets.sh put production app <file>` (README "Secrets"), then run

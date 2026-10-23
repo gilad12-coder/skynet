@@ -36,7 +36,8 @@ esac
 secret="skynet/$env/app"
 
 if [[ -n "${INFISICAL_TOKEN:-}" && -n "${INFISICAL_PROJECT_ID:-}" ]]; then
-  [[ "$(get_sync "$env" | jq -r .isAutoSyncEnabled)" == "false" ]] ||
+  sync_json="$(get_sync "$env")" || exit 1
+  [[ "$(jq -r .isAutoSyncEnabled <<<"$sync_json")" == "false" ]] ||
     die "the sync $(sync_name "$env") is enabled. Disable it in Infisical first."
   echo "sync $(sync_name "$env") is disabled"
 else
