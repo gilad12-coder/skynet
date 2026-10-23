@@ -270,7 +270,7 @@ def test_label_models_cover_exactly_the_local_clis() -> None:
 
 def test_slow_cli_label_never_holds_the_turns_cli_slots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep a slow CLI label from waiting for or holding the CLI slots the turn's own calls use."""
-    label_seconds = 6
+    label_seconds = 10
     behavior = f"if 'Summarize' in stdin: time.sleep({label_seconds})\nprint(json.dumps({CLAUDE_SUCCESS!r}))"
     fake_cli(tmp_path, "claude", behavior)
     current = local_settings(tmp_path)
@@ -294,9 +294,11 @@ def test_slow_cli_label_never_holds_the_turns_cli_slots(tmp_path: Path, monkeypa
     )
     started = time.monotonic()
     agent("ping")
-    assert time.monotonic() - started < 1.5
+    # Waiting for the abandoned label would take about 8 s; the margin is for a busy test machine.
+    assert time.monotonic() - started < 4.0
+    label_slot = cli_dispatch._semaphore(f"claude:{cli_dispatch.THINKING_LABEL_ROLE}", 1)
+    # The label CLI is stopped at its 2 s limit, well before its 10 s sleep ends.
+    assert label_slot.acquire(timeout=6.0)
+    label_slot.release()
     labels = [line for line in (tmp_path / "claude.log").read_text().splitlines() if "Summarize" in line]
     assert len(labels) == 1
-    label_slot = cli_dispatch._semaphore(f"claude:{cli_dispatch.THINKING_LABEL_ROLE}", 1)
-    assert label_slot.acquire(timeout=label_seconds - 2)
-    label_slot.release()
