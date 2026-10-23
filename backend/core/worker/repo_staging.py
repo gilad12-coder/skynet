@@ -33,6 +33,7 @@ from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_comma
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
 from ..service_gateway.optimization.blackbox.repo_workspace import RepoWorkspace
 from ..service_gateway.optimization.blackbox.rule_judge import (
+    ILLEGAL_APPROACH_KEY,
     JUDGE_ANSWER_TOKENS,
     JUDGE_REASONING_TOKENS,
     RuleJudge,
@@ -449,6 +450,24 @@ def _version_score(result: dict[str, Any], candidate: str) -> float | None:
     return None
 
 
+def _version_illegal(result: dict[str, Any], candidate: str) -> bool:
+    """Return whether the rule judge rejected one version during the run.
+
+    Args:
+        result: Finished black-box result.
+        candidate: The version's patch.
+
+    Returns:
+        ``True`` when the version's recorded side info carries the judge's rejection.
+    """
+    return any(
+        isinstance(version, dict)
+        and version.get("candidate") == candidate
+        and ILLEGAL_APPROACH_KEY in (version.get("side_info") or {})
+        for version in result.get("versions") or []
+    )
+
+
 def improved_patch(result: dict[str, Any]) -> str | None:
     """Return the best version when it beat the starting code, else ``None``.
 
@@ -459,10 +478,13 @@ def improved_patch(result: dict[str, Any]) -> str | None:
         result: Finished black-box result.
 
     Returns:
-        The best version's patch, or ``None`` when it is empty or no better.
+        The best version's patch, or ``None`` when it is empty, no better, or
+        an approach the rule judge rejected.
     """
     best = result.get("best_candidate")
     if not isinstance(best, str) or not best.strip() or result.get("regression_guard_applied"):
+        return None
+    if _version_illegal(result, best):
         return None
     baseline, optimized = result.get("baseline_score"), result.get("best_score")
     if baseline is None or optimized is None:

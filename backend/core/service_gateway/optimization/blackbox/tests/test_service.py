@@ -320,6 +320,38 @@ def test_regression_guard_restores_the_seed(
     assert response.engine_used == BLACKBOX_ENGINE_BEST_OF_N
 
 
+_ILLEGAL_WINS_ON_SCORE_CODE = """
+def score(candidate, case=None):
+    if candidate == "xyz":
+        return {"score": 0.0, "feedback": "rule broken", "illegal_approach": {"rule": "r1", "reason": "cheats"}}
+    return {"score": -3.2, "feedback": "legal"}
+"""
+
+
+def test_regression_guard_refuses_an_illegal_winner_with_a_higher_score(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A judge-rejected winner never wins, even when its fixed score beats negative legal scores."""
+    monkeypatch.setattr(
+        service_mod,
+        "run_strategy",
+        lambda strategy, task, server, ctx, cb=None, *, caps=None: (
+            Result(best_candidate="xyz", best_score=0.0, total_evals=0),
+            [],
+        ),
+    )
+
+    response = run_blackbox_optimization(
+        _payload(scorer={"kind": "python", "metric_code": _ILLEGAL_WINS_ON_SCORE_CODE}),
+        artifact_id="job-3b",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert response.regression_guard_applied is True
+    assert response.best_candidate == "hello world"
+    assert response.best_score == response.baseline_score == pytest.approx(-3.2)
+
+
 def test_seedless_run_without_cases_scores_the_version_alone(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
     """Without a starting point or cases there is no baseline and the scorer sees ``case=None``."""
     response = run_blackbox_optimization(

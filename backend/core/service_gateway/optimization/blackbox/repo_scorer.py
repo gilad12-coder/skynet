@@ -24,7 +24,7 @@ from typing import Any
 from ....billing.model_dispatch import ModelHTTPResult
 from . import runner, sandbox_log
 from .repo_workspace import REPO_DIR, RepoWorkspace, redact
-from .rule_judge import ILLEGAL_SCORE, RuleJudge, RuleJudgeUnavailableError
+from .rule_judge import ILLEGAL_APPROACH_KEY, ILLEGAL_SCORE, RuleJudge, RuleJudgeUnavailableError
 from .sandbox import SandboxSession
 from .sandbox_scorer import RUNNER_SOURCE
 
@@ -132,7 +132,7 @@ class RepoScorer:
                 return {
                     "score": ILLEGAL_SCORE,
                     "feedback": verdict.feedback,
-                    "illegal_approach": {"rule": verdict.rule, "reason": verdict.reason},
+                    ILLEGAL_APPROACH_KEY: {"rule": verdict.rule, "reason": verdict.reason},
                 }
         # Checkout and scoring share one lock: the next version's checkout
         # replaces the tree this one is scored on.

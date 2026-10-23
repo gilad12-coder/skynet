@@ -101,6 +101,7 @@ from .native_runtime import NATIVE_ENGINES, NativeOptions, native_runtime_unavai
 from .protocol import Candidate, EngineContext, EvalServer, Result, ScorerFn, Task, candidate_key
 from .registry import ENGINES, EngineCapabilities, get_engine
 from .repo_scorer import REPO_SCORER_URL, SETUP_ALLOWANCE_SECONDS
+from .rule_judge import ILLEGAL_APPROACH_KEY
 from .runner import side_info_json_default
 from .sandbox import current_sandbox_runtime, sandbox_runtime_from_settings
 from .scorer import JobScorer, RemoteScorer, build_scorer
@@ -444,6 +445,9 @@ class FinalRun:
     # Per case, the trusted observation of the run stage (time, model calls,
     # service cost); ``None`` where the scorer does not measure one.
     observations: list[dict[str, Any] | None] = field(default_factory=list)
+    # Set when the rule judge rejected the version: its fixed score can beat
+    # negative legal scores, so selection must check this flag, not the score.
+    illegal: bool = False
 
 
 def _mean_named_scores(side_infos: list[dict[str, Any]]) -> dict[str, BlackboxNamedScore]:
@@ -561,6 +565,7 @@ def _final_run(
         cases=[(score, feedback) for (score, _, _), feedback in zip(scored, feedbacks, strict=True)] if cases else [],
         runs=len(scored),
         observations=[observation for _, _, observation in scored] if cases else [],
+        illegal=any(ILLEGAL_APPROACH_KEY in side_info for side_info in side_infos),
     )
 
 
@@ -1146,7 +1151,10 @@ def _run_job(
                     concurrency=concurrency,
                 )
             )
-            if baseline_val is not None and best_val.score < baseline_val.score:
+            if baseline_val is not None and best_val.illegal and not baseline_val.illegal:
+                logger.info("the rule judge rejected the optimized version; keeping the starting point")
+                best_candidate, best_val, regression_guard_applied = seed_candidate, baseline_val, True
+            elif baseline_val is not None and best_val.score < baseline_val.score:
                 logger.info("the optimized version scored below the starting point on %s; keeping it", selection_scope)
                 best_candidate, best_val, regression_guard_applied = seed_candidate, baseline_val, True
             if reuse_selection:

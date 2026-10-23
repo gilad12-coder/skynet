@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 ILLEGAL_APPROACH = "illegal approach"
 ILLEGAL_SCORE = 0.0
+# Side-info key that marks a version the final judge rejected; final selection
+# reads it because ILLEGAL_SCORE can still beat negative legal scores.
+ILLEGAL_APPROACH_KEY = "illegal_approach"
 WATCH_EVERY_ACTIONS = 15
 JUDGE_ANSWER_TOKENS = 600
 # OpenRouter counts reasoning tokens inside max_tokens. A judge that reasons

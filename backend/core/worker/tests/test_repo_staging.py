@@ -823,6 +823,21 @@ def test_only_a_version_that_beat_the_start_is_published(result: dict[str, Any],
     assert repo_staging.improved_patch(result) == expected
 
 
+_ILLEGAL_EDIT = {"candidate": _EDIT, "score": 0.0, "side_info": {"illegal_approach": {"rule": "r1", "reason": "x"}}}
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _result(-3.2, 0.0, versions=[{"candidate": "", "score": -3.2}, _ILLEGAL_EDIT]),
+        _result(None, None, versions=[{"candidate": "", "score": -3.2}, _ILLEGAL_EDIT]),
+    ],
+)
+def test_a_version_the_judge_rejected_is_never_published(result: dict[str, Any]) -> None:
+    """The fixed illegal score can beat negative legal scores, but the illegal version still never ships."""
+    assert repo_staging.improved_patch(result) is None
+
+
 def _staged(tmp_path: Path, readonly: tuple[str, ...] = ()) -> repo_staging.StagedRepository:
     """Build a staged repository without fetching anything.
 
