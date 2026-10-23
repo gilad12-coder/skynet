@@ -45,6 +45,10 @@ _OPENAI_REASONING_MAX_TOKENS = 16000
 
 _TRANSIENT_GATEWAY_CODES = frozenset({"provider_interrupted", "provider_transport_interruption"})
 
+SUBSCRIPTION_ROLE_KEY = "_skynet_subscription_role"
+"""``ModelConfig.extra`` key naming a subscription model's loopback route role.
+It never reaches the client; the default is ``"agent"``."""
+
 
 def _gateway_failure_code(error: BaseException) -> str | None:
     """Read only a structured error code returned by Skynet's trusted model relay.
@@ -523,12 +527,13 @@ def lm_call_count(language_model: object) -> int | None:
     return len(history) if isinstance(history, list) else None
 
 
-def _apply_subscription_route(lm_kwargs: dict[str, object], config: ModelConfig) -> None:
+def _apply_subscription_route(lm_kwargs: dict[str, object], config: ModelConfig, role: str) -> None:
     """Point an API-side subscription model at the local CLI endpoint.
 
     Args:
         lm_kwargs: The ``dspy.LM`` kwargs assembled so far, mutated in place.
         config: A ``token_source == "subscription"`` model config.
+        role: The route's role; :data:`THINKING_LABEL_ROLE` runs in the label pool.
 
     Raises:
         ServiceError: Outside local mode, or when its CLI cannot run the model.
@@ -537,7 +542,7 @@ def _apply_subscription_route(lm_kwargs: dict[str, object], config: ModelConfig)
     parsed = parse_subscription_model_id(name)
     cli, slug = parsed if parsed is not None else (config.cli_provider, name)
     try:
-        route = local_subscription_route(slug, cli, "agent")  # type: ignore[arg-type]
+        route = local_subscription_route(slug, cli, role)  # type: ignore[arg-type]
     except UnpricedOperationError as error:
         raise ServiceError(f"Failed to build language model '{config.name}': {error}") from error
     lm_kwargs["model"] = f"litellm_proxy/{route['model']}"
@@ -600,8 +605,9 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         if effort:
             lm_kwargs["reasoning_effort"] = effort
     budget_route = lm_kwargs.pop(ROUTE_KEY, None)
+    subscription_role = str(lm_kwargs.pop(SUBSCRIPTION_ROLE_KEY, "agent"))
     if budget_route is None and config.token_source == "subscription":
-        _apply_subscription_route(lm_kwargs, config)
+        _apply_subscription_route(lm_kwargs, config, subscription_role)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)
     if disable_cache:

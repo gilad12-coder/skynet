@@ -51,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id, catalog_snapshot
+from ...billing.cli_dispatch import THINKING_LABEL_ROLE
 from ...brand import APP_NAME
 from ...config import settings
 from ...constants import TOKEN_SOURCE_BYOK
@@ -59,6 +60,7 @@ from ...local.cli_catalog import CliProvider
 from ...models import ModelConfig
 from ...storage.models import AgentApprovalModel
 from ..language_models import (
+    SUBSCRIPTION_ROLE_KEY,
     apply_model_reasoning_config,
     build_language_model,
     served_model_from,
@@ -2418,7 +2420,12 @@ def _build_local_summary_lm(turn_config: ModelConfig | None) -> Any | None:
         )
     elif turn_config.token_source == "subscription" and turn_config.cli_provider is not None:
         cli = turn_config.cli_provider
-        config = ModelConfig(name=_LOCAL_SUMMARY_MODELS[cli], token_source="subscription", cli_provider=cli)
+        config = ModelConfig(
+            name=_LOCAL_SUMMARY_MODELS[cli],
+            token_source="subscription",
+            cli_provider=cli,
+            extra={SUBSCRIPTION_ROLE_KEY: THINKING_LABEL_ROLE},
+        )
     else:
         return None
     return _summary_lm_from(config)

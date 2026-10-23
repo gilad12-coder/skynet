@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any, get_args
 
@@ -18,6 +19,7 @@ from core.models import ModelConfig
 from core.service_gateway import language_models
 from core.service_gateway.agents import generalist
 from core.service_gateway.agents.generalist import WizardState
+from core.service_gateway.language_models import build_language_model
 
 INTERVIEW_MODEL = "google/gemini-3.5-flash"
 REASONING = "The question column holds the input and the answer column holds the expected output for each row."
@@ -264,3 +266,37 @@ def test_label_models_cover_exactly_the_local_clis() -> None:
     assert set(generalist._LOCAL_SUMMARY_MODELS) == set(get_args(CliProvider))
     for cli, model in generalist._LOCAL_SUMMARY_MODELS.items():
         assert model in CLI_MODELS[cli]
+
+
+def test_slow_cli_label_never_holds_the_turns_cli_slots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a slow CLI label from waiting for or holding the CLI slots the turn's own calls use."""
+    label_seconds = 6
+    behavior = f"if 'Summarize' in stdin: time.sleep({label_seconds})\nprint(json.dumps({CLAUDE_SUCCESS!r}))"
+    fake_cli(tmp_path, "claude", behavior)
+    current = local_settings(tmp_path)
+    for module in (config, language_models, model_router, generalist):
+        monkeypatch.setattr(module, "settings", current)
+    monkeypatch.setattr(cli_dispatch, "_gateway", None)
+    monkeypatch.setattr(cli_dispatch, "_list_prices", lambda model: None)
+    monkeypatch.setattr(cli_dispatch, "_LABEL_CLI_TIMEOUT_SECONDS", 2.0, raising=False)
+    monkeypatch.setattr(generalist, "_SUMMARY_TIMEOUT_SECONDS", 1.5)
+    monkeypatch.setattr(generalist, "_SUMMARY_HEDGE_SECONDS", 0.3)
+    turn = ModelConfig(name="anthropic/claude-opus-5.5", token_source="subscription", cli_provider="claude")
+    summaries = generalist._thinking_summaries("English", asyncio.Queue(), None, turn)
+
+    assert asyncio.run(summaries._hedged(0, REASONING)) is None
+    turn_slots = cli_dispatch._semaphore("claude", current.cli_max_concurrency)
+    assert turn_slots._value == current.cli_max_concurrency
+
+    agent = build_language_model(
+        ModelConfig(name="anthropic/claude-haiku-4.5", token_source="subscription", cli_provider="claude"),
+        disable_cache=True,
+    )
+    started = time.monotonic()
+    agent("ping")
+    assert time.monotonic() - started < 1.5
+    labels = [line for line in (tmp_path / "claude.log").read_text().splitlines() if "Summarize" in line]
+    assert len(labels) == 1
+    label_slot = cli_dispatch._semaphore(f"claude:{cli_dispatch.THINKING_LABEL_ROLE}", 1)
+    assert label_slot.acquire(timeout=label_seconds - 2)
+    label_slot.release()
