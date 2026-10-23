@@ -28,7 +28,7 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from ...billing.metering import meter_llm_run
@@ -384,21 +384,44 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     return True
 
 
+def _embedding_table_exists(job_store: Any) -> bool:
+    """Return whether the job store's database has the ``job_embeddings`` table.
+
+    The table exists only when the schema was built with embeddings on and
+    pgvector available, so the Mac app database lacks it. Checking the table,
+    not ``settings.embeddings_enabled``, keeps a row kept from an earlier
+    semantic run in sync after a switch to another search backend.
+
+    Args:
+        job_store: Job-store exposing the SQLAlchemy ``engine`` (may be absent).
+
+    Returns:
+        True when the engine exists and the table is present.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None:
+        return False
+    return inspect(engine).has_table(JobEmbeddingModel.__tablename__)
+
+
 def set_embedding_privacy(job_store: Any, optimization_id: str, is_private: bool) -> None:
     """Sync the denormalized ``is_private`` flag on a job's embedding row.
 
     The public Explore corpus filters on the indexed ``job_embeddings.is_private``
     column, so flipping a job's visibility after it was embedded must update that
     row — not just ``payload_overview`` — or the change stays invisible to search
-    and the explore page until the row is re-embedded. A no-op when the job has no
-    embedding row yet (not-yet-embedded or non-success): the pipeline reads
-    ``is_private`` from the overview at embed time and picks up the new value then.
+    and the explore page until the row is re-embedded. A no-op when the database
+    has no ``job_embeddings`` table (the Mac app) or the job has no embedding row
+    yet (not-yet-embedded or non-success): the pipeline reads ``is_private`` from
+    the overview at embed time and picks up the new value then.
 
     Args:
         job_store: Job-store exposing the SQLAlchemy ``engine``.
         optimization_id: Optimization whose embedding row should be updated.
         is_private: New visibility flag (``True`` hides it from the public corpus).
     """
+    if not _embedding_table_exists(job_store):
+        return
     with Session(job_store.engine) as session:
         session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).update(
             {
@@ -415,17 +438,17 @@ def set_embedding_task_name(job_store: Any, optimization_id: str, task_name: str
     Explore search and the corpus list resolve a job's label from
     ``job_embeddings.task_name``; renaming a job after it was embedded updates
     ``payload_overview`` but leaves this snapshot stale, so the rename handler
-    must propagate the new name here too. A no-op when the store exposes no
-    SQLAlchemy ``engine`` (local/offline mode, which has no embedding table) or
-    the job has no embedding row yet — the pipeline snapshots ``name`` from the
-    overview at embed time and picks up the current value then.
+    must propagate the new name here too. A no-op when the database has no
+    ``job_embeddings`` table (the Mac app) or the job has no embedding row yet —
+    the pipeline snapshots ``name`` from the overview at embed time and picks up
+    the current value then.
 
     Args:
         job_store: Job-store exposing the SQLAlchemy ``engine``.
         optimization_id: Optimization whose embedding row should be updated.
         task_name: New display name to denormalize onto the embedding row.
     """
-    if getattr(job_store, "engine", None) is None:
+    if not _embedding_table_exists(job_store):
         return
     with Session(job_store.engine) as session:
         session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).update(
