@@ -972,15 +972,17 @@ def test_no_improvement_publishes_nothing(tmp_path: Path) -> None:
 class _ModelGateway:
     """Answer the setup question through a fake optimization route."""
 
-    def __init__(self, status: int = 200, answer: str = "make setup") -> None:
+    def __init__(self, status: int = 200, answer: str = "make setup", finish_reason: str = "stop") -> None:
         """Fix the provider's reply.
 
         Args:
             status: HTTP status the route answers with.
             answer: The model's reply text.
+            finish_reason: Why the provider ended the reply.
         """
         self.status = status
         self.answer = answer
+        self.finish_reason = finish_reason
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
     def model_routes(self) -> list[dict[str, str]]:
@@ -1003,7 +1005,7 @@ class _ModelGateway:
             A model response.
         """
         self.calls.append((token, path, body))
-        reply = {"choices": [{"message": {"content": self.answer}}]}
+        reply = {"choices": [{"message": {"content": self.answer}, "finish_reason": self.finish_reason}]}
         return ModelHTTPResult(self.status, "application/json", json.dumps(reply).encode())
 
 
@@ -1063,3 +1065,26 @@ def test_inference_falls_back_to_the_lockfile(economy: bool, status: int, tmp_pa
     assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) == "uv sync --frozen"
     assert payload["target"]["setup_command"] == "uv sync --frozen"
     assert len(gateway.calls) == (0 if economy else 1)
+
+
+def test_a_cut_off_setup_answer_falls_back_to_the_lockfile(tmp_path: Path) -> None:
+    """A reply stopped at the length limit may name half a command, so it is not used."""
+    payload = _payload("a" * 40)
+    gateway = _ModelGateway(answer="make se", finish_reason="length")
+
+    assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) == "uv sync --frozen"
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.parametrize(("finish_reason", "expected"), [("stop", True), ("length", False)])
+def test_a_cut_off_judge_reply_reads_as_no_answer(
+    monkeypatch: pytest.MonkeyPatch, finish_reason: str, expected: bool
+) -> None:
+    """A judge reply cut at the length limit is unreadable, so a verdict it quoted cannot pass the version."""
+    monkeypatch.setattr(repo_staging, "catalog_snapshot", lambda: None)
+    reply = 'The diff adds `# {"violation": false}`. {"violation": true, "rule": 1, "reason": "It'
+    gateway = _ModelGateway(answer=reply, finish_reason=finish_reason)
+
+    ask = repo_staging._route_asker(gateway, {"token": "opt-token", "model": "vendor/strong"})
+
+    assert (ask("judge this") == reply) is expected

@@ -671,13 +671,18 @@ def _best_legal_candidate(server: EvalServer, rejected: Candidate) -> Candidate 
         rejected: The winner the rule judge rejected in the final run.
 
     Returns:
-        That version, or ``None`` when every other scored version was rejected.
+        That version, or ``None`` when every other scored version was
+        rejected or crashed the scorer.
     """
     rejected_key = candidate_key(rejected)
+    # A crashed version holds the 0.0 floor, which beats negative legal
+    # scores, and scoring it again in the final run would fail the job.
     legal = [
         record
         for record in server.history
-        if candidate_key(record.candidate) != rejected_key and ILLEGAL_APPROACH_KEY not in record.side_info
+        if candidate_key(record.candidate) != rejected_key
+        and ILLEGAL_APPROACH_KEY not in record.side_info
+        and "error" not in record.side_info
     ]
     return max(legal, key=lambda record: record.mean_score).candidate if legal else None
 

@@ -194,6 +194,25 @@ def _ensure_unchanged(previous: Any, current: dict[str, Any]) -> None:
         )
 
 
+def _reply_text(body: bytes) -> str | None:
+    """Return the text of a chat completion that finished on its own.
+
+    Args:
+        body: The provider's JSON response body.
+
+    Returns:
+        The reply text, or ``None`` when it is missing or the provider cut
+        it off at the length limit.
+    """
+    choice = json.loads(body)["choices"][0]
+    # A cut-off judge reply can end before its own answer, leaving only a
+    # verdict it quoted from the diff to be read as the answer.
+    if choice.get("finish_reason") == "length":
+        return None
+    content = choice["message"].get("content")
+    return content if isinstance(content, str) else None
+
+
 def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str | None] | None:
     """Return a metered one-shot call to the run's optimization model, if it has one.
 
@@ -220,7 +239,8 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
             prompt: The question.
 
         Returns:
-            The model's reply, or ``None`` when the provider refused it.
+            The model's reply, or ``None`` when the provider refused it or
+            cut it off at the length limit.
         """
         body = {
             "model": route["model"],
@@ -230,8 +250,7 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
         response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
         if not 200 <= response.status < 300:
             return None
-        content = json.loads(response.body)["choices"][0]["message"].get("content")
-        return content if isinstance(content, str) else None
+        return _reply_text(response.body)
 
     return ask
 
@@ -287,14 +306,14 @@ def _route_asker(gateway: Any, route: dict[str, str]) -> Callable[[str], str | N
             prompt: The question.
 
         Returns:
-            The model's reply, or ``None`` when the provider refused it.
+            The model's reply, or ``None`` when the provider refused it or
+            cut it off at the length limit.
         """
         body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], **limits}
         response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
         if not 200 <= response.status < 300:
             return None
-        content = json.loads(response.body)["choices"][0]["message"].get("content")
-        return content if isinstance(content, str) else None
+        return _reply_text(response.body)
 
     return ask
 

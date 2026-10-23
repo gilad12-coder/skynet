@@ -389,6 +389,45 @@ def test_a_rejected_winner_gives_way_to_the_best_legal_version(
     assert response.baseline_score == pytest.approx(-3.2)
 
 
+_CRASHING_RUNNER_UP_CODE = """
+def score(candidate, case=None):
+    if candidate == "broken":
+        raise RuntimeError("syntax error in the version")
+    if candidate == "xyz":
+        return {"score": -0.5, "feedback": "rule broken", "illegal_approach": {"rule": "r1", "reason": "cheats"}}
+    if candidate == "legal-better":
+        return {"score": -2.0, "feedback": "legal improvement"}
+    return {"score": -3.2, "feedback": "legal"}
+"""
+
+
+def test_a_version_that_crashed_the_scorer_is_not_the_legal_fallback(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crashed version's 0.0 floor beats negative legal scores, yet the fallback skips it."""
+
+    def search(
+        strategy: object, task: object, server: EvalServer, ctx: object, cb: object = None, *, caps: object = None
+    ) -> tuple[Result, list[object]]:
+        """Score a legal improvement, a rejected version and a crashing one; return the rejected one."""
+        server.evaluate("legal-better")
+        server.evaluate("xyz")
+        server.evaluate("broken")
+        return Result(best_candidate="xyz", best_score=-0.5, total_evals=server.used), []
+
+    monkeypatch.setattr(service_mod, "run_strategy", search)
+
+    response = run_blackbox_optimization(
+        _payload(scorer={"kind": "python", "metric_code": _CRASHING_RUNNER_UP_CODE}),
+        artifact_id="job-3d",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert response.regression_guard_applied is False
+    assert response.best_candidate == "legal-better"
+    assert response.best_score == pytest.approx(-2.0)
+
+
 def test_seedless_run_without_cases_scores_the_version_alone(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
     """Without a starting point or cases there is no baseline and the scorer sees ``case=None``."""
     response = run_blackbox_optimization(

@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -54,6 +55,7 @@ _MAX_ACTION_CHARS = 2_000
 # results; older turns were already seen by earlier watches.
 _ACTION_TURNS = 3
 _JSON_DECODER = json.JSONDecoder()
+_VERDICT_START = re.compile(r'\{\s*"violation"\s*:')
 
 EVENT_BLOCK = RULE_BLOCK_EVENT
 EVENT_NOTE = "rule.note"
@@ -158,14 +160,16 @@ def _verdict_object(text: str | None) -> dict[str, Any] | None:
     Judges quote code, so braces in prose before or after the answer are
     skipped instead of read as part of it. A quoted verdict-shaped string
     from the diff can sit beside the real answer, so objects that disagree
-    on ``violation`` make the reply unreadable instead of letting one win.
+    on ``violation`` make the reply unreadable instead of letting one win,
+    and so does a ``{"violation"`` that does not read as an answer, such as
+    a real answer cut off or written loosely after a quoted one.
 
     Args:
         text: The judge model's reply.
 
     Returns:
-        The first answer object, or ``None`` when the reply holds none or
-        its answer objects disagree.
+        The first answer object, or ``None`` when the reply holds none, its
+        answer objects disagree, or it has a ``{"violation"`` that is not one.
     """
     reply = text or ""
     answers: list[dict[str, Any]] = []
@@ -177,6 +181,8 @@ def _verdict_object(text: str | None) -> dict[str, Any] | None:
             answer = None
         if isinstance(answer, dict) and isinstance(answer.get("violation"), bool):
             answers.append(answer)
+        elif _VERDICT_START.match(reply, start):
+            return None
         start = reply.find("{", start + 1)
     if not answers or len({answer["violation"] for answer in answers}) > 1:
         return None
