@@ -7,8 +7,13 @@
 #   infra/terraform/scripts/infisical-restore-drill.sh
 #
 # The temporary instance has no public access and uses the isolated subnets
-# and the Postgres security group. To test a login, open the Infisical
-# tunnel task and connect from it; this script does not read the password.
+# and the Postgres security group. The drill checks the instance status and
+# settings only (available, encrypted with the Infisical KMS key, not
+# public). It does not connect to the database and does not check the data
+# or that ENCRYPTION_KEY can decrypt it. No network path goes from the tunnel
+# task to port 5432 (the tunnel security group allows only 8080 and 443, and
+# the Postgres security group allows only the Infisical security group).
+# Do not widen the tunnel security group for a data check.
 
 source "$(dirname "$0")/lib.sh"
 source "$(dirname "$0")/infisical-lib.sh"
@@ -45,4 +50,4 @@ jq -r '"status=\(.DBInstanceStatus) engine=\(.Engine) \(.EngineVersion) encrypte
 [[ "$(jq -r .StorageEncrypted <<<"$info")" == "true" ]] || die "restored instance is not encrypted"
 [[ "$(jq -r .KmsKeyId <<<"$info")" == "$kms" ]] || die "restored instance uses another KMS key"
 [[ "$(jq -r .PubliclyAccessible <<<"$info")" == "false" ]] || die "restored instance is public"
-echo "drill passed: the latest backup restores to an encrypted private instance"
+echo "drill passed: the latest backup restores to an available, encrypted, private instance (status and settings only; data not checked)"

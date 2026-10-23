@@ -22,7 +22,7 @@ port="$(jq -r .tunnel_port <<<"$cfg")"
 remote_port="$(jq -r .infisical_port <<<"$cfg")"
 
 ip="$(infisical_task_ip "$cluster" "$service")"
-[[ -n "$ip" ]] || die "no running Infisical task (service desired count 0? see INFISICAL.md step 3)"
+[[ -n "$ip" ]] || die "no running Infisical task (service desired count 0? see INFISICAL.md step 4)"
 
 subnets="$(jq -r '.subnets | join(",")' <<<"$cfg")"
 sg="$(jq -r .tunnel_sg <<<"$cfg")"

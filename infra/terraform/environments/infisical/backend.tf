@@ -72,12 +72,18 @@ variable "datastore_credentials_version" {
 }
 
 variable "smtp_from_address" {
-  description = "Sender address for Infisical email (invites, verification codes). Its domain must be verified in Resend."
+  description = "Sender address for Infisical email (invites, verification codes). Its domain must be verified in Resend for the staging Resend key (INFISICAL.md step 3). Empty until Gilad sets it; Infisical cannot start without it."
   type        = string
+
+  # Cross-variable validation needs Terraform 1.9 or later (required_version is 1.11).
+  validation {
+    condition     = var.smtp_from_address == "" ? !var.service_running : can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.smtp_from_address))
+    error_message = "Set smtp_from_address to an address on a domain that is verified in Resend (INFISICAL.md step 3) before service_running = true."
+  }
 }
 
 variable "alert_email" {
-  description = "Email for the secret-change alarm (empty = none; subscribe later)."
+  description = "Email for the secret-change alarm. Required before any Infisical sync is enabled (INFISICAL.md step 12); a plan warns while it is empty."
   type        = string
   default     = ""
 }

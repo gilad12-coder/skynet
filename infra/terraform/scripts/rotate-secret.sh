@@ -29,18 +29,19 @@ sync_id="$(jq -r .id <<<"$sync")"
 inf_keys="$(infisical_key_names "$env")"
 grep -qx "$key" <<<"$inf_keys" || die "$key is not in Infisical $env (root path)"
 
-since="$(date -u +%Y-%m-%dT%H:%M:%S)"
+before="$(last_sync_job "$env")"
 inf_api POST "/api/v1/secret-syncs/aws-secrets-manager/$sync_id/sync-secrets" >/dev/null
 echo "sync $(sync_name "$env") triggered"
-wait_sync "$env" "$since"
+wait_sync "$env" "$before"
 
 sm_keys="$(sm_key_names "$env")"
 grep -qx "$key" <<<"$sm_keys" || die "$key is not in skynet/$env/app after the sync"
 [[ "$inf_keys" == "$sm_keys" ]] || die "key names differ between Infisical and skynet/$env/app after the sync"
 echo "skynet/$env/app: $(wc -l <<<"$sm_keys" | tr -d ' ') keys, same names as Infisical"
 
+users="$(app_secret_users "$env" "$key")"
 services=()
-while IFS= read -r s; do [[ -n "$s" ]] && services+=("$s"); done < <(app_secret_users "$env" "$key")
+while IFS= read -r s; do [[ -n "$s" ]] && services+=("$s"); done <<<"$users"
 echo "services that read $key: ${services[*]:-none}"
 redeploy_and_check "$env" ${services[@]+"${services[@]}"}
 echo "rotated $key in $env"

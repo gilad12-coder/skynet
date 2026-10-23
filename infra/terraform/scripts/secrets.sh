@@ -9,6 +9,9 @@
 #       Stores the file as the secret value. Fails if a key is missing.
 #   secrets.sh check <env>
 #       Lists the keys that the task definitions read but the secrets lack.
+#   secrets.sh check-empty <env>
+#       Lists the keys of app, frontend and litellm whose value is empty or
+#       only spaces (a template placeholder). Prints names only.
 #
 # The key list comes from the latest task definitions, so run Terraform first.
 
@@ -75,7 +78,29 @@ case "$cmd" in
     done
     [[ "$ok" == 1 ]] || exit 1
     ;;
+  check-empty)
+    ok=1
+    for name in app frontend litellm; do
+      # jq stderr is dropped and the error text is fixed: a jq message can
+      # quote part of a value.
+      empty="$(aws secretsmanager get-secret-value --secret-id "skynet/$env/$name" \
+        --query SecretString --output text |
+        jq -r 'if type == "object" then to_entries[] | select(.value | tostring | test("^\\s*$")) | .key
+               else error("not a JSON object") end' 2>/dev/null)" || {
+        ok=0
+        echo "skynet/$env/$name: cannot read it, or it is not a JSON object"
+        continue
+      }
+      if [[ -n "$empty" ]]; then
+        ok=0
+        echo "skynet/$env/$name has empty values: $(sort <<<"$empty" | tr '\n' ' ')"
+      else
+        echo "skynet/$env/$name: no empty values"
+      fi
+    done
+    [[ "$ok" == 1 ]] || exit 1
+    ;;
   *)
-    die "usage: secrets.sh template|put|check <env> ..."
+    die "usage: secrets.sh template|put|check|check-empty <env> ..."
     ;;
 esac

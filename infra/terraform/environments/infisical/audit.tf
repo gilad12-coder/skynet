@@ -157,6 +157,15 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
+# A check block warns at plan and apply; it does not stop them. The first
+# apply runs before Gilad picks the address.
+check "alarm_receiver" {
+  assert {
+    condition     = var.alert_email != ""
+    error_message = "alert_email is empty: the secret-change alarm has no receiver. Set it and confirm the SNS subscription before you enable any Infisical sync (INFISICAL.md step 12)."
+  }
+}
+
 data "aws_iam_policy_document" "alarms_topic" {
   statement {
     sid       = "EventBridgePublish"

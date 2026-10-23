@@ -18,10 +18,12 @@ env="${1:-}"
 check_env "$env"
 need_project
 
-existing="$(infisical_key_names "$env" | grep -c . || true)"
+names="$(infisical_key_names "$env")" || exit 1
+existing="$(grep -c . <<<"$names" || true)"
 [[ "$existing" == "0" ]] || die "Infisical $env / already has $existing secret(s); this script only fills an empty environment"
 
-count="$(sm_key_names "$env" | grep -c . || true)"
+sm_names="$(sm_key_names "$env")" || exit 1
+count="$(grep -c . <<<"$sm_names" || true)"
 [[ "$count" -gt 0 ]] || die "skynet/$env/app has no keys"
 
 aws secretsmanager get-secret-value --secret-id "skynet/$env/app" --query SecretString --output text |

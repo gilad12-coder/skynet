@@ -10,7 +10,9 @@
 #
 # Checks (all must pass):
 #   - the sync exists, is disabled, writes skynet/<env>/app in us-east-2,
-#     Many-To-One;
+#     Many-To-One, initial sync behavior "overwrite-destination", and no key
+#     schema (a key schema renames the destination secret; an import
+#     behavior can copy old Secrets Manager values back into Infisical);
 #   - Infisical <env> "/" has no secret imports;
 #   - the key NAMES in Infisical equal the key names in skynet/<env>/app;
 #   - the values are equal, or --accept-changed-values is given (only the
@@ -48,7 +50,7 @@ aws secretsmanager describe-secret --secret-id "$secret" --query Name --output t
 sync="$(get_sync "$env")"
 sync_id="$(jq -r .id <<<"$sync")"
 echo "sync: $(sync_name "$env") id=$sync_id"
-jq -r '"  auto sync: \(.isAutoSyncEnabled)\n  environment: \(.environment.slug // "?") path: \(.folder.path // "?")\n  destination: \(.destinationConfig.secretName) region=\(.destinationConfig.region) mapping=\(.destinationConfig.mappingBehavior)\n  initial sync: \(.syncOptions.initialSyncBehavior)"' <<<"$sync"
+jq -r '"  auto sync: \(.isAutoSyncEnabled)\n  environment: \(.environment.slug // "?") path: \(.folder.path // "?")\n  destination: \(.destinationConfig.secretName) region=\(.destinationConfig.region) mapping=\(.destinationConfig.mappingBehavior)\n  initial sync: \(.syncOptions.initialSyncBehavior)\n  key schema: \(.syncOptions.keySchema // "" | if . == "" then "(empty)" else . end)"' <<<"$sync"
 
 fail=0
 [[ "$(jq -r .isAutoSyncEnabled <<<"$sync")" == "false" ]] || {
@@ -73,6 +75,14 @@ fail=0
 }
 [[ "$(jq -r '.folder.path // ""' <<<"$sync")" == "/" ]] || {
   echo "FAIL: source path is not /"
+  fail=1
+}
+[[ "$(jq -r '.syncOptions.initialSyncBehavior // ""' <<<"$sync")" == "overwrite-destination" ]] || {
+  echo "FAIL: initial sync behavior is not overwrite-destination (an import behavior can copy old values into Infisical)"
+  fail=1
+}
+[[ -z "$(jq -r '.syncOptions.keySchema // ""' <<<"$sync")" ]] || {
+  echo "FAIL: key schema is set; it renames the destination secret"
   fail=1
 }
 
@@ -143,10 +153,10 @@ fi
 read -r -p "Type '$env' to enable the sync for $secret: " answer
 [[ "$answer" == "$env" ]] || die "not confirmed; the sync stays disabled"
 
-since="$(date -u +%Y-%m-%dT%H:%M:%S)"
+before="$(last_sync_job "$env")"
 inf_api PATCH "/api/v1/secret-syncs/aws-secrets-manager/$sync_id" '{"isAutoSyncEnabled":true}' >/dev/null
 echo "sync enabled; Infisical starts the first sync now"
-wait_sync "$env" "$since"
+wait_sync "$env" "$before"
 
 after="$(sm_key_names "$env")"
 if [[ "$after" != "$inf_keys" ]]; then
