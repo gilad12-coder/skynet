@@ -1,7 +1,7 @@
 # Checks the AWS Terraform (infra/terraform) on every PR that touches it
 # (SKY-156). This workflow never applies; apply stays a manual step.
 #   check: fmt, validate (every root), tflint, checkov. Needs no AWS access.
-#   plan:  read-only plan of global, staging and production through the
+#   plan:  read-only plan of global, staging, production and infisical through the
 #          GitHub OIDC role skynet-github-terraform-plan, then
 #          scripts/check-deploy-isolation.sh on the global plan (IAM policy
 #          simulator, read-only). It skips with a
@@ -29,7 +29,7 @@ permissions:
 env:
   TF_VERSION: 1.17.0
   TF_IN_AUTOMATION: "1"
-  ROOTS: infra/terraform/bootstrap infra/terraform/global infra/terraform/environments/staging infra/terraform/environments/production
+  ROOTS: infra/terraform/bootstrap infra/terraform/global infra/terraform/environments/staging infra/terraform/environments/production infra/terraform/environments/infisical
 
 jobs:
   check:
@@ -132,12 +132,15 @@ jobs:
         run: |
           summary="$RUNNER_TEMP/plan-summary.md"
           echo "### Terraform plan (read-only, ${IMAGE_TAG:0:8})" >"$summary"
-          for root in global environments/staging environments/production; do
+          for root in global environments/staging environments/production environments/infisical; do
             dir="infra/terraform/$root"
             terraform -chdir="$dir" init -input=false -backend-config="bucket=$STATE_BUCKET"
             args=(-input=false -lock=false -no-color)
             if [ "$root" = global ]; then
               args+=(-out="$RUNNER_TEMP/global.tfplan")
+            elif [ "$root" = environments/infisical ]; then
+              # Pinned image digest in ecs.tf; no image_tag variable.
+              args+=(-out="$RUNNER_TEMP/env.tfplan")
             else
               args+=(-var "image_tag=$IMAGE_TAG" -out="$RUNNER_TEMP/env.tfplan")
             fi

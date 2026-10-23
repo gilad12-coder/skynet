@@ -28,8 +28,9 @@ The environment stacks follow "First apply (staging, then production)" below.
 | `global/` | `global/terraform.tfstate` | ECR repos `skynet/backend`, `skynet/frontend`, `skynet/litellm`. GitHub OIDC provider and four GitHub roles (see "GitHub roles"; `enable_github_oidc`, default `true`). |
 | `environments/staging/` | `staging/terraform.tfstate` | One environment from `modules/environment`. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `environments/production/` | `production/terraform.tfstate` | The same module. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
+| `environments/infisical/` | `infisical/terraform.tfstate` | Self-hosted Infisical (SKY-186): own VPC, ECS service, RDS, Valkey, KMS key, bootstrap secrets, sync role, CloudTrail and a secret-change alarm. Runbook: [`INFISICAL.md`](INFISICAL.md). |
 | `modules/environment/` | module | VPC, ALB, ACM, ECS cluster, services, task definitions, RDS, Valkey, secrets, logs, alarms. |
-| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel, Railway restore. |
+| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel, Railway restore. Infisical tunnel, import, sync guard, secret rotation and rollback, restore drill. |
 | `.checkov.yaml` | config | checkov skips, each with its reason. |
 
 Remote state uses the S3 backend with native S3 locking (`use_lockfile = true`).
@@ -151,12 +152,15 @@ definitions read single JSON keys by ARN (`<arn>:<KEY>::`).
 
 | Secret | Values | Read by |
 |--------|--------|---------|
-| `skynet/<env>/app` | You fill them | backend, worker, migrate |
+| `skynet/<env>/app` | You fill them. After SKY-186 the Infisical sync `skynet-<env>-app` writes them (see [`INFISICAL.md`](INFISICAL.md)) | backend, worker, migrate |
 | `skynet/<env>/frontend` | You fill them | frontend |
 | `skynet/<env>/litellm` | You fill them | litellm |
 | `skynet/<env>/app-generated` | Terraform: `REMOTE_DB_URL` (as `skynet_app`), `REDIS_URL`, `APP_DB_PASSWORD` | backend, worker, migrate (the URLs); dbadmin (`APP_DB_PASSWORD`) |
 | `skynet/<env>/litellm-generated` | Terraform: `LITELLM_DATABASE_URL` (as `litellm`), `REDIS_PASSWORD`, `LITELLM_DB_PASSWORD` | litellm (the URL and Redis password); dbadmin (`LITELLM_DB_PASSWORD`) |
 | `skynet/<env>/db-admin` | Terraform: the RDS master `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | dbadmin |
+
+The Infisical root adds `skynet/infisical/bootstrap`, `skynet/infisical/datastore`
+and `skynet/infisical/smtp` (Infisical only; values never in Terraform state).
 
 `restore-railway.sh` also reads `app-generated` and `litellm-generated` on your
 laptop to restore each dump as its owner role.

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Blocks a commit that adds a secret. Turn the repo hooks on once per clone:
+#   git config core.hooksPath .githooks
+# Needs gitleaks 8.19 or later (brew install gitleaks).
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed (brew install gitleaks); secret scan skipped" >&2
+  exit 0
+fi
+# --redact keeps a found value out of the terminal.
+exec gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml .
