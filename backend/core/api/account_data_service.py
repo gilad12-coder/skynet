@@ -526,17 +526,19 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(ConversationEmbeddingModel).where(ConversationEmbeddingModel.username == username))
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
-    _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
-    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     # Passkey sign-in writes its passkey row, then the user row, so passkey
     # rows go before the user lock. Email-code sign-in writes the user row,
     # then deletes its code, so codes go after it. Either other order
-    # deadlocks with a concurrent sign-in (R782F-1).
+    # deadlocks with a concurrent sign-in (R782F-1, R782H-1).
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))
     _run_delete(delete(WebAuthnChallengeModel).where(WebAuthnChallengeModel.user_email == username))
     # Authorize and the code exchange lock this row before they write, so
-    # they wait for the deletion and then find no account (R782E-1).
+    # they wait for the deletion and then find no account (R782E-1). An
+    # API-token create takes a share lock on it, so it either commits before
+    # the token sweep below or finds no account and adds no token (SKY-150).
     session.execute(select(UserModel.email).where(UserModel.email == username).with_for_update())
+    _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
+    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
     _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
     # Codes, then links, then tokens. An exchange that got the user lock
     # first commits before this runs, so the link delete sees its link

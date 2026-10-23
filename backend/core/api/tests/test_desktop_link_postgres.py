@@ -28,11 +28,11 @@ from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session
 
 from core.api import two_factor
-from core.api.account_data_service import delete_account
 from core.api.auth import AuthenticatedUser, get_authenticated_user
 from core.api.errors import DomainError
 from core.api.passwords import hash_password
 from core.api.routers import account_security, accounts, desktop_link
+from core.api.routers.account_data import DeleteAccountRequest, create_account_data_router
 from core.api.routers.desktop_link import create_desktop_link_router
 from core.config import app_env, settings
 from core.storage.models import (
@@ -59,7 +59,7 @@ DELETION_HOLD_SECONDS = 0.5
 ALICE = "alice@example.test"
 ALICE_PASSWORD = "Correct-horse-9"
 INTERNAL_SECRET = "internal-test-secret"
-# Each statement locks one row that delete_account deletes. A blocker
+# Each statement locks one row that the account deletion deletes. A blocker
 # transaction that holds it parks the deletion at that point (R782F-1).
 DELETION_STOPS = {
     "api-tokens": "SELECT 1 FROM api_tokens WHERE username = :u FOR UPDATE",
@@ -116,8 +116,27 @@ def _add_alice(engine: Engine) -> None:
         engine: Engine bound to the test schema.
     """
     with Session(engine) as session:
-        session.add(UserModel(email="alice@example.test", name="Alice Example", password_hash="x"))
+        session.add(
+            UserModel(email="alice@example.test", name="Alice Example", password_hash=hash_password(ALICE_PASSWORD))
+        )
         session.commit()
+
+
+def _delete_alice(engine: Engine) -> None:
+    """Delete alice through the served account-deletion route, with all its locks (R782H-1).
+
+    The route function runs in the calling thread, so the tests' per-thread
+    statement holds still apply.
+
+    Args:
+        engine: Engine bound to the test schema.
+    """
+    router = create_account_data_router(job_store=_Store(engine))
+    endpoint = next(route.endpoint for route in router.routes if route.path == "/account/delete")
+    endpoint(
+        body=DeleteAccountRequest(password=ALICE_PASSWORD),
+        user=AuthenticatedUser(username=ALICE, role="user", groups=()),
+    )
 
 
 @pytest.fixture
@@ -383,9 +402,7 @@ def test_account_deletion_during_a_refresh_does_not_deadlock(
     def deletion() -> None:
         """Delete the account in one transaction, like the account router."""
         try:
-            with Session(full_database) as session:
-                delete_account(session, "alice@example.test")
-                session.commit()
+            _delete_alice(full_database)
             results["deletion"] = "ok"
         except Exception as exc:  # The deadlock error is the observed result.
             results["deletion"] = type(exc).__name__
@@ -485,9 +502,7 @@ def test_code_exchange_during_account_deletion_leaves_no_link(
             results["deletion"] = "no-hold"
             return
         try:
-            with Session(full_database) as session:
-                delete_account(session, "alice@example.test")
-                session.commit()
+            _delete_alice(full_database)
             results["deletion"] = "ok"
         except Exception as exc:  # A lock error is the observed result.
             results["deletion"] = type(exc).__name__
@@ -604,9 +619,7 @@ def test_link_approval_during_account_deletion_leaves_no_link(
     def deletion() -> None:
         """Delete the account in one transaction, like the account router."""
         try:
-            with Session(full_database) as session:
-                delete_account(session, "alice@example.test")
-                session.commit()
+            _delete_alice(full_database)
             results["deletion"] = "ok"
         except Exception as exc:  # A lock error is the observed result.
             results["deletion"] = type(exc).__name__
@@ -702,9 +715,7 @@ def test_account_deletion_during_an_authorize_removes_the_new_code(
         if not authorize_holds.wait(timeout=5):
             results["deletion"] = "no-hold"
             return
-        with Session(full_database) as session:
-            delete_account(session, "alice@example.test")
-            session.commit()
+        _delete_alice(full_database)
         results["deletion"] = "ok"
 
     threads = [threading.Thread(target=browser), threading.Thread(target=deletion)]
@@ -783,9 +794,7 @@ def _run_during_parked_deletion(engine: Engine, stop: str, call: Callable[[], An
     def deletion() -> None:
         """Delete the account in one transaction, like the account router."""
         try:
-            with Session(engine) as session:
-                delete_account(session, ALICE)
-                session.commit()
+            _delete_alice(engine)
             results["deletion"] = "ok"
         except Exception as exc:  # A deadlock error is the observed result.
             results["deletion"] = type(exc).__name__
