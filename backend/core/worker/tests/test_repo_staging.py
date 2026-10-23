@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from core.api.auth import AuthenticatedUser, get_authenticated_user
+from core.api.model_catalog import CatalogModel, ModelCatalogResponse
 from core.api.routers import wizard_preflight
 from core.billing.model_dispatch import ModelHTTPResult
+from core.billing.openrouter_quotes import resolve_model_slug
+from core.billing.operation_pricing import ChargePolicy
 from core.billing.protected_credentials import has_exposed_execution_credentials
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.connectors.github_publish import PublishedChange, RepoPublishError
@@ -22,6 +26,7 @@ from core.connectors.github_repo import RepoSnapshot
 from core.exceptions import ServiceError
 from core.service_gateway.optimization.blackbox.repo_constraints import ConstraintsError
 from core.service_gateway.optimization.blackbox.repo_workspace import _PROBE_OK, NetworkCutoffError
+from core.service_gateway.optimization.blackbox.rule_judge import JUDGE_ANSWER_TOKENS, JUDGE_REASONING_TOKENS
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from core.worker import repo_staging
 
@@ -161,9 +166,64 @@ def test_a_resumed_run_with_different_rules_is_refused(monkeypatch: pytest.Monke
     again, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
     staged.cleanup()
     assert again["target"]["repo"]["environment"]["protected_paths"] == ["optimize.toml", "src/geocode/eval"]
+    assert again["_repo_snapshot"]["constrained"] is True
 
     with pytest.raises(ConstraintsError, match="environment changed since it was recorded"):
         _stage_with({}, monkeypatch, resumed)
+
+
+_RULED = (
+    _CONSTRAINTS
+    + """
+[rules]
+illegal = ["Do not hardcode answers for dataset cases.", "Do not call an outside geocoding service."]
+"""
+)
+
+
+def test_staging_keeps_the_plain_language_rules_for_the_judges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rules reach the parent's judges and the recorded environment, and a resume must keep them."""
+    first, staged = _stage_with({"optimize.toml": _RULED}, monkeypatch)
+    staged.cleanup()
+
+    assert staged.constrained is True
+    assert staged.rules == (
+        "Do not hardcode answers for dataset cases.",
+        "Do not call an outside geocoding service.",
+    )
+    assert first["target"]["repo"]["environment"]["rules"] == list(staged.rules)
+    assert "- Rule 2: Do not call an outside geocoding service." in first["background"]
+
+    resumed = _payload("c" * 40)
+    resumed["target"]["repo"]["environment"] = first["target"]["repo"]["environment"]
+    with pytest.raises(ConstraintsError, match=r"\(rules\)"):
+        _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
+
+
+def test_a_run_recorded_before_rules_existed_resumes_without_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An environment saved before the rules field existed counts as having no rules."""
+    first, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch)
+    staged.cleanup()
+    resumed = _payload("c" * 40)
+    resumed["target"]["repo"]["environment"] = {
+        key: value for key, value in first["target"]["repo"]["environment"].items() if key != "rules"
+    }
+
+    _, staged = _stage_with({"optimize.toml": _CONSTRAINTS}, monkeypatch, resumed)
+    staged.cleanup()
+    assert staged.rules == ()
+
+    with pytest.raises(ConstraintsError, match=r"\(rules\)"):
+        _stage_with({"optimize.toml": _RULED}, monkeypatch, resumed)
+
+
+def test_a_tree_without_a_constraints_file_is_not_constrained(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without optimize.toml the run keeps its old behavior: no judge and no fixed block message."""
+    _, staged = _stage_with({}, monkeypatch)
+    staged.cleanup()
+
+    assert staged.constrained is False
+    assert staged.rules == ()
 
 
 @pytest.mark.parametrize("commit", [None, "b" * 40])
@@ -192,6 +252,7 @@ def test_staging_pins_the_commit_and_keeps_secrets_in_the_parent(
     assert staged_payload["target"]["repo"]["secrets"] == []
     assert staged_payload["_repo_snapshot"]["secret_names"] == ["API_KEY"]
     assert staged_payload["_repo_snapshot"]["readonly_paths"] == ["vendor/lib"]
+    assert staged_payload["_repo_snapshot"]["constrained"] is False
     assert "secret-value" not in repr(staged_payload)
     assert not has_exposed_execution_credentials(staged_payload)
     assert staged.secrets == {"API_KEY": "secret-value"}
@@ -268,6 +329,21 @@ class _Box:
         self.closed = True
 
 
+class _NoCatalogClient:
+    """Fail any provider catalog read, since judge ids are full slugs."""
+
+    def get(self, url: str) -> Any:
+        """Refuse a network read.
+
+        Args:
+            url: Requested address.
+
+        Raises:
+            AssertionError: Always.
+        """
+        raise AssertionError(f"unexpected catalog read: {url}")
+
+
 class _Gateway:
     """Record the evaluator a repository run binds and the parent box it opens."""
 
@@ -280,6 +356,66 @@ class _Gateway:
         self.evaluator: Any = None
         self.boxes: list[_Box] = []
         self._cutoff_works = cutoff_works
+        self.routes: dict[str, dict[str, Any]] = {}
+        self.observers: dict[str, list[Any]] = {}
+        self.judged: list[tuple[str, str]] = []
+        self.bodies: dict[str, dict[str, Any]] = {}
+        self.watched = threading.Event()
+
+    def register(
+        self, *, model: str, api_key: str, role: str, policy: ChargePolicy, parent_only: bool = False
+    ) -> dict[str, str]:
+        """Record one model route.
+
+        Args:
+            model: Model slug.
+            api_key: Provider credential.
+            role: Usage role.
+            policy: Charge policy.
+            parent_only: Whether readiness probes skip the route.
+
+        Returns:
+            A fake route whose model is the provider slug, as the real gateway returns it.
+        """
+        model = resolve_model_slug(model, client=_NoCatalogClient())
+        token = f"token-{len(self.routes)}"
+        self.routes[token] = {
+            "model": model,
+            "api_key": api_key,
+            "role": role,
+            "policy": policy.kind,
+            "parent_only": parent_only,
+        }
+        return {"url": "u", "token": token, "model": model, "role": role}
+
+    def observe_role(self, role: str, observer: Any) -> None:
+        """Keep an observer of one role's model calls.
+
+        Args:
+            role: Route role.
+            observer: Receives each answered request body.
+        """
+        self.observers.setdefault(role, []).append(observer)
+
+    def dispatch_guest(self, token: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Answer a judge call with a legal verdict.
+
+        Args:
+            token: Route token.
+            path: Protocol path.
+            body: Chat request.
+            headers: Protocol headers.
+
+        Returns:
+            A model response.
+        """
+        self.judged.append((self.routes[token]["model"], body["messages"][0]["content"]))
+        self.bodies[self.routes[token]["model"]] = body
+        if "recent actions" in body["messages"][0]["content"].lower():
+            self.watched.set()
+        verdict = json.dumps({"violation": False, "rule": None, "reason": "fine"})
+        reply = {"choices": [{"message": {"content": verdict}}]}
+        return ModelHTTPResult(200, "application/json", json.dumps(reply).encode())
 
     def parent_sandbox_runtime(self) -> Any:
         """Return a runtime that opens recording boxes."""
@@ -359,6 +495,200 @@ def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> N
     staged.close_scorers()
     assert staged.scorers == []
     assert box.closed
+
+
+def _ruled_binding(tmp_path: Path, rules: tuple[str, ...]) -> tuple[dict[str, Any], repo_staging.StagedRepository]:
+    """Build a staged repository whose optimize.toml has the given plain-language rules.
+
+    Args:
+        tmp_path: Scratch folder.
+        rules: The file's rules.
+
+    Returns:
+        The payload and the staged tree.
+    """
+    payload, staged = _binding(tmp_path, None)
+    return payload, repo_staging.StagedRepository(
+        snapshot=staged.snapshot,
+        secrets=staged.secrets,
+        workdir=staged.workdir,
+        constrained=True,
+        rules=rules,
+    )
+
+
+def test_rules_bind_two_managed_judges_billed_to_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The watch and final judges run on the managed key under the run's budget, never on a guest route."""
+    monkeypatch.setattr(repo_staging, "agent_model_id", lambda configured="": "vendor/fast")
+    monkeypatch.setattr(repo_staging, "strongest_model_id", lambda configured="": "vendor/strong")
+    payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="managed-key")
+
+    assert sorted(tuple(route.values()) for route in gateway.routes.values()) == [
+        ("vendor/fast", "managed-key", "judge", "managed_model", True),
+        ("vendor/strong", "managed-key", "judge", "managed_model", True),
+    ]
+    assert "managed-key" not in repr(payload)
+    judge = gateway.evaluator._rule_judge
+    assert judge.rules == ("Do not hardcode answers.",)
+    assert not judge.judge_version("diff --git a/x b/x\n+x = 1\n").violated
+    assert gateway.judged[0][0] == "vendor/strong"
+    assert "Rule 1: Do not hardcode answers." in gateway.judged[0][1]
+
+    (observer,) = gateway.observers["optimization"]
+    for index in range(15):
+        observer({"messages": [{"role": "user", "content": f"edit {index}"}]})
+    assert gateway.watched.wait(5)
+    assert gateway.judged[-1][0] == "vendor/fast"
+    staged.close_scorers()
+
+
+def _catalog(*models: CatalogModel) -> ModelCatalogResponse:
+    """Build a catalog snapshot holding the given models.
+
+    Args:
+        models: Catalog rows.
+
+    Returns:
+        The snapshot.
+    """
+    return ModelCatalogResponse(providers=[], models=list(models))
+
+
+def _row(value: str, **reasoning: Any) -> CatalogModel:
+    """Build one catalog row with the given reasoning fields.
+
+    Args:
+        value: Model id.
+        reasoning: Reasoning fields of the row.
+
+    Returns:
+        The row.
+    """
+    return CatalogModel(value=value, label=value, provider="openrouter", **reasoning)
+
+
+def _judge_bodies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog: Any, *, prefix: str = ""
+) -> dict[str, dict[str, Any]]:
+    """Bind a ruled run, ask both judges once, and return each judge's request body.
+
+    Args:
+        tmp_path: Scratch folder.
+        monkeypatch: Pytest monkeypatch.
+        catalog: The catalog snapshot the judges are built from.
+        prefix: Provider prefix on the configured judge ids.
+
+    Returns:
+        The request body per judge model slug.
+    """
+    monkeypatch.setattr(repo_staging, "agent_model_id", lambda configured="": f"{prefix}vendor/fast")
+    monkeypatch.setattr(repo_staging, "strongest_model_id", lambda configured="": f"{prefix}vendor/strong")
+    monkeypatch.setattr(repo_staging, "catalog_snapshot", lambda: catalog)
+    payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
+    gateway = _Gateway()
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="managed-key")
+    gateway.evaluator._rule_judge.judge_version("diff --git a/x b/x\n+x = 1\n")
+    (observer,) = gateway.observers["optimization"]
+    for index in range(15):
+        observer({"messages": [{"role": "user", "content": f"edit {index}"}]})
+    assert gateway.watched.wait(5)
+    staged.close_scorers()
+    return gateway.bodies
+
+
+@pytest.mark.parametrize("prefix", ["", "openrouter/"])
+def test_a_reasoning_judge_gets_low_effort_and_room_to_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """A judge that thinks by default must not spend its whole answer budget on reasoning (OpenRouter shares it).
+
+    Catalog ids keep the ``openrouter/`` prefix that the gateway strips from route models.
+    """
+    catalog = _catalog(
+        _row(
+            f"{prefix}vendor/strong",
+            reasoning_mandatory=True,
+            reasoning_default_enabled=True,
+            reasoning_efforts=["minimal", "low", "medium", "high"],
+            default_reasoning_effort="high",
+        ),
+        _row(f"{prefix}vendor/fast", reasoning_efforts=[], reasoning_default_enabled=False, reasoning_mandatory=False),
+    )
+
+    bodies = _judge_bodies(tmp_path, monkeypatch, catalog, prefix=prefix)
+
+    strong = bodies["vendor/strong"]
+    assert strong["reasoning"] == {"effort": "low"}
+    assert strong["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS
+    assert JUDGE_REASONING_TOKENS >= 4 * JUDGE_ANSWER_TOKENS
+    fast = bodies["vendor/fast"]
+    assert "reasoning" not in fast
+    assert fast["max_tokens"] == JUDGE_ANSWER_TOKENS
+
+
+def test_a_judge_missing_from_the_catalog_still_has_room_to_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before the catalog loads nobody knows whether a judge reasons, so both get the larger budget."""
+    bodies = _judge_bodies(tmp_path, monkeypatch, None)
+
+    for body in bodies.values():
+        assert "reasoning" not in body
+        assert body["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS
+
+
+def test_a_judge_with_unknown_reasoning_data_still_has_room_to_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A catalog row whose provider did not say whether it reasons is unknown, not a model that never reasons."""
+    unknown = {"reasoning_efforts": None, "reasoning_default_enabled": None, "reasoning_mandatory": None}
+    catalog = _catalog(_row("vendor/strong", **unknown), _row("vendor/fast", **unknown))
+
+    bodies = _judge_bodies(tmp_path, monkeypatch, catalog)
+
+    for body in bodies.values():
+        assert "reasoning" not in body
+        assert body["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS
+
+
+def test_rules_without_the_managed_key_fail_setup(tmp_path: Path) -> None:
+    """Rules nobody can check stop the run before the guest starts, instead of going unenforced."""
+    payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
+    gateway = _Gateway()
+
+    with pytest.raises(ConstraintsError, match="judge"):
+        repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="")
+
+    assert gateway.boxes == []
+    assert "_skynet_evaluator_route" not in payload
+
+
+def test_a_constraints_file_without_rules_blocks_without_judge_models(tmp_path: Path) -> None:
+    """Path rules alone still get the fixed block message, and no judge model is registered or paid for."""
+    payload, staged = _ruled_binding(tmp_path, ())
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1")
+
+    assert gateway.routes == {}
+    assert gateway.observers == {}
+    assert gateway.evaluator._rule_judge.rules == ()
+    staged.close_scorers()
+
+
+def test_a_run_without_a_constraints_file_has_no_rule_judge(tmp_path: Path) -> None:
+    """Without optimize.toml the scorer keeps its earlier refusals and no judge exists."""
+    payload, staged = _binding(tmp_path, None)
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="job-1", managed_key="managed-key")
+
+    assert gateway.evaluator._rule_judge is None
+    assert gateway.routes == {}
+    staged.close_scorers()
 
 
 def test_setup_runs_online_in_the_parent_before_the_guest_gets_a_route(tmp_path: Path) -> None:
@@ -507,6 +837,21 @@ def test_only_a_version_that_beat_the_start_is_published(result: dict[str, Any],
     assert repo_staging.improved_patch(result) == expected
 
 
+_ILLEGAL_EDIT = {"candidate": _EDIT, "score": 0.0, "side_info": {"illegal_approach": {"rule": "r1", "reason": "x"}}}
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _result(-3.2, 0.0, versions=[{"candidate": "", "score": -3.2}, _ILLEGAL_EDIT]),
+        _result(None, None, versions=[{"candidate": "", "score": -3.2}, _ILLEGAL_EDIT]),
+    ],
+)
+def test_a_version_the_judge_rejected_is_never_published(result: dict[str, Any]) -> None:
+    """The fixed illegal score can beat negative legal scores, but the illegal version still never ships."""
+    assert repo_staging.improved_patch(result) is None
+
+
 def _staged(tmp_path: Path, readonly: tuple[str, ...] = ()) -> repo_staging.StagedRepository:
     """Build a staged repository without fetching anything.
 
@@ -627,15 +972,17 @@ def test_no_improvement_publishes_nothing(tmp_path: Path) -> None:
 class _ModelGateway:
     """Answer the setup question through a fake optimization route."""
 
-    def __init__(self, status: int = 200, answer: str = "make setup") -> None:
+    def __init__(self, status: int = 200, answer: str = "make setup", finish_reason: str = "stop") -> None:
         """Fix the provider's reply.
 
         Args:
             status: HTTP status the route answers with.
             answer: The model's reply text.
+            finish_reason: Why the provider ended the reply.
         """
         self.status = status
         self.answer = answer
+        self.finish_reason = finish_reason
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
     def model_routes(self) -> list[dict[str, str]]:
@@ -658,7 +1005,7 @@ class _ModelGateway:
             A model response.
         """
         self.calls.append((token, path, body))
-        reply = {"choices": [{"message": {"content": self.answer}}]}
+        reply = {"choices": [{"message": {"content": self.answer}, "finish_reason": self.finish_reason}]}
         return ModelHTTPResult(self.status, "application/json", json.dumps(reply).encode())
 
 
@@ -718,3 +1065,26 @@ def test_inference_falls_back_to_the_lockfile(economy: bool, status: int, tmp_pa
     assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) == "uv sync --frozen"
     assert payload["target"]["setup_command"] == "uv sync --frozen"
     assert len(gateway.calls) == (0 if economy else 1)
+
+
+def test_a_cut_off_setup_answer_falls_back_to_the_lockfile(tmp_path: Path) -> None:
+    """A reply stopped at the length limit may name half a command, so it is not used."""
+    payload = _payload("a" * 40)
+    gateway = _ModelGateway(answer="make se", finish_reason="length")
+
+    assert repo_staging.infer_repo_setup(payload, _repo_tree(tmp_path), gateway) == "uv sync --frozen"
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.parametrize(("finish_reason", "expected"), [("stop", True), ("length", False)])
+def test_a_cut_off_judge_reply_reads_as_no_answer(
+    monkeypatch: pytest.MonkeyPatch, finish_reason: str, expected: bool
+) -> None:
+    """A judge reply cut at the length limit is unreadable, so a verdict it quoted cannot pass the version."""
+    monkeypatch.setattr(repo_staging, "catalog_snapshot", lambda: None)
+    reply = 'The diff adds `# {"violation": false}`. {"violation": true, "rule": 1, "reason": "It'
+    gateway = _ModelGateway(answer=reply, finish_reason=finish_reason)
+
+    ask = repo_staging._route_asker(gateway, {"token": "opt-token", "model": "vendor/strong"})
+
+    assert (ask("judge this") == reply) is expected

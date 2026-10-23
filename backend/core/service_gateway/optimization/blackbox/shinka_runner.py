@@ -84,6 +84,7 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
 
 _RPC_PREFIX = "APP_NATIVE_RPC "
 _PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens")
 _LANGUAGE = "markdown"
@@ -258,6 +259,27 @@ class EvaluatorMailbox:
         """
         with self._write_lock:
             print(f"{prefix}{self.nonce} {json.dumps(payload, default=str, allow_nan=False)}", flush=True)
+
+
+def rule_blocker(mailbox: EvaluatorMailbox) -> Callable[[str], None]:
+    """Build the callback that sends a path-rule block to the parent's run log.
+
+    Args:
+        mailbox: Parent connection.
+
+    Returns:
+        A function taking the block's reason.
+    """
+
+    def block(reason: str) -> None:
+        """Send one ``rule.block`` run event.
+
+        Args:
+            reason: Why the path rules refused the version.
+        """
+        mailbox.emit(_LOG_PREFIX, repo_tree.rule_block_record(reason))
+
+    return block
 
 
 def visible_examples(cases: Sequence[Any] | None) -> list[Any]:
@@ -1098,7 +1120,9 @@ class AgentEditor:
             ``(code, unified_diff, changed_files)``.
 
         Raises:
-            ValueError: When the agent changed nothing or broke the program's structure.
+            ValueError: When the agent changed nothing, broke the program's
+                structure, or, under a constraints file, changed a path the
+                rules forbid.
         """
         if self.bundle is None:
             try:
@@ -1124,7 +1148,11 @@ class AgentEditor:
         listed = _git(workspace, "diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d", "HEAD")
         files: dict[str, str] = {}
         for path in filter(None, listed.split("\0")):
-            if bundle.rule_problem(path) is not None:
+            problem = bundle.rule_problem(path)
+            if problem is not None:
+                # Without a constraints file the path is dropped silently, as before.
+                if bundle.on_block is not None:
+                    raise ValueError(bundle.refusal(path, problem))
                 continue
             data = (workspace / path).read_bytes()
             if b"\0" in data or len(data) > shinka_bundle.MAX_FILE_BYTES:
@@ -1605,11 +1633,15 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     queue = workdir / "eval-queue"
     results_dir.mkdir(parents=True, exist_ok=True)
     repo = payload.get("repo")
-    bundle = shinka_bundle.RepoBundle.prepare(repo, seed, workdir / "repo-checkout") if repo else None
+    mailbox = EvaluatorMailbox(payload["nonce"], timeout)
+    bundle = (
+        shinka_bundle.RepoBundle.prepare(repo, seed, workdir / "repo-checkout", on_block=rule_blocker(mailbox))
+        if repo
+        else None
+    )
     if bundle is not None and not isinstance(seed, str):
         seed = ""
     config = build_config(payload, str(results_dir), len(examples), repo=bundle is not None)
-    mailbox = EvaluatorMailbox(payload["nonce"], timeout)
     scorer = ProgramScorer(
         mailbox=mailbox,
         queue=queue,
