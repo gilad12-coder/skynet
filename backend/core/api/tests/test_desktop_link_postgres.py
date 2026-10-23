@@ -1,4 +1,4 @@
-"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1 to R782F-2).
+"""Exercise concurrent desktop link calls against real PostgreSQL row locks (SKY-124, R782B-1 to R782H-1).
 
 SQLite ignores ``FOR UPDATE``, so only PostgreSQL at its default READ
 COMMITTED level can show the refresh race. Point ``APP_DESKTOP_LINK_TEST_DB_URL``
@@ -42,6 +42,7 @@ from core.storage.models import (
     DesktopLinkModel,
     DesktopTokenModel,
     PackageRegistryPreferenceModel,
+    UserIdentityModel,
     UserModel,
     WebAuthnChallengeModel,
     WebAuthnCredentialModel,
@@ -62,12 +63,13 @@ INTERNAL_SECRET = "internal-test-secret"
 # Each statement locks one row that the account deletion deletes. A blocker
 # transaction that holds it parks the deletion at that point (R782F-1).
 DELETION_STOPS = {
+    "user-identities": "SELECT 1 FROM user_identities WHERE username = :u FOR UPDATE",
     "api-tokens": "SELECT 1 FROM api_tokens WHERE username = :u FOR UPDATE",
     "passkey-challenges": "SELECT 1 FROM webauthn_challenges WHERE user_email = :u FOR UPDATE",
     "registry-preferences": "SELECT 1 FROM package_registry_preferences WHERE username = :u FOR UPDATE",
     "desktop-tokens": "SELECT 1 FROM desktop_tokens FOR UPDATE",
 }
-SIGN_IN_STOPS = ["api-tokens", "passkey-challenges", "registry-preferences"]
+SIGN_IN_STOPS = ["user-identities", "passkey-challenges", "api-tokens", "registry-preferences"]
 
 
 class _Store:
@@ -843,6 +845,7 @@ def sign_in(full_database: Engine, monkeypatch: pytest.MonkeyPatch) -> SimpleNam
         alice.email_verified = True
         alice.email_2fa_enabled = True
         session.add(ApiTokenModel(username=ALICE, token_hash="h" * 64, last4="abcd"))
+        session.add(UserIdentityModel(provider="github", provider_account_id="4242", username=ALICE))
         session.add(PackageRegistryPreferenceModel(username=ALICE, index_url="https://pypi.org/simple"))
         session.add(
             WebAuthnChallengeModel(
