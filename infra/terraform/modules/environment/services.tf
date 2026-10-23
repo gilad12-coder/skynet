@@ -65,8 +65,6 @@ resource "aws_service_discovery_service" "litellm" {
       ttl  = 10
     }
   }
-
-  health_check_custom_config {}
 }
 
 locals {
@@ -195,11 +193,14 @@ locals {
       health_check = null
     }
     litellm = {
-      image        = local.image.litellm
-      cpu          = var.services["litellm"].cpu
-      memory       = var.services["litellm"].memory
-      port         = local.ports.litellm
-      command      = null
+      image  = local.image.litellm
+      cpu    = var.services["litellm"].cpu
+      memory = var.services["litellm"].memory
+      port   = local.ports.litellm
+      # The Dockerfile CMD binds "::" for Railway's IPv6-only network.
+      # Uvicorn sets IPV6_V6ONLY on that socket, so IPv4 callers (the health
+      # check on 127.0.0.1 and the backend via Cloud Map) are refused.
+      command      = ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
       stop_timeout = 120
       health_check = {
         command     = ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]

@@ -2,11 +2,18 @@ FROM docker.io/node:22.22.0-bookworm-slim AS node-runtime
 
 FROM node-runtime AS harness-deps
 
+# npm installs only the opencode binary packages that match the build CPU, so
+# the package names depend on the target architecture (ECS runs arm64).
+ARG TARGETARCH
 COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
-RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
+RUN case "$TARGETARCH" in \
+        amd64) OPENCODE_PKGS="opencode-linux-x64 opencode-linux-x64-baseline" ;; \
+        arm64) OPENCODE_PKGS="opencode-linux-arm64" ;; \
+        *) echo "unsupported arch for opencode: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
     && rm -rf \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-musl \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline-musl \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-*-musl \
     && mkdir -p \
         /opt/skynet-harness-layers/anthropic \
         /opt/skynet-harness-layers/codex \
@@ -26,11 +33,11 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnes
         /opt/skynet-harness-layers/prime/@earendil-works/ \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@earendil-works \
         /opt/skynet-harness-layers/pi/ \
-    && mv \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64 \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline \
-        /opt/skynet-harness-layers/opencode/
+    && mv /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
+        /opt/skynet-harness-layers/opencode/ \
+    && for PKG in $OPENCODE_PKGS; do \
+        mv "/usr/local/lib/skynet-harnesses/node_modules/$PKG" /opt/skynet-harness-layers/opencode/ || exit 1; \
+    done
 
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
