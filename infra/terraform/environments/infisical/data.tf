@@ -29,9 +29,25 @@ resource "aws_db_parameter_group" "this" {
     value = "1000"
   }
 
+  # Slow-query lines would otherwise carry full bind values (ciphertext,
+  # emails, token hashes). 0 drops them from the log.
+  parameter {
+    name  = "log_parameter_max_length"
+    value = "0"
+  }
+
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# RDS creates these groups with "Never expire" when they are missing. Create
+# them first so the exported logs keep the same 30-day retention as the
+# other groups of this root.
+resource "aws_cloudwatch_log_group" "rds" {
+  for_each          = toset(["postgresql", "upgrade"])
+  name              = "/aws/rds/instance/${local.name}/${each.key}"
+  retention_in_days = 30
 }
 
 resource "aws_db_instance" "this" {
@@ -76,6 +92,8 @@ resource "aws_db_instance" "this" {
   allow_major_version_upgrade     = false
   apply_immediately               = false
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+
+  depends_on = [aws_cloudwatch_log_group.rds]
 
   lifecycle {
     prevent_destroy = true

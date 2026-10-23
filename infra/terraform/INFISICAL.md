@@ -386,6 +386,49 @@ files.
 Agents continue to read secret names and values from Secrets Manager as
 before. They do not get Infisical access.
 
+### 22. Rotate the Infisical datastore credentials
+
+Use this step to change the Infisical database password and the Valkey
+token. Use it also to recover after a first apply that stopped half-way.
+The apps are not affected. Infisical is down from the apply until the new
+task is healthy. No command prints a value.
+
+1. In `environments/infisical/terraform.tfvars`, raise
+   `datastore_credentials_version` by 1. If the line is not there, add
+   `datastore_credentials_version = 2`.
+2. Make a plan. Expect only updates to the database, the Valkey group and
+   the `skynet/infisical/datastore` secret version:
+
+   ```bash
+   cd environments/infisical
+   terraform plan -out=tfplan   # expect: 0 to add, 0 to destroy
+   ```
+
+3. Get approval for the plan. Then apply it:
+
+   ```bash
+   terraform apply tfplan
+   ```
+
+4. The running task still has the old credentials. Start a new deployment
+   and wait until it is stable:
+
+   ```bash
+   aws ecs update-service --cluster skynet-infisical --service infisical \
+     --force-new-deployment --query service.serviceName --output text
+   aws ecs wait services-stable --cluster skynet-infisical --services infisical
+   ```
+
+5. Open the tunnel (step 5). In a second terminal, check the health:
+
+   ```bash
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost:18080/api/status   # expect 200
+   ```
+
+   If the check fails, read the task log in CloudWatch
+   `/ecs/skynet-infisical/infisical`. Do not raise the version again before
+   you know the cause.
+
 ## Alarms and audit
 
 - CloudTrail trail `skynet-infisical-audit` records write events (KMS-encrypted
@@ -398,6 +441,9 @@ before. They do not get Infisical access.
   alarm has no receiver, and a plan prints a warning.
 - Infisical logs: CloudWatch `/ecs/skynet-infisical/infisical` (30 days).
   ECS Exec sessions of the tunnel: 90 days.
+- RDS logs: `/aws/rds/instance/skynet-infisical/postgresql` and `/upgrade`
+  (30 days). Terraform creates these groups before the database. Slow-query
+  lines hold no bind values (`log_parameter_max_length = 0`).
 
 ## Failure isolation
 
@@ -437,8 +483,10 @@ before. They do not get Infisical access.
 | KMS key | 1 |
 | Secrets Manager, 3 secrets | ~1.2 |
 | CloudWatch logs, CloudTrail, S3, SNS | ~2-3 |
-| **Total** | **~82-85** |
+| Container Insights (38 metrics x $0.30: cluster 13, service 15, task family 10; logs ~0.15 GB) | ~11.5 |
+| **Total** | **~94-97** |
 
-The tunnel task costs about $0.01 per hour while it runs. The NAT gateway is
+The tunnel task costs about $0.01 per hour while it runs. While it runs, its task
+family adds up to 10 Container Insights metrics (at most $3 for a full month). The NAT gateway is
 the largest item. A NAT instance (fck-nat, about $3) or VPC endpoints
 without NAT would cut about $30, with more parts to maintain.

@@ -12,7 +12,8 @@
 #   - the sync exists, is disabled, writes skynet/<env>/app in us-east-2,
 #     Many-To-One, initial sync behavior "overwrite-destination", and no key
 #     schema (a key schema renames the destination secret; an import
-#     behavior can copy old Secrets Manager values back into Infisical);
+#     behavior can copy old Secrets Manager values back into Infisical), and
+#     no tags (the sync role cannot tag);
 #   - Infisical <env> "/" has no secret imports;
 #   - the key NAMES in Infisical equal the key names in skynet/<env>/app;
 #   - the values are equal, or --accept-changed-values is given (only the
@@ -83,6 +84,13 @@ fail=0
 }
 [[ -z "$(jq -r '.syncOptions.keySchema // ""' <<<"$sync")" ]] || {
   echo "FAIL: key schema is set; it renames the destination secret"
+  fail=1
+}
+# Any tags value (also an empty list) makes Infisical call TagResource or
+# UntagResource after the write. The sync role may not tag, so the job fails
+# after the value changed. Only the fact prints, not the tags.
+[[ "$(jq -r '.syncOptions.tags == null' <<<"$sync")" == "true" ]] || {
+  echo "FAIL: tags are set on the sync (also an empty list); the sync role cannot tag or untag. Remove the tags."
   fail=1
 }
 
