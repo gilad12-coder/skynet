@@ -127,7 +127,7 @@ class WizardPreflightResponse(BaseModel):
 
     @model_serializer(mode="wrap")
     def _keep_proposer_host_cli(self, handler: SerializerFunctionWrapHandler):
-        """Keep an execution check's proposer CLI in the output even when it is null.
+        """Keep the check's proposer CLI in the output even when it is null.
 
         The routes drop null fields, and a missing key lets the submit pick a
         CLI from the engine as it is now. The null must reach the submit.
