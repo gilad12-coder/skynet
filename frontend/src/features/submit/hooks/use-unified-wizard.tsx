@@ -62,7 +62,11 @@ import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "
 import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
-import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
+import {
+  checkedRunRequest,
+  preflightMayAdvance,
+  preflightPendingMessageKey,
+} from "../lib/preflight-outcome";
 import { repoRunRequest } from "../lib/repo-run";
 import {
   currentRunFailure,
@@ -652,13 +656,7 @@ export function WizardV2Provider({
 
     setSubmitPhase("sending");
     try {
-      const request: UnifiedRunRequest = {
-        ...payload,
-        execution_budget_id: checked.budget.id,
-        execution_budget_revision: checked.budget.revision,
-        preflight_id: checked.id,
-        preflight_fingerprint: checked.fingerprint,
-      };
+      const request = checkedRunRequest(payload, checked);
       const key = await budgetSession.submissionKey(checked.fingerprint);
       const result = await submitUnifiedRun(request, { idempotencyKey: key });
       track(TelemetryEvent.RunSubmitted, {

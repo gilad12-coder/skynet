@@ -121,6 +121,23 @@ class WizardPreflightResponse(BaseModel):
     # A repository run's effective environment: what versions may change,
     # what stays protected, and which network and services each step gets.
     environment: dict[str, Any] | None = None
+    # The proposer CLI this check ran on. A submit sends it back so the server
+    # does not pick another CLI from changed readiness and refuse the evidence.
+    proposer_host_cli: Literal["codex", "claude"] | None = None
+
+
+def _proposer_host_cli(payload: dict[str, Any]) -> str | None:
+    """Read the proposer CLI a setup payload resolved.
+
+    Args:
+        payload: A black-box (``proposer``) or unified (``optimizer.proposer``) payload.
+
+    Returns:
+        The proposer's ``host_cli``, or ``None`` when the payload names none.
+    """
+    optimizer = payload.get("optimizer")
+    proposer = payload.get("proposer") or (optimizer.get("proposer") if isinstance(optimizer, dict) else None)
+    return proposer.get("host_cli") if isinstance(proposer, dict) else None
 
 
 def _canonical_execution_payload(request: WizardPreflightRequest, username: str, job_store: Any) -> dict[str, Any]:
@@ -470,6 +487,7 @@ def _run_preflight(
         request = request.model_copy(
             update={"payload": _canonical_execution_payload(request, user.username, job_store)}
         )
+    host_cli = _proposer_host_cli(request.payload)
     if request.workflow == "unified" and request.contract_sample_count is not None:
         request = request.model_copy(
             update={"payload": {**request.payload, CONTRACT_SAMPLE_COUNT_KEY: request.contract_sample_count}}
@@ -503,7 +521,9 @@ def _run_preflight(
         document = claim.document
         if isinstance(document.get("terminal"), dict):
             document = {**document, "terminal": {**document["terminal"], "reused": True}}
-        return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+        return WizardPreflightResponse.model_validate(
+            {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+        )
     if terminal is not None:
         terminal.redact(check_terminal.secret_values(request.payload))
         terminal.note("budget_ready", available_cents=int(snapshot.available_cents))
@@ -538,7 +558,9 @@ def _run_preflight(
                     status="failed",
                     result={"checks": [_check("setup", "failed", str(error))]},
                 )
-                return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+                return WizardPreflightResponse.model_validate(
+                    {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+                )
             if terminal is not None:
                 terminal.redact(check_terminal.secret_values(parent_payload))
             parent_request = request.model_copy(update={"payload": parent_payload})
@@ -563,7 +585,9 @@ def _run_preflight(
             document = evidence.finish(claim.document["id"], claim_token=claim.token, status=status, result=result)
     except BudgetError as error:
         raise budget_http_error(error) from error
-    return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+    return WizardPreflightResponse.model_validate(
+        {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+    )
 
 
 def _perform_preflight(

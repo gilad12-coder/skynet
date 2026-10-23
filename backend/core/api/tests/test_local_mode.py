@@ -741,3 +741,59 @@ def test_local_wizard_check_evidence_starts_a_run_on_the_engine_cli(
     assert submitted.status_code == 201, submitted.text
     job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
     assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "claude"
+
+
+def test_local_wizard_check_evidence_survives_a_cli_readiness_change(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A submit that sends the CLI its check resolved keeps that check current.
+
+    The wizard reuses a passed check. If the engine CLI it resolved stops being
+    ready before submit, the server must not resolve another CLI and refuse
+    the evidence as a budget conflict on every retry.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("codex"), _status("claude")])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="engine-change")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+    response = harness.client.post(
+        "/wizard/preflight",
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    checked = response.json()
+    assert checked["status"] == "succeeded", checked
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    optimizer = payload["optimizer"]
+    proposer = {**optimizer.get("proposer", {}), "host_cli": checked.get("proposer_host_cli")}
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "optimizer": {**optimizer, "proposer": proposer},
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "codex"

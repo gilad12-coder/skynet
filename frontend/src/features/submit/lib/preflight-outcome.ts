@@ -1,3 +1,4 @@
+import type { UnifiedRunRequest } from "@/shared/types/unified-run";
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 
 export interface StoredPreflightEvidence {
@@ -59,4 +60,27 @@ export function preflightPendingMessageKey(
   if (response.pending_reason?.category === "usage_reconciliation")
     return "submit.preflight.usage_pending";
   return "submit.preflight.incomplete";
+}
+
+/**
+ * Bind a run to its passed execution check. The proposer keeps the CLI the
+ * check ran on, so the server does not pick another CLI from changed
+ * readiness and refuse the evidence on every retry.
+ */
+export function checkedRunRequest(
+  payload: UnifiedRunRequest,
+  checked: WizardPreflightResponse,
+): UnifiedRunRequest {
+  const proposer = payload.optimizer.proposer;
+  return {
+    ...payload,
+    optimizer:
+      proposer && checked.proposer_host_cli !== undefined
+        ? { ...payload.optimizer, proposer: { ...proposer, host_cli: checked.proposer_host_cli } }
+        : payload.optimizer,
+    execution_budget_id: checked.budget.id,
+    execution_budget_revision: checked.budget.revision,
+    preflight_id: checked.id,
+    preflight_fingerprint: checked.fingerprint,
+  };
 }
