@@ -70,8 +70,32 @@ export function findCli(
   status: LocalStatus | null | undefined,
   cli: CliProvider | null | undefined,
 ): CliStatus | undefined {
-  if (!status || !cli) return undefined;
+  if (!status || !isCliProvider(cli)) return undefined;
   return status.clis.find((entry) => entry.id === cli);
+}
+
+/** The first offered CLI that can run models right now, as the subscription source's preselection. */
+export function firstReadyCli(
+  status: LocalStatus | null | undefined,
+  now: Date = new Date(),
+): CliProvider | undefined {
+  // An older backend may still report a CLI the app no longer offers.
+  return status?.clis.find(
+    (cli) => isCliProvider(cli.id) && cliState(cli, now).kind === "ok" && cli.models.length > 0,
+  )?.id;
+}
+
+/**
+ * A model config on a newly chosen CLI. The model stays only when that CLI
+ * serves it, so a Save never pairs a CLI with a model it cannot run.
+ */
+export function withChosenCli<T extends { name: string; cli_provider?: CliProvider | null }>(
+  config: T,
+  cli: CliProvider,
+  status: LocalStatus | null | undefined,
+): T {
+  const served = findCli(status, cli)?.models.includes(config.name);
+  return { ...config, cli_provider: cli, name: served ? config.name : "" };
 }
 
 /** `subscription/<cli>/<catalog-slug>`, the agent-request model shorthand. */
@@ -297,4 +321,18 @@ export function hostCliPatch(
   return isCliProvider(value)
     ? { host_cli: value, host_permission: permission ?? "workspace_only" }
     : { host_cli: undefined, host_permission: undefined };
+}
+
+/**
+ * The proposer as a run request sends it. A restored draft or a clone may name
+ * a host CLI the app no longer offers; the menu shows that as off, so the
+ * request drops it and its permission too.
+ */
+export function withSupportedHostCli<
+  T extends { host_cli?: string | null; host_permission?: string | null },
+>(proposer: T): T {
+  if (isCliProvider(proposer.host_cli)) return proposer;
+  if (!("host_cli" in proposer) && !("host_permission" in proposer)) return proposer;
+  const { host_cli: _hostCli, host_permission: _hostPermission, ...rest } = proposer;
+  return rest as T;
 }
