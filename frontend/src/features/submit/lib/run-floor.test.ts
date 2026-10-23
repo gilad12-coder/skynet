@@ -6,7 +6,9 @@ const {
   RUN_SPARE_CENTS,
   aggregateTokenSource,
   callHoldKey,
+  isSubscriptionModel,
   runFloor,
+  runModels,
   startingLimitCents,
 } = await import("./run-floor.ts");
 
@@ -42,4 +44,64 @@ test("the job is BYOK only when every named model is", () => {
   assert.equal(aggregateTokenSource([model("a", "byok"), model("b", "managed")]), "managed");
   assert.equal(aggregateTokenSource([model("", "managed"), model("a", "byok")]), "byok");
   assert.equal(aggregateTokenSource([]), "managed");
+});
+
+test("a subscription run holds nothing for its model calls, so its floor is $0", () => {
+  const floor = runFloor({ boxHoldCents: 0, callHoldCents: [134.15], tokenSource: "subscription" });
+  assert.deepEqual(floor, { boxHoldCents: 0, spareCents: 0, floorCents: 0 });
+  // Only the server's own box hold, if any, remains.
+  assert.equal(
+    runFloor({ boxHoldCents: 18.08, callHoldCents: [], tokenSource: "subscription" }).floorCents,
+    19,
+  );
+});
+
+test("the job is a subscription job when no named model is managed and one runs on a CLI", () => {
+  type Source = "managed" | "byok" | "subscription" | undefined;
+  const model = (name: string, token_source: Source) =>
+    ({
+      name,
+      token_source,
+      cli_provider: token_source === "subscription" ? "claude" : undefined,
+    }) as Parameters<typeof aggregateTokenSource>[0][number];
+  assert.equal(aggregateTokenSource([model("a", "subscription")]), "subscription");
+  assert.equal(
+    aggregateTokenSource([model("a", "subscription"), model("b", "byok")]),
+    "subscription",
+  );
+  assert.equal(
+    aggregateTokenSource([model("a", "subscription"), model("b", "managed")]),
+    "managed",
+  );
+  // A config saved before token sources existed counts as managed.
+  assert.equal(
+    aggregateTokenSource([model("a", "subscription"), model("b", undefined)]),
+    "managed",
+  );
+  assert.equal(isSubscriptionModel(model("a", "subscription")), true);
+  assert.equal(isSubscriptionModel(model("a", "byok")), false);
+});
+
+test("a run's models are the picked roles, ShinkaEvolve's extras and a calling metric", () => {
+  const task = { name: "subscription/claude/anthropic/claude-haiku-4.5" };
+  const reflection = { name: "openai/gpt-5" };
+  const extra = { name: "openai/gpt-5-mini" };
+  const metric = { name: "anthropic/claude-sonnet-4.5" };
+  const optimizer = {
+    choice: "gepa" as const,
+    taskModel: task,
+    reflectionModel: reflection,
+    extraReflectionModels: [extra],
+  };
+  assert.deepEqual(runModels(optimizer, null), [task, reflection]);
+  assert.deepEqual(runModels({ ...optimizer, choice: "shinka_evolve" }, metric), [
+    task,
+    reflection,
+    extra,
+    metric,
+  ]);
+  assert.deepEqual(
+    runModels({ ...optimizer, taskModel: { name: " " }, reflectionModel: null }, null),
+    [],
+  );
 });

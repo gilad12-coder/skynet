@@ -117,6 +117,10 @@ import { PackageRegistrySetting } from "./PackageRegistrySetting";
 import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
 import { SettingsRow } from "@/shared/ui/settings-row";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { AgentLocalRunSetting } from "./AgentLocalRunSetting";
+import { useLocalAgentMenuModels } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "../lib/prefs";
 
 function WizardTab() {
   const { prefs, setPref } = useUserPrefs();
@@ -240,6 +244,7 @@ function TaggingTab() {
 
 function AgentTab() {
   const { prefs, setPref } = useUserPrefs();
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("generalist"));
 
   return (
     <div className="space-y-1">
@@ -253,6 +258,7 @@ function AgentTab() {
           onChange={(v) => setPref("composerModel", v)}
           effort={prefs.composerEffort}
           onEffortChange={(v) => setPref("composerEffort", v)}
+          models={localMenuModels}
         />
       </SettingsRow>
 
@@ -289,6 +295,8 @@ function AgentTab() {
           </SelectContent>
         </Select>
       </SettingsRow>
+
+      {isLocalMode() && <AgentLocalRunSetting />}
     </div>
   );
 }

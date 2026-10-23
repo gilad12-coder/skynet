@@ -130,6 +130,22 @@ async function verifyBackendPasskey(assertion: string): Promise<BackendAccount |
   }
 }
 
+/** The local desktop build's single account, from the backend's /auth/local/session. */
+async function resolveLocalAccount(): Promise<BackendAccount | null> {
+  if (!backendAuthSecret) return null;
+  try {
+    const res = await fetch(`${backendBaseUrl}/auth/local/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Auth": backendAuthSecret },
+      body: "{}",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as BackendAccount;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Mirror a provider-authenticated (Google/GitHub) identity into the
  * backend's users table via the internal /auth/oauth/provision, so it gets the
@@ -393,6 +409,31 @@ providers.push(
     },
   }),
 );
+
+// The local desktop build has one user and no sign-in screen: the backend
+// resolves its fixed local account over the internal secret. Hosted builds
+// never set APP_LOCAL_MODE, so the provider does not exist there.
+if (process.env.APP_LOCAL_MODE === "1") {
+  providers.push(
+    Credentials({
+      id: "local",
+      name: "Local",
+      credentials: {},
+      async authorize() {
+        const account = await resolveLocalAccount();
+        if (!account) return null;
+        return {
+          id: account.email,
+          name: account.name,
+          email: account.email,
+          groups: [],
+          role: account.role,
+          firstLogin: account.first_login === true,
+        };
+      },
+    }),
+  );
+}
 
 // Browsers scope cookies by host, not port, so two checkouts on localhost:3000
 // and :3001 overwrite each other's session cookie. With different AUTH_SECRETs

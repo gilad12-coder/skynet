@@ -45,6 +45,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "admin.quota_save_failed": "Failed to save quota override.",
     "admin.user_not_found": "No account found for '{email}'.",
     "analytics.other_bucket": "Other",
+    "auth.account_not_found": "This account no longer exists. Sign in again.",
     "auth.invalid_token": "Authentication token is invalid or expired.",
     "auth.missing_token": "Authentication token is required.",
     "auth.not_configured": "Backend authentication is not configured.",

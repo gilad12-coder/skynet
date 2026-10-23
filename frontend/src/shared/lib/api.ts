@@ -53,6 +53,11 @@ import type { TurnStats } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
+import {
+  ACCOUNT_MISSING_CODE,
+  announceAccountMissing,
+  isAccountMissingResponse,
+} from "@/shared/lib/account-missing";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import type { RunUsage } from "@/shared/types/run-usage";
 import type {
@@ -163,8 +168,15 @@ export async function fetchWithAuthRetry(url: string, init: RequestInit): Promis
   const res = await send(_authToken);
   if (res.status !== 401) return res;
   const fresh = await refreshAuthTokenOn401();
-  if (!fresh) return res;
-  return send(fresh);
+  const final = fresh ? await send(fresh) : res;
+  if (final.status === 401) {
+    const body = await final
+      .clone()
+      .text()
+      .catch(() => "");
+    if (isAccountMissingResponse(final.status, body)) announceAccountMissing();
+  }
+  return final;
 }
 
 function cachedGet<T>(path: string, maxAge = GET_CACHE_MS): Promise<T> {
@@ -352,6 +364,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // isInsufficientFundsError so the modal is the single surface.
     if (parsed.code === INSUFFICIENT_FUNDS_CODE && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(INSUFFICIENT_FUNDS_EVENT));
+    }
+    // A missing account cannot recover by refreshing the bearer; the session
+    // provider signs the browser out instead of letting every call fail.
+    if (res.status === 401 && parsed.code === ACCOUNT_MISSING_CODE) {
+      announceAccountMissing();
     }
     // The framework's bare "Not Found" / "Method Not Allowed" means this server
     // has no such route: it runs an older version than the app. Say that
@@ -4049,7 +4066,8 @@ export interface TaskInterviewHandlers {
   /** The server is retrying a failed attempt; drop streamed partial text. */
   onReset?: () => void;
   onDone: (result: TaskInterviewTurnResult) => void;
-  onError: (message: string) => void;
+  /** `code` is the backend's error code when the turn was refused before it started. */
+  onError: (message: string, code?: string) => void;
 }
 
 function parseCandidate(raw: unknown): string | Record<string, string> | null {
@@ -4126,7 +4144,11 @@ export async function streamTaskInterviewTurn(
     },
   });
   if (result.status === "aborted") return null;
-  if (!outcome && !failed) handlers.onError(msg("submit.code.interview.error"));
+  if (!outcome && !failed) {
+    const refused = result.status === "failed" ? result.response : undefined;
+    const code = refused ? parseError(await refused.text().catch(() => "")).code : undefined;
+    handlers.onError(msg("submit.code.interview.error"), code);
+  }
   return outcome;
 }
 

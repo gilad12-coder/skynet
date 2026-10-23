@@ -128,7 +128,7 @@ export interface MetaSlice {
   description: string;
   isPrivate: boolean;
   folderId: string | null;
-  tokenSource: "managed" | "byok";
+  tokenSource: "managed" | "byok" | "subscription";
   economyMode: boolean;
 }
 

@@ -40,6 +40,7 @@ import {
 import { contractCheckMessage } from "@/shared/lib/i18n";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import type { ContinuousEnableRequest } from "@/shared/types/continuous";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getActiveMessages } from "@/shared/lib/runtime-messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -58,7 +59,13 @@ import { SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { emptyModelConfig } from "../constants";
 import { restoreSavedLimit } from "../lib/budget-limit";
 import { cloneToSlices } from "../lib/clone-payload";
-import { aggregateTokenSource, callHoldKey, runFloor as computeRunFloor } from "../lib/run-floor";
+import {
+  aggregateTokenSource,
+  callHoldKey,
+  isSubscriptionModel,
+  runFloor as computeRunFloor,
+  runModels,
+} from "../lib/run-floor";
 import { fileNewRun } from "../lib/file-new-run";
 import { inputsFromRoles, rowsToCases, singleInputCase, type Row } from "../lib/inputs-mode";
 import { prepareModelConfig } from "../lib/model-config";
@@ -400,17 +407,18 @@ export function WizardV2Provider({
 
   const metricCallsModel = metricUsesModel(state);
   const metricModel = metricCallsModel ? resolvedMetricModel(state) : null;
-  const submittedModels = [
-    state.optimizer.taskModel,
-    state.optimizer.reflectionModel,
-    ...(state.optimizer.choice === "shinka_evolve" ? state.optimizer.extraReflectionModels : []),
-    metricModel,
-  ].filter(hasModel);
+  const submittedModels = runModels(state.optimizer, metricModel);
+  // A CLI-subscription model bills to the user's own plan, so it has no
+  // server hold to fetch and adds nothing to the floor.
+  const pricedModels = submittedModels.filter(
+    (model): model is ModelConfig & { token_source?: "managed" | "byok" } =>
+      !isSubscriptionModel(model),
+  );
   const {
     holds: callHolds,
     boxHoldCents,
     settled: costSettled,
-  } = useModelCallHolds(submittedModels);
+  } = useModelCallHolds(pricedModels);
   const tokenSource = aggregateTokenSource(submittedModels);
   // The floor waits for the server's box hold, since the boxes are most of it.
   const runFloor =
@@ -418,10 +426,11 @@ export function WizardV2Provider({
       ? null
       : computeRunFloor({
           boxHoldCents,
-          callHoldCents: submittedModels.map(
+          callHoldCents: pricedModels.map(
             (model) =>
               callHolds.get(callHoldKey(model.name, model.token_source ?? "managed")) ?? null,
           ),
+          tokenSource,
         });
 
   // The spending limit lives on the server budget, like the slice mirror the
@@ -501,7 +510,8 @@ export function WizardV2Provider({
       },
       token_source: tokenSource,
       is_private: meta.isPrivate,
-      ...(meta.economyMode && { economy_mode: true }),
+      // The local build runs no batch provider, so a restored economy choice is dropped.
+      ...(meta.economyMode && !isLocalMode() && { economy_mode: true }),
       max_cost_cents: budgetUncapped ? undefined : (maxCostCents ?? undefined),
     };
   }, [state, username, tokenSource, budgetUncapped, maxCostCents]);

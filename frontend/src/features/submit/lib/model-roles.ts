@@ -35,6 +35,7 @@ export function modelIdentity(config: ModelConfig | null | undefined): string | 
     name,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? (config.byok_provider ?? null) : null,
+    ...(tokenSource === "subscription" ? { cli_provider: config.cli_provider ?? null } : {}),
     temperature: config.temperature ?? null,
     max_tokens: config.max_tokens ?? null,
     extra: extraEntries.length > 0 ? Object.fromEntries(extraEntries) : null,
@@ -48,7 +49,10 @@ export function sameModelConfig(
   return modelIdentity(a) === modelIdentity(b);
 }
 
-/** Native proposers use model defaults; preserve BYOK so validation cannot hide it. */
+/**
+ * Native proposers use model defaults; preserve BYOK and the subscription CLI
+ * so validation cannot hide who pays.
+ */
 export function proposerModelConfig(config: ModelConfig, native: boolean): ModelConfig {
   if (!native) return config;
   const tokenSource = config.token_source ?? "managed";
@@ -56,6 +60,7 @@ export function proposerModelConfig(config: ModelConfig, native: boolean): Model
     name: config.name,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? (config.byok_provider ?? null) : null,
+    ...(tokenSource === "subscription" ? { cli_provider: config.cli_provider ?? null } : {}),
   };
 }
 
