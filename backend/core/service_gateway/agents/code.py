@@ -2215,6 +2215,7 @@ def _build_agent_lm(
     model_name_override: str | None = None,
     reasoning_effort: str | None = None,
     max_tokens: int = 32000,
+    model_config: ModelConfig | None = None,
 ) -> dspy.LM:
     """Construct the LM used by the code agent from global settings.
 
@@ -2226,6 +2227,9 @@ def _build_agent_lm(
             keeps the model's default.
         max_tokens: Completion budget, reasoning included; short-answer
             callers (the onboarding intake) lower it to bound latency and cost.
+        model_config: Optional fully resolved config that wins over
+            ``model_name_override``. The Mac app passes a vault-backed BYOK
+            copy here, so the key stays out of the model id the turn reports.
 
     Reasoning knobs we send, by provider:
 
@@ -2242,6 +2246,10 @@ def _build_agent_lm(
     Returns:
         A configured :class:`dspy.LM` instance for the code agent.
     """
+    if model_config is not None:
+        config = model_config.model_copy(update={"max_tokens": max_tokens})
+        config = apply_reasoning_effort(config, reasoning_effort)
+        return build_language_model(apply_model_reasoning_config(config), disable_cache=True)
     model_name = model_name_override or agent_model_id(settings.code_agent_model)
     lower = model_name.lower()
     extra: dict = {}
@@ -4609,6 +4617,7 @@ async def run_code_agent(
     steer_owner: str | None = None,
     steer_key: str | None = None,
     prior_files: dict[str, str] | None = None,
+    model_config: ModelConfig | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -4696,12 +4705,19 @@ async def run_code_agent(
             ``steer_owner`` it makes a chat turn steerable.
         prior_files: The wizard workspace's other files, path to text
             (unified paths only).
+        model_config: Optional resolved config for ``model`` (the Mac app's
+            BYOK route); see :func:`_build_agent_lm`.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
     """
     is_seed = not user_message.strip()
-    lm = _build_agent_lm(model, reasoning_effort, SEED_MAX_TOKENS if is_seed and unified is not None else 32000)
+    lm = _build_agent_lm(
+        model,
+        reasoning_effort,
+        SEED_MAX_TOKENS if is_seed and unified is not None else 32000,
+        model_config=model_config,
+    )
     model_name = model or agent_model_id(settings.code_agent_model)
     if usage_sink is not None:
         usage_sink.append(lm)

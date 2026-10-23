@@ -29,7 +29,13 @@ from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
-from .test_submissions_router import _billing_engine, _FakeJobStore, make_client, unified_payload
+from .test_submissions_router import (
+    _billing_engine,
+    _FakeJobStore,
+    _verified_byok_row,
+    make_client,
+    unified_payload,
+)
 
 _SECRET = "test-internal-secret"
 _REAL_ENSURE_API_BUDGET = _sub_mod._ensure_api_budget
@@ -339,6 +345,28 @@ def test_managed_run_is_refused_in_local_mode(monkeypatch: pytest.MonkeyPatch) -
     assert resp.status_code == 422
     assert resp.json()["code"] == "models.managed_unavailable_local"
     assert store.created_ids() == []
+
+
+def test_own_key_run_is_accepted_in_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Mac app runs an optimization on the user's own OpenRouter key, billed as BYOK.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the vault key.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    with Session(store.engine) as session:
+        session.add(_verified_byok_row(monkeypatch))
+        session.commit()
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(token_source="byok", models={"reflection_model": {"name": "openrouter/openai/gpt-4o"}}),
+    )
+
+    assert resp.status_code == 201, resp.text
+    overview = store._jobs[store.created_ids()[0]]["overview"]
+    assert overview["token_source"] == "byok"
+    assert set(overview["token_sources_by_model"].values()) == {"byok"}
 
 
 def test_local_mode_skips_the_global_spend_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
