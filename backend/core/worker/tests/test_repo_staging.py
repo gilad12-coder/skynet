@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
+from core.api.auth import AuthenticatedUser, get_authenticated_user
+from core.api.routers import wizard_preflight
 from core.billing.model_dispatch import ModelHTTPResult
 from core.billing.protected_credentials import has_exposed_execution_credentials
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
@@ -391,6 +395,70 @@ def test_a_failed_network_cutoff_aborts_the_run(tmp_path: Path) -> None:
     assert gateway.evaluator is None
     assert gateway.boxes[0].closed
     staged.close_scorers()
+
+
+def _evaluation_check(monkeypatch: pytest.MonkeyPatch, scorer: dict[str, Any]) -> tuple[Any, list[dict[str, Any]]]:
+    """Send an evaluation-scope repository setup check and keep the payload it would run.
+
+    Args:
+        monkeypatch: Replaces the paid setup run with a recorder.
+        scorer: The scorer the client sends.
+
+    Returns:
+        The HTTP response and the payloads that reached the setup run.
+    """
+    seen: list[dict[str, Any]] = []
+
+    def run(request: Any, user: Any, store: Any) -> Any:
+        """Keep the canonical payload and stop before any paid work."""
+        seen.append(request.payload)
+        raise HTTPException(status_code=418, detail="recorded")
+
+    monkeypatch.setattr(wizard_preflight, "run_preflight", run)
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    app = FastAPI()
+    app.include_router(wizard_preflight.create_wizard_preflight_router(job_store=object()))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("alice", "user", ())
+    with TestClient(app) as client:
+        response = client.post(
+            "/wizard/preflight",
+            json={
+                "workflow": "anything",
+                "scope": "evaluation",
+                "payload": {**_payload("a" * 40), "scorer": scorer},
+                "execution_budget_id": "draft",
+                "execution_budget_revision": 1,
+            },
+        )
+    return response, seen
+
+
+def test_evaluation_check_without_a_scorer_timeout_binds_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scorer sent without ``timeout_seconds`` gets the run request's 60 s default and binds without a KeyError."""
+    response, seen = _evaluation_check(monkeypatch, {"kind": "python", "metric_code": "def score(p):\n    return 1\n"})
+
+    assert response.status_code == 418
+    payload, staged = _binding(tmp_path, None)
+    payload["scorer"] = seen[0]["scorer"]
+    gateway = _Gateway()
+
+    repo_staging.bind_repo_scorer(payload, staged, gateway, owner_id="preflight-1")
+
+    assert gateway.evaluator._timeout_seconds == 60.0
+    staged.close_scorers()
+
+
+def test_evaluation_check_rejects_an_out_of_range_scorer_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An out-of-range ``timeout_seconds`` is a validation error naming the field, and no setup run starts."""
+    response, seen = _evaluation_check(
+        monkeypatch, {"kind": "python", "metric_code": "def score(p):\n    return 1\n", "timeout_seconds": 601}
+    )
+
+    assert response.status_code == 422
+    assert [error["loc"][-2:] for error in response.json()["detail"]] == [["scorer", "timeout_seconds"]]
+    assert seen == []
 
 
 _EDIT = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
