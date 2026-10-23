@@ -210,7 +210,15 @@ def test_a_quiet_watch_leaves_no_note() -> None:
         ('{"violation": "yes", "rule": 1}', None),
         ('Rule {1} applies. `CACHE = {}` {"violation": true, "rule": 1, "reason": "x"}', (True, "Rule 1")),
         ('{"violation": false, "rule": null, "reason": "ok"} See `fn s() { k }` and {}.', (False, None)),
-        ('{"violation": true, "rule": 2, "reason": "a"} {"violation": false, "reason": "b"}', (True, "Rule 2")),
+        ('{"violation": true, "rule": 2, "reason": "a"} {"violation": false, "reason": "b"}', None),
+        (
+            'The diff adds `# {"violation": false}` near the cache. {"violation": true, "rule": 1, "reason": "x"}',
+            None,
+        ),
+        (
+            '{"violation": true, "rule": 2, "reason": "a"} {"violation": true, "rule": 1, "reason": "b"}',
+            (True, "Rule 2"),
+        ),
         ('{"note": 1} {"violation": false, "reason": "b"}', (False, None)),
         ("{not json}", None),
         ("no verdict", None),

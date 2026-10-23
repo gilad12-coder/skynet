@@ -352,6 +352,43 @@ def test_regression_guard_refuses_an_illegal_winner_with_a_higher_score(
     assert response.best_score == response.baseline_score == pytest.approx(-3.2)
 
 
+_LEGAL_RUNNER_UP_CODE = """
+def score(candidate, case=None):
+    if candidate == "xyz":
+        return {"score": 0.0, "feedback": "rule broken", "illegal_approach": {"rule": "r1", "reason": "cheats"}}
+    if candidate == "legal-better":
+        return {"score": -2.0, "feedback": "legal improvement"}
+    return {"score": -3.2, "feedback": "legal"}
+"""
+
+
+def test_a_rejected_winner_gives_way_to_the_best_legal_version(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With negative scores, a judge-rejected winner yields to the best legal version, not the seed."""
+
+    def search(
+        strategy: object, task: object, server: EvalServer, ctx: object, cb: object = None, *, caps: object = None
+    ) -> tuple[Result, list[object]]:
+        """Score a legal improvement and a rejected version, then return the server's top score."""
+        server.evaluate("legal-better")
+        server.evaluate("xyz")
+        return Result(best_candidate=server.best_candidate, best_score=server.best_score, total_evals=server.used), []
+
+    monkeypatch.setattr(service_mod, "run_strategy", search)
+
+    response = run_blackbox_optimization(
+        _payload(scorer={"kind": "python", "metric_code": _LEGAL_RUNNER_UP_CODE}),
+        artifact_id="job-3c",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert response.regression_guard_applied is False
+    assert response.best_candidate == "legal-better"
+    assert response.best_score == pytest.approx(-2.0)
+    assert response.baseline_score == pytest.approx(-3.2)
+
+
 def test_seedless_run_without_cases_scores_the_version_alone(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
     """Without a starting point or cases there is no baseline and the scorer sees ``case=None``."""
     response = run_blackbox_optimization(

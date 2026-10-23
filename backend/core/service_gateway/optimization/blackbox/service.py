@@ -663,6 +663,25 @@ def _version_history(server: EvalServer, val_scores: dict[str, float] | None = N
     return versions
 
 
+def _best_legal_candidate(server: EvalServer, rejected: Candidate) -> Candidate | None:
+    """Return the highest-scoring version the search scored that the rule judge did not reject.
+
+    Args:
+        server: The run's root eval server.
+        rejected: The winner the rule judge rejected in the final run.
+
+    Returns:
+        That version, or ``None`` when every other scored version was rejected.
+    """
+    rejected_key = candidate_key(rejected)
+    legal = [
+        record
+        for record in server.history
+        if candidate_key(record.candidate) != rejected_key and ILLEGAL_APPROACH_KEY not in record.side_info
+    ]
+    return max(legal, key=lambda record: record.mean_score).candidate if legal else None
+
+
 def _progress_listener(progress_callback: ProgressCallback | None) -> Callable[[EvalServer, float], None]:
     """Build the eval-server listener that reports scorer-run progress.
 
@@ -1151,6 +1170,18 @@ def _run_job(
                     concurrency=concurrency,
                 )
             )
+            fallback = _best_legal_candidate(server, best_candidate) if best_val.illegal else None
+            if fallback is not None and fallback != seed_candidate:
+                logger.info("the rule judge rejected the optimized version; trying the best legal version")
+                best_candidate = fallback
+                best_val = _final_run(
+                    scorer,
+                    best_candidate,
+                    select_on,
+                    label="best legal version",
+                    phase=PHASE_FINAL,
+                    concurrency=concurrency,
+                )
             if baseline_val is not None and best_val.illegal and not baseline_val.illegal:
                 logger.info("the rule judge rejected the optimized version; keeping the starting point")
                 best_candidate, best_val, regression_guard_applied = seed_candidate, baseline_val, True

@@ -153,18 +153,22 @@ def watch_prompt(rules: Sequence[str], actions: Sequence[str], diff: str) -> str
 
 
 def _verdict_object(text: str | None) -> dict[str, Any] | None:
-    """Find the first JSON object with a boolean ``violation`` in a judge's reply.
+    """Find the JSON object with a boolean ``violation`` in a judge's reply.
 
     Judges quote code, so braces in prose before or after the answer are
-    skipped instead of read as part of it.
+    skipped instead of read as part of it. A quoted verdict-shaped string
+    from the diff can sit beside the real answer, so objects that disagree
+    on ``violation`` make the reply unreadable instead of letting one win.
 
     Args:
         text: The judge model's reply.
 
     Returns:
-        The answer object, or ``None`` when the reply holds none.
+        The first answer object, or ``None`` when the reply holds none or
+        its answer objects disagree.
     """
     reply = text or ""
+    answers: list[dict[str, Any]] = []
     start = reply.find("{")
     while start != -1:
         try:
@@ -172,9 +176,11 @@ def _verdict_object(text: str | None) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             answer = None
         if isinstance(answer, dict) and isinstance(answer.get("violation"), bool):
-            return answer
+            answers.append(answer)
         start = reply.find("{", start + 1)
-    return None
+    if not answers or len({answer["violation"] for answer in answers}) > 1:
+        return None
+    return answers[0]
 
 
 def parse_verdict(text: str | None, rules: Sequence[str]) -> RuleVerdict | None:
