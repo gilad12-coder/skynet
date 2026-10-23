@@ -1586,6 +1586,22 @@ def catalog_snapshot() -> ModelCatalogResponse | None:
     return _cached_response
 
 
+def lowest_effort_from_low(entry: CatalogModel) -> str | None:
+    """Return the lowest effort from ``low`` up on a catalog model's effort ladder.
+
+    Args:
+        entry: The model's catalog row.
+
+    Returns:
+        That effort, or ``None`` when the row lists no effort from ``low`` up.
+    """
+    floor = REASONING_EFFORTS.index("low")
+    return next(
+        (e for e in entry.reasoning_efforts or [] if e in REASONING_EFFORTS and REASONING_EFFORTS.index(e) >= floor),
+        None,
+    )
+
+
 def unpicked_effort(entry: CatalogModel) -> str | None:
     """Return the effort to send a catalog model when the caller picked none.
 
@@ -1604,8 +1620,7 @@ def unpicked_effort(entry: CatalogModel) -> str | None:
     """
     if entry.reasoning_default_enabled:
         return entry.default_reasoning_effort
-    floor = REASONING_EFFORTS.index("low")
-    return next((e for e in entry.reasoning_efforts or [] if REASONING_EFFORTS.index(e) >= floor), None)
+    return lowest_effort_from_low(entry)
 
 
 def default_effort_for(model: str | None) -> str | None:

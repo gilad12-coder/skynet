@@ -640,6 +640,20 @@ def test_a_judge_missing_from_the_catalog_still_has_room_to_reason(
         assert body["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS
 
 
+def test_a_judge_with_unknown_reasoning_data_still_has_room_to_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A catalog row whose provider did not say whether it reasons is unknown, not a model that never reasons."""
+    unknown = {"reasoning_efforts": None, "reasoning_default_enabled": None, "reasoning_mandatory": None}
+    catalog = _catalog(_row("vendor/strong", **unknown), _row("vendor/fast", **unknown))
+
+    bodies = _judge_bodies(tmp_path, monkeypatch, catalog)
+
+    for body in bodies.values():
+        assert "reasoning" not in body
+        assert body["max_tokens"] == JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS
+
+
 def test_rules_without_the_managed_key_fail_setup(tmp_path: Path) -> None:
     """Rules nobody can check stop the run before the guest starts, instead of going unenforced."""
     payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))

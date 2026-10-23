@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..api.model_catalog import REASONING_EFFORTS, agent_model_id, catalog_snapshot, strongest_model_id
+from ..api.model_catalog import agent_model_id, catalog_snapshot, lowest_effort_from_low, strongest_model_id
 from ..billing.operation_pricing import ChargePolicy
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
@@ -246,7 +246,8 @@ def _judge_limits(model: str) -> dict[str, Any]:
     Returns:
         ``max_tokens`` with room for reasoning, plus the lowest effort from
         ``low`` up when the model reasons; only the answer limit for a model
-        the catalog says does not reason.
+        the catalog says does not reason. A model missing from the catalog,
+        or one whose reasoning data is unknown, gets the room without an effort.
     """
     snapshot = catalog_snapshot()
     slug = model.removeprefix("openrouter/")
@@ -256,15 +257,13 @@ def _judge_limits(model: str) -> dict[str, Any]:
         else None
     )
     roomy = {"max_tokens": JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS}
-    if entry is None:
+    # ``None`` reasoning data means the provider did not say, so the judge
+    # may still reason; only a known non-reasoner gets the tight limit.
+    if entry is None or entry.reasoning_efforts is None:
         return roomy
     if not (entry.reasoning_efforts or entry.reasoning_default_enabled or entry.reasoning_mandatory):
         return {"max_tokens": JUDGE_ANSWER_TOKENS}
-    floor = REASONING_EFFORTS.index("low")
-    effort = next(
-        (e for e in entry.reasoning_efforts or [] if e in REASONING_EFFORTS and REASONING_EFFORTS.index(e) >= floor),
-        None,
-    )
+    effort = lowest_effort_from_low(entry)
     return {**roomy, "reasoning": {"effort": effort}} if effort else roomy
 
 
