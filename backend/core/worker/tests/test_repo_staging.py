@@ -13,6 +13,7 @@ import pytest
 
 from core.api.model_catalog import CatalogModel, ModelCatalogResponse
 from core.billing.model_dispatch import ModelHTTPResult
+from core.billing.openrouter_quotes import resolve_model_slug
 from core.billing.operation_pricing import ChargePolicy
 from core.billing.protected_credentials import has_exposed_execution_credentials
 from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
@@ -324,6 +325,21 @@ class _Box:
         self.closed = True
 
 
+class _NoCatalogClient:
+    """Fail any provider catalog read, since judge ids are full slugs."""
+
+    def get(self, url: str) -> Any:
+        """Refuse a network read.
+
+        Args:
+            url: Requested address.
+
+        Raises:
+            AssertionError: Always.
+        """
+        raise AssertionError(f"unexpected catalog read: {url}")
+
+
 class _Gateway:
     """Record the evaluator a repository run binds and the parent box it opens."""
 
@@ -355,8 +371,9 @@ class _Gateway:
             parent_only: Whether readiness probes skip the route.
 
         Returns:
-            A fake route.
+            A fake route whose model is the provider slug, as the real gateway returns it.
         """
+        model = resolve_model_slug(model, client=_NoCatalogClient())
         token = f"token-{len(self.routes)}"
         self.routes[token] = {
             "model": model,
@@ -549,19 +566,22 @@ def _row(value: str, **reasoning: Any) -> CatalogModel:
     return CatalogModel(value=value, label=value, provider="openrouter", **reasoning)
 
 
-def _judge_bodies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog: Any) -> dict[str, dict[str, Any]]:
+def _judge_bodies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog: Any, *, prefix: str = ""
+) -> dict[str, dict[str, Any]]:
     """Bind a ruled run, ask both judges once, and return each judge's request body.
 
     Args:
         tmp_path: Scratch folder.
         monkeypatch: Pytest monkeypatch.
         catalog: The catalog snapshot the judges are built from.
+        prefix: Provider prefix on the configured judge ids.
 
     Returns:
-        The request body per judge model.
+        The request body per judge model slug.
     """
-    monkeypatch.setattr(repo_staging, "agent_model_id", lambda configured="": "vendor/fast")
-    monkeypatch.setattr(repo_staging, "strongest_model_id", lambda configured="": "vendor/strong")
+    monkeypatch.setattr(repo_staging, "agent_model_id", lambda configured="": f"{prefix}vendor/fast")
+    monkeypatch.setattr(repo_staging, "strongest_model_id", lambda configured="": f"{prefix}vendor/strong")
     monkeypatch.setattr(repo_staging, "catalog_snapshot", lambda: catalog)
     payload, staged = _ruled_binding(tmp_path, ("Do not hardcode answers.",))
     gateway = _Gateway()
@@ -575,20 +595,26 @@ def _judge_bodies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog: Any)
     return gateway.bodies
 
 
-def test_a_reasoning_judge_gets_low_effort_and_room_to_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A judge that thinks by default must not spend its whole answer budget on reasoning (OpenRouter shares it)."""
+@pytest.mark.parametrize("prefix", ["", "openrouter/"])
+def test_a_reasoning_judge_gets_low_effort_and_room_to_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """A judge that thinks by default must not spend its whole answer budget on reasoning (OpenRouter shares it).
+
+    Catalog ids keep the ``openrouter/`` prefix that the gateway strips from route models.
+    """
     catalog = _catalog(
         _row(
-            "vendor/strong",
+            f"{prefix}vendor/strong",
             reasoning_mandatory=True,
             reasoning_default_enabled=True,
             reasoning_efforts=["minimal", "low", "medium", "high"],
             default_reasoning_effort="high",
         ),
-        _row("vendor/fast", reasoning_efforts=[], reasoning_default_enabled=False, reasoning_mandatory=False),
+        _row(f"{prefix}vendor/fast", reasoning_efforts=[], reasoning_default_enabled=False, reasoning_mandatory=False),
     )
 
-    bodies = _judge_bodies(tmp_path, monkeypatch, catalog)
+    bodies = _judge_bodies(tmp_path, monkeypatch, catalog, prefix=prefix)
 
     strong = bodies["vendor/strong"]
     assert strong["reasoning"] == {"effort": "low"}

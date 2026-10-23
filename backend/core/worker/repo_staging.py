@@ -239,7 +239,8 @@ def _judge_limits(model: str) -> dict[str, Any]:
     """Return the length limit and reasoning control for one judge model's requests.
 
     Args:
-        model: Catalog model id of the judge.
+        model: The judge's route model, which the gateway gives without the
+            ``openrouter/`` prefix that catalog ids keep.
 
     Returns:
         ``max_tokens`` with room for reasoning, plus the lowest effort from
@@ -247,7 +248,12 @@ def _judge_limits(model: str) -> dict[str, Any]:
         the catalog says does not reason.
     """
     snapshot = catalog_snapshot()
-    entry = next((m for m in snapshot.models if m.value == model), None) if snapshot is not None else None
+    slug = model.removeprefix("openrouter/")
+    entry = (
+        next((m for m in snapshot.models if m.value.removeprefix("openrouter/") == slug), None)
+        if snapshot is not None
+        else None
+    )
     roomy = {"max_tokens": JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS}
     if entry is None:
         return roomy
