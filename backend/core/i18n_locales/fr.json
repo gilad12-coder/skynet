@@ -420,6 +420,9 @@
     "continuous.check_stuck": "La vérification s'est arrêtée {attempts} fois avant la fin, elle a donc été fermée. Les vérifications suivantes continuent normalement.",
     "continuous.review_ready": "Le nouveau candidat a battu la version actuelle sur les mêmes cas. Il attend votre approbation.",
     "continuous.review_approved": "Vous avez approuvé le nouveau candidat. C'est désormais la version actuelle.",
-    "continuous.review_rejected": "Vous avez refusé le nouveau candidat. La version précédente est conservée."
+    "continuous.review_rejected": "Vous avez refusé le nouveau candidat. La version précédente est conservée.",
+    "local.not_available": "Cette fonction est disponible uniquement dans l'app Mac {term.appName}.",
+    "models.subscription_local_only": "Les modèles par abonnement et les proposeurs CLI locaux fonctionnent uniquement dans l'app Mac {term.appName}.",
+    "models.managed_unavailable_local": "L'app Mac ne peut pas utiliser les modèles gérés. Choisissez un modèle par abonnement ou votre propre clé de fournisseur."
   }
 }

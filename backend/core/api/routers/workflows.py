@@ -12,6 +12,7 @@ from starlette.responses import StreamingResponse
 from ...models.submissions import WorkflowDryRunRequest, WorkflowDryRunResponse
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
+from ..model_billing import enforce_raw_local_mode_sources
 from ..protected_preview import run_protected_preview
 from ..rate_limit import enforce_submission_rate
 from ._helpers import sse_from_events
@@ -21,7 +22,8 @@ IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_lengt
 
 
 def _validate_inputs(request: WorkflowDryRunRequest) -> None:
-    """Reject missing input values before starting any paid or authored execution."""
+    """Reject missing input values or local-only work before starting any paid or authored execution."""
+    enforce_raw_local_mode_sources(request.model_dump(mode="json", by_alias=True))
     names = request.workflow.input_field_names()
     missing = [name for name in names if name not in request.inputs]
     if missing:

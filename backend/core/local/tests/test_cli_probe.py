@@ -1,0 +1,227 @@
+"""Tests for the CLI and Docker probes, run against fake binaries in ``tmp_path``."""
+
+from __future__ import annotations
+
+import json
+import stat
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from core.config import Settings
+from core.local import cli_probe
+from core.local.cli_probe import (
+    STRIPPED_ENV_KEYS,
+    clear_probe_cache,
+    cli_env,
+    docker_status,
+    probe_cli,
+    probe_clis,
+    read_cli_limits,
+    write_cli_limit,
+)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cache() -> None:
+    """Start every test without cached probe results."""
+    clear_probe_cache()
+
+
+def _fake_cli(directory: Path, name: str, *, version: str, login_exit: int = 0, login_out: str = "") -> Path:
+    """Write an executable shell script that answers like a coding CLI.
+
+    Args:
+        directory: Where to write the script.
+        name: File name of the script.
+        version: Text printed for ``--version``.
+        login_exit: Exit code of the login status command.
+        login_out: Text printed by the login status command.
+
+    Returns:
+        The script path.
+    """
+    path = directory / name
+    path.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "' + version + '"; exit 0; fi\n'
+        'if [ -n "$ANTHROPIC_API_KEY$OPENAI_API_KEY$ANTHROPIC_AUTH_TOKEN" ]; then echo "key leaked"; exit 9; fi\n'
+        "cat <<'EOF'\n" + login_out + "\nEOF\n"
+        f"exit {login_exit}\n",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+def _settings(tmp_path: Path, **bins: str) -> Settings:
+    """Build settings whose CLI commands point at ``bins``.
+
+    Args:
+        tmp_path: Directory used as the local state directory.
+        **bins: ``codex_bin``/``claude_bin``/``docker_bin`` overrides.
+
+    Returns:
+        Settings with the overrides applied.
+    """
+    missing = str(tmp_path / "missing-binary")
+    update = {
+        "codex_bin": missing,
+        "claude_bin": missing,
+        "docker_bin": missing,
+        "local_state_dir": str(tmp_path / "state"),
+        **bins,
+    }
+    return Settings(_env_file=None).model_copy(update=update)  # type: ignore[call-arg]
+
+
+def test_missing_binary_reports_no_path(tmp_path: Path) -> None:
+    """A CLI that is not installed has no path, version or login answer."""
+    status = probe_cli("claude", _settings(tmp_path))
+
+    assert status.path is None
+    assert status.version is None
+    assert status.version_ok is False
+    assert status.logged_in is None
+    assert "Install the claude CLI" in status.login_hint
+    assert "anthropic/claude-sonnet-4.6" in status.models
+
+
+def test_old_version_is_flagged(tmp_path: Path) -> None:
+    """A CLI older than ``MIN_VERSIONS`` reports ``version_ok=False``."""
+    fake = _fake_cli(tmp_path, "codex", version="codex-cli 0.100.0", login_out="Logged in using ChatGPT")
+
+    status = probe_cli("codex", _settings(tmp_path, codex_bin=str(fake)))
+
+    assert status.path == str(fake)
+    assert status.version == "0.100.0"
+    assert status.version_ok is False
+    assert status.logged_in is True
+
+
+def test_logged_out_cli_is_reported(tmp_path: Path) -> None:
+    """Each CLI's own status command decides the login answer."""
+    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_exit=1, login_out="Not logged in")
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": false}')
+    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
+
+    assert [status.logged_in for status in probe_clis(settings)] == [False, False]
+
+
+def test_ready_clis_report_ok(tmp_path: Path) -> None:
+    """Current, signed-in CLIs report their version and ``logged_in=True``."""
+    codex = _fake_cli(tmp_path, "codex", version="codex-cli 0.163.0", login_out="Logged in using ChatGPT")
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306 (Claude Code)", login_out='{"loggedIn": true}')
+    settings = _settings(tmp_path, codex_bin=str(codex), claude_bin=str(claude))
+
+    statuses = probe_clis(settings)
+
+    assert [status.id for status in statuses] == ["codex", "claude"]
+    assert [status.version for status in statuses] == ["0.163.0", "2.1.306"]
+    assert all(status.version_ok and status.logged_in for status in statuses)
+    assert all(status.rate_limited_until is None for status in statuses)
+
+
+def test_unreadable_login_output_is_unknown(tmp_path: Path) -> None:
+    """Login output that is not the expected JSON gives ``None``, not ``False``."""
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out="something went wrong")
+
+    assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is None
+
+
+def test_probe_strips_provider_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """API keys in the parent environment never reach a probed CLI.
+
+    Args:
+        tmp_path: Directory for the fake binary.
+        monkeypatch: Pytest fixture used to set the keys.
+    """
+    for key in STRIPPED_ENV_KEYS:
+        monkeypatch.setenv(key, "fixture-not-a-key")
+    claude = _fake_cli(tmp_path, "claude", version="2.1.306", login_out='{"loggedIn": true}')
+
+    assert probe_cli("claude", _settings(tmp_path, claude_bin=str(claude))).logged_in is True
+    assert not set(STRIPPED_ENV_KEYS) & set(cli_env())
+
+
+def test_probe_results_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second ``probe_clis`` call within the cache window runs no subprocess.
+
+    Args:
+        tmp_path: Directory used as the state directory.
+        monkeypatch: Pytest fixture used to count probes.
+    """
+    calls: list[str] = []
+    real = cli_probe.probe_cli
+
+    def _counting(cli, settings):  # type: ignore[no-untyped-def]
+        """Record each probe, then run the real one.
+
+        Args:
+            cli: The CLI to probe.
+            settings: The active settings.
+
+        Returns:
+            The real probe's status.
+        """
+        calls.append(cli)
+        return real(cli, settings)
+
+    monkeypatch.setattr(cli_probe, "probe_cli", _counting)
+    settings = _settings(tmp_path)
+
+    probe_clis(settings)
+    probe_clis(settings)
+
+    assert calls == ["codex", "claude"]
+
+
+def test_rate_limit_round_trips_and_expires(tmp_path: Path) -> None:
+    """A recorded limit shows until its reset time, then disappears."""
+    settings = _settings(tmp_path)
+    future = datetime.now(UTC) + timedelta(hours=1)
+    write_cli_limit(settings, "claude", future.replace(tzinfo=None), "usage limit reached")
+    write_cli_limit(settings, "codex", datetime.now(UTC) - timedelta(minutes=1), "old limit")
+
+    limits = read_cli_limits(settings)
+    statuses = {status.id: status for status in probe_clis(settings)}
+
+    assert limits["claude"] == {"reset_at": future.isoformat(), "message": "usage limit reached"}
+    assert statuses["claude"].rate_limited_until == future.isoformat()
+    assert statuses["codex"].rate_limited_until is None
+
+
+def test_malformed_limits_file_reads_empty(tmp_path: Path) -> None:
+    """A broken limits file never breaks the probe."""
+    settings = _settings(tmp_path)
+    state = Path(settings.local_state_dir)
+    state.mkdir()
+    (state / cli_probe.CLI_LIMITS_FILENAME).write_text("not json", encoding="utf-8")
+    assert read_cli_limits(settings) == {}
+
+    (state / cli_probe.CLI_LIMITS_FILENAME).write_text(json.dumps({"claude": {"reset_at": 5}}), encoding="utf-8")
+    assert read_cli_limits(settings) == {}
+
+
+def test_write_cli_limit_needs_a_state_dir(tmp_path: Path) -> None:
+    """Without a state directory there is nowhere to record a limit."""
+    settings = _settings(tmp_path).model_copy(update={"local_state_dir": ""})
+
+    with pytest.raises(ValueError, match="local_state_dir"):
+        write_cli_limit(settings, "claude", datetime.now(UTC), "limit")
+
+
+def test_docker_status(tmp_path: Path) -> None:
+    """Docker is available only when ``docker info`` succeeds."""
+    assert docker_status(_settings(tmp_path))[0] is False
+
+    ok = tmp_path / "docker-ok"
+    ok.write_text("#!/bin/sh\necho 28.0.1\n", encoding="utf-8")
+    ok.chmod(0o755)
+    assert docker_status(_settings(tmp_path, docker_bin=str(ok))) == (True, None)
+
+    down = tmp_path / "docker-down"
+    down.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n", encoding="utf-8")
+    down.chmod(0o755)
+    assert docker_status(_settings(tmp_path, docker_bin=str(down))) == (False, "Cannot connect to the Docker daemon")
