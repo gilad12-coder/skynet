@@ -85,8 +85,8 @@ not start Infisical, because the SMTP secret is still empty.
 
 ```bash
 terraform -chdir=environments/infisical init -backend-config="bucket=skynet-tfstate-669242775630-us-east-2"
-terraform -chdir=environments/infisical plan -out=tfplan   # expect: 0 to change, 0 to destroy
-terraform -chdir=environments/infisical apply tfplan
+terraform -chdir=environments/infisical plan -out=infisical.tfplan   # expect: 0 to change, 0 to destroy
+terraform -chdir=environments/infisical apply infisical.tfplan
 ```
 
 The plan prints a warning while `alert_email` is empty. Step 12 sets it.
@@ -125,8 +125,8 @@ Set `service_running = true` in `terraform.tfvars`, then plan and apply.
 The first start runs the database migrations. It can take 5 minutes.
 
 ```bash
-terraform -chdir=environments/infisical plan -out=tfplan
-terraform -chdir=environments/infisical apply tfplan
+terraform -chdir=environments/infisical plan -out=infisical.tfplan
+terraform -chdir=environments/infisical apply infisical.tfplan
 aws ecs wait services-stable --cluster skynet-infisical --services infisical
 ```
 
@@ -188,8 +188,8 @@ work (TagResource and UntagResource are not denied).
    Plan and apply. This creates the IAM role `skynet-infisical-secret-sync`.
 
 ```bash
-terraform -chdir=environments/infisical plan -out=tfplan
-terraform -chdir=environments/infisical apply tfplan
+terraform -chdir=environments/infisical plan -out=infisical.tfplan
+terraform -chdir=environments/infisical apply infisical.tfplan
 terraform -chdir=environments/infisical output secret_sync_role_arn
 ```
 
@@ -249,8 +249,8 @@ topic `skynet-infisical-alarms`. With no subscriber, nobody gets the alarm.
    alias). Plan and apply:
 
    ```bash
-   terraform -chdir=environments/infisical plan -out=tfplan
-   terraform -chdir=environments/infisical apply tfplan
+   terraform -chdir=environments/infisical plan -out=infisical.tfplan
+   terraform -chdir=environments/infisical apply infisical.tfplan
    ```
 
 2. AWS sends a confirmation email. Click the link.
@@ -402,8 +402,9 @@ before. They do not get Infisical access.
 
 Use this step to change the Infisical database password and the Valkey
 token. Use it also to recover after a first apply that stopped half-way.
-The apps are not affected. Infisical is down from the apply until the new
-task is healthy. No command prints a value.
+That case has a different plan check (item 2). The apps are not affected.
+Infisical is down from the apply until the new task is healthy. No command
+prints a value.
 
 1. In `environments/infisical/terraform.tfvars`, raise
    `datastore_credentials_version` by 1. If the line is not there, add
@@ -411,19 +412,31 @@ task is healthy. No command prints a value.
 2. Make a plan:
 
    ```bash
-   terraform -chdir=environments/infisical plan -out=tfplan   # expect: 1 to add, 2 to change, 1 to destroy
+   terraform -chdir=environments/infisical plan -out=infisical.tfplan   # normal case: 1 to add, 2 to change, 1 to destroy
    ```
 
-   Expect `Plan: 1 to add, 2 to change, 1 to destroy.` The only replace
-   (`-/+`) is `aws_secretsmanager_secret_version.datastore`. The database
-   (`aws_db_instance.this`) and the Valkey group
+   In the normal case, expect `Plan: 1 to add, 2 to change, 1 to destroy.`
+   The only replace (`-/+`) is `aws_secretsmanager_secret_version.datastore`.
+   The database (`aws_db_instance.this`) and the Valkey group
    (`aws_elasticache_replication_group.this`) change in place (`~`). If the
    plan replaces or destroys any other resource, stop. Do not apply it.
+
+   After a first apply that stopped half-way, the counts are different.
+   Do not use the counts above. Check each line of the plan:
+   - An add (`+`) is correct for a resource that the first apply did not
+     create.
+   - A replace (`-/+`) is correct for
+     `aws_secretsmanager_secret_version.datastore` and for a resource that
+     the plan marks as `tainted`.
+   - An in-place change (`~`) is correct for the database and the Valkey
+     group.
+   - If the plan replaces any other resource, or destroys a resource
+     (`-`) without a new one, stop. Do not apply it.
 
 3. Get approval for the plan. Then apply it:
 
    ```bash
-   terraform -chdir=environments/infisical apply tfplan
+   terraform -chdir=environments/infisical apply infisical.tfplan
    ```
 
 4. The running task still has the old credentials. Start a new deployment
