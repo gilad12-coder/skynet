@@ -45,6 +45,8 @@ export interface WizardPreflightResponse {
   budget: ExecutionBudget;
   scorer_result?: ScorerDryRunResponse;
   workflow_result?: WorkflowDryRunResponse;
+  /** The proposer CLI the check ran on; a submit sends it back unchanged. */
+  proposer_host_cli?: "codex" | "claude" | null;
 }
 export interface ExecutionRuntimeCatalog {
   runtimes: Array<{

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -17,8 +18,17 @@ from sqlalchemy.pool import StaticPool
 from ...billing.service import FREE_GRANT_CENTS, free_grant_cents
 from ...config import settings
 from ...local.cli_probe import clear_probe_cache
+from ...models.blackbox import BlackboxProposer
 from ...registry.core import ServiceRegistry
-from ...storage.models import BillingCustomerModel, ExecutionBudgetModel, UserIdentityModel, UserModel
+from ...storage.models import (
+    AgentEnginePreferenceModel,
+    BillingCustomerModel,
+    ExecutionBudgetModel,
+    UserIdentityModel,
+    UserModel,
+)
+from .. import agent_engine
+from ..agent_engine import fill_proposer_host_cli
 from ..app import create_app
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -29,6 +39,9 @@ from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
+from .test_agent_engine import _status
+from .test_protected_submissions import _Harness, _payload
+from .test_protected_submissions import harness as _harness_fixture
 from .test_submissions_router import (
     _billing_engine,
     _FakeJobStore,
@@ -36,6 +49,8 @@ from .test_submissions_router import (
     make_client,
     unified_payload,
 )
+
+harness = _harness_fixture
 
 _SECRET = "test-internal-secret"
 _REAL_ENSURE_API_BUDGET = _sub_mod._ensure_api_budget
@@ -207,6 +222,8 @@ def _local_submit_client(monkeypatch: pytest.MonkeyPatch, *, local_mode: bool) -
     client = make_client(store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_sub_mod.settings, "local_mode", local_mode)
     monkeypatch.setattr(_sub_mod, "_ensure_api_budget", _REAL_ENSURE_API_BUDGET)
+    # No CLI is ready unless a test says so, so the host's own CLIs never fill the proposer.
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [])
     monkeypatch.setattr(
         _sub_mod,
         "run_preflight",
@@ -421,7 +438,7 @@ def test_hosted_execution_check_refuses_a_subscription_model(monkeypatch: pytest
     monkeypatch.setattr(settings, "local_mode", False)
 
     with pytest.raises(DomainError) as refused:
-        _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+        _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", None)
 
     assert refused.value.status_code == 422
     assert refused.value.code == "models.subscription_local_only"
@@ -435,7 +452,7 @@ def test_local_execution_check_keeps_a_subscription_model(monkeypatch: pytest.Mo
     """
     monkeypatch.setattr(settings, "local_mode", True)
 
-    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice")
+    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", None)
 
     assert payload["token_source"] == "subscription"
 
@@ -449,7 +466,7 @@ def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.Monke
     monkeypatch.setattr(settings, "local_mode", True)
 
     with pytest.raises(DomainError) as refused:
-        _canonical_execution_payload(_execution_request(), "alice")
+        _canonical_execution_payload(_execution_request(), "alice", None)
 
     assert refused.value.code == "models.managed_unavailable_local"
 
@@ -505,3 +522,342 @@ def test_local_wizard_check_passes_the_raw_gate(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(settings, "local_mode", True)
 
     enforce_raw_local_mode_sources({"token_source": "subscription", "proposer": {"host_cli": "codex"}})
+
+
+def _engine_setup(monkeypatch: pytest.MonkeyPatch, store: Any, *, ready: tuple[str, ...], stored: str | None) -> None:
+    """Make CLIs look ready and store the caller's engine choice.
+
+    Args:
+        monkeypatch: Pytest fixture used to replace the CLI probe.
+        store: Job store whose engine holds the engine setting.
+        ready: The CLIs the probe reports as ready, in probe order.
+        stored: The engine ``alice`` chose in Settings, or ``None`` for no row.
+    """
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status(cli) for cli in ready])
+    if stored is not None:
+        with Session(store.engine) as session:
+            session.add(AgentEnginePreferenceModel(username="alice", engine=stored))
+            session.commit()
+
+
+def _stored_proposer(store: _FakeJobStore, resp: Any) -> dict[str, Any]:
+    """Return the proposer settings the accepted run stored.
+
+    Args:
+        store: The fake job store.
+        resp: The accepted ``/optimize`` response.
+
+    Returns:
+        The stored ``optimizer.proposer`` object.
+    """
+    assert resp.status_code == 201, resp.text
+    return store._jobs[resp.json()["optimization_id"]]["payload"]["optimizer"]["proposer"]
+
+
+@pytest.mark.parametrize(
+    ("ready", "stored", "expected"),
+    [(("codex", "claude"), None, "codex"), (("codex",), "claude", "claude")],
+)
+def test_local_proposer_follows_the_agent_engine(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], stored: str | None, expected: str
+) -> None:
+    """A local run with no proposer CLI pick runs its proposer on the engine CLI.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        stored: The engine stored in Settings, if any.
+        expected: The proposer CLI the stored run must name.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored=stored)
+
+    resp = client.post("/optimize", json=unified_payload(token_source="subscription", models=_SUBSCRIPTION_MODELS))
+
+    assert _stored_proposer(store, resp)["host_cli"] == expected
+
+
+@pytest.mark.parametrize(("pick", "expected"), [("claude", "claude"), (None, None)])
+def test_explicit_proposer_pick_overrides_the_agent_engine(
+    monkeypatch: pytest.MonkeyPatch, pick: str | None, expected: str | None
+) -> None:
+    """A per-run pick, including an explicit sandbox proposer, wins over the engine.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        pick: The run's explicit ``host_cli``.
+        expected: The proposer CLI the stored run must name.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=("codex", "claude"), stored="codex")
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(
+            token_source="subscription",
+            models=_SUBSCRIPTION_MODELS,
+            optimizer={"choice": "gepa", "proposer": {"host_cli": pick}},
+        ),
+    )
+
+    assert _stored_proposer(store, resp)["host_cli"] == expected
+
+
+@pytest.mark.parametrize(
+    ("ready", "stored", "proposer"),
+    [
+        (("codex",), "openrouter", {}),
+        ((), None, {}),
+        (("codex",), None, {"harness": "custom", "run_command": "my-agent --model {model}"}),
+    ],
+)
+def test_local_proposer_stays_in_the_sandbox_without_an_engine_cli(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], stored: str | None, proposer: dict[str, Any]
+) -> None:
+    """The OpenRouter engine, no ready CLI, or a custom harness leaves ``host_cli`` unset.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        stored: The engine stored in Settings, if any.
+        proposer: The run's proposer settings.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored=stored)
+
+    resp = client.post(
+        "/optimize",
+        json=unified_payload(
+            token_source="subscription",
+            models=_SUBSCRIPTION_MODELS,
+            optimizer={"choice": "gepa", "proposer": proposer},
+        ),
+    )
+
+    assert _stored_proposer(store, resp)["host_cli"] is None
+
+
+def test_hosted_proposer_ignores_the_agent_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted mode never probes a CLI or reads the setting for a proposer.
+
+    Args:
+        monkeypatch: Pytest fixture used to keep local mode off.
+    """
+    store = _FakeJobStore()
+    client = make_client(store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(settings, "local_mode", False)
+
+    def _no_probe(_settings: Any) -> list[Any]:
+        """Fail the test if hosted mode probes a CLI."""
+        raise AssertionError("hosted mode probed a CLI")
+
+    monkeypatch.setattr(agent_engine, "probe_clis", _no_probe)
+
+    resp = client.post("/optimize", json=unified_payload())
+
+    assert _stored_proposer(store, resp)["host_cli"] is None
+
+
+def test_local_execution_check_fills_the_proposer_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setup check fills the same proposer CLI as the run, so its fingerprint matches.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    store = SimpleNamespace(engine=_billing_engine())
+    _engine_setup(monkeypatch, store, ready=("codex", "claude"), stored="claude")
+
+    payload = _canonical_execution_payload(_execution_request(models=_SUBSCRIPTION_MODELS), "alice", store)
+
+    assert payload["optimizer"]["proposer"]["host_cli"] == "claude"
+
+
+def test_blackbox_proposer_follows_the_agent_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A black-box request's top-level proposer follows the engine too.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    request = SimpleNamespace(proposer=BlackboxProposer())
+
+    fill_proposer_host_cli(None, "alice", request)
+
+    assert request.proposer.host_cli == "claude"
+
+
+@pytest.mark.parametrize("route", ["/wizard/preflight", "/wizard/preflight/stream"])
+def test_local_wizard_check_evidence_starts_a_run_on_the_engine_cli(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    """The wizard check fills the proposer CLI like the run, so its evidence starts the run.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        route: The plain or streamed wizard check route.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="engine")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+
+    response = harness.client.post(
+        route,
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    checked = frames[-1] if route.endswith("/stream") else response.json()
+    assert checked["status"] == "succeeded", checked
+    assert harness.calls[0]["payload"]["optimizer"]["proposer"]["host_cli"] == "claude"
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "claude"
+
+
+def test_local_wizard_check_evidence_survives_a_cli_readiness_change(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A submit that sends the CLI its check resolved keeps that check current.
+
+    The wizard reuses a passed check. If the engine CLI it resolved stops being
+    ready before submit, the server must not resolve another CLI and refuse
+    the evidence as a budget conflict on every retry.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("codex"), _status("claude")])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="engine-change")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+    response = harness.client.post(
+        "/wizard/preflight",
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    checked = response.json()
+    assert checked["status"] == "succeeded", checked
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("claude")])
+    optimizer = payload["optimizer"]
+    proposer = {**optimizer.get("proposer", {}), "host_cli": checked.get("proposer_host_cli")}
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "optimizer": {**optimizer, "proposer": proposer},
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"]["host_cli"] == "codex"
+
+
+@pytest.mark.parametrize("route", ["/wizard/preflight", "/wizard/preflight/stream"])
+def test_local_wizard_check_without_a_cli_survives_a_new_engine_cli(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    """A check that ran with no proposer CLI sends that null back to the submit.
+
+    The routes drop null fields. Without the key, the wizard leaves host_cli
+    unset, the submit picks the CLI that became ready after the check, and
+    every retry gets a budget conflict.
+
+    Args:
+        harness: Real setup, wallet, and job services.
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        route: The plain or streamed wizard check route.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [])
+    budget = harness.budgets.create(harness.username, 20, idempotency_key="no-cli")
+    payload = {
+        **_payload(),
+        "token_source": "subscription",
+        "models": _SUBSCRIPTION_MODELS,
+        "execution_budget_id": budget.id,
+        "execution_budget_revision": budget.revision,
+    }
+
+    response = harness.client.post(
+        route,
+        json={
+            "scope": "execution",
+            "workflow": "unified",
+            "payload": payload,
+            "execution_budget_id": budget.id,
+            "execution_budget_revision": budget.revision,
+        },
+    )
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    checked = frames[-1] if route.endswith("/stream") else response.json()
+    assert checked["status"] == "succeeded", checked
+    assert checked["proposer_host_cli"] is None
+    assert "pending_reason" not in checked
+    monkeypatch.setattr(agent_engine, "probe_clis", lambda _settings: [_status("codex")])
+    optimizer = payload["optimizer"]
+    proposer = {**optimizer.get("proposer", {}), "host_cli": checked["proposer_host_cli"]}
+
+    submitted = harness.client.post(
+        "/optimize",
+        json={
+            **payload,
+            "optimizer": {**optimizer, "proposer": proposer},
+            "execution_budget_revision": checked["budget"]["revision"],
+            "preflight_id": checked["id"],
+            "preflight_fingerprint": checked["fingerprint"],
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    job = harness.store.get_job(submitted.json()["optimization_id"], include_payload=True)
+    assert job["payload"]["optimizer"]["proposer"].get("host_cli") is None

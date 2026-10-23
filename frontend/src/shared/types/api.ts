@@ -591,6 +591,7 @@ export interface BlackboxProposer {
   // Caps tool calls per candidate for every coding-agent proposer, and for
   // ShinkaEvolve's agent editor.
   max_tool_calls?: number | null;
+  host_cli?: "codex" | "claude" | null;
 }
 
 export type BlackboxShinkaParentSelection = "weighted" | "power_law" | "beam_search";

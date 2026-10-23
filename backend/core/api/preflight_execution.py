@@ -8,7 +8,7 @@ import logging
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, field_validator, model_serializer
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
 from ..billing.budgets import (
@@ -54,6 +54,7 @@ from ..worker.repo_staging import (
 )
 from ..worker.unified_aliases import alias_unified_model_roles, strip_unified_model_aliases
 from ..worker.vercel_dspy import run_vercel_dspy
+from .agent_engine import fill_proposer_host_cli
 from .model_billing import enforce_local_mode_sources, enforce_raw_local_mode_sources, normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
@@ -120,14 +121,50 @@ class WizardPreflightResponse(BaseModel):
     # A repository run's effective environment: what versions may change,
     # what stays protected, and which network and services each step gets.
     environment: dict[str, Any] | None = None
+    # The proposer CLI this check ran on. A submit sends it back so the server
+    # does not pick another CLI from changed readiness and refuse the evidence.
+    proposer_host_cli: Literal["codex", "claude"] | None = None
+
+    @model_serializer(mode="wrap")
+    def _keep_proposer_host_cli(self, handler: SerializerFunctionWrapHandler):
+        """Keep the check's proposer CLI in the output even when it is null.
+
+        The routes drop null fields, and a missing key lets the submit pick a
+        CLI from the engine as it is now. The null must reach the submit.
+
+        Args:
+            handler: Pydantic's default serializer for this model.
+
+        Returns:
+            The serialized response, with ``proposer_host_cli`` whenever the check set it.
+        """
+        data = handler(self)
+        if "proposer_host_cli" in self.model_fields_set:
+            data["proposer_host_cli"] = self.proposer_host_cli
+        return data
 
 
-def _canonical_execution_payload(request: WizardPreflightRequest, username: str) -> dict[str, Any]:
+def _proposer_host_cli(payload: dict[str, Any]) -> str | None:
+    """Read the proposer CLI a setup payload resolved.
+
+    Args:
+        payload: A black-box (``proposer``) or unified (``optimizer.proposer``) payload.
+
+    Returns:
+        The proposer's ``host_cli``, or ``None`` when the payload names none.
+    """
+    optimizer = payload.get("optimizer")
+    proposer = payload.get("proposer") or (optimizer.get("proposer") if isinstance(optimizer, dict) else None)
+    return proposer.get("host_cli") if isinstance(proposer, dict) else None
+
+
+def _canonical_execution_payload(request: WizardPreflightRequest, username: str, job_store: Any) -> dict[str, Any]:
     """Apply the submission schema before hashing complete execution inputs.
 
     Args:
         request: Full execution preflight request.
         username: Authenticated owner replacing any client-supplied identity.
+        job_store: Job store whose engine holds the caller's agent engine setting.
 
     Returns:
         The same canonical JSON shape the submission endpoint will attach.
@@ -139,6 +176,7 @@ def _canonical_execution_payload(request: WizardPreflightRequest, username: str)
         typed = UnifiedRunRequest.model_validate(payload)
     requested_source = typed.token_source
     model_configs, _ = normalize_model_token_sources(typed)
+    fill_proposer_host_cli(job_store, username, typed)
     enforce_local_mode_sources(typed, requested_source, model_configs)
     return typed.model_dump(mode="json", by_alias=True)
 
@@ -464,7 +502,10 @@ def _run_preflight(
     evidence = PreflightStore(job_store.engine)
     # A unified check runs the full workspace contract, so its inputs are complete at every scope.
     if request.scope == "execution" or request.workflow == "unified":
-        request = request.model_copy(update={"payload": _canonical_execution_payload(request, user.username)})
+        request = request.model_copy(
+            update={"payload": _canonical_execution_payload(request, user.username, job_store)}
+        )
+    host_cli = _proposer_host_cli(request.payload)
     if request.workflow == "unified" and request.contract_sample_count is not None:
         request = request.model_copy(
             update={"payload": {**request.payload, CONTRACT_SAMPLE_COUNT_KEY: request.contract_sample_count}}
@@ -498,7 +539,9 @@ def _run_preflight(
         document = claim.document
         if isinstance(document.get("terminal"), dict):
             document = {**document, "terminal": {**document["terminal"], "reused": True}}
-        return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+        return WizardPreflightResponse.model_validate(
+            {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+        )
     if terminal is not None:
         terminal.redact(check_terminal.secret_values(request.payload))
         terminal.note("budget_ready", available_cents=int(snapshot.available_cents))
@@ -533,7 +576,9 @@ def _run_preflight(
                     status="failed",
                     result={"checks": [_check("setup", "failed", str(error))]},
                 )
-                return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+                return WizardPreflightResponse.model_validate(
+                    {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+                )
             if terminal is not None:
                 terminal.redact(check_terminal.secret_values(parent_payload))
             parent_request = request.model_copy(update={"payload": parent_payload})
@@ -558,7 +603,9 @@ def _run_preflight(
             document = evidence.finish(claim.document["id"], claim_token=claim.token, status=status, result=result)
     except BudgetError as error:
         raise budget_http_error(error) from error
-    return WizardPreflightResponse.model_validate({**document, "budget": budget_response(snapshot)})
+    return WizardPreflightResponse.model_validate(
+        {**document, "budget": budget_response(snapshot), "proposer_host_cli": host_cli}
+    )
 
 
 def _perform_preflight(
