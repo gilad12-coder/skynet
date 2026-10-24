@@ -14,8 +14,8 @@
 # certificate do not exist yet. Step 8 of the README sets both to true here
 # and merges that change, so every later plan and apply keeps the services
 # and HTTPS. Setting either one back to false destroys them.
-services_enabled = false
-enable_https     = false
+services_enabled = true
+enable_https     = true
 
 egress_mode = "nat_single"
 
