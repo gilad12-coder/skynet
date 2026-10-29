@@ -20,11 +20,14 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The aws deploy run of this commit can wait behind the previous one, and
+    # each run may take up to 90 minutes.
+    timeout-minutes: 150
     env:
       APP_URL: ${{ vars.STAGING_APP_URL || 'https://frontend-staging-102e.up.railway.app' }}
       API_URL: ${{ vars.STAGING_API_URL || 'https://backend-staging-6295.up.railway.app' }}
@@ -33,6 +36,36 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+      - name: Wait for the aws deploy run of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Poll the served commit only after its deploy finished, so a deploy
+          # that waits in the aws deploy queue does not use up the poll time.
+          deadline=$(( $(date +%s) + 110 * 60 ))
+          while :; do
+            # The runs API, not `gh run list --workflow`: that looks the
+            # workflow up on main, which does not have aws-deploy.yml.
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&event=push&branch=staging&per_page=100" \
+              --jq '[.workflow_runs[] | select(.path == ".github/workflows/aws-deploy.yml")] | .[0] // empty | {status, conclusion, url: .html_url}') || run=
+            status=$(jq -r '.status // empty' <<<"$run")
+            if [ "$status" = "completed" ]; then
+              conclusion=$(jq -r .conclusion <<<"$run")
+              url=$(jq -r .url <<<"$run")
+              if [ "$conclusion" != "success" ]; then
+                echo "::error::The aws deploy run of ${GITHUB_SHA:0:8} ended with $conclusion: $url"
+                exit 1
+              fi
+              echo "aws deploy succeeded: $url"
+              break
+            fi
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::The aws deploy run of ${GITHUB_SHA:0:8} did not finish in 110 minutes (status: ${status:-not found})."
+              exit 1
+            fi
+            echo "Waiting for aws deploy: ${status:-not started}"
+            sleep 30
+          done
       - name: Wait for staging to serve this push
         run: |
           fetch() { curl -sS -L --max-time 20 "$@" 2>/dev/null; }
