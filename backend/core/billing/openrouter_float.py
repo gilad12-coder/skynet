@@ -132,9 +132,8 @@ def read_account_balance_cents() -> int | None:
 def local_key_limit_problem() -> str | None:
     """Say what is wrong with the OpenRouter key when running on a developer machine.
 
-    Every deployed service sets ``APP_ENVIRONMENT`` (on Railway, the
-    ``RAILWAY_ENVIRONMENT_NAME`` fallback), so its absence means a developer
-    machine. There the key should be a separate one
+    Every deployed service sets ``APP_ENVIRONMENT``, so its absence means a
+    developer machine. There the key should be a separate one
     with a small spend limit: a local run on the production key spends the
     same balance that backs every user's balance. Fails open.
 

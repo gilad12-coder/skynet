@@ -9,17 +9,14 @@ import {
   exitFullScreen,
   ideToolbar,
   newManualTask,
-  previewUrl,
+  STAGING_URL,
   signup,
   toMetricAndRun,
   waitForAgentIdle,
-  waitForPreview,
 } from "../skynet.mjs";
 
 const pr = process.env.PR ?? "715";
-console.log("deploys", await waitForPreview(pr));
-
-const r = await startReel({ url: `${previewUrl(pr)}/login` });
+const r = await startReel({ url: `${STAGING_URL}/login` });
 const { page } = r;
 console.log("frontend sha", await deployedSha(page));
 

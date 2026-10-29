@@ -29,7 +29,7 @@ The environment stacks follow "First apply (staging, then production)" below.
 | `environments/staging/` | `staging/terraform.tfstate` | One environment from `modules/environment`. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `environments/production/` | `production/terraform.tfstate` | The same module. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `modules/environment/` | module | VPC, ALB, ACM, ECS cluster, services, task definitions, RDS, Valkey, secrets, logs, alarms. |
-| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel, Railway restore. |
+| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel. |
 | `.checkov.yaml` | config | checkov skips, each with its reason. |
 
 Remote state uses the S3 backend with native S3 locking (`use_lockfile = true`).
@@ -41,13 +41,13 @@ There is no DynamoDB table.
   subnets (RDS, Valkey, no internet route). S3 gateway endpoint. VPC flow logs.
   With `egress_mode = "public_ip"` the tasks run in the public subnets instead
   and there is no NAT gateway.
-- ALB: HTTP redirects to HTTPS. Idle timeout 120 s (Railway SSE streams need >= 60 s).
+- ALB: HTTP redirects to HTTPS. Idle timeout 120 s (SSE streams need >= 60 s).
   The API host goes to the backend. Every other host goes to the frontend.
 - ECS services: `backend` (8080), `worker`, `frontend` (3001), `litellm` (4000).
   The backend and the worker reach litellm at `litellm.<env>.skynet.internal:4000`
   (Cloud Map). ECS Exec is on. Deployment circuit breaker with rollback is on.
 - One-off task families: `migrate` (`python manage.py migrate`) and `dbadmin`
-  (psql tools, for the database roles, the tunnel and the restore). The dbadmin
+  (psql tools, for the database roles and the tunnel). The dbadmin
   image is `postgres:18-alpine` pinned by digest.
 - RDS PostgreSQL 18.6 (`rds.force_ssl=1`, gp3, encrypted, Performance Insights).
   pgvector is an RDS extension; `create-db-roles.sh` enables it.
@@ -63,7 +63,7 @@ There is no DynamoDB table.
 
 ### Choices
 
-- **PostgreSQL 18.6, not 16.** The Railway source runs 18.6 (all four backup
+- **PostgreSQL 18.6, not 16.** The Railway source ran 18.6 (all four backup
   `info.json` files say `18.6 (Debian 18.6-1.pgdg13+2)`). `pg_restore` cannot
   load an 18 archive into an older server, and a downgrade adds a dump format
   risk for no gain. RDS supports 18.6, so the target matches the source.
@@ -160,9 +160,6 @@ definitions read single JSON keys by ARN (`<arn>:<KEY>::`).
 | `skynet/<env>/litellm-generated` | Terraform: `LITELLM_DATABASE_URL` (as `litellm`), `REDIS_PASSWORD`, `LITELLM_DB_PASSWORD` | litellm (the URL and Redis password); dbadmin (`LITELLM_DB_PASSWORD`) |
 | `skynet/<env>/db-admin` | Terraform: the RDS master `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | dbadmin |
 
-`restore-railway.sh` also reads `app-generated` and `litellm-generated` on your
-laptop to restore each dump as its owner role.
-
 The key names come from the Railway export (SKY-155). ECS does not start a task
 when a referenced key is missing. An empty string is allowed.
 
@@ -208,7 +205,7 @@ docker buildx build --platform linux/arm64 -t "$REG/skynet/backend:<sha>" --push
 
 Prerequisites: Terraform >= 1.11, AWS CLI v2, Docker with buildx, `jq`,
 the Session Manager plugin (`brew install --cask session-manager-plugin`) and
-`postgresql@18` for `pg_restore`.
+`postgresql@18` for `psql` through the DB tunnel.
 
 ```bash
 aws login --profile skynet
@@ -247,7 +244,7 @@ scripts/secrets.sh put staging litellm  ~/skynet-secrets/staging-litellm.json
 scripts/secrets.sh check staging
 scripts/create-db-roles.sh staging
 
-# 7. Restore the Railway data (see "Restore"). Then migrate.
+# 7. Migrate (creates the schema in the empty databases).
 scripts/deploy.sh staging "$SHA" --migrate-only
 
 # 8. Environment, pass 2: services on, HTTPS on (after ACM shows ISSUED).
@@ -349,29 +346,13 @@ Risk to know: the plan role can read the state, and the state holds the
 generated database and cache passwords. Any same-repository PR branch can use
 the plan role. Only people with write access can push such a branch.
 
-## Restore the Railway backups
+## Restore
 
-The pg_dump files (custom format, from PostgreSQL 18.6) are in
-`~/Library/Application Support/Skynet Backups/railway-2026-10-21/`.
-The script expects `<env>-Postgres.dump` (app) and `<env>-Postgres-ZPeG.dump`
-(litellm). Restore into empty databases, before the first migration and before
-the services start.
-
-```bash
-brew install postgresql@18
-export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
-
-# Terminal 1: tunnel localhost:15432 to RDS through a dbadmin task.
-infra/terraform/scripts/db-tunnel.sh staging
-
-# Terminal 2:
-infra/terraform/scripts/restore-railway.sh staging
-```
-
-The script restores with `--no-owner --no-acl` as the owner role of each
-database (`skynet_app` for the app dump, `litellm` for the litellm dump), so
-the app's migrations can alter every object. It then runs a row count check. After the restore, run
-`deploy.sh <env> <sha> --migrate-only`; it applies only newer migrations.
+The October 2026 cutover restored the Railway pg_dump files into RDS once.
+Railway is deleted, so its restore script is gone (SKY-185). A new environment
+starts with empty databases, and `deploy.sh <env> <sha> --migrate-only` creates
+the schema. To recover data, restore an RDS automated backup (point-in-time
+restore) into a new instance.
 
 ## DNS cutover
 
