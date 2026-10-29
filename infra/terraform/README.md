@@ -285,8 +285,10 @@ change to a task definition (for example a new secret key) takes effect at the
 next `deploy.sh` run.
 
 `.github/workflows/aws-deploy.yml` does the same with the OIDC role of the
-chosen environment. It runs on `workflow_dispatch` only. See "GitHub roles" for
-the setup.
+chosen environment. A push to `staging` deploys staging. Production runs only
+from `workflow_dispatch`. The GitHub environment `aws-production` is protected
+(`main` branch only, Gilad's approval required) and has no variables yet. See
+"GitHub roles" for the setup.
 
 ## GitHub roles and CI
 
