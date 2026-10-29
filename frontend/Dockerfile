@@ -29,11 +29,14 @@ ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 # .git is dockerignored, so withSentryConfig (next.config.ts) cannot read the
-# commit itself. It reads RAILWAY_GIT_COMMIT_SHA during `npm run build` and
-# bakes it into the bundle as the Sentry release name.
+# commit itself. It reads SENTRY_RELEASE during `npm run build` and bakes it
+# into the bundle as the Sentry release name. APP_GIT_SHA names the commit;
+# Railway's RAILWAY_GIT_COMMIT_SHA is the fallback.
+ARG APP_GIT_SHA
 ARG RAILWAY_GIT_COMMIT_SHA
+ENV SENTRY_RELEASE=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
 # The footer's AGPL source link points at this commit (legal-config.ts).
-ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
+ENV NEXT_PUBLIC_SOURCE_COMMIT=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
     node scripts/generate-third-party-licenses.mjs && npm run build
 
