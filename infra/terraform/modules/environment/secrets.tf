@@ -105,8 +105,6 @@ locals {
 
   app_secret_keys = sort(distinct(concat(local.backend_secret_keys, local.worker_secret_keys)))
 
-  # SENTRY_AUTH_TOKEN is a build-time value only (BuildKit secret), so the
-  # running frontend does not get it.
   frontend_secret_keys = [
     "AUTH_GITHUB_ID",
     "AUTH_GITHUB_SECRET",
@@ -119,8 +117,6 @@ locals {
     "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
     "SENTRY_DSN",
     "SENTRY_ENVIRONMENT",
-    "SENTRY_ORG",
-    "SENTRY_PROJECT",
     "SENTRY_TRACES_SAMPLE_RATE",
   ]
 

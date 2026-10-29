@@ -12,9 +12,8 @@
 #
 # Configuration (Settings > Environments > aws-<env> > variables and secrets):
 #   vars.AWS_DEPLOY_ROLE_ARN                     github_deploy_role_arns[<env>]
-#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
-#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional)
-#   secrets.SENTRY_AUTH_TOKEN                    (optional)
+#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+#                                                (optional)
 name: aws deploy
 
 on:
@@ -56,9 +55,6 @@ jobs:
         env:
           NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
           NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: infra/terraform/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
 
       - name: Migrate and deploy

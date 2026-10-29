@@ -193,8 +193,8 @@ infra/terraform/scripts/build-push.sh staging <git-sha>
 The script runs `docker buildx build --platform linux/arm64 --push` for
 `backend` (`backend/`), `frontend` (`frontend/`) and `litellm` (`deploy/litellm/`). ECR tags are
 immutable; the script skips a tag that exists. Frontend build values
-(`NEXT_PUBLIC_SENTRY_DSN` and others) come from the shell. `SENTRY_AUTH_TOKEN`
-goes in as a BuildKit secret, not a build argument.
+(`NEXT_PUBLIC_SENTRY_DSN` and others) come from the shell. The frontend build
+does not generate or upload Sentry source maps.
 
 Manual equivalent for one image:
 
