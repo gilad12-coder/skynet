@@ -849,7 +849,6 @@ def test_webhook_records_purchase_milestone(
 ) -> None:
     """A credited top-up leaves one ``purchase_completed`` telemetry row, and only one."""
     monkeypatch.setattr(settings, "telemetry_enabled", True)
-    monkeypatch.setattr(settings, "posthog_project_api_key", None)
     _seed_customer(engine, "u@x.com")
     service = StripeBillingService(engine=engine)
     event = _checkout_event("evt_tel", "u@x.com", 500, pack_id="pack_small")
