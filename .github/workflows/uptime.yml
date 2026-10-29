@@ -1,5 +1,5 @@
-# External production monitor. It runs on GitHub, not Railway, so it still
-# fires when the whole Railway project (and every in-app alert with it) is down.
+# External production monitor. It runs on GitHub, not AWS, so it still fires
+# when the whole AWS environment (and every in-app alert with it) is down.
 # A failed run is the alert: GitHub emails the workflow's owner, and when the
 # ALERT_WEBHOOK_URL secret is set the same message goes to that Slack-style hook.
 #
@@ -61,10 +61,10 @@ jobs:
             problems+=("App $APP_URL answered HTTP ${code:-none}")
           fi
 
-          # Railway only rebuilds a service when its own folder changed, so a
-          # service is stale only once a change to that folder has waited on
-          # main longer than the grace period. That caught nothing for 15
-          # merges while the frontend sat on #519.
+          # A service is stale only once a change to its own folder has waited
+          # on main longer than the grace period, so a merge that leaves a
+          # folder alone does not alert. Before this check, the frontend sat
+          # on #519 for 15 merges and nothing alerted.
           check_deployed() {
             local name=$1 commit=$2 dir=$3 oldest age
             if [ -z "$commit" ]; then

@@ -7,7 +7,7 @@
 #
 # It runs after "staging deploy" succeeds, which already waits until staging
 # serves the pushed commit. When that deploy check fails, nothing is
-# reverted: staging may simply not have come up, so look at Railway first.
+# reverted: staging may simply not have come up, so look at the deploy first.
 #
 # Configuration (Settings > Secrets and variables > Actions):
 #   vars.STAGING_APP_URL     shared with staging-deploy.yml
@@ -38,8 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      APP_URL: ${{ vars.STAGING_APP_URL || 'https://frontend-staging-102e.up.railway.app' }}
-      API_URL: ${{ vars.STAGING_API_URL || 'https://backend-staging-6295.up.railway.app' }}
+      APP_URL: ${{ vars.STAGING_APP_URL || 'https://staging.skynetml.com' }}
+      API_URL: ${{ vars.STAGING_API_URL || 'https://api-staging.skynetml.com' }}
     outputs:
       failed: ${{ steps.checks.outputs.failed }}
       report: ${{ steps.checks.outputs.report }}

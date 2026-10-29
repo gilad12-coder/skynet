@@ -173,14 +173,13 @@ class Settings(BaseSettings):
     )
     app_environment: str = Field(
         default="",
-        validation_alias=AliasChoices("APP_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME"),
-        description="Deployment environment name; Railway's RAILWAY_ENVIRONMENT_NAME is the fallback. "
-        "A name ending in -pr-<number> marks a PR preview environment.",
+        alias="APP_ENVIRONMENT",
+        description="Deployment environment name. A name ending in -pr-<number> marks a PR preview environment.",
     )
     app_git_sha: str = Field(
         default="",
-        validation_alias=AliasChoices("APP_GIT_SHA", "RAILWAY_GIT_COMMIT_SHA"),
-        description="Commit the deployed image was built from; Railway's RAILWAY_GIT_COMMIT_SHA is the fallback.",
+        alias="APP_GIT_SHA",
+        description="Commit the deployed image was built from.",
     )
     preview_grant_cents: int = Field(
         default=0,
@@ -1333,7 +1332,7 @@ class Settings(BaseSettings):
         error instead of a config diagnostic. Deriving the default keeps the
         agent pointed at this app's own ``/mcp`` mount; a bind-all ``0.0.0.0``
         host is dialled as ``127.0.0.1`` — the IPv4 literal, not ``localhost``,
-        because some container runtimes (e.g. Railway) resolve ``localhost`` to
+        because some container runtimes resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
         a raw ``ConnectError``.
 
