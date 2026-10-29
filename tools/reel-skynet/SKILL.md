@@ -24,7 +24,7 @@ file's absolute path, and replace the part after setup with what the PR must pro
 | --- | --- |
 | `STAGING_URL` | `https://staging.skynetml.com`. AWS builds no PR previews yet (SKY-164), so film on staging or local dev. |
 | `deployedSha(page)` | Opens `/login` and reads the "Source code" link (`.../tree/<sha>`): the commit the frontend was built from. Compare it to the PR head before filming. |
-| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. A new account on staging starts with $0 credit; only `-pr-N` previews give the signup grant. |
+| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. Works only on local dev with SMTP unset. Staging sends a real email code, so an `@example.com` account cannot sign in there: on staging, sign in with your own test account from its access file. New accounts start with $0 credit; only `-pr-N` environments give the signup grant. |
 | `newManualTask(page, { prompt, csvPath })` | Wizard: Manual, objective, Prompt artifact, uploads the CSV (default `fixtures/tickets.csv`, 12 tickets). Ends on Inputs. |
 | `toMetricAndRun(page)` | Continues to Metric & run and waits for the inline IDE's explorer to list run.py. Returns boot ms. |
 | `ide(page)` / `ideToolbar(page)` | The IDE (inline section, or the full-screen dialog) / its header: the Check and Full screen icon buttons. Found through the `[data-ide-host]` workbench host. |

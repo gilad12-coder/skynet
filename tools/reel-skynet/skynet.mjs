@@ -28,8 +28,9 @@ export async function deployedSha(page) {
 }
 
 /**
- * Register a throwaway account (recNNN-<random>@example.com, $0 credit on staging),
+ * Register a throwaway account (recNNN-<random>@example.com, $0 credit),
  * sign the page in, set English and skip the experience intake. Never buy credit.
+ * Local dev with SMTP unset only: staging requires an email code, so sign-in fails.
  * Returns { email, password }.
  */
 export async function signup(page, { tag = "rec" } = {}) {

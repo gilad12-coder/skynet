@@ -349,7 +349,7 @@ the plan role. Only people with write access can push such a branch.
 ## Restore
 
 The October 2026 cutover restored the Railway pg_dump files into RDS once.
-Railway is deleted, so its restore script is gone (SKY-185). A new environment
+Railway is deleted (SKY-185), so its restore script is gone (SKY-194). A new environment
 starts with empty databases, and `deploy.sh <env> <sha> --migrate-only` creates
 the schema. To recover data, restore an RDS automated backup (point-in-time
 restore) into a new instance.
