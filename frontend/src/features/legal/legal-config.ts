@@ -38,7 +38,7 @@ export const LEGAL_CONFIG = {
   sourceRepoUrl: "https://github.com/gilad12-coder/skynet",
 } as const;
 
-// The Docker build bakes in the commit Railway deployed, so the link names the
+// The Docker build bakes in the deployed commit, so the link names the
 // exact source running; local builds without it fall back to the repo root.
 const SOURCE_COMMIT = process.env.NEXT_PUBLIC_SOURCE_COMMIT;
 

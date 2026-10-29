@@ -5,10 +5,9 @@ FROM base AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json .npmrc* ./
-# Railway keeps no image layers between builds, so the npm download cache and
-# Next's compile cache live in cache mounts instead. Railway requires the
-# s/<service id>- prefix on the id; plain Docker treats it as any other id.
-RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/root/.npm,target=/root/.npm \
+# The npm download cache and Next's compile cache live in cache mounts, so a
+# rebuild reuses them even when a layer above them changes.
+RUN --mount=type=cache,id=frontend-npm,target=/root/.npm \
     npm ci --prefer-offline
 
 FROM base AS build
@@ -30,14 +29,12 @@ ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 # .git is dockerignored, so withSentryConfig (next.config.ts) cannot read the
 # commit itself. It reads SENTRY_RELEASE during `npm run build` and bakes it
-# into the bundle as the Sentry release name. APP_GIT_SHA names the commit;
-# Railway's RAILWAY_GIT_COMMIT_SHA is the fallback.
+# into the bundle as the Sentry release name. APP_GIT_SHA names the commit.
 ARG APP_GIT_SHA
-ARG RAILWAY_GIT_COMMIT_SHA
-ENV SENTRY_RELEASE=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
+ENV SENTRY_RELEASE=$APP_GIT_SHA
 # The footer's AGPL source link points at this commit (legal-config.ts).
-ENV NEXT_PUBLIC_SOURCE_COMMIT=${APP_GIT_SHA:-$RAILWAY_GIT_COMMIT_SHA}
-RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
+ENV NEXT_PUBLIC_SOURCE_COMMIT=$APP_GIT_SHA
+RUN --mount=type=cache,id=frontend-next-cache,target=/app/.next/cache \
     node scripts/generate-third-party-licenses.mjs && npm run build
 
 FROM base AS runner

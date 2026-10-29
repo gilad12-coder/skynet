@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
   // CI's `npm run typecheck` is the type gate; repeating it inside `next build`
-  // added about 90 seconds to every Railway deploy.
+  // added about 90 seconds to every deploy.
   typescript: { ignoreBuildErrors: true },
   images: {
     formats: ["image/avif", "image/webp"],
@@ -22,8 +22,8 @@ const nextConfig: NextConfig = {
         { key: "X-Frame-Options", value: "DENY" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         // HSTS: after the first HTTPS response, browsers refuse plain HTTP for
-        // two years. All skynetml.com hosts (apex + www) terminate TLS on
-        // Railway; the API runs on a separate *.up.railway.app host, so
+        // two years. Every skynetml.com host (apex, www, api and the staging
+        // hosts) terminates TLS on the AWS load balancer, so
         // includeSubDomains stays safe. No `preload` — that opts into the
         // browser preload list, which is slow to reverse.
         {

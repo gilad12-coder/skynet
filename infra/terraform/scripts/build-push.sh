@@ -51,7 +51,6 @@ build() {
 build backend "$sha" "$repo_root/backend" --build-arg "GIT_SHA=$sha"
 build litellm "$sha" "$repo_root/deploy/litellm"
 
-# RAILWAY_GIT_COMMIT_SHA keeps the Dockerfile working before PR #788 (APP_*) lands.
 build frontend "$sha-$env" "$repo_root/frontend" \
   --build-arg "NEXT_PUBLIC_SITE_URL=$site_url" \
   --build-arg "NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}" \
@@ -59,7 +58,6 @@ build frontend "$sha-$env" "$repo_root/frontend" \
   --build-arg "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}" \
   --build-arg "NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=${NEXT_PUBLIC_FEATURE_GENERALIST_AGENT:-}" \
   --build-arg "APP_GIT_SHA=$sha" \
-  --build-arg "APP_ENVIRONMENT=$env" \
-  --build-arg "RAILWAY_GIT_COMMIT_SHA=$sha"
+  --build-arg "APP_ENVIRONMENT=$env"
 
 echo "pushed: backend:$sha litellm:$sha frontend:$sha-$env"
