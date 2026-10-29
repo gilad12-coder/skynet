@@ -17,7 +17,7 @@ The environment stacks follow "First apply (staging, then production)" below.
   and returns an empty list. `global` creates the GitHub Actions OIDC provider
   and the GitHub roles (`enable_github_oidc` defaults to `true`).
 - Spend limit: the plan is $460 per month for both environments. The lean
-  variants (about $373) fit. The full variants (about $671) do not; raise the
+  variants (about $419) fit. The full variants (about $671) do not; raise the
   limit before you apply `full.tfvars` in both environments.
 
 ## Layout
@@ -98,10 +98,10 @@ file changes.
 | `egress_mode` | `public_ip` (no NAT) | `nat_single` | `nat_single` | `nat_per_az` |
 | `db_instance_class` / `db_multi_az` | db.t4g.small / false | db.t4g.small / false | db.t4g.small / false | db.t4g.medium / true |
 | `cache_node_count` | 1 | 1 | 1 | 2 (failover) |
-| backend | 1 x 0.5 vCPU / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
-| worker | 1 x 0.5 / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
-| frontend | 1 x 0.25 / 0.5 GB, Spot | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 1 GB | 2 x 0.5 / 1 GB |
-| litellm | 1 x 0.5 / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 0.5 / 2 GB |
+| backend | 1 x 0.5 vCPU / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
+| worker | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
+| frontend | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 1 GB | 2 x 0.5 / 1 GB |
+| litellm | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 0.5 / 2 GB |
 
 Railway ran backend 3, worker 3, frontend 2 and litellm 2 replicas in
 production. Their summed memory was backend 1.6 GB, worker 1.3 GB, litellm
@@ -120,10 +120,12 @@ What each lean cut costs in availability:
 | 1 Valkey node (production) | ~$9 | A node failure loses the cache and stops Valkey for minutes until ElastiCache replaces the node. App sessions and rate limits in Valkey reset. |
 | 1 NAT gateway (production) | ~$37 | All egress goes through one AZ. If that AZ fails, tasks in the other AZ lose internet access (LLM providers, Stripe, OAuth). |
 | No NAT, public task IPs (staging) | ~$22 net | No availability loss. Tasks have public IPv4 addresses; security groups still accept inbound traffic only from the ALB. Egress IPs change per task, so no third party can allowlist them. |
-| Fargate Spot (staging) | ~$46 | AWS may stop a task with a 2-minute warning. A one-task service is down until Spot capacity returns. An interrupted worker job goes through orphan recovery. |
 
 Options that the lean variant does not use:
 
+- `spot = true` on staging saves about $46 per month. Staging used it until
+  2026-10-29, when Spot had no capacity for hours and one-task services stayed
+  down. AWS may also stop a Spot task with a 2-minute warning.
 - `spot = true` on the production worker saves about $14 per month. A Spot stop
   interrupts running optimization jobs; orphan recovery then retries or fails
   them, and the user waits. Not worth $14 for paid customer jobs.
@@ -397,7 +399,7 @@ not in the Price List API; the estimate assumes 70% off (AWS: "up to 70%").
 
 | Item | Staging lean | Staging full | Production lean | Production full |
 |------|--------------|--------------|-----------------|-----------------|
-| Fargate ARM64 tasks | ~$20 (4 Spot tasks) | ~$66 (4 tasks) | ~$67 (4 tasks, 1.75 vCPU) | ~$178 (8 tasks, 6 vCPU) |
+| Fargate ARM64 tasks | ~$66 (4 tasks) | ~$66 (4 tasks) | ~$67 (4 tasks, 1.75 vCPU) | ~$178 (8 tasks, 6 vCPU) |
 | RDS PostgreSQL, 20 GB gp3 | ~$26 (small, single-AZ) | ~$26 | ~$26 (small, single-AZ) | ~$99 (medium, Multi-AZ) |
 | ElastiCache Valkey | ~$9 (1 node) | ~$9 | ~$9 (1 node) | ~$19 (2 nodes) |
 | ALB (hours + LCU) | ~$20 | ~$20 | ~$25 | ~$25 |
@@ -405,9 +407,9 @@ not in the Price List API; the estimate assumes 70% off (AWS: "up to 70%").
 | Public IPv4 | ~$22 (2 ALB + 4 tasks) | ~$11 (3) | ~$11 (3) | ~$15 (4) |
 | CloudWatch (Container Insights about $40, logs, alarms, monitoring) | ~$45 | ~$45 | ~$50 | ~$50 |
 | Secrets Manager, S3, ECR storage | ~$5 | ~$5 | ~$5 | ~$5 |
-| **Total** | **~$147** | **~$215** | **~$226** | **~$456** |
+| **Total** | **~$193** | **~$215** | **~$226** | **~$456** |
 
-Lean total: about $373 per month, below the $460 spend limit. Full total:
+Lean total: about $419 per month, below the $460 spend limit. Full total:
 about $671 per month, above the $460 spend limit. Production full alone
 (about $456) uses almost all of it.
 
@@ -421,9 +423,8 @@ Not included: data transfer out, NAT data processing ($0.045 per GB), LLM provid
 costs, RDS CPU credits beyond the baseline, WAF (off by default; about $10 per
 month plus requests when on). Autoscaled tasks add about $20 (backend) or $9
 (frontend) per task-month, plus $3.65 per public IP in `public_ip` mode.
-If Spot is only 50% off, staging lean costs about $160. The 35-day production
-backups add a few dollars of backup storage beyond the free allowance (the
-database size). The ECR repos and the
+The 35-day production backups add a few dollars of backup storage beyond the
+free allowance (the database size). The ECR repos and the
 state bucket are shared and cost a few dollars per month. A Compute Savings
 Plan cuts on-demand Fargate by about 20% to 50%.
 
