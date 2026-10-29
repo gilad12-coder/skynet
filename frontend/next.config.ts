@@ -1,12 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
-// Railway names PR preview environments `<project>-pr-<n>` (the backend's
-// `is_preview_environment` reads the same suffix). Nobody debugs a preview's
-// minified stack traces, and generating and uploading source maps adds time to
-// every preview build, so previews skip it; staging and production still upload.
-const isPreviewBuild = /-pr-\d+$/.test(process.env.RAILWAY_ENVIRONMENT_NAME ?? "");
-
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
@@ -77,13 +71,13 @@ const nextConfig: NextConfig = {
   },
 };
 
+// Source maps are not generated or uploaded (SKY-193). The image build gets no
+// Sentry auth token, so the plugin also creates no Sentry release. `release`
+// keeps its default on purpose: `create: false` would also stop the plugin from
+// baking the detected release name (the commit SHA) into the bundle.
 export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
-  sourcemaps: { disable: isPreviewBuild },
-  release: { create: !isPreviewBuild },
+  sourcemaps: { disable: true },
   webpack: { treeshake: { removeDebugLogging: true } },
   telemetry: false,
 });

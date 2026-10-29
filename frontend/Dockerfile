@@ -1,8 +1,3 @@
-# check=skip=SecretsUsedInArgOrEnv
-# ^ SENTRY_AUTH_TOKEN is deliberately a build ARG: Railway exposes variables to
-#   Dockerfile builds only through ARG (no BuildKit secret mounts). It lives in
-#   the discarded build stage only, so the lint rule does not apply here.
-
 FROM node:20-alpine AS base
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -33,20 +28,10 @@ ENV NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=$NEXT_PUBLIC_FEATURE_GENERALIST_AGENT
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
-# Sentry source-map upload (withSentryConfig in next.config.ts) runs inside
-# `npm run build`, so it only sees these when they are declared as build args.
-# Railway passes service variables into a Dockerfile build solely via ARG.
-# Build-stage only: nothing here is copied into the runner image.
-# .git is dockerignored, so the plugin cannot read the commit itself; it does
-# read RAILWAY_GIT_COMMIT_SHA, which keeps the uploaded release equal to the
-# one sentry.server.config.ts / sentry.edge.config.ts report at runtime.
-ARG SENTRY_ORG
-ARG SENTRY_PROJECT
-ARG SENTRY_AUTH_TOKEN
+# .git is dockerignored, so withSentryConfig (next.config.ts) cannot read the
+# commit itself. It reads RAILWAY_GIT_COMMIT_SHA during `npm run build` and
+# bakes it into the bundle as the Sentry release name.
 ARG RAILWAY_GIT_COMMIT_SHA
-# next.config.ts skips the source-map upload when this names a `*-pr-<n>`
-# preview environment.
-ARG RAILWAY_ENVIRONMENT_NAME
 # The footer's AGPL source link points at this commit (legal-config.ts).
 ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
 RUN --mount=type=cache,id=s/8ebabb79-21cd-4026-b57b-7abc5e1d612c-/app/.next/cache,target=/app/.next/cache \
