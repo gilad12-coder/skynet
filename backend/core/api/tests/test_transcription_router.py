@@ -244,11 +244,11 @@ def billing_engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     Base.metadata.drop_all(engine)
 
 
-def _save_key(engine: Any, provider: str, secret: str) -> None:
+def _save_key(engine: Any, provider: str, secret: str, api_base: str | None = None) -> None:
     """Store and verify a BYOK key for the test user without a network probe."""
     ok = SimpleNamespace(status_code=200, is_success=True)
     with patch("core.billing.byok_vault.httpx.get", return_value=ok):
-        ProviderKeyVault(engine=engine).save_key(_USER.username, provider, secret)
+        ProviderKeyVault(engine=engine).save_key(_USER.username, provider, secret, api_base=api_base)
 
 
 def _seen_keys(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -282,6 +282,16 @@ def test_own_openrouter_key_is_used_and_skips_platform_budget(
     assert [_post_audio(client).status_code for _ in range(2)] == [200, 200]
     assert keys == ["sk-or-own", "sk-or-own"]
     assert not list(redis_double.scan_iter("skynet:platform-budget:transcription*"))
+
+
+def test_openrouter_key_with_custom_base_is_not_sent_to_openrouter(
+    monkeypatch: pytest.MonkeyPatch, billing_engine: Any
+) -> None:
+    """An OpenRouter connection pointed at another host keeps its key off openrouter.ai."""
+    _save_key(billing_engine, "openrouter", "proxy-secret", api_base="https://proxy.example.com/v1")
+    keys = _seen_keys(monkeypatch)
+    assert _post_audio(_client(_BillingStore(billing_engine))).status_code == 200
+    assert keys == ["sk-or-platform"]
 
 
 def test_groq_byok_key_no_longer_serves_dictation(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:

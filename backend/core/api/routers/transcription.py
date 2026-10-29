@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 
 from ...billing.byok_vault import ProviderKeyVault
+from ...billing.protected_credentials import _openrouter_endpoint
 from ...config import settings
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -114,7 +115,8 @@ def _own_openrouter_key(engine: Any, username: str) -> str | None:
 
     Returns:
         The decrypted key when the caller has a verified OpenRouter connection that
-        the vault can decrypt; otherwise None, which routes to the platform key.
+        the vault can decrypt and that targets openrouter.ai itself; otherwise
+        None, which routes to the platform key.
     """
     if engine is None:
         return None
@@ -126,7 +128,13 @@ def _own_openrouter_key(engine: Any, username: str) -> str | None:
     except DomainError as err:
         logger.warning("openrouter byok key unusable for %s: %s", username, err.code)
         return None
-    return connection.secret if connection is not None else None
+    if connection is None:
+        return None
+    # A connection with a custom base holds a credential for another host;
+    # sending it to openrouter.ai would leak it and fail every clip.
+    if not _openrouter_endpoint(connection.api_base):
+        return None
+    return connection.secret
 
 
 def create_transcription_router(job_store: Any) -> APIRouter:
