@@ -28,7 +28,7 @@ export async function deployedSha(page) {
 }
 
 /**
- * Register a throwaway account (recNNN-<random>@example.com, $10 starting credit),
+ * Register a throwaway account (recNNN-<random>@example.com, $0 credit on staging),
  * sign the page in, set English and skip the experience intake. Never buy credit.
  * Returns { email, password }.
  */

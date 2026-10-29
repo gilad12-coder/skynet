@@ -24,7 +24,7 @@ file's absolute path, and replace the part after setup with what the PR must pro
 | --- | --- |
 | `STAGING_URL` | `https://staging.skynetml.com`. AWS builds no PR previews yet (SKY-164), so film on staging or local dev. |
 | `deployedSha(page)` | Opens `/login` and reads the "Source code" link (`.../tree/<sha>`): the commit the frontend was built from. Compare it to the PR head before filming. |
-| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. Every new account starts with $10 credit. |
+| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. A new account on staging starts with $0 credit; only `-pr-N` previews give the signup grant. |
 | `newManualTask(page, { prompt, csvPath })` | Wizard: Manual, objective, Prompt artifact, uploads the CSV (default `fixtures/tickets.csv`, 12 tickets). Ends on Inputs. |
 | `toMetricAndRun(page)` | Continues to Metric & run and waits for the inline IDE's explorer to list run.py. Returns boot ms. |
 | `ide(page)` / `ideToolbar(page)` | The IDE (inline section, or the full-screen dialog) / its header: the Check and Full screen icon buttons. Found through the `[data-ide-host]` workbench host. |
@@ -49,8 +49,8 @@ The page must be on the app before a helper runs: start with
 - Always run `deployedSha` first; a clip of the wrong commit is worthless.
 - Use a fresh `signup` per run. Other agents may test the same environment at the same
   time with their own accounts; never reuse or touch theirs.
-- Never buy credit or open checkout. $10 covers a few runs; if a flow needs more,
-  stop and report.
+- Never buy credit or open checkout. A new staging account has $0, so a paid run
+  stops for lack of balance; if a flow needs credit, stop and report.
 - Prefer role, label and placeholder selectors (as the helpers do); the wizard's
   English strings live in `i18n/locales/ui/en.json`.
 
