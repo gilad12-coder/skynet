@@ -15,7 +15,8 @@ cd <this repo checkout>
 PR=715 node ~/.agents/skills/reel/bin/reel.mjs run tools/reel-skynet/examples/ide-smoke.mjs --out <scratchpad>/pr715
 ```
 
-Copy `examples/ide-smoke.mjs` to your scratchpad, change the import path to this
+The example runs against local dev (`APP_URL`, default `http://localhost:3000`, with SMTP unset),
+because `signup()` cannot pass the staging email code. Copy `examples/ide-smoke.mjs` to your scratchpad, change the import path to this
 file's absolute path, and replace the part after setup with what the PR must prove.
 
 ## Helpers (`tools/reel-skynet/skynet.mjs`)

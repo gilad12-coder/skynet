@@ -1,5 +1,7 @@
 // Example reel flow: Metric & run is an inline IDE, the coding agent starts on its own,
 // and Full screen grows the IDE into a pop-up and back.
+// Runs against local dev with SMTP unset (APP_URL, default http://localhost:3000):
+// signup() cannot pass the staging email code. PR only sets the account tag.
 //   PR=715 node ~/.agents/skills/reel/bin/reel.mjs run tools/reel-skynet/examples/ide-smoke.mjs --out <scratch>/ide-smoke
 import { startReel } from "reel";
 import {
@@ -9,14 +11,14 @@ import {
   exitFullScreen,
   ideToolbar,
   newManualTask,
-  STAGING_URL,
   signup,
   toMetricAndRun,
   waitForAgentIdle,
 } from "../skynet.mjs";
 
 const pr = process.env.PR ?? "715";
-const r = await startReel({ url: `${STAGING_URL}/login` });
+const appUrl = process.env.APP_URL ?? "http://localhost:3000";
+const r = await startReel({ url: `${appUrl}/login` });
 const { page } = r;
 console.log("frontend sha", await deployedSha(page));
 
