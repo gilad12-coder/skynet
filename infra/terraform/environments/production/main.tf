@@ -33,8 +33,6 @@ module "env" {
   # Production-only names from the Railway export.
   app_secret_keys_extra = [
     "OPENROUTER_FLOAT_ALERT_EMAIL",
-    "POSTHOG_HOST",
-    "POSTHOG_PROJECT_API_KEY",
   ]
 
   enable_waf         = false

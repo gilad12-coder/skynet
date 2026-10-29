@@ -544,19 +544,6 @@ class Settings(BaseSettings):
         ),
         alias="TELEMETRY_ENABLED",
     )
-    posthog_project_api_key: SecretStr | None = Field(
-        default=None,
-        alias="POSTHOG_PROJECT_API_KEY",
-        description=(
-            "PostHog project key for privacy-preserving export of accepted first-party telemetry. "
-            "Unset keeps analytics entirely in Postgres."
-        ),
-    )
-    posthog_host: str = Field(
-        default="https://eu.i.posthog.com",
-        alias="POSTHOG_HOST",
-        description="PostHog event-ingestion origin; defaults to the EU cloud endpoint.",
-    )
     sentry_dsn: SecretStr | None = Field(
         default=None,
         alias="SENTRY_DSN",
