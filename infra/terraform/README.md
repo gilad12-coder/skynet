@@ -59,7 +59,10 @@ There is no DynamoDB table.
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
   targets, backend latency, ECS CPU, memory and running < desired, RDS CPU, memory,
-  free storage and connections, Valkey CPU and memory, error lines in the logs.
+  free storage and connections, Valkey CPU and memory, error lines in the logs,
+  RDS failure events, and no finished automated RDS backup in 30 hours. The
+  topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
+  under the AWS managed SNS key.
 
 ### Choices
 
@@ -263,7 +266,10 @@ For production, repeat steps 3 to 9 with `production` (step 8 edits
 `environments/production/terraform.tfvars`). Build the production
 frontend image separately: `scripts/build-push.sh production "$SHA"`.
 Optional: `alert_email = "<address>"` in `terraform.tfvars` subscribes an email
-to the alarms.
+to the alarms. The repository is public, so you can instead subscribe once
+outside Terraform, which later applies leave alone:
+`aws sns subscribe --topic-arn <alarm topic ARN> --protocol email --notification-endpoint <address>`.
+Click the confirmation link in the email from AWS; until then nothing is sent.
 
 ## Deploys after the first apply
 
