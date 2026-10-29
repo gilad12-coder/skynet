@@ -138,7 +138,7 @@ export const PRIVACY_POLICY: LegalDocument = {
             "Stripe, to process payments and manage billing.",
             "Speech transcription (Groq) when you use voice input.",
             "Hosting and infrastructure providers: Amazon Web Services (website and application servers, database, and cache), Vercel (the isolated sandboxes that run evaluation code), and our email delivery provider.",
-            "Error-monitoring providers (currently Sentry, when enabled) to diagnose failures. We keep product analytics on our own servers, and analytics can be disabled in account settings. We configure these providers to minimize personal data.",
+            "Error-monitoring providers (currently Sentry, when enabled) to diagnose failures. We keep product analytics on our own servers. You can turn off analytics from your browser in account settings. We configure these providers to minimize personal data.",
             "Professional advisers, and authorities or other parties, where necessary to comply with law, enforce our Terms, or protect the rights, property, or safety of our users or others.",
             "A successor entity in connection with a merger, acquisition, financing, or sale of assets, subject to this Policy.",
           ],
