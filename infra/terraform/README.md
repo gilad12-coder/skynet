@@ -17,7 +17,7 @@ The environment stacks follow "First apply (staging, then production)" below.
   and returns an empty list. `global` creates the GitHub Actions OIDC provider
   and the GitHub roles (`enable_github_oidc` defaults to `true`).
 - Spend limit: the plan is $460 per month for both environments. The lean
-  variants (about $373) fit. The full variants (about $671) do not; raise the
+  variants (about $419) fit. The full variants (about $671) do not; raise the
   limit before you apply `full.tfvars` in both environments.
 
 ## Layout
