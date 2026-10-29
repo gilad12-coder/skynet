@@ -5,7 +5,7 @@ export { WalletTab } from "./components/WalletTab";
 export { UsageTab } from "./components/UsageTab";
 export { ByokKeysSection } from "./components/ByokKeysSection";
 export { InsufficientFundsModalHost } from "./components/InsufficientFundsModalHost";
-export { litellmProviderForByok } from "./lib/byok";
+export { BYOK_PROVIDERS, litellmProviderForByok } from "./lib/byok";
 export {
   centsToUsd,
   usdToCents,
@@ -13,6 +13,7 @@ export {
   formatCentsUsd,
   formatUsd,
   type TokenSourceMode,
+  type CliProvider,
 } from "./lib/wallet";
 export {
   DEFAULT_PRICING_TERMS,

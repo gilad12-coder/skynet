@@ -92,7 +92,7 @@ def test_safe_relative_path_normalizes_and_rejects_escapes() -> None:
             safe_relative_path(bad)
 
 
-@pytest.mark.parametrize("harness", ["custom", "pi", "codex", "claude_code", "opencode"])
+@pytest.mark.parametrize("harness", ["custom", "pi", "codex", "opencode"])
 def test_seedless_agent_readiness_uses_real_runtime_without_candidate(harness: str) -> None:
     """Check shell syntax and pinned binaries while never launching a model or inventing input."""
     runtime = FakeSandboxRuntime()
@@ -103,10 +103,10 @@ def test_seedless_agent_readiness_uses_real_runtime_without_candidate(harness: s
     assert runtime.specs[0].network_disabled is True
     assert session.closed
     assert len(session.commands) == 1
-    assert "bash -n .skynet/readiness-0.sh" in session.commands[0]
+    assert "bash -n .app/readiness-0.sh" in session.commands[0]
     assert "--version" in session.commands[0] or harness == "custom"
     assert "npm install" not in session.commands[0]
-    assert not any(name in session.files for name in (PROMPT_FILE, "AGENTS.md", "CLAUDE.md"))
+    assert not any(name in session.files for name in (PROMPT_FILE, "AGENTS.md"))
     assert result["candidate_execution"] == "awaiting_first_generated_candidate"
     assert result["readiness"] == (
         "command_syntax_verified" if harness == "custom" else "pinned_cli_and_syntax_verified"
@@ -129,14 +129,14 @@ def test_agent_readiness_executes_authored_dependencies_offline() -> None:
     runtime.protected = True
     scorer = _scorer_of(
         runtime,
-        _target(install_command="pip install --no-index /opt/skynet/wheels/tool.whl"),
+        _target(install_command="pip install --no-index ./wheels/tool.whl"),
     )
 
     result = scorer.check_ready()
 
     session = runtime.sessions[0]
     assert runtime.specs[0].network_disabled is True
-    assert session.commands[-1] == "pip install --no-index /opt/skynet/wheels/tool.whl"
+    assert session.commands[-1] == "pip install --no-index ./wheels/tool.whl"
     assert result["readiness"] == "offline_dependencies_and_syntax_verified"
 
 
@@ -225,8 +225,8 @@ def test_run_builds_a_tagged_named_spec_within_the_lifetime_ceiling() -> None:
 
     spec = runtime.specs[0]
     assert spec.lifetime_seconds == 60 + 600 + 15
-    assert spec.env["SKYNET_MODEL"] == "m"
-    assert spec.name.startswith("skynet-job-1-")
+    assert spec.env["APP_MODEL"] == "m"
+    assert spec.name.startswith("app-job-1-")
     assert len(spec.name) <= 60
     assert spec.tags == {"skynet_job": "job-1"}
 
@@ -241,7 +241,7 @@ def test_each_run_opens_a_box_under_its_own_name() -> None:
 
     names = [spec.name for spec in runtime.specs]
     assert len(set(names)) == 2
-    assert all(name.startswith("skynet-job-1-") for name in names)
+    assert all(name.startswith("app-job-1-") for name in names)
 
 
 class _DyingSession(FakeSandboxSession):

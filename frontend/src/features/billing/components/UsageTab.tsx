@@ -5,15 +5,13 @@ import * as React from "react";
 import { ArrowsClockwise, ChartBar, Coins, Sparkle, type Icon } from "@/shared/ui/icons";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartTooltip, ChartEmptyState } from "@/shared/charts/chart-utils";
-import { ChartTable } from "@/shared/charts/chart-table";
-import { useLiteMode } from "@/features/settings";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { modelDisplayName } from "@/shared/lib/formatters";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
 import { getUsage, type BillingUsageEntry, type BillingUsageResponse } from "@/shared/lib/api";
-import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
+import { AppDatePicker, toISODate } from "@/shared/ui/app-date-picker";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Segmented } from "@/shared/ui/segmented";
 import { PanelHeading } from "@/shared/ui/panel-heading";
@@ -25,8 +23,6 @@ import { formatCents, formatCentsUsd, formatResetDate, type UsageEntry } from ".
 type PresetRange = "7d" | "30d" | "90d" | "all";
 /** The selected window: a preset, or a user-picked `custom` from/to range. */
 type RangeKey = PresetRange | "custom";
-/** Time bucket for the spend-over-time chart. */
-type GroupBy = "day" | "week";
 
 const RANGE_DAYS: Record<PresetRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 
@@ -36,11 +32,6 @@ const RANGE_LABEL: Record<RangeKey, MessageKey> = {
   "90d": "usage.range.90d",
   all: "usage.range.all",
   custom: "usage.range.custom",
-};
-
-const GROUP_LABEL: Record<GroupBy, MessageKey> = {
-  day: "usage.group.day",
-  week: "usage.group.week",
 };
 
 // Warm monochrome ramp (matches --chart-1..5): billed spend anchors to the
@@ -156,24 +147,11 @@ function formatDay(iso: string, locale: string): string {
   );
 }
 
-/** Monday-anchored ISO week key (`YYYY-MM-DD`) for a calendar day. */
-function weekKey(iso: string): string {
-  const date = new Date(`${iso}T00:00:00Z`);
-  const offset = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - offset);
-  return date.toISOString().slice(0, 10);
-}
-
-/** Re-bucket the per-day series to the chosen granularity, ascending by time. */
-function bucketDays(
-  byDay: BillingUsageResponse["by_day"],
-  mode: GroupBy,
-  locale: string,
-): Bucket[] {
+/** Sum the per-day series into chart buckets, ascending by day. */
+function bucketDays(byDay: BillingUsageResponse["by_day"], locale: string): Bucket[] {
   const map = new Map<string, number>();
   for (const day of byDay) {
-    const key = mode === "week" ? weekKey(day.date) : day.date;
-    map.set(key, (map.get(key) ?? 0) + day.billed_cents);
+    map.set(day.date, (map.get(day.date) ?? 0) + day.billed_cents);
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -196,29 +174,12 @@ function StatCard({ icon: Icon, label, value }: { icon: Icon; label: string; val
 
 /**
  * Billed spend over time, shown in dollars. The bucket values stay in cents
- * (the ledger's unit); every display path — Y-axis ticks, tooltip, and the Lite
- * table — renders them through `formatCentsUsd` so the chart reads in the same
- * dollars as the "Spent" stat above it. Lite mode falls back to a table.
+ * (the ledger's unit); every display path — Y-axis ticks and tooltip — renders
+ * them through `formatCentsUsd` so the chart reads in the same dollars as the
+ * "Spent" stat above it.
  */
 function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) {
-  const lite = useLiteMode();
   if (buckets.length === 0) return <ChartEmptyState message={msg("usage.empty.title")} />;
-  if (lite) {
-    return (
-      <ChartTable
-        rows={buckets}
-        columns={[
-          { key: "label", label: msg("usage.col.day") },
-          {
-            key: "billed",
-            label: msg("usage.series.billed"),
-            align: "end",
-            format: (value) => formatCentsUsd(value as number, locale),
-          },
-        ]}
-      />
-    );
-  }
   return (
     <div className="h-[220px] min-w-0">
       <ResponsiveContainer width="100%" height="100%">
@@ -260,7 +221,7 @@ function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) 
   );
 }
 
-/** Per-model spend as a ranked bar list. Lite mode falls back to a table. */
+/** Per-model spend as a ranked bar list. */
 /** Compact token count for the per-model rows ("1.2M"). */
 function formatTokens(count: number, locale: string): string {
   return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(
@@ -280,27 +241,8 @@ function ModelBreakdown({
   rows: BillingUsageResponse["by_model"];
   locale: string;
 }) {
-  const lite = useLiteMode();
   if (rows.length === 0) {
     return <EmptyState variant="list" title={msg("usage.empty.title")} />;
-  }
-  if (lite) {
-    return (
-      <ChartTable
-        rows={rows.map((row) => ({
-          model: row.model ? modelDisplayName(row.model) : msg("usage.model.unknown"),
-          cents: formatCentsUsd(row.cents, locale),
-          runs: row.runs,
-          tokens: rowTokens(row) > 0 ? formatTokens(rowTokens(row), locale) : "—",
-        }))}
-        columns={[
-          { key: "model", label: msg("usage.col.model") },
-          { key: "cents", label: msg("usage.col.amount"), align: "end" },
-          { key: "runs", label: msg("usage.col.runs"), align: "end" },
-          { key: "tokens", label: msg("usage.col.tokens"), align: "end" },
-        ]}
-      />
-    );
   }
   const max = Math.max(...rows.map((row) => row.cents), 1);
   return (
@@ -439,7 +381,6 @@ export function UsageTab() {
   const [range, setRange] = React.useState<RangeKey>("30d");
   const [customFrom, setCustomFrom] = React.useState<string | null>(null);
   const [customTo, setCustomTo] = React.useState<string | null>(null);
-  const [groupBy, setGroupBy] = React.useState<GroupBy>("day");
   const [data, setData] = React.useState<BillingUsageResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const reqId = React.useRef(0);
@@ -481,8 +422,8 @@ export function UsageTab() {
   }, [load]);
 
   const buckets = React.useMemo(
-    () => bucketDays(data?.by_day ?? [], groupBy, locale),
-    [data?.by_day, groupBy, locale],
+    () => bucketDays(data?.by_day ?? [], locale),
+    [data?.by_day, locale],
   );
 
   const entries = data?.entries ?? [];
@@ -490,10 +431,6 @@ export function UsageTab() {
   const rangeOptions = (Object.keys(RANGE_DAYS) as RangeKey[]).map((value) => ({
     value,
     label: msg(RANGE_LABEL[value]),
-  }));
-  const groupOptions = (Object.keys(GROUP_LABEL) as GroupBy[]).map((value) => ({
-    value,
-    label: msg(GROUP_LABEL[value]),
   }));
 
   const toolbar = (
@@ -509,13 +446,6 @@ export function UsageTab() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <Segmented
-            options={groupOptions}
-            value={groupBy}
-            onChange={setGroupBy}
-            size="sm"
-            label={msg("usage.group.label")}
-          />
           <ExportTableMenu
             iconOnly
             disabled={entries.length === 0}
@@ -536,7 +466,7 @@ export function UsageTab() {
       {range === "custom" && (
         <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[150px_auto_150px]">
           <div className="w-full sm:w-[150px]">
-            <SkynetDatePicker
+            <AppDatePicker
               value={customFrom}
               onChange={setCustomFrom}
               max={customTo ?? todayIso}
@@ -548,7 +478,7 @@ export function UsageTab() {
             –
           </span>
           <div className="w-full sm:w-[150px]">
-            <SkynetDatePicker
+            <AppDatePicker
               value={customTo}
               onChange={setCustomTo}
               min={customFrom}

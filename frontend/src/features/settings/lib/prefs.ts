@@ -1,16 +1,21 @@
+import type { CliProvider } from "@/features/billing";
 import type { ModelConfig } from "@/shared/types/api";
+import type { OptimizerChoice } from "@/shared/types/unified-run";
 
 type CodeAssistDefault = "auto" | "manual";
 type SplitModeDefault = "auto" | "manual";
 type TrustModeDefault = "ask" | "auto_safe" | "yolo";
 
+/** The agents the local desktop build can run on the user's CLI subscription. */
+export type LocalAgentRole = "generalist" | "code" | "interview" | "tagger";
+export const LOCAL_AGENT_ROLES: readonly LocalAgentRole[] = [
+  "generalist",
+  "code",
+  "interview",
+  "tagger",
+];
+
 export interface UserPrefs {
-  // Layout preference: the wizard's collapsible sections start expanded.
-  expandAdvanced: boolean;
-  // Lightweight mode for low-resource machines: kills motion/blur and swaps the
-  // heavy visualizations (charts, SVG trajectory tree, code editor) for static
-  // equivalents. See LiteModeProvider.
-  liteMode: boolean;
   wizardCodeAssist: CodeAssistDefault;
   wizardSplitMode: SplitModeDefault;
   agentTrustMode: TrustModeDefault;
@@ -28,23 +33,23 @@ export interface UserPrefs {
   // Seed for the assist model in new tagging sessions; empty name = the
   // server's default tagging model.
   taggerAssistModel: ModelConfig;
+  // Seeds for the Optimizer step of a new optimization. The engine applies
+  // only when it fits the task (else Auto); an empty model name means the
+  // catalog's default model; null runs means the wizard's own default.
+  optimizerEngine: OptimizerChoice;
+  optimizerTaskModel: ModelConfig;
+  optimizerReflectionModel: ModelConfig;
+  optimizerMaxRuns: number | null;
+  // Local desktop build only: the CLI each agent role runs on, or null to
+  // use the composer's model as usual.
+  agentSubscription: Record<LocalAgentRole, CliProvider | null>;
 }
 
 export type AgentPreferencePatch = Partial<
-  Pick<
-    UserPrefs,
-    | "expandAdvanced"
-    | "liteMode"
-    | "wizardCodeAssist"
-    | "wizardSplitMode"
-    | "taggerAssist"
-    | "dictationEnabled"
-  >
+  Pick<UserPrefs, "wizardCodeAssist" | "wizardSplitMode" | "taggerAssist" | "dictationEnabled">
 >;
 
 const AGENT_PREFERENCE_FIELDS: Record<string, keyof AgentPreferencePatch> = {
-  expand_advanced: "expandAdvanced",
-  lite_mode: "liteMode",
   wizard_code_assist: "wizardCodeAssist",
   wizard_split_mode: "wizardSplitMode",
   tagger_assist: "taggerAssist",
@@ -88,21 +93,22 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  expandAdvanced: "skynet.prefs.expand-advanced",
-  liteMode: "skynet.prefs.lite-mode",
-  wizardCodeAssist: "skynet.prefs.wizard.code-assist",
-  wizardSplitMode: "skynet.prefs.wizard.split-mode",
-  agentTrustMode: "skynet.prefs.agent.trust-mode",
-  taggerAssist: "skynet.prefs.tagger.assist",
-  composerModel: "skynet.prefs.composer.model",
-  composerEffort: "skynet.prefs.composer.effort",
-  dictationEnabled: "skynet.prefs.composer.dictation",
-  taggerAssistModel: "skynet.prefs.tagger.assist-model",
+  wizardCodeAssist: "app.prefs.wizard.code-assist",
+  wizardSplitMode: "app.prefs.wizard.split-mode",
+  agentTrustMode: "app.prefs.agent.trust-mode",
+  taggerAssist: "app.prefs.tagger.assist",
+  composerModel: "app.prefs.composer.model",
+  composerEffort: "app.prefs.composer.effort",
+  dictationEnabled: "app.prefs.composer.dictation",
+  taggerAssistModel: "app.prefs.tagger.assist-model",
+  optimizerEngine: "app.prefs.optimizer.engine",
+  optimizerTaskModel: "app.prefs.optimizer.task-model",
+  optimizerReflectionModel: "app.prefs.optimizer.reflection-model",
+  optimizerMaxRuns: "app.prefs.optimizer.max-runs",
+  agentSubscription: "app.prefs.agent.subscription",
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
-  expandAdvanced: false,
-  liteMode: false,
   wizardCodeAssist: "auto",
   wizardSplitMode: "auto",
   agentTrustMode: "ask",
@@ -113,10 +119,16 @@ export const DEFAULT_PREFS: UserPrefs = {
   composerEffort: null,
   dictationEnabled: true,
   taggerAssistModel: { name: "" },
+  optimizerEngine: "auto",
+  optimizerTaskModel: { name: "" },
+  optimizerReflectionModel: { name: "" },
+  optimizerMaxRuns: null,
+  agentSubscription: { generalist: null, code: null, interview: null, tagger: null },
 };
 
-// `skynet.prefs.advanced-mode` belonged to a retired toggle; a stale value in
-// an old browser is simply ignored now.
+// `skynet.prefs.advanced-mode` and `skynet.prefs.expand-advanced` belonged to
+// retired toggles (the second is now the server-side Expert level); a stale
+// value in an old browser is simply ignored.
 export function migrateLegacyPrefs(): void {
   /* No pending migrations. Kept so callers don't churn when one appears. */
 }
@@ -139,4 +151,17 @@ export function writePref<K extends keyof UserPrefs>(key: K, value: UserPrefs[K]
   } catch {
     /* noop */
   }
+}
+
+const CLI_VALUES: readonly string[] = ["codex", "claude"];
+
+/**
+ * The CLI one agent role runs on. The stored value is user-editable browser
+ * storage, so anything but a known CLI reads as "off".
+ */
+export function agentSubscriptionFor(role: LocalAgentRole): CliProvider | null {
+  const stored = readPref("agentSubscription") as unknown;
+  if (!stored || typeof stored !== "object") return null;
+  const value = (stored as Record<string, unknown>)[role];
+  return typeof value === "string" && CLI_VALUES.includes(value) ? (value as CliProvider) : null;
 }

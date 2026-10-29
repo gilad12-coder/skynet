@@ -14,7 +14,14 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { EmptyState } from "@/shared/ui/empty-state";
-import { ListPageSkeleton } from "@/shared/ui/list-page-skeleton";
+import { Ghost, Skeleton } from "@/shared/ui/skeleton";
+import { ProgressBar } from "@/shared/ui/progress-bar";
+import {
+  LIST_TOOLBAR_BUTTON_CLASS,
+  ListPageSkeleton,
+  type ListRowActionSlot,
+} from "@/shared/ui/list-page-skeleton";
+import { hintedCount, rememberLayout, useLayoutHint } from "@/shared/lib/layout-hint";
 import { SearchField } from "@/shared/ui/search-field";
 import { SelectionBar } from "@/shared/ui/selection-bar";
 import { TAGGER_SESSIONS_CHANGED } from "../hooks/use-tagger";
@@ -45,6 +52,7 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
       const res = await listTaggerSessions({ limit: 200 });
       const { items } = res;
       setSessions(items);
+      rememberLayout(SESSIONS_LAYOUT_KEY, items.length);
       // Drop selections that no longer resolve to a listed owned session
       // (deleted elsewhere, or shared-in and therefore not bulk-deletable),
       // so the bar never counts ghosts.
@@ -130,7 +138,7 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
   if (!loaded) {
     return (
       <section className="w-full pb-16" aria-busy="true">
-        <ListPageSkeleton />
+        <SessionsSkeleton />
         <span className="sr-only" role="status">
           {msg("tagger.session.loading")}
         </span>
@@ -250,5 +258,44 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+/** Remembers how many sessions the chooser last listed, for the next skeleton. */
+const SESSIONS_LAYOUT_KEY = "tagging-sessions-count";
+
+// An owned session's actions: share, rename | delete.
+const SESSION_ACTIONS: readonly ListRowActionSlot[] = ["icon", "icon", "divider", "icon"];
+
+/**
+ * The chooser while its sessions load: the search + start-new toolbar and
+ * TaggingSessionCard rows (with their progress column), as many as the
+ * chooser last held. Nothing when it was empty, since the empty state has
+ * no toolbar or rows.
+ */
+function SessionsSkeleton() {
+  const count = hintedCount(useLayoutHint<number>(SESSIONS_LAYOUT_KEY), 5, 12);
+  if (count === 0) return null;
+  return (
+    <ListPageSkeleton
+      count={count}
+      actions={SESSION_ACTIONS}
+      toolbar={
+        <Ghost>
+          <Button variant="outline" tabIndex={-1} className={LIST_TOOLBAR_BUTTON_CLASS}>
+            <Plus className="size-4" />
+            {msg("tagger.session.start_new")}
+          </Button>
+        </Ghost>
+      }
+      trailing={
+        <div className="flex w-20 shrink-0 flex-col items-end gap-1.5">
+          <span className="text-xs">
+            <Skeleton width={36} />
+          </span>
+          <ProgressBar value={0} size="sm" />
+        </div>
+      }
+    />
   );
 }

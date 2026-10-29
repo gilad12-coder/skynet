@@ -4,59 +4,22 @@
 to edit any subset of wizard fields in one call. Each supplied field is
 validated against a narrow whitelist and echoed back in a
 ``wizard_state`` patch that the frontend mirrors into the live submit
-wizard (see ``use-submit-wizard.ts`` pulse-apply effect).
-
-The endpoint is intentionally broad: it supersedes the per-field tools
-(``set_column_roles``, etc.) while staying additive — those legacy tools
-still work. An agent can call this once per turn with a composite patch
-(e.g. optimizer + split + kwargs) instead of chaining several narrow calls.
+wizard. The keys follow the wizard's four steps: task and artifact,
+inputs, optimizer (with models and budget), and the metric/code workspace.
 
 Hidden from the public Scalar reference (not in ``_SCALAR_PUBLIC_PATHS``).
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from ...models import WORKFLOW_MODULE_NAME
-from ...registry import ResolverError, resolve_module_factory, resolve_optimizer_factory
+from ...models import ArtifactKind, DataMode, OptimizerChoice, optimizers_for
+from ...models.blackbox import BlackboxCandidate
 from ..errors import DomainError
-
-# GEPA's metric signature: ``(gold, pred, trace, pred_name, pred_trace)``.
-# The 3-arg DSPy default ``(example, pred, trace=None)`` fails GEPA's
-# validate-on-submit check, and the agent has historically tripped this
-# every other turn. We accept both shapes here (the optimizer-level check
-# still gates submission) but reject any function whose param count or
-# names don't look like a metric at all.
-_METRIC_DEF_RE = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-
-
-_VALID_COLUMN_ROLES = frozenset({"input", "output", "ignore"})
-
-
-# Tool roster for a react/flex program, in the camelCase shape the submit
-# wizard already keeps in its shared ``react_config`` state. The auth header is
-# deliberately not accepted: a secret must never travel through the agent.
-class ReactConfigPatch(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    mcp_url: str = Field(
-        alias="mcpUrl",
-        min_length=1,
-        max_length=2000,
-        pattern=r"^https?://",
-        description="MCP server URL.",
-    )
-    tool_filter: list[str] | None = Field(
-        default=None,
-        alias="toolFilter",
-        description="Tool names the program may call; null exposes every tool on the server.",
-    )
 
 
 class WizardUpdateRequest(BaseModel):
@@ -71,113 +34,78 @@ class WizardUpdateRequest(BaseModel):
 
     job_name: str | None = Field(default=None, max_length=200)
     job_description: str | None = Field(default=None, max_length=500)
-    optimizer_name: str | None = Field(
-        default=None,
-        max_length=80,
-        description="Optimizer algorithm. Only 'gepa' is supported.",
-    )
-    module_name: str | None = Field(
-        default=None,
-        max_length=80,
-        description=(
-            "DSPy module to optimize. Supported values: 'predict', 'cot', 'react', 'flex', "
-            "'workflow'. 'react' and 'flex' call MCP tools and need ``react_config``."
-        ),
-    )
-    job_type: Literal["run", "grid_search", "blackbox"] | None = Field(
-        default=None,
-        description=(
-            "'run' for a single-pair run, 'grid_search' for a model-pair sweep, "
-            "'blackbox' to switch the wizard to an optimize-anything run."
-        ),
-    )
-    react_config: ReactConfigPatch | None = Field(
-        default=None,
-        description="MCP tool source for a 'react' or 'flex' module: {mcpUrl, toolFilter}.",
-    )
     is_private: bool | None = Field(
         default=None,
         description="When true (the default for new runs), the run is excluded from public Explore.",
     )
 
-    column_roles: dict[str, str] | None = Field(
+    task_objective: str | None = Field(
         default=None,
-        description="Dataset column → role map. Values: 'input', 'output', or 'ignore'.",
+        max_length=8000,
+        description="Task step: what a better version means, in the user's words.",
+    )
+    task_background: str | None = Field(
+        default=None,
+        max_length=20_000,
+        description="Task step: context the optimizer should know about the task.",
+    )
+    artifact_kind: ArtifactKind | None = Field(
+        default=None,
+        description="Task step: what is optimized. One of: 'prompt', 'code', 'text', 'dspy_program'.",
+    )
+    starting_version: BlackboxCandidate | None = Field(
+        default=None,
+        description="Task step: the starting version, a string or a map of named parts to strings.",
     )
 
+    data_mode: DataMode | None = Field(
+        default=None,
+        description="Inputs step: 'single' for one input, 'pairs' for input/output pairs with a held-out split.",
+    )
+    staged_dataset_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Inputs step: id of a staged dataset that holds the input/output pairs.",
+    )
+    split_fractions: dict[str, float] | None = Field(
+        default=None,
+        description="Inputs step: train/val/test fractions. Must sum to 1.0 and be non-negative.",
+    )
+    shuffle: bool | None = Field(default=None)
+    seed: int | None = Field(default=None, description="Shuffle/split seed.")
+
+    optimizer_choice: OptimizerChoice | None = Field(
+        default=None,
+        description=(
+            "Optimizer step: 'auto' or one optimizer id. Only the optimizers that fit the artifact kind "
+            "and data mode are offered (see GET /optimizers)."
+        ),
+    )
     primary_model: dict[str, Any] | None = Field(
         default=None,
         alias="model_config",
-        description="Generation model config dict (name required, other fields optional).",
+        description="Optimizer step: task model config dict (name required, other fields optional).",
     )
     reflection_model: dict[str, Any] | None = Field(
         default=None,
         alias="reflection_model_config",
-        description="Reflection model config dict (teacher for GEPA).",
+        description="Optimizer step: reflection model config dict, the model that proposes new versions.",
     )
-
-    generation_models: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="Grid-search list of generation models.",
-    )
-    reflection_models: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="Grid-search list of reflection models.",
-    )
-    use_all_generation_models: bool | None = Field(
-        default=None,
-        description="When true, sweep over every generation model in the catalog.",
-    )
-    use_all_reflection_models: bool | None = Field(
-        default=None,
-        description="When true, sweep over every reflection model in the catalog.",
-    )
-
-    split_fractions: dict[str, float] | None = Field(
-        default=None,
-        description="Train/val/test fractions. Must sum to 1.0 and be non-negative.",
-    )
-    split_mode: Literal["auto", "manual"] | None = Field(
-        default=None,
-        description="'auto' follows the profiler recommendation; 'manual' pins user edits.",
-    )
-    seed: int | None = Field(default=None, description="Shuffle/split seed.")
-    shuffle: bool | None = Field(default=None)
-
-    optimizer_kwargs: dict[str, Any] | None = Field(
-        default=None,
-        description=("Optimizer parameters. Known keys: auto, reflection_minibatch_size, max_full_evals, use_merge."),
-    )
-    target_score: float | None = Field(
+    spending_limit_usd: float | None = Field(
         default=None,
         gt=0,
-        le=100,
-        description="Optional GEPA validation target as a percentage (1–100).",
+        le=100_000,
+        description="Total spending limit for the run in US dollars. Send null explicitly to remove the limit.",
     )
 
-    blackbox_objective: str | None = Field(
+    run_code: str | None = Field(
         default=None,
-        max_length=4000,
-        description="Black-box mode only: what a better version means, in the user's words.",
-    )
-    blackbox_seed: str | None = Field(
-        default=None,
-        max_length=200_000,
-        description="Black-box mode only: the starting text to optimize.",
-    )
-    blackbox_scorer_code: str | None = Field(
-        default=None,
-        max_length=100_000,
-        description="Black-box mode only: Python source defining score(candidate, case=None).",
-    )
-
-    signature_code: str | None = Field(
-        default=None,
-        description="Full DSPy Signature source to replace the current one.",
+        description="Refused: workspace run code is written only by the Metric & run step's coding agent.",
     )
     metric_code: str | None = Field(
         default=None,
-        description="Full metric function source to replace the current one.",
+        description="Refused: metric code is written only by the Metric & run step's coding agent.",
     )
 
 
@@ -251,43 +179,6 @@ def validate_model_config_dict(v: Any, field_name: str) -> dict[str, Any]:
     return out
 
 
-def _validate_resolvable_name(
-    raw: Any,
-    *,
-    field: str,
-    resolver: Callable[[str], Any],
-    error_key: str,
-) -> str:
-    """Trim ``raw`` and confirm it resolves via ``resolver``.
-
-    Mirrors the runtime resolution that ``service_gateway`` performs so the
-    agent gets a 422 with an actionable hint instead of crashing the worker
-    on an unknown optimizer or module.
-
-    Args:
-        raw: Candidate field value from the request.
-        field: Field label used in error messages.
-        resolver: ``resolve_optimizer_factory`` or ``resolve_module_factory``.
-        error_key: i18n key surfaced when ``resolver`` rejects ``raw``.
-
-    Returns:
-        The cleaned (stripped) name once resolution succeeds.
-
-    Raises:
-        DomainError: 422 with ``wizard.field_non_empty_string`` when ``raw``
-            is not a non-blank string, or ``error_key`` when ``resolver``
-            raises :class:`ResolverError`.
-    """
-    if not isinstance(raw, str) or not raw.strip():
-        raise DomainError("wizard.field_non_empty_string", status=422, field=field)
-    cleaned = raw.strip()
-    try:
-        resolver(cleaned)
-    except ResolverError as exc:
-        raise DomainError(error_key, status=422, name=cleaned) from exc
-    return cleaned
-
-
 def create_wizard_router() -> APIRouter:
     """Build the wizard-state router.
 
@@ -307,18 +198,16 @@ def create_wizard_router() -> APIRouter:
     def update_wizard_state(req: WizardUpdateRequest) -> WizardUpdateResponse:
         """Validate and echo any subset of wizard fields as a ``wizard_state`` patch.
 
-        Covers every editable field in the submit wizard: job metadata,
-        optimizer/module choice, column roles, primary & secondary model
-        configs, grid-search model lists, split plan, and optimizer kwargs.
-        Supply only the fields you want to change — the rest are left
-        untouched on the frontend.
+        Covers every editable field in the submit wizard: job metadata, the
+        task and artifact, the inputs and split, the optimizer with its
+        models and spending limit, and the workspace code. Supply only the
+        fields you want to change — the rest are left untouched on the
+        frontend. Workspace code (``run_code``, ``metric_code``) is refused
+        here; the Metric & run step's coding agent writes it.
 
         BATCHING — make ONE call per turn covering every field you intend
-        to set together. The body accepts every wizard field at once
-        (``optimizer_name`` + ``module_name`` + ``model_config`` +
-        ``reflection_model_config`` + ``generation_models`` +
-        ``reflection_models`` + …) — call once with the full merged
-        patch, not seven times with one field each. Sequential
+        to set together (``task_objective`` + ``artifact_kind`` +
+        ``starting_version`` + …), not one call per field. Sequential
         same-turn calls render as duplicate spinner pills in the UI and
         waste turns on identical round-trips.
 
@@ -330,68 +219,52 @@ def create_wizard_router() -> APIRouter:
 
         Raises:
             DomainError: 422 if any supplied field fails validation
-                (invalid role, bad split sum, malformed model dict, etc.).
+                (blank text, bad split sum, malformed model dict, an
+                optimizer that does not fit the artifact and data mode,
+                workspace code sent directly, etc.).
         """
         supplied = req.model_dump(by_alias=True, exclude_unset=True)
         patch: dict[str, Any] = {}
 
-        for key in (
-            "job_name",
-            "job_description",
-            "blackbox_objective",
-            "blackbox_seed",
-            "blackbox_scorer_code",
-        ):
+        # Workspace code is written ONLY by the Metric & run step's coding
+        # agent, which checks and repairs it in the workspace. Accepting it
+        # here would let the agent inject unchecked code straight into the
+        # workspace, so the endpoint rejects it outright.
+        for code_field in ("run_code", "metric_code"):
+            if supplied.get(code_field) is not None:
+                raise DomainError("wizard.code_via_authoring_only", status=422, field=code_field)
+
+        for key in ("job_name", "job_description", "task_objective"):
             if key in supplied and supplied[key] is not None:
                 val = supplied[key]
                 if not isinstance(val, str) or not val.strip():
                     raise DomainError("wizard.field_non_empty_string", status=422, field=key)
                 patch[key] = val.strip()
 
-        if "optimizer_name" in supplied and supplied["optimizer_name"] is not None:
-            patch["optimizer_name"] = _validate_resolvable_name(
-                supplied["optimizer_name"],
-                field="optimizer_name",
-                resolver=resolve_optimizer_factory,
-                error_key="wizard.optimizer_unknown",
+        if supplied.get("task_background") is not None:
+            patch["task_background"] = supplied["task_background"].strip()
+
+        for literal_key in ("artifact_kind", "data_mode", "optimizer_choice", "staged_dataset_id"):
+            if supplied.get(literal_key) is not None:
+                patch[literal_key] = supplied[literal_key]
+
+        if supplied.get("starting_version") is not None:
+            patch["starting_version"] = supplied["starting_version"]
+
+        # The pairing can only be checked when one patch names both sides of
+        # it; otherwise the wizard's step issue flags a stale choice.
+        if (
+            req.optimizer_choice is not None
+            and req.artifact_kind is not None
+            and req.data_mode is not None
+            and req.optimizer_choice not in optimizers_for(req.artifact_kind, req.data_mode)
+        ):
+            raise DomainError(
+                "submit.unified.optimizer_not_allowed",
+                status=422,
+                optimizer=req.optimizer_choice,
+                allowed=", ".join(optimizers_for(req.artifact_kind, req.data_mode)),
             )
-
-        if "module_name" in supplied and supplied["module_name"] is not None:
-            raw_module = supplied["module_name"]
-            # "workflow" is a composite-run marker, not a resolvable DSPy
-            # dotted path — the graph itself is validated at submission.
-            if isinstance(raw_module, str) and raw_module.strip().lower() == WORKFLOW_MODULE_NAME:
-                patch["module_name"] = WORKFLOW_MODULE_NAME
-            else:
-                patch["module_name"] = _validate_resolvable_name(
-                    raw_module,
-                    field="module_name",
-                    resolver=resolve_module_factory,
-                    error_key="wizard.module_unknown",
-                )
-
-        if "job_type" in supplied and supplied["job_type"] is not None:
-            patch["job_type"] = supplied["job_type"]
-
-        if req.react_config is not None:
-            patch["react_config"] = req.react_config.model_dump(by_alias=True)
-
-        if "column_roles" in supplied and supplied["column_roles"] is not None:
-            roles = supplied["column_roles"]
-            if not isinstance(roles, dict):
-                raise DomainError("wizard.column_roles_not_object", status=422)
-            bad = {c: r for c, r in roles.items() if r not in _VALID_COLUMN_ROLES}
-            if bad:
-                raise DomainError(
-                    "wizard.invalid_role_values",
-                    status=422,
-                    allowed=sorted(_VALID_COLUMN_ROLES),
-                    bad=bad,
-                )
-            patch["column_roles"] = dict(roles)
-            inputs = [c for c, r in roles.items() if r == "input"]
-            outputs = [c for c, r in roles.items() if r == "output"]
-            patch["columns_configured"] = bool(inputs) and bool(outputs)
 
         if "model_config" in supplied and supplied["model_config"] is not None:
             cleaned = validate_model_config_dict(supplied["model_config"], "model_config")
@@ -404,19 +277,7 @@ def create_wizard_router() -> APIRouter:
                 supplied["reflection_model_config"], "reflection_model_config"
             )
 
-        for list_key in ("generation_models", "reflection_models"):
-            if list_key in supplied and supplied[list_key] is not None:
-                items = supplied[list_key]
-                if not isinstance(items, list):
-                    raise DomainError("wizard.field_must_be_list", status=422, field=list_key)
-                patch[list_key] = [validate_model_config_dict(m, f"{list_key}[{i}]") for i, m in enumerate(items)]
-
-        for bool_key in (
-            "use_all_generation_models",
-            "use_all_reflection_models",
-            "shuffle",
-            "is_private",
-        ):
+        for bool_key in ("shuffle", "is_private"):
             if bool_key in supplied and supplied[bool_key] is not None:
                 patch[bool_key] = bool(supplied[bool_key])
 
@@ -437,32 +298,14 @@ def create_wizard_router() -> APIRouter:
                 raise DomainError("wizard.split_fractions_sum", status=422, total=f"{total:.4f}")
             patch["split_fractions"] = {"train": train, "val": val, "test": test}
 
-        if "split_mode" in supplied and supplied["split_mode"] is not None:
-            patch["split_mode"] = supplied["split_mode"]
-
         if "seed" in supplied and supplied["seed"] is not None:
             patch["seed"] = int(supplied["seed"])
 
-        if "optimizer_kwargs" in supplied and supplied["optimizer_kwargs"] is not None:
-            ok = supplied["optimizer_kwargs"]
-            if not isinstance(ok, dict):
-                raise DomainError("wizard.optimizer_kwargs_not_object", status=422)
-            patch["optimizer_kwargs"] = dict(ok)
-
-        if "target_score" in supplied and supplied["target_score"] is not None:
-            patch["target_score"] = float(supplied["target_score"])
-
-        # Signature/Metric code is authored ONLY via ``request_code_authoring``
-        # (the inline card runs the dedicated code agent, which validates and
-        # repairs the result before it lands in the wizard). Accepting them
-        # here would let the agent inject unvalidated code straight into a
-        # submission — the failure mode that produced syntactically-broken
-        # signatures at submit time — so the endpoint rejects them outright.
-        for code_field in ("signature_code", "metric_code"):
-            if supplied.get(code_field) is not None:
-                raise DomainError(
-                    "wizard.code_via_authoring_only", status=422, field=code_field
-                )
+        # Unlike the other fields an explicit null is meaningful here (remove
+        # the limit), and the patch carries cents to match ``max_cost_cents``.
+        if "spending_limit_usd" in supplied:
+            dollars = supplied["spending_limit_usd"]
+            patch["max_cost_cents"] = None if dollars is None else max(1, round(dollars * 100))
 
         return WizardUpdateResponse(wizard_state=patch)
 

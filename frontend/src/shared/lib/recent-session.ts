@@ -9,8 +9,8 @@
 type RecentKind = "tagger" | "optimization";
 
 const STORAGE_KEY: Record<RecentKind, string> = {
-  tagger: "skynet.recent.tagger",
-  optimization: "skynet.recent.optimization",
+  tagger: "app.recent.tagger",
+  optimization: "app.recent.optimization",
 };
 
 /** How recently the user must have been in a session for the nav button to resume it. */

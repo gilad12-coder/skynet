@@ -8,16 +8,18 @@
  * them before you rely on them.
  */
 
+import { APP_NAME } from "@/shared/lib/brand";
+
 export const LEGAL_CONFIG = {
-  serviceName: "Skynet",
+  serviceName: APP_NAME,
   websiteLabel: "skynetml.com",
   websiteUrl: "https://skynetml.com",
 
   // Dates shown on both documents. Update lastUpdated whenever the text changes.
   effectiveDate: "August 11, 2026",
-  lastUpdated: "September 29, 2026",
+  lastUpdated: "October 29, 2026",
 
-  // Skynet is operated by an individual (sole proprietor); this legal name is
+  // The service is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.
   legalEntity: "Gilad Morad",
 
@@ -36,7 +38,7 @@ export const LEGAL_CONFIG = {
   sourceRepoUrl: "https://github.com/gilad12-coder/skynet",
 } as const;
 
-// The Docker build bakes in the commit Railway deployed, so the link names the
+// The Docker build bakes in the deployed commit, so the link names the
 // exact source running; local builds without it fall back to the repo root.
 const SOURCE_COMMIT = process.env.NEXT_PUBLIC_SOURCE_COMMIT;
 

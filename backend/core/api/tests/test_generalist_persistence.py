@@ -36,6 +36,7 @@ from ...storage.models import (
     AgentMessageModel,
     Base,
     BillingCustomerModel,
+    UserModel,
 )
 from .. import auth as auth_mod
 from .. import model_catalog
@@ -122,6 +123,10 @@ def persistence_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Eng
     """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        for email in ("alice@example.com", "mallory@example.com"):
+            session.add(UserModel(email=email, name=email, password_hash="x"))
+        session.commit()
     monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr(_SECRET))
     monkeypatch.setattr(agent_mod, "run_generalist_agent", _fake_stream)
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
@@ -479,6 +484,86 @@ async def test_persist_on_done_writes_exactly_once(wrapper_engine: Engine) -> No
     assert len(rows) == 1
     assert rows[0].content == "שלום"
     assert rows[0].model == "test-model"
+
+
+async def test_turn_plan_is_saved_with_the_reply(wrapper_engine: Engine) -> None:
+    """The turn's plan is kept on its row so a reload still shows it; labels are not."""
+
+    async def _planned_turn() -> AsyncIterator[dict[str, Any]]:
+        """Emit a turn that shares a plan, labels a thought, then replies."""
+        yield {"event": "plan", "data": {"text": "I'll fill the inputs, then move on."}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Picked pairs"}}
+        yield {"event": "message_patch", "data": {"chunk": "Done"}}
+        yield {"event": "done", "data": {"assistant_message": "Done", "model": "test-model"}}
+
+    events = await _drain(_planned_turn(), wrapper_engine)
+
+    assert [e["event"] for e in events if e["event"] in ("plan", "thinking_summary")] == ["plan", "thinking_summary"]
+    rows = _assistant_rows(wrapper_engine)
+    assert len(rows) == 1
+    assert rows[0].router_metadata == {"plan": "I'll fill the inputs, then move on."}
+
+
+async def test_turn_thinking_rows_are_saved_with_their_summaries(wrapper_engine: Engine) -> None:
+    """Each thinking row is kept in the panel's shape, so a reload shows the same rows and labels."""
+
+    async def _thinking_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think, call a tool, think again, label both rows, then reply."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "Pairs fit "}}
+        yield {"event": "reasoning_patch", "data": {"chunk": "this task."}}
+        yield {"event": "tool_start", "data": {"id": "t1", "tool": "update_wizard_state", "arguments": {}}}
+        yield {"event": "tool_end", "data": {"id": "t1", "status": "ok", "result": {}}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Picked pairs"}}
+        yield {"event": "reasoning_patch", "data": {"chunk": "Now ask for data."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "thinking_summary", "data": {"index": 1, "text": "Asked for data"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+
+    await _drain(_thinking_turn(), wrapper_engine)
+
+    rows = _assistant_rows(wrapper_engine)
+    thinking = (rows[0].router_metadata or {})["thinking"]
+    assert [(t["reasoning"], t["toolsBefore"], t["summary"]) for t in thinking] == [
+        ("Pairs fit this task.", 0, "Picked pairs"),
+        ("Now ask for data.", 1, "Asked for data"),
+    ]
+    assert all(t["startedAt"] <= t["endedAt"] for t in thinking)
+
+
+async def test_a_label_written_after_done_reaches_the_saved_turn(wrapper_engine: Engine) -> None:
+    """The last row is often labelled after ``done``; the saved turn still gets the label, once."""
+
+    async def _late_label_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think, reply, finish, then label the row."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "Ask for the data."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+        yield {"event": "thinking_summary", "data": {"index": 0, "text": "Asked for the data"}}
+        yield {"event": "turn_stats", "data": {"stats": {"cents": 3, "input_tokens": 10}}}
+
+    events = await _drain(_late_label_turn(), wrapper_engine)
+
+    assert [e["event"] for e in events][-2:] == ["thinking_summary", "turn_stats"]
+    rows = _assistant_rows(wrapper_engine)
+    assert len(rows) == 1
+    metadata = rows[0].router_metadata or {}
+    assert [t.get("summary") for t in metadata["thinking"]] == ["Asked for the data"]
+    assert metadata["stats"] == {"cents": 3, "input_tokens": 10}
+
+
+async def test_a_row_whose_label_never_came_is_saved_with_one_from_its_reasoning(wrapper_engine: Engine) -> None:
+    """A stream dropped before the last label arrived still saves a label for every row."""
+
+    async def _unlabelled_turn() -> AsyncIterator[dict[str, Any]]:
+        """Think at length, reply and finish; no label ever arrives."""
+        yield {"event": "reasoning_patch", "data": {"chunk": "The user has support tickets. They need answers."}}
+        yield {"event": "message_patch", "data": {"chunk": "Upload it"}}
+        yield {"event": "done", "data": {"assistant_message": "Upload it", "model": "test-model"}}
+
+    await _drain(_unlabelled_turn(), wrapper_engine)
+
+    thinking = (_assistant_rows(wrapper_engine)[0].router_metadata or {})["thinking"]
+    assert [t["summary"] for t in thinking] == ["The user has support tickets. They need answers."]
 
 
 async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:

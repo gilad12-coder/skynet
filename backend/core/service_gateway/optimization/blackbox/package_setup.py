@@ -29,6 +29,8 @@ except ModuleNotFoundError as error:
     from pip._vendor.packaging.requirements import Requirement
     from pip._vendor.packaging.utils import canonicalize_name
 
+# Mirrors ``runner.HELPER_MODULE_NAME``, the scorer helper module the runner provides itself.
+_HELPER_MODULE = "skynet"
 _ALIASES = {
     "PIL": "Pillow",
     "sklearn": "scikit-learn",
@@ -66,7 +68,10 @@ def _request(route: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Parent-produced registry metadata or chunk.
     """
-    endpoint = os.environ.get("SKYNET_BUDGET_RELAY_URL", route["url"]).rstrip("/")
+    # This file runs alone in the box; a relay set by an older control plane uses the pre-rename name.
+    endpoint = (
+        os.environ.get("APP_BUDGET_RELAY_URL") or os.environ.get("SKYNET_BUDGET_RELAY_URL") or route["url"]
+    ).rstrip("/")
     request = urllib.request.Request(
         endpoint + "/_packages",
         data=json.dumps(body).encode(),
@@ -189,7 +194,7 @@ def _requirements_for(roots: set[str]) -> list[str]:
     return [
         _ALIASES.get(root, root)
         for root in sorted(roots)
-        if root not in sys.stdlib_module_names and root != "skynet" and importlib.util.find_spec(root) is None
+        if root not in sys.stdlib_module_names and root != _HELPER_MODULE and importlib.util.find_spec(root) is None
     ]
 
 

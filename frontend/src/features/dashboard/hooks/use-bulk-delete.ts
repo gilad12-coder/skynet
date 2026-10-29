@@ -11,12 +11,6 @@ type UseBulkDeleteArgs = {
   setData: React.Dispatch<React.SetStateAction<PaginatedJobsResponse | null>>;
   setPageOffset: React.Dispatch<React.SetStateAction<number>>;
   fetchJobs: () => Promise<void> | void;
-  /**
-   * Items visible to the user. When the dashboard is overlaid with demo
-   * data during the tutorial, this is the merged view — passing real
-   * `data` alone would incorrectly prune demo IDs from the selection.
-   */
-  visibleData?: PaginatedJobsResponse | null;
 };
 
 export type UseBulkDeleteReturn = {
@@ -35,7 +29,6 @@ export function useBulkDelete({
   setData,
   setPageOffset,
   fetchJobs,
-  visibleData,
 }: UseBulkDeleteArgs): UseBulkDeleteReturn {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -54,10 +47,9 @@ export function useBulkDelete({
 
   // Drop selected IDs that no longer exist in the current dataset
   // (e.g. after another user deleted them or a status change removed them).
-  const pruneSource = visibleData ?? data;
   useEffect(() => {
-    if (!pruneSource || selectedIds.size === 0) return;
-    const present = new Set(pruneSource.items.map((j) => j.optimization_id));
+    if (!data || selectedIds.size === 0) return;
+    const present = new Set(data.items.map((j) => j.optimization_id));
     let changed = false;
     const next = new Set<string>();
     for (const id of selectedIds) {
@@ -65,7 +57,7 @@ export function useBulkDelete({
       else changed = true;
     }
     if (changed) setSelectedIds(next);
-  }, [pruneSource, selectedIds]);
+  }, [data, selectedIds]);
 
   const confirmBulkDelete = async () => {
     if (bulkDeleting) return;

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-const STORAGE_KEY = "skynet:explore:recent-queries";
+const STORAGE_KEY = "app:explore:recent-queries";
 const MAX_RECENT = 6;
 
 /**

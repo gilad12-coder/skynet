@@ -1,4 +1,4 @@
-"""FastAPI application factory for Skynet.
+"""FastAPI application factory for the backend API.
 
 This module now contains *only* the app-lifecycle concerns:
 
@@ -8,7 +8,7 @@ This module now contains *only* the app-lifecycle concerns:
 * Consistent JSON error response shape
 * Two "infra" endpoints that reference the worker directly: ``/health``
   and ``/queue``
-* Scalar API reference mounted at ``/scalar`` with air-gapped static assets
+* Scalar API reference mounted at ``/scalar`` with bundled static assets
 
 Every other route has been extracted into ``backend/core/api/routers/``
 and wired up via ``app.include_router``. See ``AGENTS.md`` for the
@@ -52,14 +52,14 @@ from ..billing import (
     start_openrouter_float_sweeper,
     warn_if_local_key_uncapped,
 )
-from ..billing.budgets import BudgetService
 from ..billing.data_policy import configure_data_policy
+from ..brand import APP_NAME
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
 from ..models import HEALTH_STATUS_OK, HealthResponse, QueueStatusResponse
-from ..notifications import configure_notification_preferences
+from ..notifications import configure_notification_preferences, start_notification_hold_sweeper
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import (
@@ -71,6 +71,7 @@ from ..service_gateway.embedding_pipeline import (
 from ..service_gateway.language_models import install_openrouter_served_model_patch
 from ..service_gateway.service_builder import wire_registry_aliases
 from ..storage import get_job_store
+from ..worker.continuous import start_continuous_sweeper
 from ..worker.engine import BackgroundWorker, get_worker
 from .directory_client import build_directory_client
 from .errors import DomainError
@@ -93,6 +94,7 @@ from .routers.account_data import create_account_data_router
 from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
+from .routers.admin_dashboard import create_admin_dashboard_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
 from .routers.api_tokens import create_api_tokens_router
@@ -100,18 +102,21 @@ from .routers.billing import create_billing_router
 from .routers.code_agent import create_code_agent_router
 from .routers.code_validation import create_code_validation_router
 from .routers.connectors import create_connectors_router
+from .routers.continuous import create_continuous_router
 from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
+from .routers.experience import create_experience_router
 from .routers.folders import create_folders_router
 from .routers.generalist_agent import create_generalist_agent_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
 from .routers.notification_preferences import create_notification_preferences_router
+from .routers.notifications import create_notifications_router
 from .routers.optimizations import create_optimizations_router
 from .routers.optimizations_meta import create_optimizations_meta_router
 from .routers.package_registry import create_package_registry_router
@@ -178,12 +183,12 @@ _SCALAR_PUBLIC_PATHS = frozenset(
     }
 )
 
-# Custom CSS for Scalar that (a) hides UI chrome we don't want in an
-# air-gapped deployment, (b) renders the Skynet logo next to the API
+# Custom CSS for Scalar that (a) hides UI chrome that calls out to
+# Scalar's hosted services, (b) renders the Skynet logo next to the API
 # title, and (c) retints the reference in the same warm beige/brown
 # palette as the main app (see frontend/src/app/globals.css light mode).
 _SCALAR_CUSTOM_CSS = """
-/* Hide Generate/Connect MCP sidebar block — no-op in air-gapped mode */
+/* Hide Generate/Connect MCP sidebar block — needs Scalar's hosted service */
 .scalar-mcp-layer { display: none !important; }
 
 /* Hide all toolbar popover buttons (Share, Deploy, Configure, Developer Tools).
@@ -262,7 +267,7 @@ _SCALAR_CUSTOM_CSS = """
   z-index: 40;
 }
 
-.skynet-toolbar-brand {
+.app-toolbar-brand {
   position: absolute;
   left: 16px;
   top: 50%;
@@ -280,29 +285,29 @@ _SCALAR_CUSTOM_CSS = """
   transition: background-color 140ms ease;
   overflow: visible;
 }
-.skynet-toolbar-brand:hover { background: #f0ebe4; }
-.skynet-toolbar-brand:focus-visible {
+.app-toolbar-brand:hover { background: #f0ebe4; }
+.app-toolbar-brand:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
 
-.skynet-toolbar-brand .skynet-toolbar-icon {
+.app-toolbar-brand .app-toolbar-icon {
   flex-shrink: 0;
   display: block;
 }
-.skynet-toolbar-brand .skynet-wordmark {
+.app-toolbar-brand .app-wordmark {
   flex-shrink: 0;
 }
-.skynet-wordmark { color: #3D2E22; user-select: none; }
-.skynet-wordmark svg { overflow: visible; }
+.app-wordmark { color: #3D2E22; user-select: none; }
+.app-wordmark svg { overflow: visible; }
 
 /* When the sidebar is open, the brand moves into the sidebar header */
-html[data-skynet-sidebar="visible"] .skynet-toolbar-brand {
+html[data-app-sidebar="visible"] .app-toolbar-brand {
   display: none;
 }
 
 /* ── Sidebar header (only shown while sidebar is visible) ─────────── */
-.skynet-sidebar-header {
+.app-sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -310,11 +315,11 @@ html[data-skynet-sidebar="visible"] .skynet-toolbar-brand {
   border-bottom: 1px solid #ddd6cc;
   flex-shrink: 0;
 }
-html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
+html[data-app-sidebar="hidden"] .app-sidebar-header {
   display: none;
 }
 
-.skynet-sidebar-home {
+.app-sidebar-home {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -324,13 +329,13 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
   text-decoration: none;
   transition: background-color 120ms ease;
 }
-.skynet-sidebar-home:hover { background: #ede7dd; }
-.skynet-sidebar-home:focus-visible {
+.app-sidebar-home:hover { background: #ede7dd; }
+.app-sidebar-home:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
 
-.skynet-sidebar-close {
+.app-sidebar-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -344,8 +349,8 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
   border-radius: 8px;
   transition: background-color 120ms ease;
 }
-.skynet-sidebar-close:hover { background: #ede7dd; }
-.skynet-sidebar-close:focus-visible {
+.app-sidebar-close:hover { background: #ede7dd; }
+.app-sidebar-close:focus-visible {
   outline: 2px solid #3D2E22;
   outline-offset: 2px;
 }
@@ -364,11 +369,11 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
       transform 320ms cubic-bezier(0.4, 0, 0.2, 1),
       opacity 220ms ease;
   }
-  html[data-skynet-sidebar="hidden"] .references-layout {
+  html[data-app-sidebar="hidden"] .references-layout {
     grid-template-columns: 0px minmax(0, 1fr) !important;
     overflow: hidden;
   }
-  html[data-skynet-sidebar="hidden"] .t-doc__sidebar {
+  html[data-app-sidebar="hidden"] .t-doc__sidebar {
     transform: translateX(-100%);
     opacity: 0;
     pointer-events: none;
@@ -415,7 +420,7 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
    We animate that expansion with a slide-in from the left. The desktop
    .t-doc__sidebar stays hidden on mobile (Tailwind's `hidden` class). */
 @media (max-width: 1023px) {
-  .skynet-toolbar-brand { display: none !important; }
+  .app-toolbar-brand { display: none !important; }
 
   .t-doc__header {
     transform-origin: left top;
@@ -431,11 +436,11 @@ html[data-skynet-sidebar="hidden"] .skynet-sidebar-header {
 
   /* When open, slide in from left */
   .references-sidebar-mobile-open .t-doc__header {
-    animation: skynet-slide-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: app-slide-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }
 }
 
-@keyframes skynet-slide-in {
+@keyframes app-slide-in {
   from {
     transform: translateX(-40px);
     opacity: 0;
@@ -718,6 +723,8 @@ def create_app(
     openrouter_float_sweeper = None
     issuing_funding_sweeper = None
     embedding_sweeper = None
+    notification_hold_sweeper = None
+    continuous_sweeper = None
     loop_lag_monitor = None
 
     @asynccontextmanager
@@ -739,13 +746,15 @@ def create_app(
             openrouter_float_sweeper, \
             issuing_funding_sweeper, \
             embedding_sweeper, \
+            notification_hold_sweeper, \
+            continuous_sweeper, \
             worker
         # Reclaim jobs whose worker lease has expired. Under multi-pod scaling
         # this only fails rows whose ``lease_expires_at`` is in the past — a
         # peer pod's in-flight job is not orphaned and is left alone. The
         # periodic sweeper (below) covers steady-state; this one-shot keeps
         # boot latency low when a single replica restarts.
-        job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
+        job_store.recover_orphaned_jobs()
         for problem in oauth_config_problems():
             logger.warning("Connector OAuth misconfigured: %s", problem)
         # ``recover_pending_jobs`` is no longer required for correctness because
@@ -777,6 +786,11 @@ def create_app(
         # Keeps the Issuing balance behind the provider card funded, so upstream
         # top-ups charged to that card don't decline.
         issuing_funding_sweeper = start_issuing_funding_sweeper(job_store.engine)
+        # Releases notifications held for the user's hold window (non-urgent
+        # email/push/Slack wait so reading the inbox first can cancel them).
+        notification_hold_sweeper = start_notification_hold_sweeper(getattr(job_store, "engine", None))
+        # Runs due continuous-optimization checks; one replica per tick holds its lock.
+        continuous_sweeper = start_continuous_sweeper(job_store, service)
         warn_if_local_key_uncapped()
         if settings.event_loop_lag_monitor_enabled:
             loop_lag_monitor = start_event_loop_lag_monitor()
@@ -869,11 +883,15 @@ def create_app(
                 issuing_funding_sweeper.stop()
             if embedding_sweeper:
                 embedding_sweeper.stop()
+            if notification_hold_sweeper:
+                notification_hold_sweeper.stop()
+            if continuous_sweeper:
+                continuous_sweeper.stop()
             if loop_lag_monitor:
                 loop_lag_monitor.stop()
 
     app = FastAPI(
-        title="Skynet",
+        title=APP_NAME,
         lifespan=lifespan,
         openapi_tags=_OPENAPI_TAGS,
         servers=[{"url": "/", "description": "This server"}],
@@ -883,7 +901,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         description=(
-            "Backend API for **Skynet** — a platform for submitting, "
+            f"Backend API for **{APP_NAME}** — a platform for submitting, "
             "comparing, and serving optimized language-model "
             "programs. Submit optimization runs or grid searches, stream "
             "live progress and metrics, inspect per-example baselines vs. "
@@ -1020,7 +1038,7 @@ def create_app(
             A :class:`JSONResponse` with media type ``application/problem+json``.
         """
         body: dict[str, Any] = {
-            "type": f"https://errors.skynet.app/{code}" if code else "about:blank",
+            "type": f"https://api.skynetml.com/errors/{code}" if code else "about:blank",
             "title": title
             or (
                 code.replace("_", " ").replace(".", " ").capitalize()
@@ -1224,7 +1242,7 @@ def create_app(
             status=HEALTH_STATUS_OK,
             registered_assets=snapshot,
             vector_search_enabled=getattr(job_store, "vector_search_enabled", None),
-            commit=os.getenv("RAILWAY_GIT_COMMIT_SHA") or None,
+            commit=settings.app_git_sha or None,
         )
 
     app.add_middleware(CacheControlMiddleware)
@@ -1298,6 +1316,7 @@ def create_app(
         create_admin_router(job_store=job_store, directory_client=build_directory_client()),
         tags=["Admin"],
     )
+    app.include_router(create_admin_dashboard_router(job_store=job_store), tags=["Admin"])
     app.include_router(create_registry_router(registry=registry), tags=["Registry"])
     app.include_router(create_code_validation_router(), tags=["Code Validation"])
     app.include_router(create_mcp_probe_router(), tags=["Code Validation"])
@@ -1317,6 +1336,8 @@ def create_app(
     app.include_router(create_account_security_router(job_store=job_store), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_notifications_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_experience_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_scorer_dependencies_router(job_store=job_store), tags=["Wizard"])
@@ -1324,6 +1345,7 @@ def create_app(
     app.include_router(create_dataset_library_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_share_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_folders_router(job_store=job_store), tags=["Folders"])
+    app.include_router(create_continuous_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_connectors_router(job_store=job_store), tags=["Connectors"])
     app.include_router(create_saved_secrets_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_tagging_session_router(job_store=job_store), tags=["Optimizations"])

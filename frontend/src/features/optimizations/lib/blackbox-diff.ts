@@ -146,3 +146,189 @@ export function countChanges(rows: DiffRow[]): { added: number; removed: number 
   }
   return { added, removed };
 }
+
+function plainRow(kind: DiffLine["kind"], text: string): DiffRow {
+  return { kind, segments: [{ text, changed: false }] };
+}
+
+/**
+ * Whole-file diff: every line of both texts, changes in place. The shared
+ * head and tail are matched before the line diff runs, so a small edit in a
+ * long file stays well under the LCS budget.
+ */
+export function fullDiffRows(before: string, after: string): DiffRow[] {
+  if (before === after) return before.split("\n").map((text) => plainRow("same", text));
+  const a = before === "" ? [] : before.split("\n");
+  const b = after === "" ? [] : after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const oldMiddle = a.slice(head, a.length - tail);
+  const newMiddle = b.slice(head, b.length - tail);
+  const middle =
+    oldMiddle.length === 0
+      ? newMiddle.map((text) => plainRow("added", text))
+      : newMiddle.length === 0
+        ? oldMiddle.map((text) => plainRow("removed", text))
+        : diffRows(oldMiddle.join("\n"), newMiddle.join("\n"));
+  return [
+    ...a.slice(0, head).map((text) => plainRow("same", text)),
+    ...middle,
+    ...a.slice(a.length - tail).map((text) => plainRow("same", text)),
+  ];
+}
+
+/** A diff row with the line numbers it has in the before and after texts. */
+export interface NumberedRow extends DiffRow {
+  oldLine: number | null;
+  newLine: number | null;
+}
+
+export function numberRows(rows: DiffRow[]): NumberedRow[] {
+  let oldLine = 0;
+  let newLine = 0;
+  return rows.map((row) => {
+    if (row.kind !== "added") oldLine++;
+    if (row.kind !== "removed") newLine++;
+    return {
+      ...row,
+      oldLine: row.kind === "added" ? null : oldLine,
+      newLine: row.kind === "removed" ? null : newLine,
+    };
+  });
+}
+
+/** A run of unchanged rows folded away; `start` is its index in the numbered rows. */
+export interface FoldedGap {
+  gap: true;
+  start: number;
+  hidden: number;
+}
+
+/**
+ * Keep only the changed rows and `context` unchanged rows around each change,
+ * folding every unchanged run of at least `minFold` rows into a gap. Gaps
+ * whose `start` is in `expanded` stay open.
+ */
+export function foldRows(
+  rows: NumberedRow[],
+  context = 3,
+  expanded: ReadonlySet<number> = new Set(),
+  // A fold row is as tall as a line, so folding a short run hides nothing.
+  minFold = 4,
+): Array<NumberedRow | FoldedGap> {
+  const keep = rows.map((row) => row.kind !== "same");
+  const near = keep.slice();
+  keep.forEach((changed, i) => {
+    if (!changed) return;
+    for (let j = Math.max(0, i - context); j <= Math.min(rows.length - 1, i + context); j++) near[j] = true;
+  });
+  const out: Array<NumberedRow | FoldedGap> = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (near[i]) {
+      out.push(rows[i]!);
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < rows.length && !near[i]) i++;
+    if (expanded.has(start) || i - start < minFold) out.push(...rows.slice(start, i));
+    else out.push({ gap: true, start, hidden: i - start });
+  }
+  return out;
+}
+
+/** A piece of a diff line carrying both its syntax style and its change emphasis. */
+export interface StyledSpan {
+  text: string;
+  spec: number | null;
+  changed: boolean;
+}
+
+/**
+ * Cut a line's syntax tokens at its word-level change boundaries, so a changed
+ * line keeps its highlighting under the emphasis. Null when the two do not
+ * spell the same text.
+ */
+export function mergeLineSpans(
+  tokens: ReadonlyArray<{ text: string; spec: number | null }>,
+  segments: readonly DiffSegment[],
+): StyledSpan[] | null {
+  if (tokens.map((t) => t.text).join("") !== segments.map((s) => s.text).join("")) return null;
+  const out: StyledSpan[] = [];
+  let ti = 0;
+  let si = 0;
+  let tOffset = 0;
+  let sOffset = 0;
+  while (ti < tokens.length && si < segments.length) {
+    const token = tokens[ti]!;
+    const segment = segments[si]!;
+    const take = Math.min(token.text.length - tOffset, segment.text.length - sOffset);
+    if (take > 0) {
+      const text = token.text.slice(tOffset, tOffset + take);
+      const last = out[out.length - 1];
+      if (last && last.spec === token.spec && last.changed === segment.changed) last.text += text;
+      else out.push({ text, spec: token.spec, changed: segment.changed });
+    }
+    tOffset += take;
+    sOffset += take;
+    if (tOffset >= token.text.length) {
+      ti++;
+      tOffset = 0;
+    }
+    if (sOffset >= segment.text.length) {
+      si++;
+      sOffset = 0;
+    }
+  }
+  return out;
+}
+
+/** One line of a split diff: the old file's line on the left, the new file's on the right. */
+export interface SplitRow {
+  left: NumberedRow | null;
+  right: NumberedRow | null;
+}
+
+/**
+ * Pair rows side by side the way a split diff shows them: an unchanged line
+ * on both sides, and within each change the k-th removed line next to the
+ * k-th added one, the shorter side padded with empty cells.
+ */
+export function splitRows(rows: Array<NumberedRow | FoldedGap>): Array<SplitRow | FoldedGap> {
+  const out: Array<SplitRow | FoldedGap> = [];
+  let removed: NumberedRow[] = [];
+  let added: NumberedRow[] = [];
+  const flush = () => {
+    for (let k = 0; k < Math.max(removed.length, added.length); k++) {
+      out.push({ left: removed[k] ?? null, right: added[k] ?? null });
+    }
+    removed = [];
+    added = [];
+  };
+  for (const row of rows) {
+    if ("gap" in row) {
+      flush();
+      out.push(row);
+    } else if (row.kind === "removed") {
+      // A removal after additions starts a new change, not part of this one.
+      if (added.length > 0) flush();
+      removed.push(row);
+    } else if (row.kind === "added") {
+      added.push(row);
+    } else {
+      flush();
+      out.push({ left: row, right: row });
+    }
+  }
+  flush();
+  return out;
+}

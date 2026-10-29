@@ -51,6 +51,8 @@ import { perLocale } from "@/shared/lib/per-locale";
 import { formatBytes, moduleLabel } from "@/shared/lib/formatters";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatCentsUsd } from "@/features/billing";
+import { runEstimateLabelKey } from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { TERMS } from "@/shared/lib/terms";
 import { InfoCard } from "./ui-primitives";
 import { BlackboxConfigCard } from "./BlackboxConfig";
@@ -257,7 +259,7 @@ function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string
           return (
             <li
               key={column}
-              className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/45 bg-background/80 py-1 pe-1 ps-3 text-xs"
+              className="inline-flex max-w-full items-center gap-2 rounded-md border border-border/45 bg-background/80 py-1 pe-1 ps-3 text-xs"
             >
               <span className="truncate font-mono font-medium text-foreground" dir="ltr">
                 {renamed ? `${column} · ${renamed}` : column}
@@ -312,44 +314,37 @@ export function ConfigTab({
   const generalRows: ConfigRow[] = [];
   if (isPrivate != null) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>,
+      label: msg("submit.basics.privacy.label"),
       value: isPrivate ? msg("submit.basics.privacy.private") : msg("submit.basics.privacy.public"),
       icon: isPrivate ? <Lock /> : <Globe />,
     });
   }
   if (tokenSource) {
     generalRows.push({
-      label: (
-        <HelpTip text={tip("config.billing_source")}>{msg("submit.budget.billing_source")}</HelpTip>
-      ),
+      label: msg("submit.budget.billing_source"),
       value: tokenSource === "byok" ? msg("billing.mode.byok") : msg("billing.mode.managed"),
       icon: tokenSource === "byok" ? <Key /> : <Wallet />,
     });
   }
   if (runtime) {
     generalRows.push({
-      label: <HelpTip text={tip("config.runtime")}>{msg("optimization.config.runtime")}</HelpTip>,
+      label: msg("optimization.config.runtime"),
       value: runtime === "vercel" ? msg("submit.runtime.vercel") : runtime,
       icon: <RocketLaunch />,
     });
   }
   if (hasCostCap) {
     generalRows.push({
-      label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
+      label: msg("submit.budget.label"),
       value:
         costCap != null ? formatCentsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
       icon: <Coins />,
     });
   }
-  if (estimateLow != null && estimateHigh != null) {
+  const estimateLabelKey = runEstimateLabelKey(tokenSource, isLocalMode());
+  if (estimateLabelKey && estimateLow != null && estimateHigh != null) {
     generalRows.push({
-      label: (
-        <HelpTip text={tip("submit.estimate")}>
-          {tokenSource === "byok"
-            ? msg("submit.summary.estimate_fee")
-            : msg("submit.summary.estimate_cost")}
-        </HelpTip>
-      ),
+      label: <HelpTip text={tip("submit.estimate")}>{msg(estimateLabelKey)}</HelpTip>,
       // Isolate "low–high" as one LTR run (U+2066…U+2069) so the dash between
       // the two number groups doesn't flip them under RTL.
       value: formatMsg("submit.summary.estimate_range", {
@@ -411,14 +406,14 @@ export function ConfigTab({
     const mcpUrl = nonEmptyString(toolSource.mcp_url);
     if (mcpUrl) {
       toolRows.push({
-        label: <HelpTip text={tip("react.mcp_url")}>{msg("submit.react.mcp_url_label")}</HelpTip>,
+        label: msg("submit.react.mcp_url_label"),
         value: mcpUrl,
         icon: <Plug />,
       });
     }
     const filter = Array.isArray(toolSource.tool_filter) ? toolSource.tool_filter : null;
     toolRows.push({
-      label: <HelpTip text={tip("config.tool_access")}>{msg("submit.react.tools_access")}</HelpTip>,
+      label: msg("submit.react.tools_access"),
       value: filter
         ? formatMsg("submit.react.tools_count", { p1: filter.length })
         : msg("submit.react.tools_all"),
@@ -467,9 +462,7 @@ export function ConfigTab({
     ...(workflowNodes != null && workflowEdges != null
       ? [
           {
-            label: (
-              <HelpTip text={tip("config.workflow")}>{msg("optimization.config.workflow")}</HelpTip>
-            ),
+            label: msg("optimization.config.workflow"),
             value: formatMsg("optimization.config.workflow_graph", {
               nodes: workflowNodes,
               edges: workflowEdges,
@@ -512,29 +505,21 @@ export function ConfigTab({
   const dataRows: ConfigRow[] = [];
   if (datasetFilename) {
     dataRows.push({
-      label: (
-        <HelpTip text={tip("submit.dataset_file")}>
-          {msg("auto.features.submit.components.steps.summarystep.7")}
-        </HelpTip>
-      ),
+      label: msg("auto.features.submit.components.steps.summarystep.7"),
       value: datasetFilename,
       icon: <FileText />,
     });
   }
   if (datasetRows != null) {
     dataRows.push({
-      label: <HelpTip text={tip("submit.dataset_size")}>{msg("optimization.config.rows")}</HelpTip>,
+      label: msg("optimization.config.rows"),
       value: String(datasetRows),
       icon: <Table />,
     });
   }
   if (job.stored_bytes) {
     dataRows.push({
-      label: (
-        <HelpTip text={tip("submit.dataset_size")}>
-          {msg("auto.features.submit.components.steps.summarystep.8")}
-        </HelpTip>
-      ),
+      label: msg("auto.features.submit.components.steps.summarystep.8"),
       value: formatBytes(job.stored_bytes),
       icon: <HardDrives />,
     });
@@ -556,15 +541,15 @@ export function ConfigTab({
         renderSlide={(activeSlide) => (
           <>
             {activeSlide === 0 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
                     label={
-                      <HelpTip text={tip("submit.name")}>
+                      <>
                         {msg("auto.features.submit.components.steps.summarystep.3")}
                         {TERMS.optimization}
-                      </HelpTip>
+                      </>
                     }
                     value={name}
                     icon={<Tag />}
@@ -587,20 +572,13 @@ export function ConfigTab({
                 </div>
                 <MiniGrid rows={generalRows} />
                 {description && (
-                  <SlideNote
-                    label={
-                      <HelpTip text={tip("config.description")}>
-                        {msg("optimization.config.description")}
-                      </HelpTip>
-                    }
-                    text={description}
-                  />
+                  <SlideNote label={msg("optimization.config.description")} text={description} />
                 )}
               </div>
             )}
 
             {activeSlide === 1 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
                   <SlideHeroCard
                     index={0}
@@ -624,7 +602,7 @@ export function ConfigTab({
             )}
 
             {activeSlide === 2 && (
-              <div className="min-h-[24rem]">
+              <div>
                 {!isGrid ? (
                   <div
                     className="grid gap-4"
@@ -691,7 +669,7 @@ export function ConfigTab({
                   <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                     <div className="space-y-3">
                       <p className="flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                        <span className="grid size-7 place-items-center rounded-lg bg-[#3D2E22] text-[#FAF8F5]">
+                        <span className="grid size-7 place-items-center rounded-lg bg-primary-fill text-primary-foreground">
                           <Cpu className="size-3.5" aria-hidden="true" />
                         </span>
                         <HelpTip text={tip("grid.generation_models")}>
@@ -708,7 +686,7 @@ export function ConfigTab({
                     </div>
                     <div className="space-y-3">
                       <p className="flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                        <span className="grid size-7 place-items-center rounded-lg bg-[#C8A882] text-[#3D2E22]">
+                        <span className="grid size-7 place-items-center rounded-lg bg-primary-fill text-primary-foreground">
                           <Brain className="size-3.5" aria-hidden="true" />
                         </span>
                         <HelpTip text={tip("grid.reflection_models")}>
@@ -734,13 +712,13 @@ export function ConfigTab({
             )}
 
             {activeSlide === 3 && (
-              <div className="flex min-h-[24rem] flex-col gap-5">
+              <div className="flex flex-col gap-5">
                 {job.source_dataset_id && (
                   <Link
                     href={`/datasets?open=${job.source_dataset_id}`}
-                    className="group/srclink flex min-h-28 items-center gap-4 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 transition-[background-color,border-color,transform] hover:border-[#C8A882]/70 hover:bg-[#F4EEE6] active:scale-[0.995] sm:p-6"
+                    className="group/srclink flex min-h-28 items-center gap-4 rounded-2xl border border-border/60 bg-muted p-5 transition-[background-color,border-color,transform] hover:border-primary-fill/70 hover:bg-accent active:scale-[0.995] sm:p-6"
                   >
-                    <span className="grid size-14 shrink-0 place-items-center rounded-2xl bg-[#3D2E22] text-[#FAF8F5] shadow-sm">
+                    <span className="grid size-14 shrink-0 place-items-center rounded-2xl bg-primary-fill text-primary-foreground">
                       <Books className="size-6" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -754,7 +732,7 @@ export function ConfigTab({
                         {job.source_dataset_id}
                       </span>
                     </span>
-                    <span className="hidden shrink-0 text-xs font-semibold text-[#7C6350] sm:block">
+                    <span className="hidden shrink-0 text-xs font-semibold text-[var(--text-2)] sm:block">
                       {msg("optimizations.source_dataset.view")}
                     </span>
                     <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover/srclink:text-foreground" />

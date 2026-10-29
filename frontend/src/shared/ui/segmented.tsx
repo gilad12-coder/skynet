@@ -99,7 +99,7 @@ export function Segmented<T extends string>({
       {selectedIndex >= 0 && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)] transition-[inset-inline-start] duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          className="pointer-events-none absolute rounded-md bg-primary-fill transition-[inset-inline-start] duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
           style={{
             top: inset,
             bottom: inset,
@@ -126,11 +126,11 @@ export function Segmented<T extends string>({
             }}
             onClick={() => onChange(o.value)}
             className={cn(
-              "relative min-w-0 cursor-pointer rounded-md text-center font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-40",
+              "relative min-w-0 cursor-pointer rounded-md text-center font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40",
               sm ? "min-h-[44px] px-2.5 py-1 text-xs" : "min-h-[44px] px-2 py-2 text-sm sm:px-3",
               "lg:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
               selected
-                ? "text-foreground"
+                ? "text-primary-foreground"
                 : "text-foreground/60 hover:text-foreground disabled:hover:text-foreground/60",
               segmentClassName,
             )}
@@ -145,7 +145,7 @@ export function Segmented<T extends string>({
                 <span
                   className={cn(
                     "mt-0.5 block text-[0.6875rem] font-normal transition-colors duration-200",
-                    selected ? "text-muted-foreground" : "text-foreground/40",
+                    selected ? "text-primary-foreground/75" : "text-foreground/40",
                   )}
                 >
                   {o.desc}

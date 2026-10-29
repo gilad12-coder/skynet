@@ -78,7 +78,7 @@ def test_catalog_provider_stores_env_var_and_url() -> None:
     p = CatalogProvider(
         slug="openai",
         label="OpenAI",
-        data_center="On-prem gateway",
+        data_center="EU",
         env_var="OPENAI_API_KEY",
         default_base_url="https://api.openai.com/v1",
         has_env_key=True,
@@ -86,7 +86,7 @@ def test_catalog_provider_stores_env_var_and_url() -> None:
     assert p.env_var == "OPENAI_API_KEY"
     assert p.default_base_url == "https://api.openai.com/v1"
     assert p.has_env_key is True
-    assert p.data_center == "On-prem gateway"
+    assert p.data_center == "EU"
 
 
 def test_model_catalog_response_empty_lists() -> None:
@@ -314,7 +314,7 @@ def test_single_endpoint_provider_has_none_data_center(monkeypatch: pytest.Monke
     """A provider with one endpoint emits exactly one entry, ``data_center=None``.
 
     Preserves the historical single-DC wire shape so existing clients keep
-    working when no on-prem gateway is configured.
+    working.
     """
     centers = _provider_data_centers("openrouter")
     assert len(centers) == 1
@@ -348,11 +348,11 @@ def test_platform_catalog_is_openrouter_only(monkeypatch: pytest.MonkeyPatch) ->
     """Non-OpenRouter providers never reach the hosted catalog.
 
     Other providers' keys may exist for non-LLM features (OpenAI powers
-    Whisper dictation) and an on-prem gateway may be configured — neither
-    may leak chat models into the platform-billed menu.
+    Whisper dictation) and agent or embedding gateways may be configured —
+    none may leak chat models into the platform-billed menu.
     """
     monkeypatch.setattr(settings, "code_agent_base_url", "https://llm.internal/v1")
-    monkeypatch.setattr(settings, "embeddings_base_url", "")
+    monkeypatch.setattr(settings, "embeddings_base_url", "https://embed.internal/v1")
 
     fake_cost: dict = {
         "gpt-4o": {
@@ -394,14 +394,13 @@ def test_platform_catalog_is_openrouter_only(monkeypatch: pytest.MonkeyPatch) ->
     assert {p.slug for p in result.providers} == {"openrouter"}
 
 
-def test_on_prem_falls_back_to_embeddings_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``EMBEDDINGS_BASE_URL`` is used as the on-prem DC when no agent URL is set."""
-    monkeypatch.setattr(settings, "code_agent_base_url", "")
+def test_configured_gateways_add_no_data_center(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent and embedding base URLs never surface as an extra provider endpoint."""
+    monkeypatch.setattr(settings, "code_agent_base_url", "https://llm.internal/v1")
     monkeypatch.setattr(settings, "embeddings_base_url", "https://embed.internal/v1")
 
     centers = _provider_data_centers("openai")
-    on_prem = next(c for c in centers if c.label == "On-prem gateway")
-    assert on_prem.base_url == "https://embed.internal/v1"
+    assert [(c.label, c.base_url) for c in centers] == [(None, "https://api.openai.com/v1")]
 
 
 def test_get_catalog_adds_probe_only_models_with_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -858,10 +857,121 @@ def test_best_value_default_prefers_score_per_dollar_among_default_thinkers() ->
     assert winner[0] == "acme/flash-3"
 
 
+def test_lab_tier_ranks_top_labs_first_and_chinese_labs_last() -> None:
+    """The tier reads the vendor out of catalog values, probe ids and direct-provider ids alike."""
+    assert mc.lab_tier("openrouter/anthropic/claude-haiku-5.5") == 0
+    assert mc.lab_tier("openai/gpt-6-luna") == 0
+    assert mc.lab_tier("openrouter/google/gemini-3.8-flash") == 0
+    assert mc.lab_tier("openrouter/x-ai/grok-4.7") == 1
+    assert mc.lab_tier("openrouter/meta/muse-spark-1.3") == 1
+    assert mc.lab_tier("openrouter/z-ai/glm-5.3-flash") == 2
+    assert mc.lab_tier("deepseek/deepseek-v4.1-flash") == 2
+    assert mc.lab_tier("openrouter/moonshotai/kimi-k3") == 2
+    assert mc.lab_tier("openrouter/qwen/qwen3.8-max-0902") == 2
+
+
+def test_best_value_prefers_a_top_lab_over_a_cheaper_chinese_lab() -> None:
+    """Lab tier ranks before score per dollar, so a far cheaper Chinese model loses to a top lab's."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "z-ai/glm-flash": _listed(_NOW, score=42, pricing={"prompt": "0.00000003"}, **thinks),
+        "acme/mid-1": _listed(_NOW, score=46, pricing={"prompt": "0.0000002"}, **thinks),
+        "openai/luna": _listed(_NOW, score=38, pricing={"prompt": "0.0000001"}, **thinks),
+        "openai/sol": _listed(_NOW, score=52, pricing={"prompt": "0.000002"}, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert {"z-ai/glm-flash", "acme/mid-1", "openai/luna"} <= featured
+    winner = mc._best_value_probe_id(listing, featured)
+    assert winner is not None
+    assert winner[0] == "openai/luna"
+
+    without_top = {k: v for k, v in listing.items() if not k.startswith("openai/")}
+    winner = mc._best_value_probe_id(without_top, mc._featured_probe_ids(without_top))
+    assert winner is not None
+    assert winner[0] == "acme/mid-1"
+
+
+def test_best_value_default_on_the_current_listing_is_claude_haiku() -> None:
+    """On today's featured models the default leaves GLM 5.3 Flash for Claude Haiku 5.5.
+
+    Haiku only thinks on request, but it can reason, and an unpicked effort
+    sends it low (see ``default_effort_for``), so it qualifies and wins the
+    top labs on score per dollar.
+    """
+    thinks = {"reasoning": {"default_enabled": True}}
+    opt_in = {"reasoning": {"supported_efforts": ["low", "medium", "high"]}}
+    listing = {
+        "anthropic/claude-haiku-5.5": _listed(_NOW, score=43.4, pricing={"prompt": "0.0000001"}, **opt_in),
+        "anthropic/claude-sonnet-5.5": _listed(_NOW, score=56.0, pricing={"prompt": "0.000002"}, **thinks),
+        "openai/gpt-6-luna": _listed(_NOW, score=38.1, pricing={"prompt": "0.0000001"}, **thinks),
+        "openai/gpt-6.1-sol": _listed(_NOW, score=51.8, pricing={"prompt": "0.000002"}, **thinks),
+        "google/gemini-3.8-flash": _listed(_NOW, score=40.9, pricing={"prompt": "0.00000075"}, **thinks),
+        "z-ai/glm-5.3-flash": _listed(_NOW, score=41.8, pricing={"prompt": "0.0000000261"}, **thinks),
+        "deepseek/deepseek-v4.1-flash": _listed(_NOW, score=39.5, pricing={"prompt": "0.00000015"}, **thinks),
+    }
+    winner = mc._best_value_probe_id(listing, set(listing))
+    assert winner is not None
+    assert winner[0] == "anthropic/claude-haiku-5.5"
+
+
 def test_best_value_default_is_none_without_default_thinkers() -> None:
-    """No featured model reasons by default, so no default is flagged."""
+    """No featured model can reason, so no default is flagged."""
     listing = {"acme/ultra-2": _listed(_NOW, score=60)}
     assert mc._best_value_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_strongest_is_the_highest_index_default_thinker() -> None:
+    """Strongest skips featured models that do not think by default, however high they score."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW, score=60, pricing={"prompt": "0.000004"}, **thinks),
+        "acme/flash-3": _listed(_NOW, score=45, pricing={"prompt": "0.0000003"}, **thinks),
+        "beta/genius-1": _listed(_NOW, score=70),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert "beta/genius-1" in featured
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-2", 60)
+
+
+def test_strongest_new_release_inherits_its_predecessors_score() -> None:
+    """An unbenchmarked new release carries its line's score and takes strongest on release day."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+        "acme/ultra-3": _listed(_NOW, **thinks),
+        "beta/mid-2": _listed(_NOW, score=55, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert mc._intelligence_by_probe_id(listing)["acme/ultra-3"] == 60
+    assert mc._strongest_probe_id(listing, featured) == ("acme/ultra-3", 60)
+
+
+def test_strongest_is_none_without_default_thinkers() -> None:
+    """No featured model reasons by default, so nothing is strongest."""
+    listing = {"acme/ultra-2": _listed(_NOW, score=60)}
+    assert mc._strongest_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_get_catalog_flags_one_strongest_and_carries_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exactly one model is strongest, and an inherited score reaches the catalog entry."""
+    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    thinks = {"reasoning": {"default_enabled": True}}
+    probe = {
+        ("openrouter", None): {
+            "acme/ultra-2": _listed(_NOW - 30 * _DAY, score=60, **thinks),
+            "acme/ultra-3": _listed(_NOW, **thinks),
+            "beta/mid-2": _listed(_NOW, score=55, pricing={"prompt": "0.0000002"}, **thinks),
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    by_value = {m.value: m for m in get_catalog().models}
+    assert [v for v, m in by_value.items() if m.is_strongest] == ["openrouter/acme/ultra-3"]
+    assert by_value["openrouter/acme/ultra-3"].intelligence_index == 60
+    assert by_value["openrouter/beta/mid-2"].intelligence_index == 55
+    assert by_value["openrouter/beta/mid-2"].is_default is True
+    assert all(m.artificial_analysis_url is None for m in by_value.values())
 
 
 def test_practical_keeps_benchmarked_models_and_newest_of_each_line() -> None:
@@ -902,3 +1012,42 @@ def test_get_catalog_hides_impractical_models_but_still_accepts_them(monkeypatch
     assert [m.value for m in catalog.models] == ["openrouter/acme/opus-5.5"]
     assert mc.is_hidden_model("openrouter/hobby/finetune-7")
     mc.require_known_model("openrouter/hobby/finetune-7")
+
+
+def test_the_strongest_model_follows_the_operator_then_the_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An operator-set id wins; else the catalog's strongest model; else the best-value agent model."""
+    best = CatalogModel(value="openrouter/vendor/best", label="best", provider="openrouter", is_default=True)
+    strongest = CatalogModel(value="openrouter/vendor/strong", label="strong", provider="openrouter", is_strongest=True)
+    monkeypatch.setattr(mc, "_cached_response", ModelCatalogResponse(providers=[], models=[best, strongest]))
+
+    assert mc.strongest_model_id(" vendor/picked ") == "vendor/picked"
+    assert mc.strongest_model_id() == "openrouter/vendor/strong"
+
+    monkeypatch.setattr(mc, "_cached_response", ModelCatalogResponse(providers=[], models=[best]))
+    assert mc.strongest_model_id() == "openrouter/vendor/best"
+
+
+def test_the_lowest_effort_from_low_is_shared_by_the_unpicked_effort() -> None:
+    """Below-``low`` efforts are skipped, and a model that thinks by default still gets its catalog default."""
+
+    def row(**reasoning: object) -> CatalogModel:
+        """Build one catalog row with the given reasoning fields.
+
+        Args:
+            **reasoning: Reasoning fields of the row.
+
+        Returns:
+            The row.
+        """
+        return CatalogModel(value="openrouter/vendor/m", label="m", provider="openrouter", **reasoning)
+
+    on_request = row(reasoning_efforts=["minimal", "low", "high"], reasoning_default_enabled=False)
+    assert mc.lowest_effort_from_low(on_request) == "low"
+    assert mc.unpicked_effort(on_request) == "low"
+    assert mc.lowest_effort_from_low(row(reasoning_efforts=["minimal"])) is None
+    assert mc.lowest_effort_from_low(row()) is None
+    by_default = row(
+        reasoning_efforts=["minimal", "low", "high"], reasoning_default_enabled=True, default_reasoning_effort="high"
+    )
+    assert mc.lowest_effort_from_low(by_default) == "low"
+    assert mc.unpicked_effort(by_default) == "high"

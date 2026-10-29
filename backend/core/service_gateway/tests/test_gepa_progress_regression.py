@@ -113,6 +113,9 @@ def test_gepa_run_builds_generation_and_reflection_lms_cached() -> None:
             return_value=fake_compiled_program(),
         ),
         patch("core.service_gateway.optimization.core.persist_program", return_value=None),
+        # The regression guard scores both programs on the selection split;
+        # the mock LM cannot run a real evaluation.
+        patch("core.service_gateway.optimization.core.evaluate_on_test", return_value=0.5),
         patch(
             "core.service_gateway.optimization.core.instantiate_optimizer",
             return_value=MagicMock(),
@@ -164,6 +167,9 @@ def test_gepa_recognized_bar_under_capture_tqdm_emits_progress_to_callback() -> 
             side_effect=_compile_side_effect,
         ),
         patch("core.service_gateway.optimization.core.persist_program", return_value=None),
+        # The regression guard scores both programs on the selection split;
+        # the mock LM cannot run a real evaluation.
+        patch("core.service_gateway.optimization.core.evaluate_on_test", return_value=0.5),
         patch(
             "core.service_gateway.optimization.core.instantiate_optimizer",
             return_value=MagicMock(),

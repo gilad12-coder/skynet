@@ -7,7 +7,10 @@ validates environment variables at startup and provides typed access.
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
+from collections.abc import Mapping
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
@@ -21,18 +24,73 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # With CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL unset, both agents follow
 # the model catalog's best-value default (see
 # ``model_catalog.agent_model_id``). This id only runs until the boot-time
-# catalog build lands, or when the catalog flags no default.
-#
-# TODO: On-prem / air-gap — set CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL to
-# whatever LiteLLM identifier your internal gateway exposes (e.g.
-# "openai/<model>") and point CODE_AGENT_BASE_URL / GENERALIST_AGENT_BASE_URL
-# at the gateway via env. Requires OPENROUTER_API_KEY otherwise.
+# catalog build lands, or when the catalog flags no default. Requires
+# OPENROUTER_API_KEY.
 DEFAULT_AGENT_MODEL_ID = "openrouter/z-ai/glm-5.3-flash"
 
-# Vercel's API refuses any sandbox timeout above five hours (``timeout`` should
-# be <= 18000000), whatever a plan allows below that, so a larger configured
-# ceiling can never be admitted and would fail at creation.
-VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 18_000
+# Vercel's API refuses any sandbox timeout above 24 hours (raised from five in
+# June 2026, Pro and Enterprise only), so a larger configured ceiling can never
+# be admitted and would fail at creation.
+VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
+
+# Deployments (and the pinned sandbox image) still set the pre-rename
+# ``SKYNET_*`` variables, so every ``APP_*`` read falls back to its old name.
+ENV_PREFIX = "APP_"
+LEGACY_ENV_PREFIX = "SKYNET_"
+
+
+def legacy_env_name(name: str) -> str:
+    """Return the pre-rename ``SKYNET_*`` spelling of an ``APP_*`` variable.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+
+    Returns:
+        The same name with ``SKYNET_`` in place of ``APP_``.
+
+    Raises:
+        ValueError: When ``name`` does not start with ``APP_``.
+    """
+    if not name.startswith(ENV_PREFIX):
+        raise ValueError(f"{name!r} is not an {ENV_PREFIX}* variable")
+    return LEGACY_ENV_PREFIX + name.removeprefix(ENV_PREFIX)
+
+
+def app_env(name: str, default: str | None = None, environ: Mapping[str, str] | None = None) -> str | None:
+    """Read an ``APP_*`` variable, falling back to its ``SKYNET_*`` name.
+
+    An empty value counts as unset, so a blank new name never hides a real old one.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+        default: Value returned when neither name is set.
+        environ: Mapping to read instead of ``os.environ``.
+
+    Returns:
+        The new name's value, else the old name's, else ``default``.
+    """
+    source = os.environ if environ is None else environ
+    return source.get(name) or source.get(legacy_env_name(name)) or default
+
+
+def with_legacy_env(environment: Mapping[str, str]) -> dict[str, str]:
+    """Copy each ``APP_*`` entry under its ``SKYNET_*`` name as well.
+
+    For environments handed to code that may predate the rename, such as the
+    pinned sandbox image or a user's own command. The new value overwrites a
+    stale legacy one, so both spellings always agree.
+
+    Args:
+        environment: Child-process environment using the new names.
+
+    Returns:
+        A new mapping carrying both spellings of every ``APP_*`` variable.
+    """
+    result = dict(environment)
+    for name, value in environment.items():
+        if name.startswith(ENV_PREFIX):
+            result[legacy_env_name(name)] = value
+    return result
 
 
 # Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
@@ -72,11 +130,11 @@ class Settings(BaseSettings):
         default=None,
         description=("Base URL of the OpenAI-compatible LLM gateway (LiteLLM reads the same env var for serving)."),
     )
-    groq_api_key: SecretStr | None = Field(
+    transcription_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "Groq API key for dictation speech-to-text (Whisper large-v3-turbo "
-            "on Groq LPUs) — the platform's sole STT provider. Unset disables "
+            "OpenRouter API key for dictation speech-to-text (Whisper large-v3-turbo "
+            "through OpenRouter) — the platform's sole STT provider. Unset disables "
             "dictation with a typed 503."
         ),
     )
@@ -113,6 +171,23 @@ class Settings(BaseSettings):
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
     )
+    app_environment: str = Field(
+        default="",
+        alias="APP_ENVIRONMENT",
+        description="Deployment environment name. A name ending in -pr-<number> marks a PR preview environment.",
+    )
+    app_git_sha: str = Field(
+        default="",
+        alias="APP_GIT_SHA",
+        description="Commit the deployed image was built from.",
+    )
+    preview_grant_cents: int = Field(
+        default=0,
+        ge=0,
+        alias="PREVIEW_GRANT_CENTS",
+        description="One-time credit each new account gets in a PR preview environment, so automated "
+        "checks can pay for a run there. Ignored outside preview environments.",
+    )
     smtp_host: str | None = Field(
         default=None,
         alias="SMTP_HOST",
@@ -130,6 +205,36 @@ class Settings(BaseSettings):
     )
     smtp_starttls: bool = Field(
         default=True, alias="SMTP_STARTTLS", description="Upgrade the SMTP connection with STARTTLS."
+    )
+    vapid_public_key: str | None = Field(
+        default=None,
+        alias="VAPID_PUBLIC_KEY",
+        description="Web Push VAPID public key (urlsafe base64, uncompressed P-256 point) browsers subscribe with. Unset turns the Chrome notification channel off.",
+    )
+    vapid_private_key: SecretStr | None = Field(
+        default=None,
+        alias="VAPID_PRIVATE_KEY",
+        description="Web Push VAPID private key (urlsafe base64 raw P-256 scalar, or a PEM) that signs push requests.",
+    )
+    vapid_subject: str | None = Field(
+        default=None,
+        alias="VAPID_SUBJECT",
+        description="VAPID contact claim, a mailto: or https: URL push services can reach the sender at. Unset falls back to APP_PUBLIC_URL.",
+    )
+    slack_client_id: str | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_ID",
+        description="Client ID of the Skynet Slack app. Unset (or SLACK_CLIENT_SECRET / BYOK_VAULT_KEY unset) turns the Slack notification channel off.",
+    )
+    slack_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="SLACK_CLIENT_SECRET",
+        description="Client secret of the Skynet Slack app, used to trade the OAuth code for the bot token.",
+    )
+    slack_redirect_url: str | None = Field(
+        default=None,
+        alias="SLACK_REDIRECT_URL",
+        description="Absolute URL of this backend's /notifications/slack/oauth/callback as registered on the Slack app. Unset derives it from the incoming request.",
     )
     webauthn_rp_id: str | None = Field(
         default=None,
@@ -284,12 +389,7 @@ class Settings(BaseSettings):
         alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
         gt=0.0,
         le=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS,
-        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 18000 (5 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
-    )
-    claude_code_byok_egress: bool = Field(
-        default=False,
-        alias="CLAUDE_CODE_BYOK_EGRESS",
-        description="Offer Claude Code as the proposer for users with a verified Anthropic key. Its box may then reach only api.anthropic.com, Vercel's egress proxy adds the user's x-api-key there, and the CLI trusts that proxy's CA through NODE_EXTRA_CA_CERTS. Off until that path is verified on the deployed Vercel team; while off, Claude Code stays unavailable.",
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 86400 (24 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
     )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,
@@ -316,6 +416,11 @@ class Settings(BaseSettings):
         default=None,
         alias="OPENROUTER_API_KEY",
         description="OpenRouter master-account (inference) API key. Read-only here: the float monitor uses it to read the shared prepaid balance (GET /api/v1/credits) so it can warn when the OpenRouter float runs thin against outstanding customer balances. Managed inference itself routes through the LiteLLM proxy or per-user provisioned keys, not this field.",
+    )
+    firecrawl_api_key: SecretStr | None = Field(
+        default=None,
+        alias="FIRECRAWL_API_KEY",
+        description="Firecrawl API key. When set, the wizard agent gets web_search, fetch_url and crawl_site tools so it can search the web and read links the user gives it. Unset leaves the agent without web access.",
     )
     # Every *_CENTS variable still reads its pre-rename *_CREDITS name so existing deployments keep their values.
     openrouter_balance_floor_cents: int = Field(
@@ -444,19 +549,6 @@ class Settings(BaseSettings):
         ),
         alias="TELEMETRY_ENABLED",
     )
-    posthog_project_api_key: SecretStr | None = Field(
-        default=None,
-        alias="POSTHOG_PROJECT_API_KEY",
-        description=(
-            "PostHog project key for privacy-preserving export of accepted first-party telemetry. "
-            "Unset keeps analytics entirely in Postgres."
-        ),
-    )
-    posthog_host: str = Field(
-        default="https://eu.i.posthog.com",
-        alias="POSTHOG_HOST",
-        description="PostHog event-ingestion origin; defaults to the EU cloud endpoint.",
-    )
     sentry_dsn: SecretStr | None = Field(
         default=None,
         alias="SENTRY_DSN",
@@ -485,11 +577,6 @@ class Settings(BaseSettings):
         default=5000,
         ge=1,
         description="Maximum stored progress events per optimization job before old events are evicted",
-    )
-    log_entries_per_job_cap: int = Field(
-        default=5000,
-        ge=1,
-        description="Maximum stored log entries per optimization job before old entries are evicted",
     )
     dataset_max_file_bytes: int = Field(
         default=50 * 1024 * 1024,
@@ -678,10 +765,10 @@ class Settings(BaseSettings):
         description="Disable driver features incompatible with PgBouncer transaction pooling",
         alias="DB_PGBOUNCER_TRANSACTION_MODE",
     )
-    skynet_code_version: str = Field(
+    app_code_version: str = Field(
         default="",
         description="Build git SHA used to keep queued jobs on compatible workers",
-        alias="SKYNET_CODE_VERSION",
+        validation_alias=AliasChoices("APP_CODE_VERSION", "SKYNET_CODE_VERSION"),
     )
     require_code_version: bool = Field(
         default=False,
@@ -704,11 +791,10 @@ class Settings(BaseSettings):
         alias="ALLOWED_ORIGINS",
     )
 
-    # Air-gap deploys legitimately probe internal LiteLLM gateways on RFC1918
-    # ranges, but the default has to fail closed: an unauthenticated caller
-    # otherwise gets a /v1/models scan of the deploy network (incl. cloud
-    # metadata services). Operators flip this on once their gateway address
-    # range is well-defined.
+    # A local stack (docker-compose service names resolve to RFC1918 addresses)
+    # may need to reach private gateways and MCP tools, but the default has to
+    # fail closed: an unauthenticated caller otherwise gets a /v1/models scan of
+    # the deploy network (incl. cloud metadata services).
     discover_allow_private: bool = Field(
         default=False,
         description=(
@@ -803,25 +889,6 @@ class Settings(BaseSettings):
         ),
     )
 
-    log_ship_url: str = Field(
-        default="",
-        alias="LOG_SHIP_URL",
-        description=(
-            "HTTP ingest endpoint that receives a JSON copy of every log record "
-            "the root logger admits (e.g. Better Stack's https://in.logs.betterstack.com "
-            "or a Vector http_server source), so logs outlive the platform's own "
-            "retention. Unset (the default) disables shipping; logs still go to stdout."
-        ),
-    )
-    log_ship_token: SecretStr | None = Field(
-        default=None,
-        alias="LOG_SHIP_TOKEN",
-        description=(
-            "Bearer token sent with each LOG_SHIP_URL batch (Better Stack source "
-            "token). Unset sends no Authorization header."
-        ),
-    )
-
     @field_validator("alert_min_level")
     @classmethod
     def _validate_alert_min_level(cls, v: str) -> str:
@@ -845,16 +912,12 @@ class Settings(BaseSettings):
         default="",
         description=(
             "LiteLLM model id used by the submit-wizard code agent. Empty "
-            "follows the model catalog's best-value default; override via "
-            "CODE_AGENT_MODEL for on-prem deployments."
+            "follows the model catalog's best-value default."
         ),
     )
-    # TODO: On-prem / air-gap — set CODE_AGENT_BASE_URL to your internal
-    # OpenAI-compatible gateway (e.g. https://llm.your-company.com/v1) so the
-    # agent stops trying to reach the public OpenRouter endpoint.
     code_agent_base_url: str = Field(
         default="",
-        description="Optional custom base URL for the code agent LM (e.g. internal OpenAI-compatible gateway)",
+        description="Optional custom base URL for the code agent LM (an OpenAI-compatible gateway)",
     )
 
     generalist_agent_mcp_url: str = Field(
@@ -872,12 +935,35 @@ class Settings(BaseSettings):
             "panel). Empty follows the model catalog's best-value default."
         ),
     )
-    # TODO: On-prem / air-gap — set GENERALIST_AGENT_BASE_URL to your internal
-    # OpenAI-compatible gateway. The default empty string lets LiteLLM choose
-    # the public OpenRouter endpoint, which an air-gapped host cannot reach.
     generalist_agent_base_url: str = Field(
         default="",
-        description="Optional custom base URL for the generalist agent LM (e.g. internal OpenAI-compatible gateway)",
+        description="Optional custom base URL for the generalist agent LM (an OpenAI-compatible gateway)",
+    )
+
+    interview_agent_model: str = Field(
+        default="",
+        description=(
+            "LiteLLM model id every agent interview runs when the user picks "
+            "none (onboarding, code interview, tagger dataset interview). Empty "
+            "follows the catalog's measured fastest small featured model."
+        ),
+    )
+
+    rule_watch_model: str = Field(
+        default="",
+        description=(
+            "Model id of the fast judge that watches a repository run's recent "
+            "actions against its plain-language rules. Empty follows the model "
+            "catalog's best-value default."
+        ),
+    )
+    rule_judge_model: str = Field(
+        default="",
+        description=(
+            "Model id of the judge that reads each repository version's full diff "
+            "against its plain-language rules before it is scored. Empty follows "
+            "the model catalog's strongest model."
+        ),
     )
 
     tagger_assist_model: str = Field(
@@ -894,13 +980,11 @@ class Settings(BaseSettings):
             "Optional custom base URL for the tagging-assist LM. Empty falls back to generalist_agent_base_url."
         ),
     )
-    # TODO: On-prem / air-gap — point this at an internal OpenAI-compatible
-    # embeddings endpoint (usually the same gateway family as CODE_AGENT_BASE_URL).
     # The backend sends POST {base_url}/embeddings with {model, input}; no model
     # weights are bundled in this repo.
     embeddings_base_url: str = Field(
         default="",
-        description="Internal OpenAI-compatible embedding API base URL, e.g. https://llm.internal/v1",
+        description="OpenAI-compatible embedding API base URL, e.g. https://llm.example.com/v1",
     )
     embeddings_model: str = Field(
         default="jina-embeddings-v4",
@@ -930,10 +1014,6 @@ class Settings(BaseSettings):
             "Must match the schema; changing requires a migration."
         ),
     )
-    # TODO: On-prem / air-gap — leave EMBEDDINGS_SUMMARY_MODEL empty so the
-    # pipeline reuses code_agent_model (which already points at your internal
-    # gateway). Setting this to a public-provider id would route summarisation
-    # calls outside the air-gap.
     embeddings_summary_model: str = Field(
         default="",
         description=(
@@ -962,8 +1042,8 @@ class Settings(BaseSettings):
             "Explore search engine — the single knob that also decides which "
             "Postgres extension (if any) the deployment requires:\n"
             "  lexical  (default): vanilla Postgres, no extension. ILIKE substring "
-            "search. The safe choice for an air-gapped database that can't add "
-            "extensions — neither the migrate Job nor the app runs CREATE EXTENSION.\n"
+            "search. The safe choice for a database that can't add extensions — "
+            "neither the migrate Job nor the app runs CREATE EXTENSION.\n"
             "  bm25: requires the pg_search extension. Ranks lexical search with "
             "BM25 relevance; degrades to ILIKE when pg_search is absent.\n"
             "  semantic: requires the pgvector extension. Embedding (vector) "
@@ -1087,6 +1167,15 @@ class Settings(BaseSettings):
             "kill-switch (per-user balance gate still applies)."
         ),
     )
+    wizard_agent_daily_turns: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "Turns of the black-box wizard agent (its interview and chat) one account may start per "
+            "UTC day. The wizard agent is free, so this cap replaces the credit charge. 0 disables "
+            "the cap."
+        ),
+    )
     interactive_min_balance_cents: int = Field(
         validation_alias=AliasChoices("INTERACTIVE_MIN_BALANCE_CENTS", "INTERACTIVE_MIN_BALANCE_CREDITS"),
         default=5,
@@ -1126,15 +1215,15 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Per-account cap on dictation clips per hour, enforced across replicas via Redis. "
-            "Dictation runs on the platform's Groq key and is not billed to user balances. 0 disables the cap."
+            "Dictation runs on the platform's transcription key and is not billed to user balances. 0 disables the cap."
         ),
     )
-    groq_monthly_budget_usd: float = Field(
+    transcription_monthly_budget_usd: float = Field(
         default=10.0,
         ge=0,
         description=(
-            "Platform-wide monthly cap on Groq dictation spend in dollars, counted in Redis from each "
-            "clip's billed duration. Dictation answers a typed 503 once it is reached. 0 disables the cap."
+            "Platform-wide monthly cap on dictation spend in dollars, counted in Redis from the "
+            "cost OpenRouter reports for each clip. Dictation answers a typed 503 once it is reached. 0 disables the cap."
         ),
     )
     embeddings_monthly_token_cap: int = Field(
@@ -1159,7 +1248,7 @@ class Settings(BaseSettings):
         ge=0,
         le=1,
         description=(
-            "Share of each platform budget (Groq dictation, embeddings, per-account embeddings) a single "
+            "Share of each platform budget (dictation, embeddings, per-account embeddings) a single "
             "process may spend per month when Redis is unset or unreachable, counted in memory. 0 refuses "
             "every budgeted call without Redis."
         ),
@@ -1243,7 +1332,7 @@ class Settings(BaseSettings):
         error instead of a config diagnostic. Deriving the default keeps the
         agent pointed at this app's own ``/mcp`` mount; a bind-all ``0.0.0.0``
         host is dialled as ``127.0.0.1`` — the IPv4 literal, not ``localhost``,
-        because some container runtimes (e.g. Railway) resolve ``localhost`` to
+        because some container runtimes resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
         a raw ``ConnectError``.
 
@@ -1269,6 +1358,11 @@ class Settings(BaseSettings):
     def admin_groups_set(self) -> frozenset[str]:
         """Return admin IdP groups as a lowercase frozenset."""
         return _csv_lower_set(self.admin_groups)
+
+    @property
+    def is_preview_environment(self) -> bool:
+        """Return whether this deployment is a PR preview environment."""
+        return re.search(r"-pr-\d+$", self.app_environment) is not None
 
     @property
     def is_stripe_configured(self) -> bool:
@@ -1303,8 +1397,9 @@ class Settings(BaseSettings):
     def code_version(self) -> str:
         """Return the build version used for job-claim compatibility checks.
 
-        Resolution order: ``SKYNET_CODE_VERSION`` env, then a local git lookup,
-        then the literal ``"unknown"``. With ``REQUIRE_CODE_VERSION=true``,
+        Resolution order: ``APP_CODE_VERSION`` env (or the legacy
+        ``SKYNET_CODE_VERSION``), then a local git lookup, then the literal
+        ``"unknown"``. With ``REQUIRE_CODE_VERSION=true``,
         falling through to ``"unknown"`` raises — production builds must bake
         the SHA into the image so staged rollouts don't have multiple pods
         claiming each other's ``"unknown"``-tagged work.
@@ -1313,7 +1408,7 @@ class Settings(BaseSettings):
             RuntimeError: When the fallback resolves to ``"unknown"`` and
                 ``require_code_version`` is enabled.
         """
-        configured = self.skynet_code_version.strip()
+        configured = self.app_code_version.strip()
         if configured:
             return configured[:40]
         try:
@@ -1332,7 +1427,7 @@ class Settings(BaseSettings):
             return resolved[:40]
         if self.require_code_version:
             raise RuntimeError(
-                "SKYNET_CODE_VERSION is unset and no git checkout is available — "
+                "APP_CODE_VERSION is unset and no git checkout is available — "
                 "set REQUIRE_CODE_VERSION=false for local dev, or bake the SHA "
                 "into the image (Dockerfile passes GIT_SHA build arg).",
             )

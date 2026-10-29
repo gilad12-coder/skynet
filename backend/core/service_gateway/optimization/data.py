@@ -227,7 +227,7 @@ def load_signature_from_code(code: str) -> type[dspy.Signature]:
     """Execute user-provided code and return the single DSPy signature class it defines.
 
     Trust boundary: the body of ``code`` runs in-process via ``exec``. Optimization
-    runs (``DspyService.run`` / ``run_grid_search``) reach this through
+    runs (``DspyService.run``) reach this through
     ``backend/core/worker/subprocess_runner.py``, which sandboxes per-job execution
     in a separate process. Validation paths (the ``code_validation`` router,
     ``validate_payload``, the code agent) intentionally exec in the API process
@@ -249,7 +249,7 @@ def load_signature_from_code(code: str) -> type[dspy.Signature]:
     namespace: dict[str, Any] = {"dspy": dspy}
     try:
         # exec: user-supplied signature code. Isolation is context-dependent:
-        # the DspyService.run/run_grid_search paths execute inside
+        # the DspyService.run path executes inside
         # worker/subprocess_runner.py (separate process boundary), but the
         # validation paths (code_validation router, validate_payload,
         # code_agent) run in the API process. Treat this as class-body
@@ -345,7 +345,7 @@ def load_metric_from_code(code: str) -> Callable[..., Any]:
     try:
         # exec: user-supplied metric code. Same security boundary as
         # load_signature_from_code — isolated when called from
-        # DspyService.run/run_grid_search (via worker/subprocess_runner.py),
+        # DspyService.run (via worker/subprocess_runner.py),
         # but runs in-process during validation (code_validation router,
         # validate_payload, code_agent). Module-level def evaluation only;
         # the metric callable itself is invoked later inside the subprocess.

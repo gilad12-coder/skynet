@@ -1,8 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { Coins, Key, X } from "@/shared/ui/icons";
+import { Coins, Desktop, Key, X } from "@/shared/ui/icons";
 import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/features/billing";
+import {
+  SubscriptionSourcePicker,
+  byokHintKey,
+  findCli,
+  firstReadyCli,
+  isCliProvider,
+  subscriptionCatalogModels,
+  useLocalStatus,
+  withChosenCli,
+} from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
 import { getByokModelCatalog, cachedByokCatalog } from "@/shared/lib/model-catalog";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
@@ -14,8 +25,8 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { modelDisplayName, modelProviderSlug } from "@/shared/lib/model-provider";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
 import { Segmented } from "@/shared/ui/segmented";
 import { Disclosure } from "./Disclosure";
@@ -25,6 +36,7 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { defaultOpen, isVisible, useExperienceLevel } from "@/features/experience";
 
 interface ModelConfigModalProps {
   open: boolean;
@@ -46,19 +58,54 @@ interface ModelConfigModalProps {
   nameOnly?: boolean;
   /** Keep billing selection, but use the model's own sampling defaults. */
   modelDefaultsOnly?: boolean;
+  /**
+   * In the local build, offer only the user's own key: the caller's backend
+   * refuses managed models locally and cannot run subscription ones.
+   */
+  byokOnlyLocally?: boolean;
 }
 
 const TOKEN_SOURCE_SEGMENTS: Array<{
   mode: TokenSourceMode;
   icon: typeof Coins;
-  labelKey: "billing.mode.managed" | "billing.mode.byok";
+  labelKey: "billing.mode.managed" | "billing.mode.byok" | "subscription.mode";
 }> = [
   { mode: "managed", icon: Coins, labelKey: "billing.mode.managed" },
   { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
 ];
 
+// The local desktop build runs models on the user's signed-in coding-agent
+// CLIs or provider keys; it has no managed models, so it offers no managed source.
+const LOCAL_TOKEN_SOURCE_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
+  { mode: "subscription", icon: Desktop, labelKey: "subscription.mode" },
+];
+
+const LOCAL_BYOK_ONLY_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
+];
+
+/**
+ * The draft a config opens as: in the local build a managed model opens on the
+ * subscription source, or on the user's own key where only that source runs.
+ */
+function initialDraft(config: ModelConfig, local: boolean, byokOnly = false): ModelConfig {
+  const draft = withoutInlineConnection(config);
+  if (local && byokOnly && draft.token_source !== "byok") {
+    return withoutInlineConnection({
+      ...draft,
+      name: "",
+      token_source: "byok",
+      byok_provider: undefined,
+    });
+  }
+  return local && draft.token_source === "managed"
+    ? { ...draft, name: "", token_source: "subscription", cli_provider: null }
+    : draft;
+}
+
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
-  const { base_url: _baseUrl, ...rest } = config;
+  const { base_url: _baseUrl, cli_provider: cliProvider, ...rest } = config;
   const {
     api_key: _apiKey,
     api_base: _ApiBase,
@@ -70,6 +117,10 @@ function withoutInlineConnection(config: ModelConfig): ModelConfig {
     ...rest,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? rest.byok_provider : undefined,
+    // A saved CLI the app no longer offers opens unchosen, so a ready one is preselected.
+    ...(tokenSource === "subscription"
+      ? { cli_provider: isCliProvider(cliProvider) ? cliProvider : null }
+      : {}),
     extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
   };
 }
@@ -85,6 +136,7 @@ export function ModelConfigModal({
   onRemoveRecent,
   nameOnly = false,
   modelDefaultsOnly = false,
+  byokOnlyLocally = false,
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
@@ -92,8 +144,34 @@ export function ModelConfigModal({
   // layoutId must be unique per instance or Framer pairs them up.
   const parametersId = React.useId();
   const [parametersOpen, setParametersOpen] = React.useState(false);
-  const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
+  // Expert opens Parameters by default; Guided leaves them out unless the
+  // config already carries a value, which then stays on screen to edit.
+  const level = useExperienceLevel();
+  const paramsFirstOpen = defaultOpen("wizard.model_params", level);
+  const hasParams = (c: ModelConfig) =>
+    c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
+  const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
+  const localMode = isLocalMode();
+  const byokOnly = localMode && byokOnlyLocally;
+  const [draft, setDraft] = React.useState<ModelConfig>(() =>
+    initialDraft(config, localMode, byokOnly),
+  );
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
+  const local = useLocalStatus(localMode && open && mode === "subscription");
+  const subscriptionModels = React.useMemo(
+    () =>
+      mode === "subscription"
+        ? subscriptionCatalogModels(findCli(local.status, draft.cli_provider), catalogModels)
+        : undefined,
+    [mode, local.status, draft.cli_provider, catalogModels],
+  );
+  // Preselect a ready CLI once the status lands, so switching to the
+  // subscription source lists models without a second click.
+  const readyCli = firstReadyCli(local.status);
+  React.useEffect(() => {
+    if (mode !== "subscription" || draft.cli_provider || !readyCli) return;
+    setDraft((current) => withChosenCli(current, readyCli, local.status));
+  }, [mode, draft.cli_provider, readyCli, local.status]);
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -122,7 +200,12 @@ export function ModelConfigModal({
       cancelled = true;
     };
   }, [mode, byokProviderKey]);
-  const detectionModels = mode === "byok" ? (byokModels ?? undefined) : catalogModels;
+  const detectionModels =
+    mode === "byok"
+      ? (byokModels ?? undefined)
+      : mode === "subscription"
+        ? subscriptionModels
+        : catalogModels;
 
   // Recent chips follow the chosen source: a remembered managed model never
   // shows under BYOK (and vice versa), and a chip whose model the active
@@ -131,19 +214,20 @@ export function ModelConfigModal({
     if (!recentConfigs?.length) return [];
     const served = detectionModels ? new Set(detectionModels.map((m) => m.value)) : null;
     return recentConfigs.filter(
-      (rc) => (rc.token_source ?? "managed") === mode && (!served || served.has(rc.name)),
+      (rc) =>
+        (rc.token_source ?? "managed") === mode &&
+        (mode !== "subscription" || rc.cli_provider === draft.cli_provider) &&
+        (!served || served.has(rc.name)),
     );
-  }, [recentConfigs, detectionModels, mode]);
+  }, [recentConfigs, detectionModels, mode, draft.cli_provider]);
 
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
     if (open) {
-      setDraft(withoutInlineConnection(config));
-      setParametersOpen(
-        config.temperature != null || config.max_tokens != null || !!config.extra?.reasoning_effort,
-      );
+      setDraft(initialDraft(config, localMode, byokOnly));
+      setParametersOpen(paramsFirstOpen || hasParams(config));
     }
-  }, [open, config]);
+  }, [open, config, localMode, byokOnly]);
 
   // The effort ladder is model-specific (providers reject levels outside
   // their documented set). "none" is expressed by the switch itself. An
@@ -158,14 +242,24 @@ export function ModelConfigModal({
   // catalog knows it, else medium, else the middle of the ladder. A model
   // with no ladder takes any level as "on", and medium is OpenRouter's own.
   const defaultEffort = (model: string, ladder: readonly string[]) => {
-    const providerDefault = detectionModels?.find((m) => m.value === model)?.default_reasoning_effort;
+    const hit = detectionModels?.find((m) => m.value === model);
+    const unpicked = unpickedEffort(hit);
+    if (unpicked && ladder.includes(unpicked)) return unpicked;
+    const providerDefault = hit?.default_reasoning_effort;
     if (providerDefault && ladder.includes(providerDefault)) return providerDefault;
-    return ladder.includes("medium") ? "medium" : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
+    return ladder.includes("medium")
+      ? "medium"
+      : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
   };
   const thinkingInfo = (model: string) => {
     const hit = detectionModels?.find((m) => m.value === model);
     const mandatory = !!hit?.reasoning_mandatory;
-    return { mandatory, defaultOn: mandatory || !!hit?.reasoning_default_enabled };
+    // The backend sends an opt-in thinker low effort when none is stored,
+    // so it is on by default too, and turning it off stores "none".
+    return {
+      mandatory,
+      defaultOn: mandatory || !!hit?.reasoning_default_enabled || unpickedEffort(hit) !== null,
+    };
   };
   const { mandatory: thinkingMandatory, defaultOn: thinkingDefaultOn } = thinkingInfo(draft.name);
   const canThink = modelSupportsThinking(draft.name, detectionModels);
@@ -210,6 +304,7 @@ export function ModelConfigModal({
         name: draft.name,
         token_source: draft.token_source ?? "managed",
         byok_provider: draft.token_source === "byok" ? draft.byok_provider : undefined,
+        ...(draft.token_source === "subscription" ? { cli_provider: draft.cli_provider } : {}),
       });
     } else {
       onSave(withoutInlineConnection(draft));
@@ -219,10 +314,10 @@ export function ModelConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-2xl">
-        <DialogTitleRow title={roleLabel} className="px-4 pt-6 sm:px-6" />
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85dvh] sm:max-w-2xl">
+        <DialogTitleRow title={roleLabel} className="shrink-0 px-4 pt-6 sm:px-6" />
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {visibleRecent.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
@@ -237,25 +332,23 @@ export function ModelConfigModal({
                       className={cn(
                         "group/recent flex shrink-0 items-center gap-1.5 rounded-md border ps-2 pe-1 py-1 text-[0.6875rem] font-mono transition-all",
                         isActive
-                          ? "border-primary/50 bg-primary/5 text-foreground"
-                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/50",
+                          ? "on-primary"
+                          : "border-border/40 bg-muted/30 text-muted-foreground hover:border-primary-fill/40 hover:text-foreground hover:bg-muted/50",
                       )}
                     >
                       <button
                         type="button"
                         onClick={() => {
                           setDraft(withoutInlineConnection(rc));
-                          setParametersOpen(
-                            rc.temperature != null ||
-                              rc.max_tokens != null ||
-                              !!rc.extra?.reasoning_effort,
-                          );
+                          setParametersOpen(paramsFirstOpen || hasParams(rc));
                         }}
                         className="flex items-center gap-1.5 cursor-pointer outline-none"
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={16} />
-                        <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
-                        {!nameOnly && !modelDefaultsOnly && (
+                        <span className="truncate max-w-[120px]" dir="ltr">
+                          {modelDisplayName(rc.name, detectionModels)}
+                        </span>
+                        {!nameOnly && !modelDefaultsOnly && showParameters && (
                           <span className="text-[9px] opacity-60">{rc.temperature}</span>
                         )}
                       </button>
@@ -264,7 +357,7 @@ export function ModelConfigModal({
                           type="button"
                           aria-label={formatMsg(
                             "auto.features.submit.components.modelconfigmodal.recent.remove",
-                            { model: rc.name.split("/").pop() ?? rc.name },
+                            { model: modelDisplayName(rc.name, detectionModels) },
                           )}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -303,7 +396,12 @@ export function ModelConfigModal({
                         }),
                       )
                     }
-                    options={TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => ({
+                    options={(byokOnly
+                      ? LOCAL_BYOK_ONLY_SEGMENTS
+                      : localMode
+                        ? LOCAL_TOKEN_SOURCE_SEGMENTS
+                        : TOKEN_SOURCE_SEGMENTS
+                    ).map(({ mode: value, icon: Icon, labelKey }) => ({
                       value,
                       label: msg(labelKey),
                       icon: <Icon className="size-3.5" aria-hidden="true" />,
@@ -315,11 +413,31 @@ export function ModelConfigModal({
                     <span className="min-w-0 flex-1">{msg("billing.mode.managed_hint")}</span>
                   </div>
                 )}
+                {byokOnly && (
+                  <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1" dir="auto">
+                      {msg("tagger.assist.local_key_needed")}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {mode === "subscription" && (
+                <SubscriptionSourcePicker
+                  value={draft.cli_provider}
+                  onChange={(cli) =>
+                    setDraft((current) => withChosenCli(current, cli, local.status))
+                  }
+                  status={local.status}
+                  loading={local.loading}
+                  failed={local.failed}
+                  onRefresh={local.refresh}
+                />
+              )}
 
               {mode === "byok" && (
                 <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1">{msg("billing.mode.byok_hint")}</span>
+                  <span className="min-w-0 flex-1">{msg(byokHintKey(localMode))}</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -329,7 +447,7 @@ export function ModelConfigModal({
                           openTo("providers");
                         }}
                         aria-label={msg("billing.mode.manage_keys")}
-                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
+                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                       >
                         <Key className="size-4" aria-hidden="true" />
                       </button>
@@ -356,7 +474,9 @@ export function ModelConfigModal({
                   // new model accepts: "off" becomes the default when the new
                   // model can't turn off (or is off anyway), and a level
                   // outside its ladder moves to its default level.
-                  const ladder = effortsFor(next, detectionModels).filter((level) => level !== "none");
+                  const ladder = effortsFor(next, detectionModels).filter(
+                    (level) => level !== "none",
+                  );
                   const { mandatory, defaultOn } = thinkingInfo(next);
                   let effort = (p.extra?.reasoning_effort as string | undefined) ?? null;
                   if (!modelSupportsThinking(next, detectionModels)) effort = null;
@@ -374,6 +494,7 @@ export function ModelConfigModal({
               }
               byokMode={mode === "byok"}
               byokProviders={byokProviders}
+              modelsOverride={subscriptionModels}
               placeholder={msg("auto.features.submit.components.modelconfigmodal.literal.3")}
             />
           </div>
@@ -469,7 +590,7 @@ export function ModelConfigModal({
           )}
         </div>
 
-        <DialogFooter className="border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
+        <DialogFooter className="shrink-0 border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {msg("auto.features.submit.components.modelconfigmodal.10")}
           </Button>
@@ -477,6 +598,7 @@ export function ModelConfigModal({
             onClick={handleSave}
             disabled={
               !draft.name.trim() ||
+              (mode === "subscription" && !draft.cli_provider) ||
               (!nameOnly &&
                 !modelDefaultsOnly &&
                 ((draft.temperature != null &&

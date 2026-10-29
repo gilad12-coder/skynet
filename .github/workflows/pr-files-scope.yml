@@ -1,0 +1,143 @@
+# Gate 3 of the merge policy in AGENTS.md: a PR may only touch the files its
+# Linear issue lists under `## Files`. Issues are written so they never
+# overlap, which is what lets implementers work in parallel; a PR that
+# strays outside its list breaks that promise, so this check goes red.
+#
+# The issue key (e.g. SKY-123) is read from the branch name or the PR title.
+# A PR with no key passes only when it carries the `no-issue` label.
+# Shared append-only files (locale catalogs, generated i18n artefacts) are
+# exempt; the merger resolves those.
+#
+# Configuration (Settings > Secrets and variables > Actions):
+#   secrets.LINEAR_API_KEY   Linear personal API key with read access
+#   vars.LINEAR_TEAM_KEY     the team key in issue identifiers, e.g. SKY
+name: pr files scope
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: pr-files-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      LINEAR_TEAM_KEY: ${{ vars.LINEAR_TEAM_KEY }}
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+    steps:
+      - name: List changed files
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' | sort -u > "$RUNNER_TEMP/changed.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/changed.txt") changed paths"
+
+      - name: Compare against the issue's Files list
+        run: |
+          python3 - <<'PY'
+          import fnmatch
+          import json
+          import os
+          import re
+          import sys
+          import urllib.request
+
+          EXEMPT = (
+              "**/locales/**/*.json",
+              "backend/core/i18n_locales/*.json",
+              "frontend/src/shared/lib/generated/*",
+              "backend/core/i18n_keys.py",
+          )
+
+          def exempt(path):
+              # fnmatch's * already crosses "/", so each "**/" also has to match zero
+              # dirs; try every combination so i18n/locales/he.json matches too.
+              def variants(pat):
+                  head, sep, tail = pat.partition("**/")
+                  if not sep:
+                      return [pat]
+                  return [head + prefix + rest for rest in variants(tail) for prefix in ("**/", "")]
+
+              return any(fnmatch.fnmatch(path, v) for pat in EXEMPT for v in variants(pat))
+
+          def summary(text):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+                  fh.write(text + "\n")
+
+          team = os.environ.get("LINEAR_TEAM_KEY", "").strip()
+          labels = set(filter(None, os.environ.get("LABELS", "").split(",")))
+          if not team:
+              print("::error::Set the LINEAR_TEAM_KEY repository variable (e.g. SKY).")
+              sys.exit(1)
+
+          pattern = re.compile(rf"\b{re.escape(team)}-\d+\b", re.IGNORECASE)
+          match = pattern.search(os.environ["HEAD_REF"]) or pattern.search(os.environ["PR_TITLE"])
+          if not match:
+              if "no-issue" in labels:
+                  summary("No Linear issue key; skipped because the PR is labeled `no-issue`.")
+                  sys.exit(0)
+              print(f"::error::No {team}-<number> key in the branch name or PR title. "
+                    "Add the Linear issue key, or label the PR `no-issue`.")
+              sys.exit(1)
+          key = match.group(0).upper()
+
+          api_key = os.environ.get("LINEAR_API_KEY", "")
+          if not api_key:
+              print("::error::The LINEAR_API_KEY secret is not set.")
+              sys.exit(1)
+          body = json.dumps({
+              "query": "query($id: String!) { issue(id: $id) { identifier description } }",
+              "variables": {"id": key},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.linear.app/graphql",
+              data=body,
+              headers={"Content-Type": "application/json", "Authorization": api_key},
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              payload = json.load(resp)
+          issue = (payload.get("data") or {}).get("issue")
+          if not issue:
+              print(f"::error::Linear issue {key} was not found ({payload.get('errors')}).")
+              sys.exit(1)
+
+          section = re.search(r"^##\s*Files\s*$(.*?)(?=^##\s|\Z)", issue["description"] or "",
+                              re.MULTILINE | re.DOTALL)
+          if not section:
+              print(f"::error::Linear issue {key} has no '## Files' section.")
+              sys.exit(1)
+          allowed = set()
+          for line in section.group(1).splitlines():
+              item = re.match(r"^\s*[-*]\s+`?([^`\s]+)`?", line)
+              if item:
+                  # Linear's markdown may escape underscores (test\_x.py).
+                  allowed.add(item.group(1).replace("\\", "").removeprefix("./"))
+
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "changed.txt")) as fh:
+              changed = [line.strip() for line in fh if line.strip()]
+          stray = [p for p in changed if p not in allowed and not exempt(p)]
+
+          summary(f"### Files scope for {key}\n\n{len(allowed)} listed, {len(changed)} changed.")
+          if stray:
+              summary("\nOutside the issue's `## Files` list:\n" + "\n".join(f"- `{p}`" for p in stray))
+              for p in stray:
+                  print(f"::error file={p}::{p} is not in {key}'s ## Files list.")
+              print(f"::error::{len(stray)} file(s) outside {key}'s scope. Either add them to the "
+                    "issue (after re-running the overlap check) or move the change to its own issue.")
+              sys.exit(1)
+          summary("\nEvery changed file is in scope.")
+          PY

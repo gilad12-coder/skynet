@@ -68,6 +68,14 @@ PAYLOAD_OVERVIEW_IS_PRIVATE = "is_private"
 # was by-reference. Persisted so the optimization detail surfaces a live link
 # back to the dataset and the dataset page can list the runs that used it.
 PAYLOAD_OVERVIEW_SOURCE_DATASET_ID = "source_dataset_id"
+# Unified (wizard v2) runs are stored as black-box runs; these keys tell them
+# apart and record how the wizard configured them.
+PAYLOAD_OVERVIEW_PAYLOAD_KIND = "payload_kind"
+PAYLOAD_OVERVIEW_ARTIFACT_KIND = "artifact_kind"
+PAYLOAD_OVERVIEW_OPTIMIZER_CHOICE = "optimizer_choice"
+PAYLOAD_OVERVIEW_OPTIMIZER_RESOLVED = "optimizer_resolved"
+PAYLOAD_OVERVIEW_DATA_MODE = "data_mode"
+PAYLOAD_OVERVIEW_SPLIT_COUNTS = "split_counts"
 
 PROGRESS_SPLITS_READY = "dataset_splits_ready"
 PROGRESS_BASELINE = "baseline_evaluated"
@@ -175,3 +183,7 @@ OPTIMIZER_REFLECTION_LM_KEY = "reflection_lm"
 OPTIMIZER_LOG_DIR_KEY = "log_dir"
 
 OPTIMIZER_NAME_GEPA = "gepa"
+
+# A worker that shuts down mid-run marks the run with this recovery cause; the
+# orphan sweep then requeues it without counting the restart as a failed attempt.
+WORKER_RESTART_CAUSE = "worker_restart"

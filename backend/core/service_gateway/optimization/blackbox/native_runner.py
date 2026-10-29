@@ -1,7 +1,7 @@
 """Execute pinned upstream agent engines with a filesystem evaluator mailbox.
 
 This standalone module is copied into the selected runtime. It deliberately
-imports no Skynet application code and never receives held-out test examples.
+imports no Skynet application code; the parent owns the scorer and its cases.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import logging
 import math
 import os
 import signal
@@ -43,8 +44,11 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
     native_engines = _sibling_modules["native_engines"]
     repo_tree = _sibling_modules["repo_tree"]
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
+# Loggers that narrate every HTTP call at INFO; their warnings still stream.
+_QUIET_LOGGERS = ("httpx", "httpcore", "urllib3", "LiteLLM", "litellm", "openai", "anthropic")
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 _PROC_ROOT = Path("/proc")
@@ -72,6 +76,9 @@ class EvaluatorMailbox:
         self.timeout_seconds = timeout_seconds
         self.error: EvaluationStopped | None = None
         self.stopped = threading.Event()
+        # Candidate and case of the evaluation this thread is making, so the
+        # parent can tag what the scorer logs while scoring it.
+        self.labels = threading.local()
         self._write_lock = threading.Lock()
 
     def evaluate(self, candidate: str, example: Any = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
@@ -92,7 +99,13 @@ class EvaluatorMailbox:
         if self.stopped.is_set():
             raise EvaluationStopped("The parent evaluator has stopped this run.")
         request_id = uuid.uuid4().hex
-        request = {"id": request_id, "candidate": candidate, "example": example}
+        request = {
+            "id": request_id,
+            "candidate": candidate,
+            "example": example,
+            "candidate_id": getattr(self.labels, "candidate_id", None),
+            "case": getattr(self.labels, "case", None),
+        }
         self.emit(_RPC_PREFIX, request)
         response_path = Path("rpc") / f"{request_id}.json"
         deadline = time.monotonic() + self.timeout_seconds
@@ -112,6 +125,10 @@ class EvaluatorMailbox:
                     raise self.error
                 return float(response["score"]), dict(response.get("info") or {})
             time.sleep(0.05)
+        if self.stopped.is_set():
+            # The supervisor stopped the run and records why; claiming a reply
+            # timeout here would mask that reason.
+            raise self.error or EvaluationStopped("The parent evaluator has stopped this run.")
         self.error = self.error or EvaluationStopped("Native evaluator response timed out.")
         self.stopped.set()
         raise self.error
@@ -127,6 +144,54 @@ class EvaluatorMailbox:
             print(f"{prefix}{self.nonce} {json.dumps(payload, default=str, allow_nan=False)}", flush=True)
 
 
+class RunLogHandler(logging.Handler):
+    """Stream every log record to the parent the moment it is emitted."""
+
+    def __init__(self, mailbox: EvaluatorMailbox) -> None:
+        """Bind the handler to the parent connection.
+
+        Args:
+            mailbox: Parent evaluation and progress connection.
+        """
+        super().__init__(logging.INFO)
+        self.mailbox = mailbox
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Send one record, with its run-log fields, as a framed log line.
+
+        Args:
+            record: Any record at INFO or above in this process.
+        """
+        try:
+            data = getattr(record, native_engines.RUN_LOG_ATTR, None)
+            line = {
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                **(data if isinstance(data, dict) else {}),
+            }
+            try:
+                self.mailbox.emit(_LOG_PREFIX, line)
+            except ValueError:
+                # A non-finite number in the fields; the line itself still matters.
+                self.mailbox.emit(_LOG_PREFIX, {**line, "fields": None})
+        except Exception:
+            self.handleError(record)
+
+
+def install_run_log(mailbox: EvaluatorMailbox) -> None:
+    """Route this process's log records to the parent's run log.
+
+    Args:
+        mailbox: Parent evaluation and progress connection.
+    """
+    root = logging.getLogger()
+    root.addHandler(RunLogHandler(mailbox))
+    root.setLevel(logging.INFO)
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 class ProgressEvalServer(EvalServer):
     """Forward aggregate checkpoints, and the case scores behind them, as upstream records them."""
 
@@ -134,7 +199,7 @@ class ProgressEvalServer(EvalServer):
         """Bind the upstream evaluator and its additive progress transport.
 
         Args:
-            task: Upstream task without held-out examples.
+            task: Upstream task carrying the job's cases, if any.
             mailbox: Parent evaluation and progress connection.
             config: Native engine evaluation budget and concurrency.
             output_dir: Persisted upstream evaluation artifacts.
@@ -189,9 +254,16 @@ class ProgressEvalServer(EvalServer):
         """
         targets = self._sweep_targets(example_ids, split)
         if set(targets) == set(self._agent_visible_ids()):
+            candidate_id = self._register_candidate(candidate)
+            native_engines.log_event(
+                "candidate.eval.start",
+                f"Evaluating candidate {candidate_id} on {len(targets)} cases",
+                candidate=candidate_id,
+                cases=len(targets),
+            )
             with self._sweep_lock:
                 self._sweeps[_candidate_key(candidate)] = {
-                    "candidate_id": self._register_candidate(candidate),
+                    "candidate_id": candidate_id,
                     "total": len(targets),
                     "scores": [],
                 }
@@ -208,6 +280,9 @@ class ProgressEvalServer(EvalServer):
         Returns:
             The unchanged upstream score and side information.
         """
+        with self._lock:
+            self.mailbox.labels.candidate_id = self._candidate_registry.get(_candidate_key(candidate))
+        self.mailbox.labels.case = None if example is None else self._case_ids.get(id(example))
         score, info = super().evaluate(candidate, example, **kwargs)
         with self._sweep_lock:
             sweep = self._sweeps.get(_candidate_key(candidate))
@@ -287,7 +362,7 @@ def _add_usage(destination: dict[str, dict[str, int]], model: str, counts: dict[
 
     Args:
         destination: Per-model cumulative usage.
-        model: Model identifier reported by Claude Code.
+        model: Model identifier reported by the proposer session.
         counts: Native token usage fields.
         camel: Whether fields use the CLI final-summary camelCase spelling.
     """
@@ -310,11 +385,13 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
         model: Configured model, used when a native record omits its model id.
 
     Returns:
-        Per-model usage from final CLI summaries or deduplicated message ids.
+        Per-model usage from final CLI summaries or deduplicated message ids,
+        with ``calls`` counting one model request per distinct assistant message.
     """
     totals: dict[str, dict[str, int]] = {}
     complete_sessions: set[str] = set()
     summaries: dict[str, dict[str, Any]] = {}
+    summary_turns: dict[str, int] = {}
     messages: dict[tuple[str, str], dict[str, Any]] = {}
     for root in paths:
         if not root.exists():
@@ -329,6 +406,7 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
             if isinstance(document, dict) and isinstance(document.get("modelUsage"), dict):
                 session = str(document.get("session_id") or path.name)
                 summaries[session] = document["modelUsage"]
+                summary_turns[session] = _number(document.get("num_turns"))
         for path in root.rglob("*.jsonl"):
             if path.is_symlink():
                 continue
@@ -357,8 +435,18 @@ def collect_usage(paths: list[Path], model: str) -> dict[str, dict[str, int]]:
             if isinstance(counts, dict):
                 _add_usage(totals, str(native_model), counts, camel=True)
     for (session, _message_id), message in messages.items():
+        message_model = str(message.get("model") or model)
         if session not in complete_sessions:
-            _add_usage(totals, str(message.get("model") or model), message["usage"], camel=False)
+            _add_usage(totals, message_model, message["usage"], camel=False)
+        current = totals.setdefault(message_model, {**dict.fromkeys(_TOKEN_NAMES, 0), "total_tokens": 0})
+        current["calls"] = current.get("calls", 0) + 1
+    sessions_with_messages = {session for session, _message_id in messages}
+    # A summary without its transcript still reports how many turns it took.
+    for session in complete_sessions - sessions_with_messages:
+        first_model = next((str(name) for name, counts in summaries[session].items() if isinstance(counts, dict)), None)
+        if first_model is not None and summary_turns.get(session):
+            current = totals[first_model]
+            current["calls"] = current.get("calls", 0) + summary_turns[session]
     return totals
 
 
@@ -366,7 +454,7 @@ def _descendants() -> list[int]:
     """Find only processes descended from this isolated runner.
 
     Returns:
-        Child process ids, including separately grouped Claude sessions.
+        Child process ids, including separately grouped proposer sessions.
     """
     parents: dict[int, int] = {}
     if _PROC_ROOT.is_dir():
@@ -516,25 +604,24 @@ def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
         Only the keys the named engine's config dataclass accepts, minus unset ones.
     """
     if engine_id == "meta_harness":
-        names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
-    elif engine_id == "gepa_repo":
-        names = ("effort", "max_thinking_tokens")
+        names: tuple[str, ...] = ("max_candidates_per_iter",)
+    elif engine_id in ("gepa_repo", "best_of_n_repo"):
+        names = ()
     else:
-        names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
+        names = ("ralph", "max_no_eval_seconds")
     return {name: proposer[name] for name in names if proposer.get(name) is not None}
 
 
 def _install_proposer(proposer: dict[str, Any]) -> None:
     """Put the configured harness behind the ``claude`` command the upstream engines run.
 
-    Claude Code itself stays the ``claude`` command, aimed at Anthropic when the
-    run holds its owner's key.
+    A block without a ``run_command`` (only engine knobs) leaves ``claude`` as
+    whatever is on ``PATH``, which only tests provide.
 
     Args:
         proposer: Proposer block of the parent payload.
     """
-    if not proposer or proposer.get("harness") == "claude_code":
-        harness_bridge.use_direct_anthropic(os.environ)
+    if not proposer.get("run_command"):
         return
     config_file = Path("proposer.json").resolve()
     config_file.write_text(json.dumps(proposer), encoding="utf-8")
@@ -552,7 +639,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Result envelope, or a failure envelope retaining available usage.
     """
-    if payload.get("engine_id") not in ("meta_harness", "autoresearch", "gepa_repo"):
+    if payload.get("engine_id") not in native_engines.ENGINES:
         raise ValueError("Unsupported native optimizer.")
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")
@@ -562,14 +649,14 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
     repo = payload.get("repo")
     if repo is not None:
-        if payload["engine_id"] not in ("autoresearch", "gepa_repo"):
-            raise ValueError("Only AutoResearch and GEPA optimize a repository.")
         checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
+        repo_tree.exclude_paths(checkout, harness_bridge.workspace_files(proposer))
         config_values["repo"] = {
             "checkout": str(checkout),
             "base": repo_tree.BASE_REF,
             "editable_paths": list(repo["editable_paths"]),
             "readonly_paths": list(repo["readonly_paths"]),
+            "constrained": bool(repo.get("constrained")),
             "tools": str(Path(__file__).resolve().parent),
         }
     if payload["engine_id"] == "meta_harness" and payload.get("max_iterations") is not None:
@@ -587,6 +674,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         engine_config=config_values,
     )
     mailbox = EvaluatorMailbox(payload["nonce"], float(payload["timeout_seconds"]))
+    install_run_log(mailbox)
     server = ProgressEvalServer(task, mailbox, config, output_dir)
     engine = native_engines.ENGINES[payload["engine_id"]](config)
     document: dict[str, Any] = {}
@@ -594,6 +682,13 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
 
     def optimize() -> None:
         """Run upstream on a supervised thread so evaluator failures cannot spawn retries."""
+        native_engines.log_event(
+            "phase.start",
+            f"Starting {payload['engine_id']} with up to {config.max_evals} evaluations",
+            phase="optimize",
+            engine=payload["engine_id"],
+            max_evals=config.max_evals,
+        )
         try:
             result = engine.run(task, server)
             engine.process_result(result, output_dir)
@@ -605,8 +700,22 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
                     "metadata": result.metadata,
                 }
             )
+            native_engines.log_event(
+                "phase.end",
+                f"{payload['engine_id']} finished, best score {result.best_score}",
+                phase="optimize",
+                best_score=result.best_score,
+                total_evals=server.budget.used,
+            )
         except (Exception, EvaluationStopped) as exc:
             document["error"] = f"{type(exc).__name__}: {exc}"
+            native_engines.log_event(
+                "phase.end",
+                f"{payload['engine_id']} stopped: {document['error']}",
+                level=logging.WARNING,
+                phase="optimize",
+                error=document["error"],
+            )
         finally:
             finished.set()
 

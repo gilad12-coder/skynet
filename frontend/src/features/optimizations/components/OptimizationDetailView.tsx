@@ -19,9 +19,6 @@ import {
   Copy,
   Database,
   Gear,
-  Pulse,
-  Eye,
-  PencilSimple,
   ArrowCounterClockwise,
   Play,
   Pause,
@@ -30,6 +27,8 @@ import {
   Package,
   Cube,
   Coins,
+  Repeat,
+  Trophy,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 
@@ -52,62 +51,63 @@ import {
   serveProgramStream,
   servePairProgramStream,
   serveSharedOptimization,
+  STORAGE_CHANGED_EVENT,
+  getContinuousState,
 } from "@/shared/lib/api";
-import type {
-  LMActivity,
-  ServeInfoResponse,
-  WorkflowNodeTrace,
-  WorkflowSpec,
-} from "@/shared/types/api";
-// Leaf import on purpose — the tutorial barrel deliberately does not re-export
-// the demo fixtures (see features/tutorial/index.ts).
-// eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import {
-  DEMO_OPTIMIZATION_ID,
-  DEMO_GRID_OPTIMIZATION_ID,
-  DEMO_BLACKBOX_OPTIMIZATION_ID,
-  DEMO_TRAJECTORY_PREVIEW_LAYOUT,
-  buildDemoOptimizationPayload,
-  buildGridDemoJob,
-  buildBlackboxDemoJob,
-  buildBlackboxDemoPayload,
-  finishDemoSimulation,
-  resetDemoSimulation,
-  startDemoSimulation,
-} from "@/features/tutorial/lib/demo-data";
+import type { ServeInfoResponse, WorkflowNodeTrace, WorkflowSpec } from "@/shared/types/api";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatBytes } from "@/shared/lib/formatters";
-import { localizeStoredReason, TERMS } from "@/shared/lib/terms";
+import { TERMS } from "@/shared/lib/terms";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-status";
-import { registerTutorialHook } from "@/features/tutorial";
-import type { OptimizationStatusResponse, OptimizationPayloadResponse } from "@/shared/types/api";
+import { useRunLogStream } from "../hooks/use-run-log-stream";
+import { QUOTA_FULL_EVENT, maxLogId, mergeLiveLogs, pruneLiveLogs } from "../lib/run-log-merge";
+import { detailTabGate, useExperienceLevel } from "@/features/experience";
+import type {
+  OptimizationLogEntry,
+  OptimizationStatusResponse,
+  OptimizationPayloadResponse,
+} from "@/shared/types/api";
 import type { SharedOptimizationData } from "@/shared/lib/api";
 import { extractScoresFromLogs } from "../lib/extract-scores";
 import { extractBlackboxScorePoints } from "../lib/blackbox";
 import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
+import {
+  rememberRunKind,
+  measureOverview,
+  rememberRunShape,
+  runShapeHint,
+  runShapeKey,
+  useRunKindHint,
+  type RunShape,
+} from "../lib/run-kind-hint";
+import { runCostCents } from "../lib/run-billing";
+import { requestedDetailTab, shownDetailTab } from "../lib/detail-tabs";
 import { DataTab } from "./DataTab";
 import { LogsTab } from "./LogsTab";
 import { DeleteJobDialog } from "./DeleteJobDialog";
 import { ShareDialog } from "./ShareDialog";
+import { RunAccessBanner } from "./RunAccessBanner";
 import { StatusBadge } from "@/shared/ui/status-badge";
 import { ConfigTab } from "./ConfigTab";
 import { CodeTab } from "./CodeTab";
 import { ArtifactTab } from "./ArtifactTab";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
-import { BudgetTab } from "./BudgetTab";
+import { HeldOutNotice, isNotHeldOut } from "./RewardComparison";
+import { RewardTab, hasRewardTab } from "./RewardTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCostChip } from "./RunCostChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
-import { BlackboxLMActivityTab, LMActivityTab } from "./LMActivityTab";
+import { UsageTab } from "./UsageTab";
+import { ContinuousTab } from "./ContinuousTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
@@ -116,7 +116,81 @@ import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-f
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
-const PHONE_DETAIL_TABS = new Set(["overview", "playground", "best", "artifact", "logs", "budget"]);
+/**
+ * Records the Overview's block heights for this view's next loading skeleton,
+ * again whenever they change (a live run grows, a chart lands).
+ */
+function useRememberOverview(hintKey: string) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!node) return;
+    let frame = 0;
+    const record = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const overview = measureOverview(node);
+        if (overview) rememberRunShape(hintKey, { overview });
+      });
+    };
+    const observer = new ResizeObserver(record);
+    observer.observe(node);
+    for (const child of Array.from(node.children)) observer.observe(child);
+    const mutations = new MutationObserver(() => {
+      for (const child of Array.from(node.children)) observer.observe(child);
+      record();
+    });
+    mutations.observe(node, { childList: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, [node, hintKey]);
+  return setNode;
+}
+
+/**
+ * Records the open tab's panel height (any tab but Overview, which keeps its
+ * own block-level record) for the skeleton of a deep link back to that tab.
+ */
+function useRememberPanel(hintKey: string, tab: string) {
+  useEffect(() => {
+    if (tab === "overview") return;
+    const panel = document.querySelector<HTMLElement>(
+      `[data-detail-tabs] > [role="tabpanel"][data-state="active"]`,
+    );
+    if (!panel) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const box = panel.getBoundingClientRect();
+        if (box.height === 0) return;
+        // A tab whose content carries its own top margin (Logs) starts lower.
+        const first = panel.firstElementChild?.getBoundingClientRect();
+        const gap = first ? Math.max(0, Math.round((first.top - box.top) * 100) / 100) : 0;
+        const h = Math.round((box.height - gap) * 100) / 100;
+        const panels = {
+          ...runShapeHint(hintKey)?.panels,
+          [tab]: { vw: window.innerWidth, gap, h },
+        };
+        rememberRunShape(hintKey, { panels });
+      });
+    });
+    observer.observe(panel);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [hintKey, tab]);
+}
+
+/** Records this view's tab bar and header for its next loading skeleton. */
+function RememberRunShape({ hintKey, shape }: { hintKey: string; shape: RunShape }) {
+  const json = JSON.stringify(shape);
+  useEffect(() => rememberRunShape(hintKey, JSON.parse(json) as RunShape), [hintKey, json]);
+  return null;
+}
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
 // backend, which stores UTC datetimes that Pydantic emits without a suffix.
@@ -248,7 +322,7 @@ function FailureCopyButton({ text }: { text: string }) {
       text={text}
       ariaLabel={msg("shared.code_editor.copy")}
       copiedAriaLabel={msg("shared.code_editor.copied")}
-      className="-me-1 shrink-0 text-[#B04030]/70 hover:bg-[#B04030]/10 hover:text-[#B04030]"
+      className="-me-1 shrink-0 text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
     />
   );
 }
@@ -267,38 +341,36 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const shareCanServe = isShare && (shareRole === "editor" || shareRole === "owner");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") ?? "overview";
-  const [detailTab, setDetailTab] = useState(initialTab);
+  const [detailTab, setDetailTab] = useState(() => requestedDetailTab(searchParams.get("tab")));
   // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs,
-  // Spending. Data/Code/LM activity/Config are desk work; a deep link to one of
+  // Usage and cost. Data/Code/LM activity/Config are desk work; a deep link to one of
   // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
-  const activeDetailTab = isPhone && !PHONE_DETAIL_TABS.has(detailTab) ? "overview" : detailTab;
-  // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
-  useEffect(() => registerTutorialHook("setDetailTab", setDetailTab), []);
+  const activeDetailTab = shownDetailTab(detailTab, isPhone);
+  const surfaceLevel = useExperienceLevel();
+  const levelTabGate = detailTabGate(surfaceLevel);
+  const linkedDetailTab = requestedDetailTab(searchParams.get("tab"));
 
-  const isDemoMode = id === DEMO_OPTIMIZATION_ID;
-  const isGridDemoMode = id === DEMO_GRID_OPTIMIZATION_ID;
-  const isBlackboxDemoMode = id === DEMO_BLACKBOX_OPTIMIZATION_ID;
-  const isAnyDemoMode = isDemoMode || isGridDemoMode || isBlackboxDemoMode;
   // Public read-only share view: seed from props; never call authed endpoints.
-  const skipNetwork = isAnyDemoMode || isShare;
+  const skipNetwork = isShare;
 
   // The NextAuth session resolves asynchronously on the client. Without this
   // gate the first getJob() fires before setApiAuthToken() runs, returns 401,
   // and flashes the "not found" UI until SSE/poll refetches a few seconds
   // later with the token now in place.
   const { status: sessionStatus } = useSession();
-  const authReady = isAnyDemoMode || isShare || sessionStatus === "authenticated";
+  const authReady = isShare || sessionStatus === "authenticated";
 
   const [job, setJob] = useState<OptimizationStatusResponse | null>(null);
   const [payload, setPayload] = useState<OptimizationPayloadResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Shapes the loading skeleton like this run's kind when an earlier fetch saw it.
+  const kindHint = useRunKindHint(id);
   const [error, setError] = useState<string | null>(null);
 
   // Stamp this run as recent only while it's actually in progress, so the
   // sidebar's Optimize button resumes ongoing work — never a finished run the
-  // user merely opened to look at. Share/demo views aren't the caller's to resume.
+  // user merely opened to look at. Share views aren't the caller's to resume.
   useEffect(() => {
     if (skipNetwork || !id || !job || !ACTIVE_STATUSES.has(job.status)) return;
     markRecentSession("optimization", id);
@@ -306,64 +378,20 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   }, [id, skipNetwork, job?.status]);
   // Funnel milestone: the user has seen a finished run's results. Once per
   // run per mount — the poll re-renders, and a run that finishes while open
-  // counts the moment it flips to success. Demo runs are excluded.
+  // counts the moment it flips to success.
   const resultsViewedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!id || isAnyDemoMode || job?.status !== "success" || resultsViewedFor.current === id)
-      return;
+    if (!id || job?.status !== "success" || resultsViewedFor.current === id) return;
     resultsViewedFor.current = id;
     track(TelemetryEvent.ResultsViewed, {
       optimization_type: job.optimization_type,
       shared: isShare,
     });
-  }, [id, isAnyDemoMode, isShare, job?.status, job?.optimization_type]);
+  }, [id, isShare, job?.status, job?.optimization_type]);
   // Re-run mints a brand-new run per call, so guard against a double-click
   // firing two retries (and creating two duplicate runs).
   const [resuming, setResuming] = useState(false);
   const [pausing, setPausing] = useState(false);
-
-  // Bump to replay the demo optimization simulation. The deep-dive tour
-  // triggers this when reaching the trajectory step so users watch the tree
-  // grow live instead of seeing the already-completed final state.
-  const [demoReplayKey, setDemoReplayKey] = useState(0);
-
-  useEffect(
-    () =>
-      registerTutorialHook("replayDemoSimulation", () => {
-        resetDemoSimulation();
-        setDemoReplayKey((k) => k + 1);
-      }),
-    [],
-  );
-  // Re-running the simulation effect clears the pending replay timers, and a
-  // completed simulation starts straight at the finished run.
-  useEffect(
-    () =>
-      registerTutorialHook("finishDemoSimulation", () => {
-        if (finishDemoSimulation()) setDemoReplayKey((k) => k + 1);
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    if (!isDemoMode) return;
-    setPayload(buildDemoOptimizationPayload());
-    const fromTrajectory = demoReplayKey > 0;
-    return startDemoSimulation({ setJob: (fn) => setJob(fn), setLoading }, { fromTrajectory });
-  }, [isDemoMode, demoReplayKey]);
-
-  useEffect(() => {
-    if (!isGridDemoMode) return;
-    setJob(buildGridDemoJob());
-    setLoading(false);
-  }, [isGridDemoMode]);
-
-  useEffect(() => {
-    if (!isBlackboxDemoMode) return;
-    setPayload(buildBlackboxDemoPayload());
-    setJob(buildBlackboxDemoJob());
-    setLoading(false);
-  }, [isBlackboxDemoMode]);
 
   // Seed the read-only share view from the public composite; no fetching.
   useEffect(() => {
@@ -420,11 +448,47 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       : (effectiveJob.grid_result.pair_results.find((p) => p.pair_index === activePairIndex) ??
         null);
   const isPairContext = activePair != null;
+  const overviewRef = useRememberOverview(runShapeKey(id, isPairContext));
+  useRememberPanel(
+    runShapeKey(id, isPairContext),
+    loading || !authReady || !job ? "overview" : activeDetailTab,
+  );
 
   // Hoisted so the memos below depend on a plain local — the React Compiler lint
   // can't equate an inferred `job.logs` path with a `job?.logs` dependency
   // literal, which would skip optimizing the whole component.
-  const jobLogs = job?.logs;
+  const fetchedLogs = job?.logs;
+  // Rows the live log stream delivered since the last fetch. Kept apart from
+  // job.logs because fetchJob's delta cursor counts the fetched rows only.
+  const [liveLogs, setLiveLogs] = useState<OptimizationLogEntry[]>([]);
+  const fetchedLogsRef = useRef(fetchedLogs);
+  useEffect(() => {
+    fetchedLogsRef.current = fetchedLogs;
+    if (fetchedLogs) setLiveLogs((cur) => pruneLiveLogs(fetchedLogs, cur));
+  }, [fetchedLogs]);
+  const hasJob = !!job;
+  const jobRunning = !!job && !TERMINAL_STATUSES.has(job.status);
+  const quotaToastShownRef = useRef(false);
+  const logStreamStatus = useRunLogStream(
+    !skipNetwork && authReady && hasJob && jobRunning
+      ? `${getRuntimeEnv().apiUrl}/optimizations/${encodeURIComponent(id)}/logs/stream`
+      : "",
+    () => maxLogId(fetchedLogsRef.current),
+    (entries) => {
+      setLiveLogs((cur) => [...cur, ...entries]);
+      if (!quotaToastShownRef.current && entries.some((e) => e.event === QUOTA_FULL_EVENT)) {
+        quotaToastShownRef.current = true;
+        toast.warning(msg("optimizations.logs.quota_full_toast"), {
+          toastId: "run-log-quota-full",
+        });
+        window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
+      }
+    },
+  );
+  const jobLogs = useMemo(
+    () => (fetchedLogs ? mergeLiveLogs(fetchedLogs, liveLogs) : undefined),
+    [fetchedLogs, liveLogs],
+  );
 
   const pairScorePoints = useMemo(() => {
     if (activePairIndex === null || !jobLogs) return [];
@@ -466,6 +530,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           }
         : undefined;
       const data = await getJob(id, cursor);
+      rememberRunKind(id, data.optimization_type);
       setJob((cur) => mergeJobDelta(cur, data));
       setError(null);
     } catch (err) {
@@ -492,7 +557,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     getOptimizationPayload(id)
       .then(setPayload)
       .catch(() => {});
-  }, [id, isAnyDemoMode, authReady]);
+  }, [id, skipNetwork, authReady]);
 
   useEffect(() => {
     jobRef.current = job;
@@ -521,7 +586,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     if (skipNetwork) return;
     if (!authReady) return;
     void fetchJob();
-  }, [id, isAnyDemoMode, authReady, fetchJob]);
+  }, [id, skipNetwork, authReady, fetchJob]);
 
   const API = getRuntimeEnv().apiUrl;
   useStreamWithPollFallback({
@@ -599,7 +664,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       window.removeEventListener("optimization-renamed", onRenamed);
       window.removeEventListener("optimization-updated", onUpdated);
     };
-  }, [id, fetchJob, isAnyDemoMode]);
+  }, [id, fetchJob, skipNetwork]);
 
   const handleCancel = async () => {
     if (skipNetwork) return;
@@ -614,7 +679,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   const handleRetry = () => {
     if (skipNetwork) return;
-    router.push(`/submit?clone=${id}${cloneQuery}`);
+    router.push(`/submit?clone=${id}`);
   };
 
   const handleResume = async () => {
@@ -650,34 +715,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     }
   };
 
-  useEffect(() => {
-    if (isDemoMode && job?.status === "success") {
-      setServeInfo({
-        optimization_id: id,
-        module_name: "Predict",
-        optimizer_name: "GEPA",
-        model_name: "gpt-4o-mini",
-        input_fields: ["email_text"],
-        output_fields: ["category"],
-        instructions: "Classify an email into a category: spam, important, or promotional.",
-        demo_count: 3,
-      });
-    }
-    if (isGridDemoMode && job?.status === "success") {
-      const best = job.grid_result?.best_pair;
-      setServeInfo({
-        optimization_id: id,
-        module_name: "ChainOfThought",
-        optimizer_name: "GEPA",
-        model_name: best?.generation_model ?? "openai/gpt-4o-mini",
-        input_fields: ["article"],
-        output_fields: ["summary"],
-        instructions: best?.program_artifact?.optimized_prompt?.instructions ?? "",
-        demo_count: 1,
-      });
-    }
-  }, [isDemoMode, isGridDemoMode, id, job?.status, job?.grid_result]);
-
   // Share view: seed the playground serve info from the public composite.
   // It is non-null only for viewer+ (the backend nulls it for anonymous view).
   useEffect(() => {
@@ -703,6 +740,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       );
     };
     const isGrid = job.optimization_type === "grid_search";
+    // The grid summary never reads this: its Usage tab (GridServeTab) loads
+    // each pair's own serve info. Asking anyway 409s on a grid with no pair
+    // results, as does a pair link to a pair that isn't there.
+    if (isGrid && !isPairContext) return;
     const loader =
       isGrid && activePairIndex != null ? getPairServeInfo(id, activePairIndex) : getServeInfo(id);
     loader
@@ -711,7 +752,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setServeInfoError(null);
       })
       .catch(onFail);
-  }, [id, job?.status, job?.optimization_type, activePairIndex, isAnyDemoMode]);
+  }, [id, job?.status, job?.optimization_type, activePairIndex, isPairContext, skipNetwork]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -929,39 +970,57 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   const signatureCode = (payload?.payload?.signature_code as string) ?? null;
   const blackboxScorer = payload?.payload?.scorer as { metric_code?: string } | undefined;
+  const blackboxWorkspace = payload?.payload?.workspace as { metric_code?: string } | undefined;
   const metricCode =
-    (payload?.payload?.metric_code as string) ?? blackboxScorer?.metric_code ?? null;
+    (payload?.payload?.metric_code as string) ??
+    blackboxWorkspace?.metric_code ??
+    blackboxScorer?.metric_code ??
+    null;
   const workflowSpec = (payload?.payload?.workflow as WorkflowSpec | undefined) ?? null;
 
-  // The clone link carries the recipe so the picker opens preselected on the
-  // source job's slide. Payloads older than the stored recipe field carry no
-  // prompt-vs-code signal, so legacy black-box jobs fall back to "anything" —
-  // the general recipe — matching the sidebar's clone link.
   const payloadRecipe = payload?.payload?.recipe as string | undefined;
-  const cloneRecipe =
-    job?.optimization_type !== "blackbox"
-      ? "program"
-      : payloadRecipe === "prompt" ||
-          payloadRecipe === "code" ||
-          payloadRecipe === "anything" ||
-          payloadRecipe === "repo"
-        ? payloadRecipe
-        : "anything";
-  const cloneQuery = `&recipe=${cloneRecipe}`;
 
   // Black-box runs announce each scored version as a candidate event rather
   // than a GEPA log line, so the chart reads the newest lane's candidates.
   const jobIsBlackbox = job?.optimization_type === "blackbox";
   const jobProgressEvents = job?.progress_events;
+  const blackboxCandidates = useMemo(
+    () => (jobIsBlackbox ? extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])) : []),
+    [jobIsBlackbox, jobProgressEvents],
+  );
   const scorePoints = useMemo(
     () =>
       jobIsBlackbox
-        ? extractBlackboxScorePoints(extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])))
+        ? extractBlackboxScorePoints(blackboxCandidates)
         : jobLogs?.length
           ? extractScoresFromLogs(jobLogs)
           : [],
-    [jobIsBlackbox, jobProgressEvents, jobLogs],
+    [jobIsBlackbox, blackboxCandidates, jobLogs],
   );
+
+  // A schedule set up in the submit wizard stays on its run when the run fails,
+  // so that run still shows the tab to explain why it never started.
+  const jobStatus = job?.status;
+  const jobId = job?.optimization_id;
+  const endedRun = jobStatus === "failed" || jobStatus === "cancelled" || jobStatus === "stopped";
+  const [endedRunHasPlan, setEndedRunHasPlan] = useState(false);
+  useEffect(() => {
+    if (!endedRun || !jobIsBlackbox || !jobId || skipNetwork || isPairContext) {
+      setEndedRunHasPlan(false);
+      return;
+    }
+    let cancelled = false;
+    getContinuousState(jobId)
+      .then((state) => {
+        if (!cancelled) setEndedRunHasPlan(state.plan != null);
+      })
+      .catch(() => {
+        if (!cancelled) setEndedRunHasPlan(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [endedRun, jobIsBlackbox, jobId, skipNetwork, isPairContext]);
 
   // Optimized prompt picks the pair's artifact in pair view, otherwise falls
   // back to the run's artifact, otherwise to the grid's best pair (for the
@@ -1007,11 +1066,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     : (job?.result?.program_artifact ?? job?.grid_result?.best_pair?.program_artifact ?? null);
   const showArtifactTab = !!(optimizedPrompt || reactOverlay || artifactFiles);
 
-  // LM activity is pair-scoped in pair view, otherwise the run's.
-  const viewLmActivity: LMActivity | null = isPairContext
-    ? ((activePair.lm_activity as LMActivity | undefined) ?? null)
-    : ((job?.result?.lm_activity as LMActivity | undefined) ?? null);
-
   const isActive = job ? ACTIVE_STATUSES.has(job.status) : false;
   const startedAt = job?.started_at ?? null;
   const createdAt = job?.created_at ?? null;
@@ -1041,12 +1095,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   );
 
   if (loading || !authReady) {
-    return <OptimizationDetailSkeleton />;
+    return (
+      <OptimizationDetailSkeleton
+        pair={activePairIndex !== null}
+        grid={(job?.optimization_type ?? kindHint) === "grid_search"}
+      />
+    );
   }
 
   if (error || !job) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+      <div className="flex flex-col items-center justify-center min-h-[60dvh] gap-4">
         <XCircle className="size-12 text-destructive" />
         <p className="text-lg text-muted-foreground">
           {error ??
@@ -1063,6 +1122,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const effectiveRole = job.effective_role ?? null;
   const canEditRun = effectiveRole == null || effectiveRole === "editor";
   const canDeleteRun = effectiveRole == null;
+  // Grid searches are retired: their stored runs stay readable, but the backend
+  // refuses to clone, retry or resume one, so those actions are hidden.
+  const canRerun = job.optimization_type !== "grid_search";
   // Sharing is owner-only: members (even editors) can't invite, change roles,
   // or set general access. null = the owner's own run / admin / co-owner.
   // Never on the public /share/<token> route: there the job is seeded from
@@ -1076,9 +1138,26 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const callerRole = isShare ? shareRole : effectiveRole;
   const sharedTier = callerRole === "editor" ? "editor" : callerRole === "viewer" ? "viewer" : null;
   const sharedByOwner = isShare ? shareData?.owner : job.username;
-  // Split "מאת {name}" so the emphasis (semibold/foreground) lands only on the
-  // owner name; the "by" prefix stays muted meta text.
-  const [sharedByPrefix, sharedBySuffix] = msg("optimization.readonly_by").split("{name}");
+  // The header's icon actions below, counted for the loading skeleton. The
+  // phone shell keeps only share and cancel; a share view has just the clone
+  // button, on wide screens, and otherwise no action row.
+  const canRestart =
+    canEditRun &&
+    (job.status === "failed" || job.status === "cancelled" || job.status === "paused") &&
+    !isBudgetPause(job);
+  const canCancel = canEditRun && isActive;
+  const headerActionCounts = isShare
+    ? { wide: shareCanInteract ? 1 : null, phone: null }
+    : {
+        wide:
+          Number(canManageShare) +
+          1 +
+          Number(canRestart) +
+          Number(canCancel && !!job.pausable) +
+          Number(canCancel) +
+          Number(canDeleteRun && isTerminal),
+        phone: Number(canManageShare) + Number(canCancel),
+      };
   // Pair-aware terminal: a pair is considered "available for data export" once
   // it has either a program artifact or an error recorded. This mirrors the
   // standalone job's "isTerminal" gate so the data/export surfaces appear
@@ -1095,21 +1174,35 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // Share view: only editor+ may run inference (it spends the owner's key),
   // and only through the single non-streaming /share serve endpoint, so it
   // needs a seeded serveInfo (the backend nulls serve_info below editor).
+  // The level trims desk tabs, but a deep link to one still opens it: the
+  // linked tab is kept rather than stranding the link on Overview.
+  const levelShowsTab = (tab: string) => isShare || levelTabGate(tab) || tab === linkedDetailTab;
   const showPlaygroundTab = isShare
     ? shareCanServe && job.status === "success" && !!serveInfo
     : job.status === "success" && (job.optimization_type === "grid_search" || !!serveInfo);
-  const showDataTab = isShare
-    ? !!shareData?.dataset
-    : isPairContext
-      ? isPairTerminal
-      : isTerminal && job.optimization_type !== "grid_search" && !jobIsBlackbox;
-  const showLogsTab = job.optimization_type !== "grid_search" || isPairContext;
+  const showDataTab =
+    (isShare
+      ? !!shareData?.dataset
+      : isPairContext
+        ? isPairTerminal
+        : isTerminal && job.optimization_type !== "grid_search" && !jobIsBlackbox) &&
+    levelShowsTab("data");
+  const showLogsTab =
+    (job.optimization_type !== "grid_search" || isPairContext) && levelShowsTab("logs");
   const showBestVersionTab = jobIsBlackbox && !!job.blackbox_result;
   // A remote-scorer black-box run has no code to show at all.
-  const showCodeTab = !jobIsBlackbox || !!metricCode;
-  const showLmActivityTab =
-    viewLmActivity != null || (job.blackbox_result?.usage_by_model?.length ?? 0) > 0;
-  const showBudgetTab = (job.execution_budget ?? job.terminal_evidence?.execution_budget) != null;
+  const showCodeTab = (!jobIsBlackbox || !!metricCode) && levelShowsTab("code");
+  const showConfigTab = levelShowsTab("config");
+  const showRewardTab = jobIsBlackbox && hasRewardTab(payload?.payload) && levelShowsTab("reward");
+  // Usage reads the run's billing records, which only an authenticated viewer can fetch.
+  const showUsageTab = !skipNetwork;
+  // Continuous optimization starts from the owner's own successful black-box
+  // run; the backend still decides whether this run can carry a plan.
+  const showContinuousTab =
+    !skipNetwork &&
+    !isPairContext &&
+    jobIsBlackbox &&
+    (job.status === "success" || endedRunHasPlan);
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
@@ -1117,53 +1210,24 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   return (
     <div className="space-y-6 pb-12">
-      {sharedTier && (
-        <div
-          role="status"
-          className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-gradient-to-br from-muted/60 to-muted/25 px-4 py-2.5 shadow-sm"
-        >
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/5 text-primary/80">
-            {sharedTier === "editor" ? (
-              <PencilSimple className="size-4" aria-hidden="true" />
-            ) : (
-              <Eye className="size-4" aria-hidden="true" />
-            )}
-          </span>
-          <span className="min-w-0 text-sm font-medium text-foreground/90">
-            {msg(
-              sharedTier === "editor"
-                ? "optimization.access_banner.editor"
-                : "optimization.access_banner.viewer",
-            )}
-          </span>
-          {sharedByOwner && (
-            <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 text-xs text-muted-foreground sm:ms-auto sm:flex-none">
-              <span dir="auto" className="min-w-0 truncate">
-                {sharedByPrefix}
-                <span dir="auto" className="font-semibold text-foreground">
-                  {sharedByOwner}
-                </span>
-                {sharedBySuffix}
-              </span>
-              <span
-                aria-hidden="true"
-                className="grid size-4 shrink-0 place-items-center rounded-full bg-primary/10 text-[0.5625rem] font-semibold uppercase text-primary"
-              >
-                {sharedByOwner.trim().charAt(0)}
-              </span>
-            </span>
-          )}
-        </div>
-      )}
+      {sharedTier && <RunAccessBanner tier={sharedTier} owner={sharedByOwner} />}
+      {/* Gate on the predicate too: an empty FadeIn div would add a space-y-6 gap above the summary. */}
+      {jobIsBlackbox &&
+        job.status === "success" &&
+        job.blackbox_result &&
+        isNotHeldOut(job.blackbox_result.split_counts) && (
+          <FadeIn delay={0.1} className="mb-3">
+            <HeldOutNotice splitCounts={job.blackbox_result.split_counts} />
+          </FadeIn>
+        )}
       <FadeIn delay={0.1}>
-        <div
-          className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
-          data-tutorial="detail-header"
-        >
+        <div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
             <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
-                <StatusBadge status={job.status} />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusBadge status={job.status} />
+                </div>
                 {job.name && (
                   <h2 className="text-lg sm:text-xl font-bold tracking-tight" dir="auto">
                     {job.name}
@@ -1184,7 +1248,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   ariaLabel={formatMsg("auto.app.optimizations.id.page.template.3", {
                     p1: TERMS.optimization,
                   })}
-                  title={msg("auto.app.optimizations.id.page.literal.1")}
                   onCopied={notifyCopied}
                 />
               </span>
@@ -1226,24 +1289,24 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   </Link>
                 )}
                 {!isPairContext && (
-                  <RunCostChip details={job.result?.details ?? job.blackbox_result?.details} />
+                  <RunCostChip
+                    details={job.result?.details ?? job.blackbox_result?.details}
+                    budget={job.execution_budget ?? job.terminal_evidence?.execution_budget}
+                    running={isActive}
+                    onOpen={showUsageTab ? () => setDetailTab("usage") : undefined}
+                  />
                 )}
               </div>
             </div>
             {!isShare && (
-              <div
-                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2"
-                data-tutorial="result-actions"
-              >
+              <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2">
                 {canManageShare && <ShareDialog optimizationId={job.optimization_id} />}
-                {!isPhone && (
+                {!isPhone && canRerun && (
                   <TooltipButton tooltip={msg("auto.app.optimizations.id.page.4")}>
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() =>
-                        router.push(`/submit?clone=${job.optimization_id}${cloneQuery}`)
-                      }
+                      onClick={() => router.push(`/submit?clone=${job.optimization_id}`)}
                       aria-label={msg("auto.app.optimizations.id.page.literal.4")}
                     >
                       <Copy className="size-4" />
@@ -1252,6 +1315,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 )}
                 {!isPhone &&
                   canEditRun &&
+                  canRerun &&
                   (job.status === "failed" ||
                     job.status === "cancelled" ||
                     job.status === "paused") &&
@@ -1319,7 +1383,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 )}
               </div>
             )}
-            {shareCanInteract && !isPhone && (
+            {shareCanInteract && !isPhone && canRerun && (
               <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
                 <TooltipButton tooltip={msg("share.clone_tooltip")}>
                   <Button
@@ -1328,8 +1392,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     onClick={() =>
                       router.push(
                         shareToken
-                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}${cloneQuery}`
-                          : `/submit?clone=${job.optimization_id}&public=1${cloneQuery}`,
+                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}`
+                          : `/submit?clone=${job.optimization_id}&public=1`,
                       )
                     }
                     aria-label={msg("share.clone")}
@@ -1364,11 +1428,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           onBack={() => router.push(`/optimizations/${id}`)}
           onPrev={() => router.push(`/optimizations/${id}?pair=${activePair.pair_index - 1}`)}
           onNext={() => router.push(`/optimizations/${id}?pair=${activePair.pair_index + 1}`)}
-          onClone={() =>
-            router.push(
-              `/submit?clone=${effectiveJob.optimization_id}&pair=${activePair.pair_index}${cloneQuery}`,
-            )
-          }
           onCancel={handleCancel}
           onDeleted={() => router.push(`/optimizations/${id}`)}
         />
@@ -1376,35 +1435,35 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {job.status === "failed" && !isPairContext && (job.message || (metrics.error as string)) && (
         <FadeIn delay={0.15}>
-          <div className="rounded-xl border border-[#B04030]/20 bg-gradient-to-br from-[#B04030]/[0.05] to-[#B04030]/[0.015] p-5 shadow-[0_1px_3px_rgba(176,64,48,0.07)]">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.04] p-5">
             <div className="flex items-center gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#B04030]/10 text-[#B04030]">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <XCircle className="size-5" />
               </span>
-              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E]">
+              <p className="min-w-0 flex-1 text-sm font-semibold text-[#7A2A1E] dark:text-[#ffb1a0]">
                 {msg("auto.app.optimizations.id.page.6")}
               </p>
             </div>
-            <div className="mt-3 rounded-lg border border-[#B04030]/15 bg-[#B04030]/[0.035] px-3.5 py-2.5">
+            <div className="mt-3 rounded-lg border border-destructive/15 bg-destructive/[0.035] px-3.5 py-2.5">
               <div className="flex items-start gap-2" dir="ltr">
                 <div className="min-w-0 flex-1">
                   <pre
-                    className="text-xs text-[#8A3326] whitespace-pre-wrap break-words font-mono leading-relaxed"
+                    className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed"
                     dir="ltr"
                   >
                     {linkifyMessage(
                       job.message ?? "",
-                      "underline decoration-[#B04030]/40 underline-offset-2 hover:text-[#7A2A1E] transition-colors",
+                      "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                     )}
                   </pre>
                   {typeof metrics.error === "string" && !job.message?.includes(metrics.error) && (
                     <pre
-                      className="text-xs text-[#8A3326] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-[#B04030]/15 pt-2"
+                      className="text-xs text-[#8A3326] dark:text-[#ffa997] whitespace-pre-wrap break-words font-mono leading-relaxed mt-2 border-t border-destructive/15 pt-2"
                       dir="ltr"
                     >
                       {linkifyMessage(
                         String(metrics.error),
-                        "underline decoration-[#B04030]/40 underline-offset-2 hover:text-[#7A2A1E] transition-colors",
+                        "underline decoration-destructive/40 underline-offset-2 hover:text-[#7A2A1E] dark:hover:text-[#ffb1a0] transition-colors",
                       )}
                     </pre>
                   )}
@@ -1427,35 +1486,16 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
       {isPairContext && activePair.error && (
         <FadeIn delay={0.05}>
-          <div className="rounded-xl border border-[#B04030]/30 bg-[#B04030]/5 p-4">
-            <div className="text-sm font-medium text-[#B04030] mb-1">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="text-sm font-medium text-destructive mb-1">
               {msg("auto.features.optimizations.components.pairdetailview.3")}
             </div>
-            <pre className="text-xs font-mono text-[#B04030]/80 whitespace-pre-wrap" dir="ltr">
+            <pre
+              className="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-words"
+              dir="ltr"
+            >
               {activePair.error}
             </pre>
-          </div>
-        </FadeIn>
-      )}
-
-      {job.status === "cancelled" && !isPairContext && (
-        <FadeIn>
-          <div className="flex items-center gap-3 p-4 rounded-xl border border-stone-300 bg-stone-50 text-stone-700">
-            <XCircle className="size-5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold">
-                {msg("auto.app.optimizations.id.page.7")}
-                {TERMS.optimization}
-                {msg("auto.app.optimizations.id.page.8")}
-              </p>
-              <p className="text-xs text-stone-500 mt-0.5">
-                {job.message
-                  ? localizeStoredReason(job.message)
-                  : formatMsg("auto.app.optimizations.id.page.template.4", {
-                      p1: TERMS.optimization,
-                    })}
-              </p>
-            </div>
           </div>
         </FadeIn>
       )}
@@ -1493,11 +1533,58 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             !(activePair.program_artifact || activePair.optimized_test_metric != null)
           : isActive;
         return (
-          <Tabs value={activeDetailTab} onValueChange={setDetailTab}>
+          <Tabs value={activeDetailTab} onValueChange={setDetailTab} data-detail-tabs="">
+            <RememberRunShape
+              hintKey={runShapeKey(id, isPairContext)}
+              shape={{
+                name: job.name ?? null,
+                description: job.description ?? null,
+                costChip:
+                  !isPairContext &&
+                  runCostCents(
+                    job.result?.details ?? job.blackbox_result?.details,
+                    job.execution_budget ?? job.terminal_evidence?.execution_budget,
+                    isActive,
+                  ) != null,
+                storageLink: !isPairContext && (job.stored_bytes ?? 0) > 0,
+                access: sharedTier ? { tier: sharedTier, owner: sharedByOwner ?? null } : null,
+                actions: headerActionCounts,
+                tabs:
+                  1 +
+                  Number(showConfigTab) +
+                  Number(showPlaygroundTab) +
+                  Number(showBestVersionTab) +
+                  Number(showDataTab) +
+                  Number(showCodeTab) +
+                  Number(showArtifactTab) +
+                  Number(showLogsTab) +
+                  Number(showUsageTab) +
+                  Number(showContinuousTab),
+                phoneTabs:
+                  1 +
+                  Number(showPlaygroundTab) +
+                  Number(showBestVersionTab) +
+                  Number(showArtifactTab) +
+                  Number(showLogsTab) +
+                  Number(showUsageTab),
+                tabIds: [
+                  "overview",
+                  ...(showPlaygroundTab ? ["playground"] : []),
+                  ...(showBestVersionTab ? ["best"] : []),
+                  ...(showDataTab ? ["data"] : []),
+                  ...(showCodeTab ? ["code"] : []),
+                  ...(showRewardTab ? ["reward"] : []),
+                  ...(showArtifactTab ? ["artifact"] : []),
+                  ...(showLogsTab ? ["logs"] : []),
+                  ...(showUsageTab ? ["usage"] : []),
+                  ...(showContinuousTab ? ["continuous"] : []),
+                  ...(showConfigTab ? ["config"] : []),
+                ],
+              }}
+            />
             <TabsList
               variant="line"
               className="w-full justify-start gap-0 overflow-x-auto border-b border-border/50 pb-0 no-scrollbar"
-              data-tutorial="detail-tabs"
             >
               <TabsTrigger value="overview" className={tabCls}>
                 <TrendUp className="size-3.5" />
@@ -1512,8 +1599,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               )}
               {showBestVersionTab && (
                 <TabsTrigger value="best" className={tabCls}>
-                  <Cube className="size-3.5" />
-                  {msg("optimization.blackbox.best.tab")}
+                  <Package className="size-3.5" />
+                  {msg("optimization.artifact.tab")}
                 </TabsTrigger>
               )}
               {showDataTab && !isPhone && (
@@ -1526,6 +1613,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <TabsTrigger value="code" className={tabCls}>
                   <Code className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.17")}
+                </TabsTrigger>
+              )}
+              {showRewardTab && (
+                <TabsTrigger value="reward" className={tabCls}>
+                  <Trophy className="size-3.5" />
+                  {msg("reward_tab.title")}
                 </TabsTrigger>
               )}
               {showArtifactTab && (
@@ -1541,19 +1634,20 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {pingActive && <PingDot className="ms-1" />}
                 </TabsTrigger>
               )}
-              {showLmActivityTab && !isPhone && (
-                <TabsTrigger value="lm-activity" className={tabCls}>
-                  <Pulse className="size-3.5" />
-                  {msg("auto.app.optimizations.id.page.lm_activity")}
-                </TabsTrigger>
-              )}
-              {showBudgetTab && (
-                <TabsTrigger value="budget" className={tabCls}>
+              {showUsageTab && (
+                <TabsTrigger value="usage" className={tabCls}>
                   <Coins className="size-3.5" />
-                  {msg("optimization.budget.tab")}
+                  {msg("usage_tab.title")}
+                  {pingActive && <PingDot className="ms-1" />}
                 </TabsTrigger>
               )}
-              {!isPhone && (
+              {!isPhone && showContinuousTab && (
+                <TabsTrigger value="continuous" className={tabCls}>
+                  <Repeat className="size-3.5" />
+                  {msg("continuous_tab.title")}
+                </TabsTrigger>
+              )}
+              {!isPhone && showConfigTab && (
                 <TabsTrigger value="config" className={tabCls}>
                   <Gear className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.19")}
@@ -1561,11 +1655,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               )}
             </TabsList>
 
-            <TabsContent
-              value="overview"
-              className="space-y-6 mt-4"
-              data-tutorial={isPairContext ? "pair-detail" : "overview-tab"}
-            >
+            <TabsContent ref={overviewRef} value="overview" className="space-y-6 mt-4">
               <OverviewTab
                 job={effectiveJob ?? job}
                 isActive={isActive}
@@ -1575,9 +1665,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
                 payload={payload}
-                trajectoryPreviewLayout={
-                  isDemoMode && !isPairContext ? DEMO_TRAJECTORY_PREVIEW_LAYOUT : undefined
-                }
               />
             </TabsContent>
 
@@ -1627,11 +1714,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showBestVersionTab && job.blackbox_result && (
-              <TabsContent value="best" className="mt-4" data-tutorial="best-version">
+              <TabsContent value="best" className="mt-4">
                 <BestVersionTab
                   result={job.blackbox_result}
                   jobName={job.name}
                   repository={payloadRecipe === "repo"}
+                  optimizationId={job.optimization_id}
                 />
               </TabsContent>
             )}
@@ -1643,6 +1731,15 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   metricCode={metricCode ?? ""}
                   workflowSpec={workflowSpec}
                   metricLabel={jobIsBlackbox ? msg("optimization.blackbox.scorer_code") : undefined}
+                />
+              </TabsContent>
+            )}
+
+            {showRewardTab && (
+              <TabsContent value="reward" className="mt-4">
+                <RewardTab
+                  payload={payload?.payload}
+                  result={job.status === "success" ? (job.blackbox_result ?? null) : null}
                 />
               </TabsContent>
             )}
@@ -1665,28 +1762,27 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
             {showLogsTab && (
               <TabsContent value="logs">
-                <LogsTab logs={isPairContext ? pairFilteredLogs : (job.logs ?? [])} />
+                <LogsTab
+                  logs={isPairContext ? pairFilteredLogs : (jobLogs ?? [])}
+                  liveStatus={logStreamStatus}
+                />
               </TabsContent>
             )}
 
-            {showLmActivityTab && !isPhone && (
-              <TabsContent value="lm-activity" className="mt-4">
-                {viewLmActivity ? (
-                  <LMActivityTab lmActivity={viewLmActivity} />
-                ) : (
-                  job.blackbox_result && <BlackboxLMActivityTab result={job.blackbox_result} />
-                )}
+            {showUsageTab && (
+              <TabsContent value="usage" className="mt-4">
+                <UsageTab job={job} pairIndex={isPairContext ? activePair.pair_index : null} />
               </TabsContent>
             )}
 
-            {showBudgetTab && (
-              <TabsContent value="budget" className="mt-4">
-                <BudgetTab job={job} />
+            {!isPhone && showContinuousTab && (
+              <TabsContent value="continuous">
+                <ContinuousTab optimizationId={job.optimization_id} />
               </TabsContent>
             )}
 
             {!isPhone && (
-              <TabsContent value="config" className="mt-4" data-tutorial="config-section">
+              <TabsContent value="config" className="mt-4">
                 <ConfigTab job={job} payload={payload} activePair={activePair ?? undefined} />
               </TabsContent>
             )}

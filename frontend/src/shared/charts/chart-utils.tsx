@@ -8,7 +8,7 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 // Shared Recharts tooltip chrome, reused by the bespoke tooltips that need their own row content.
 export const CHART_TOOLTIP_CARD_CLASS =
-  "rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-lg backdrop-blur-sm";
+  "rounded-xl border border-border/60 bg-background/95 p-3 text-sm shadow-[var(--shadow-float)] backdrop-blur-sm";
 export const CHART_TOOLTIP_TITLE_CLASS = "mb-2 font-semibold text-foreground";
 export const CHART_TOOLTIP_ROW_CLASS = "flex items-center gap-2 text-muted-foreground";
 export const CHART_TOOLTIP_SWATCH_CLASS = "size-2.5 shrink-0 rounded-full ring-1 ring-black/5";

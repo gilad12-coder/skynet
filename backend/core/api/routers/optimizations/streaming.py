@@ -5,6 +5,7 @@ Public dev surface (in ``_SCALAR_PUBLIC_PATHS``):
 
 Internal (dashboard plumbing, hidden from public docs):
 - ``GET /optimizations/stream`` — fan-out stream for the dashboard.
+- ``GET /optimizations/{id}/logs/stream`` — live tail of a job's run log.
 """
 
 from __future__ import annotations
@@ -13,13 +14,14 @@ import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from starlette.responses import StreamingResponse
 
 from ...auth import AuthenticatedUser, get_authenticated_user, is_admin
 from ...sharing_access import ShareRole
 from .._helpers import require_role_at_least, sse_from_events
 from ._local import stream_dashboard_snapshots, stream_job_updates
+from .log_stream import stream_job_logs
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,57 @@ def register_job_stream(router: APIRouter, *, job_store) -> None:
 
         return StreamingResponse(
             sse_from_events(stream_job_updates(job_store, optimization_id)),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+
+
+def register_log_stream(router: APIRouter, *, job_store) -> None:
+    """Register the ``GET /optimizations/{id}/logs/stream`` live run-log route.
+
+    Args:
+        router: The router to attach the route to.
+        job_store: Job-store the rows are read from.
+    """
+
+    @router.get(
+        "/optimizations/{optimization_id}/logs/stream",
+        summary="Stream an optimization's run log live as SSE",
+        include_in_schema=False,
+    )
+    async def stream_logs(
+        optimization_id: str,
+        current_user: AuthenticatedUserDep,
+        after_id: int | None = Query(
+            default=None, ge=0, description="Last log row id already held; the stream resumes after it."
+        ),
+    ):
+        """Stream an optimization's run-log rows as they are written.
+
+        Each ``logs`` event carries a batch of rows and an SSE ``id`` equal to
+        the batch's last row id; reconnect with ``after_id`` set to it to
+        resume without gaps or repeats. Ends with ``event: done`` once the run
+        is over and every row has been sent. Open to anyone the run is shared
+        with, like the job stream.
+
+        Args:
+            optimization_id: Optimization id to tail.
+            current_user: Authenticated caller resolved from the bearer token.
+            after_id: Last row id the client already holds.
+
+        Returns:
+            A streaming ``StreamingResponse`` with ``text/event-stream`` body.
+
+        Raises:
+            DomainError: 404 when the optimization id is unknown or the caller
+                has no share access to it.
+        """
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, require_role_at_least, job_store, optimization_id, current_user, ShareRole.viewer
+        )
+        return StreamingResponse(
+            sse_from_events(stream_job_logs(job_store, optimization_id, after_id)),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )

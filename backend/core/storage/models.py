@@ -26,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -79,6 +80,74 @@ class AgentApprovalModel(Base):
     )
 
 
+class AgentSteerMessageModel(Base):
+    """A message the user sent into an agent turn that was still running.
+
+    The steer POST and the streaming turn can land on different replicas, so
+    the message waits here under the turn's client-chosen ``steer_key``. The
+    running loop takes it at its next step; once the turn ends, the client
+    withdraws whatever the loop never read. Taking sets ``taken_at``, so a
+    message is either read by the agent or withdrawn, never both.
+    """
+
+    __tablename__ = "agent_steer_messages"
+    __table_args__ = (Index("ix_agent_steer_messages_key", "steer_key", "owner"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    steer_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentTurnModel(Base):
+    """One resumable wizard-agent turn, shared across backend replicas.
+
+    The turn runs as a server-side task on the replica that started it, while
+    the browser's stream connection is capped by the hosting edge and may
+    reconnect to any replica. This row carries what those other replicas need:
+    the owner (resume/cancel authorization), the run status, a cancel request
+    for the owning replica to act on, the owner's liveness heartbeat, and the
+    last time any reader was attached. Rows (and their events) are purged an
+    hour after their last heartbeat.
+    """
+
+    __tablename__ = "agent_turns"
+
+    turn_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
+    )
+    last_read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class AgentTurnEventModel(Base):
+    """One SSE event of an :class:`AgentTurnModel`, in emission order.
+
+    ``seq`` is the turn's monotonic event number (the SSE ``id``); a
+    reconnecting stream replays every row after the last ``seq`` it saw.
+    ``data`` is the event payload as JSON text, exactly as it was streamed.
+    """
+
+    __tablename__ = "agent_turn_events"
+
+    turn_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class UserModel(Base):
     """A Skynet account row, keyed by the cross-app identity.
 
@@ -111,8 +180,15 @@ class UserModel(Base):
     # OAuth-provisioned rows and rows created before these columns existed
     # never set them, and ``job_role`` is optional even on the sign-up form.
     use_case: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # One of ``guided`` / ``standard`` / ``expert``: how much of the product
+    # surface the UI shows this account. Rows from the original sign-up form
+    # stored ``new`` / ``familiar``; the abstraction-level migration remapped them.
     experience_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     job_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # First-login intake: NULL means the account has not finished (or chose to
+    # rerun) the onboarding intake, so every pre-existing account sees it once.
+    intake_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    intake_profile: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     # Two-factor state for password sign-ins. A non-null ``totp_secret`` means
     # TOTP is enabled; ``totp_pending_secret`` holds the secret between setup
     # and the first verified code, so an abandoned setup never locks the
@@ -122,6 +198,29 @@ class UserModel(Base):
     totp_pending_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Our own and test accounts (synthetic ``.local`` fixtures, configured
+    # admins, anything an admin flags) that every product metric excludes.
+    # Defaults False so every new sign-up counts as a real user.
+    is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+
+
+class UserIdentityModel(Base):
+    """A Google or GitHub account that signs in to one Skynet account.
+
+    Keyed by the provider's stable account id rather than its email, so a
+    provider account linked from Settings keeps reaching the same Skynet
+    account even when none of its emails match it.
+    """
+
+    __tablename__ = "user_identities"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider_account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    provider_email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
 
 
 class MonthlyActiveUserModel(Base):
@@ -136,24 +235,131 @@ class MonthlyActiveUserModel(Base):
     )
 
 
+class WizardAgentUsageModel(Base):
+    """How many black-box wizard agent turns an identity started on one UTC day.
+
+    The wizard agent is free to use, so instead of a credit charge each turn
+    counts against a daily cap (``settings.wizard_agent_daily_turns``).
+    """
+
+    __tablename__ = "wizard_agent_usage"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class NotificationPreferenceModel(Base):
-    """Per-identity preferences for optional product notification emails.
+    """Per-identity routing of run notifications across the delivery channels.
 
     The row is separate from :class:`UserModel` because OAuth identities own
-    jobs and shares without a local password-account row. Missing rows preserve
-    the historical default: both notification categories are enabled.
+    jobs and shares without a local password-account row. A missing row, or a
+    NULL ``channel_grid``, means the default grid of
+    :mod:`core.notifications.events`.
     """
 
     __tablename__ = "notification_preferences"
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
-    job_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    sharing_updates_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # ``{event_type: {channel: bool}}``; cells absent here take the default grid.
+    channel_grid: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    hold_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default="10")
+    # Channels whose non-urgent sends wait ``hold_minutes``; NULL means email only.
+    held_channels: Mapped[list[str] | None] = mapped_column(JSON_STORE, nullable=True)
+    stuck_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.25, server_default="0.25")
+    budget_alert_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.8, server_default="0.8")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class NotificationModel(Base):
+    """One notification event for one identity: an inbox item plus its channel deliveries.
+
+    Rows are kept forever. ``deliveries`` records each routed channel's state
+    (``held``, ``sent``, ``failed``, ``dropped`` or ``unavailable``) so a later
+    channel can be added without a schema change; ``hold_until`` is set while
+    any channel still waits and is what the hold sweeper scans.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_username_created", "username", "created_at"),
+        UniqueConstraint("username", "dedupe_key", name="uq_notifications_username_dedupe"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    facts: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    link: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Makes a repeated emit of the same event (a resumed run, a news file seen
+    # twice) a no-op; NULL for events that may legitimately repeat.
+    dedupe_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    in_inbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deliveries: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class PushSubscriptionModel(Base):
+    """One browser's Web Push subscription for one identity.
+
+    The endpoint is the push service URL the browser handed out; it is unique
+    per browser profile, so re-subscribing the same browser (even as another
+    identity) moves the row rather than duplicating it.
+    """
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SlackConnectionModel(Base):
+    """One identity's install of the Skynet Slack app, where its Slack notifications go.
+
+    Keyed by ``username`` like :class:`PushSubscriptionModel`. The bot token is
+    Fernet-encrypted under ``BYOK_VAULT_KEY``. A ``broken`` row stays so the
+    settings tab can say why Slack stopped; sends skip it until the user
+    reconnects or picks a working destination.
+    """
+
+    __tablename__ = "slack_connections"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    team_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    team_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    bot_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    slack_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    bot_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL sends a direct message to ``slack_user_id``.
+    channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dm_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="connected", server_default="connected")
+    broken_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
 
@@ -373,6 +579,10 @@ class WalletLedgerModel(Base):
     """
 
     __tablename__ = "wallet_ledger"
+    # A named unique index, not a column UNIQUE constraint: migration 927cb56e104a
+    # created it with CREATE UNIQUE INDEX (renamed with the table), so declaring it
+    # the same way keeps autogenerate from proposing a drop-and-recreate.
+    __table_args__ = (Index("wallet_ledger_settlement_key_key", "settlement_key", unique=True),)
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
@@ -385,7 +595,7 @@ class WalletLedgerModel(Base):
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     budget_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    settlement_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    settlement_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Measured usage behind a run row's charge; None on top-ups/grants and on
     # rows written before token metering landed.
     input_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
@@ -401,6 +611,14 @@ class WalletLedgerModel(Base):
     # it is the one id present on the checkout, charge, and dispute objects
     # alike. None on grants/runs/adjustments and on top-ups predating this column.
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # The job a ``run`` row charged, so cost per run is a sum over this table.
+    # None on interactive debits (serve, agent chat), non-run rows, and rows
+    # written before run attribution landed.
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Cents of a ``run`` row's charge drawn from the free grant; the paid part
+    # is ``-delta_cents - from_grant_cents``. On a positive restart-waiver row,
+    # the cents returned to the grant. None on non-run and older rows.
+    from_grant_cents: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
     )
@@ -707,9 +925,7 @@ class TelemetryEventModel(Base):
 
     One row per captured interaction (a page view, a labelled click, a named
     flow event). The browser SDK batches events to ``POST /telemetry/events``
-    and they land here, queryable beside the rest of the product data. An
-    operator may additionally export accepted events to PostHog with a one-way
-    account hash and without creating a person profile.
+    and they land here, queryable beside the rest of the product data.
 
     Identity is split deliberately. ``username`` is the *server-trusted* caller
     derived from the request's auth token (never from the request body), so it
@@ -854,6 +1070,9 @@ class JobModel(Base):
     composition: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     code_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    # The image a protected run first executed in. Every later box for the run,
+    # a resume after a redeploy included, boots from it so checkpoints stay loadable.
+    sandbox_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
     execution_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     execution_budget_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     execution_budget_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -868,6 +1087,11 @@ class JobModel(Base):
     # ``claim_completion_notification`` — guarantees a single Slack/Teams
     # message per job even when orphan recovery re-runs a row.
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Kinds of in-run email already sent for this run (``new_best``,
+    # ``stage:baseline``, ``digest:<window>`` ...). Kept on the row rather than
+    # in worker memory so a resumed or orphan-recovered run never re-sends one,
+    # and cleared with ``notified_at`` when the run is restarted from scratch.
+    notification_claims: Mapped[list[str] | None] = mapped_column(JSON_STORE, nullable=True)
     # Optional client-supplied dedup key; lookups are scoped per submitter so
     # two users may legitimately reuse the same key without colliding.
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -933,10 +1157,16 @@ class LogEntryModel(Base):
     logger: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     pair_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Structured run-log fields, see core.run_log. NULL source is a row written
+    # before they existed, which was always the host's.
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    event: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fields: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    candidate: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    case_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Backs the per-job ordered reads (get_logs) and the oldest-first cap
-    # eviction in append_log, which otherwise scan on the single-column
-    # optimization_id index and sort timestamps in memory.
+    # Backs the per-job ordered reads (get_logs), which otherwise scan on the
+    # single-column optimization_id index and sort timestamps in memory.
     __table_args__ = (Index("ix_job_logs_optimization_timestamp", "optimization_id", "timestamp"),)
 
 
@@ -1569,3 +1799,81 @@ class RunFolderItemModel(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class ContinuousPlanModel(Base):
+    """A schedule that keeps one successful run improving with fresh, linked runs.
+
+    ``source_optimization_id`` is the run the plan was enabled from and
+    ``incumbent_optimization_id`` the version the customer approved last.
+    ``permitted`` names the inputs that may refresh without a setup change, and
+    ``baseline_snapshot`` holds the inputs of the last reviewed cycle, so a check
+    with no permitted change records a skip instead of a run. ``pause_reason``
+    keeps a customer's pause apart from an allowance or funds pause, because a
+    monthly reset may lift only the latter. ``schedule_rule`` is the repeat rule
+    (``core.worker.continuous_schedule.ScheduleRule``); ``schedule`` keeps its
+    frequency name, and plans saved before rules existed have only that.
+    """
+
+    __tablename__ = "continuous_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    source_optimization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    incumbent_optimization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    pause_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    schedule: Mapped[str] = mapped_column(String(16), nullable=False)
+    schedule_rule: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    permitted: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    source: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    pending_inputs: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    baseline_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    monthly_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cycle_budget_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("source_optimization_id", name="uq_continuous_plans_source_optimization_id"),)
+
+
+class ContinuousCycleModel(Base):
+    """One scheduled check of a continuous plan and the fresh run it started, if any.
+
+    ``slot`` is the scheduled time the check claimed. The unique
+    ``(plan_id, slot)`` pair is what stops overlapping checks, retries and
+    several workers from recording the same check twice. ``month`` is the
+    ``YYYY-MM`` allowance the cycle's spend counts against, kept after the
+    month rolls over.
+    """
+
+    __tablename__ = "continuous_cycles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    plan_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    slot: Mapped[str] = mapped_column(String(40), nullable=False)
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    changes: Mapped[list[str]] = mapped_column(JSON_STORE, nullable=False, default=list)
+    detail_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail_params: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    optimization_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    execution_budget_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    incumbent_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    candidate_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spent_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("plan_id", "slot", name="uq_continuous_cycles_plan_slot"),)

@@ -75,6 +75,10 @@ class ConversationMessage(BaseModel):
     served_model: str | None = None
     # Token usage, cost and timing of the turn, from router_metadata.
     stats: dict[str, Any] | None = None
+    # What the agent said it would do that turn, from router_metadata.
+    plan: str | None = None
+    # The turn's thinking rows (reasoning, timing, summary), from router_metadata.
+    thinking: list[dict[str, Any]] | None = None
     created_at: datetime
 
 
@@ -262,6 +266,10 @@ def create_agent_history_router(*, job_store) -> APIRouter:
                         if isinstance(m.router_metadata, dict)
                         else None,
                         stats=(m.router_metadata or {}).get("stats") if isinstance(m.router_metadata, dict) else None,
+                        plan=(m.router_metadata or {}).get("plan") if isinstance(m.router_metadata, dict) else None,
+                        thinking=(m.router_metadata or {}).get("thinking")
+                        if isinstance(m.router_metadata, dict)
+                        else None,
                         created_at=cast(datetime, m.created_at),
                     )
                     for m in msgs

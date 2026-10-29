@@ -1,0 +1,452 @@
+"""Copy what a sandboxed command writes to stderr into the run log.
+
+A sandbox, and every file in it, is gone once the run ends, so its stderr is
+the only record of why something inside it failed. Every session's ``run`` goes
+through :func:`logged_command`: stderr lines stream to :data:`stream_logger` at
+DEBUG while the command runs, and a command that fails, times out or raises
+logs a WARNING with its last lines on :data:`logger`. Each record carries the
+sandbox's job as ``sandbox_owner``; the worker routes records by it into that
+job's run log, and the optimization subprocess forwards them as log events.
+
+Sandbox output is untrusted, so it is stripped of terminal control sequences
+and scrubbed of every secret the command was given. :func:`forward` relays a
+structured record a sandbox sent, attributed and capped by the host. Inside an
+:func:`event_scope`, the ``log()`` events a scorer writes to stderr are relayed
+the same way, pinned to the scope's source, candidate and case. A multi-line
+message, such as a stack trace or a printed error object, becomes one row.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import contextvars
+import functools
+import json
+import logging
+import re
+import threading
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from typing import Any
+
+from .... import run_log
+from ....billing.usage_tags import usage_scope
+from . import check_terminal
+from .runner import EVENT_PREFIX
+
+logger = logging.getLogger(__name__)
+# Streamed lines reach only the run-log handlers attached here, never the
+# process's own console, which would otherwise carry every sandbox's stderr.
+stream_logger = logging.getLogger(f"{__name__}.stream")
+stream_logger.propagate = False
+stream_logger.setLevel(logging.DEBUG)
+
+_TAIL_LINES = 40
+_LABEL_CHARS = 120
+# Shorter values (ports, flags, "1") are not secrets, and scrubbing them would mangle ordinary text.
+_SECRET_MIN_CHARS = 8
+_CONTROL = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]")
+# The highest level a sandbox may claim: CRITICAL is reserved for the host.
+_FORWARDED_LEVELS = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+# Lines that only close a printed object, like Node's "}" after an error's fields.
+_CLOSER = re.compile(r"^[\]\)}]+[,;]?$")
+_CHAINED = ("Caused by", "During handling of the above exception", "The above exception was the direct cause")
+
+
+# What the host knows about the command running now: the source its events
+# come from and the candidate and case it serves. Unset, stderr is plain output.
+_scope: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("sandbox_event_scope", default=None)
+
+
+@contextlib.contextmanager
+def event_scope(**tags: Any) -> Iterator[None]:
+    """Relay the events commands write to stderr while the scope is open.
+
+    The candidate and case also tag the model calls made inside the scope.
+    Scopes nest: an inner one keeps the outer's tags and overrides those it sets.
+
+    Args:
+        **tags: ``source``, ``candidate`` and ``case`` to pin on every event; ``None`` keeps the outer value.
+
+    Yields:
+        Nothing; the scope ends when the block does.
+    """
+    merged = {**(_scope.get() or {}), **{key: value for key, value in tags.items() if value is not None}}
+    token = _scope.set(merged)
+    try:
+        with usage_scope(candidate=tags.get("candidate"), case=tags.get("case")):
+            yield
+    finally:
+        _scope.reset(token)
+
+
+def ignore_output(stream: str, text: str) -> None:
+    """Accept streamed output that :func:`logged_command` already records.
+
+    Passing it as ``on_output`` makes a session stream a command's stderr live,
+    instead of logging it once the command ends.
+
+    Args:
+        stream: ``stdout`` or ``stderr``.
+        text: The chunk.
+    """
+    del stream, text
+
+
+class Scrubber:
+    """Make untrusted sandbox text safe to log."""
+
+    def __init__(self, secrets: Iterable[str]) -> None:
+        """Remember the values to redact.
+
+        Args:
+            secrets: Values the sandbox can see; each is replaced before logging.
+        """
+        self._secrets = sorted({value for value in secrets if len(value) >= _SECRET_MIN_CHARS}, key=len, reverse=True)
+
+    def text(self, line: str) -> str:
+        """Redact secrets and drop terminal control sequences from one line.
+
+        Args:
+            line: Raw output text.
+
+        Returns:
+            The text as it may be logged.
+        """
+        for secret in self._secrets:
+            line = line.replace(secret, "[redacted]")
+        return _CONTROL.sub("", line)
+
+    def value(self, value: Any) -> Any:
+        """Redact secrets from every string inside a JSON value.
+
+        Args:
+            value: Parsed JSON.
+
+        Returns:
+            The same structure with each string scrubbed.
+        """
+        if isinstance(value, str):
+            return self.text(value)
+        if isinstance(value, list):
+            return [self.value(item) for item in value]
+        if isinstance(value, dict):
+            return {self.text(str(key)): self.value(item) for key, item in value.items()}
+        return value
+
+
+def forward(
+    data: Any,
+    *,
+    owner: str | None,
+    scrub: Scrubber,
+    source: str = "engine",
+    pinned: Mapping[str, Any] | None = None,
+) -> None:
+    """Relay one structured record a sandbox sent into its job's run log.
+
+    The host, not the sandbox, decides what the record may be: its logger is
+    always under ``sandbox.``, its source one of the sandbox sources, and its
+    level at most ERROR, so sandbox code can never pass for Skynet's own lines.
+
+    Args:
+        data: The decoded record; anything but a mapping is ignored.
+        owner: Job the sandbox belongs to.
+        scrub: Redacts the sandbox's secrets.
+        source: Source used when the record names none it may use.
+        pinned: Fields the host knows and the record may not change, such as
+            a scorer event's source, candidate and case.
+    """
+    if not isinstance(data, dict):
+        return
+    claimed = run_log.normalize({**scrub.value(data), **(pinned or {})})
+    if claimed["source"] not in run_log.SANDBOX_SOURCES:
+        claimed["source"] = source
+    level = _FORWARDED_LEVELS.get(str(data.get("level", "")).upper(), logging.INFO)
+    name = scrub.text(str(data.get("logger") or "sandbox")).strip() or "sandbox"
+    record = stream_logger.makeRecord(
+        f"sandbox.{name}",
+        level,
+        __file__,
+        0,
+        "%s",
+        (scrub.text(str(data.get("message", ""))),),
+        None,
+        extra=run_log.event_extra(**claimed, sandbox_owner=owner),
+    )
+    stream_logger.handle(record)
+
+
+def stream_line(line: str, *, owner: str | None, scrub: Scrubber, label: str = "sandbox") -> None:
+    """Log one plain line a sandbox printed, at DEBUG.
+
+    Args:
+        line: Raw line without its newline.
+        owner: Job the sandbox belongs to.
+        scrub: Redacts the sandbox's secrets.
+        label: Prefix that says where the line came from.
+    """
+    if line.strip():
+        stream_logger.debug(
+            "[%s] %s", label, scrub.text(line), extra=run_log.event_extra(source="sandbox", sandbox_owner=owner)
+        )
+
+
+class LineGroups:
+    """Join the lines of one multi-line message so it is logged as one row.
+
+    A line continues the message before it when it is indented, only closes a
+    bracket, or chains another exception. A Python traceback also takes its
+    unindented last line, the exception itself. Messages are only cut at line
+    boundaries, so a caller flushes at the end of each output chunk: one write,
+    such as a whole error object, reaches the host in one chunk.
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        """Start with no open message.
+
+        Args:
+            emit: Called with each finished message, its lines joined by newlines.
+        """
+        self._emit = emit
+        self._lines: list[str] = []
+
+    def add(self, line: str) -> None:
+        """Take one complete, non-blank line.
+
+        Args:
+            line: The line without its newline.
+        """
+        if self._lines and self._continues(line):
+            self._lines.append(line)
+            if self._lines[0].startswith("Traceback") and not line[:1].isspace():
+                self.flush()
+            return
+        self.flush()
+        self._lines.append(line)
+
+    def _continues(self, line: str) -> bool:
+        """Whether ``line`` belongs to the open message.
+
+        Args:
+            line: The next line.
+
+        Returns:
+            True when it continues the open message.
+        """
+        if line[:1].isspace() or _CLOSER.match(line.strip()) or line.startswith(_CHAINED):
+            return True
+        return self._lines[0].startswith("Traceback")
+
+    def flush(self) -> None:
+        """Emit the open message, if any."""
+        if self._lines:
+            text, self._lines = "\n".join(self._lines), []
+            self._emit(text)
+
+
+class SandboxOutputLog:
+    """The log record of one sandboxed command's stderr."""
+
+    def __init__(self, command: str, secrets: Iterable[str], owner: str | None = None) -> None:
+        """Prepare to log one command.
+
+        Args:
+            command: The shell command line, shortened into the log label.
+            secrets: Values the command can see; each is replaced before logging.
+            owner: Job the sandbox belongs to, set on every record as ``sandbox_owner``.
+        """
+        self._owner = owner
+        self._scope = _scope.get()
+        self._extra = run_log.event_extra(source="sandbox", sandbox_owner=owner)
+        self.scrub = Scrubber(secrets)
+        first = command.strip().splitlines()[0] if command.strip() else ""
+        self.label = self.scrub.text(first[:_LABEL_CHARS] + ("…" if len(first) > _LABEL_CHARS else ""))
+        self._pending = ""
+        self._tail: deque[str] = deque(maxlen=_TAIL_LINES)
+        self._groups = LineGroups(lambda text: stream_line(text, owner=self._owner, scrub=self.scrub))
+        self._lock = threading.Lock()
+
+    def _line(self, line: str) -> None:
+        """Stream one complete stderr line.
+
+        Args:
+            line: Raw stderr line without its newline.
+        """
+        if not line.strip():
+            return
+        if self._scope is not None and line.startswith(EVENT_PREFIX):
+            self._groups.flush()
+            self._event(line[len(EVENT_PREFIX) :])
+            return
+        self._tail.append(self.scrub.text(line))
+        self._groups.add(line)
+
+    def _event(self, body: str) -> None:
+        """Relay one ``log()`` event, pinned to the scope it was written in.
+
+        Args:
+            body: The JSON after the event prefix; unreadable JSON is logged as plain output.
+        """
+        try:
+            data = json.loads(body)
+        except ValueError:
+            stream_line(body, owner=self._owner, scrub=self.scrub)
+            return
+        scope = self._scope or {}
+        pinned = {
+            "source": scope.get("source", "sandbox"),
+            "candidate": scope.get("candidate"),
+            "case": scope.get("case"),
+        }
+        forward(data, owner=self._owner, scrub=self.scrub, pinned=pinned)
+
+    def feed(self, text: str) -> None:
+        """Take a stderr chunk, which may hold partial lines.
+
+        Args:
+            text: Newly written stderr.
+        """
+        with self._lock:
+            self._pending += text
+            *lines, self._pending = self._pending.split("\n")
+            for line in lines:
+                self._line(line)
+            self._groups.flush()
+
+    def tee(self, on_output: Callable[[str, str], None] | None) -> Callable[[str, str], None] | None:
+        """Wrap the caller's output sink so stderr is logged as it streams.
+
+        A command run without a sink is logged from its result instead: adding
+        a sink would make the Vercel session read its output files on every poll.
+
+        Args:
+            on_output: The caller's sink, or ``None``.
+
+        Returns:
+            A sink that logs stderr and then calls the caller's, or ``None``.
+        """
+        if on_output is None:
+            return None
+
+        def sink(stream: str, text: str) -> None:
+            """Log a stderr chunk, then hand every chunk on unchanged."""
+            if stream == "stderr":
+                self.feed(text)
+            on_output(stream, text)
+
+        return sink
+
+    def finish(self, result: Any, *, streamed: bool) -> None:
+        """Log the rest of stderr and, when the command failed, a summary with its tail.
+
+        Args:
+            result: The command's ``CommandResult``.
+            streamed: Whether stderr already went through :meth:`tee`.
+        """
+        if not streamed:
+            self.feed(result.stderr)
+        with self._lock:
+            if self._pending:
+                self._line(self._pending)
+                self._pending = ""
+            self._groups.flush()
+        if result.exit_code == 0 and not result.timed_out:
+            return
+        state = "timed out" if result.timed_out else f"exited {result.exit_code}"
+        self._summary(logging.WARNING, f"{state}: {self.label}")
+
+    def failed(self, error: BaseException) -> None:
+        """Log what the command wrote before it raised.
+
+        Args:
+            error: The exception leaving ``run``.
+        """
+        with self._lock:
+            if self._pending:
+                self._line(self._pending)
+                self._pending = ""
+            self._groups.flush()
+        self._summary(logging.WARNING, f"raised {type(error).__name__}: {self.label}")
+
+    def _summary(self, level: int, headline: str) -> None:
+        """Log one record with the headline and the last stderr lines.
+
+        Args:
+            level: Logging level.
+            headline: What happened to which command.
+        """
+        lines = list(self._tail)
+        body = "\n".join(lines) if lines else "(no stderr)"
+        logger.log(level, "[sandbox] command %s\n%s", headline, body, extra=self._extra)
+
+
+def logged_command(run: Callable[..., Any]) -> Callable[..., Any]:
+    """Log the stderr of every command a session's ``run`` executes.
+
+    Args:
+        run: A ``SandboxSession.run`` implementation.
+
+    Returns:
+        The same method, with its command's stderr logged.
+    """
+
+    @functools.wraps(run)
+    def wrapper(
+        self: Any,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: Callable[[str, str], None] | None = None,
+    ) -> Any:
+        """Run the command with its stderr logged, keeping the method's own contract."""
+        session_env = getattr(self, "_env", None)
+        secrets = [*(env or {}).values(), *(session_env.values() if isinstance(session_env, Mapping) else ())]
+        record = SandboxOutputLog(command, secrets, getattr(self, "log_owner", None))
+        terminal = check_terminal.current_recorder()
+        command_id = None
+        if terminal is not None:
+            command_id = terminal.command_started(
+                command, scrub=record.scrub.text, sample=check_terminal.current_sample()
+            )
+            on_output = _mirrored(terminal, command_id, on_output)
+        sink = record.tee(on_output)
+        try:
+            result = run(self, command, env=env, timeout_seconds=timeout_seconds, on_output=sink)
+        except BaseException as error:
+            record.failed(error)
+            if terminal is not None and command_id is not None:
+                terminal.command_finished(command_id, error=type(error).__name__)
+            raise
+        record.finish(result, streamed=sink is not None)
+        if terminal is not None and command_id is not None:
+            terminal.command_finished(command_id, exit_code=result.exit_code, timed_out=result.timed_out)
+        return result
+
+    return wrapper
+
+
+def _mirrored(
+    terminal: check_terminal.CheckTerminalRecorder,
+    command_id: int,
+    on_output: Callable[[str, str], None] | None,
+) -> Callable[[str, str], None]:
+    """Wrap a command's output sink so the Check's live transcript sees every chunk.
+
+    Args:
+        terminal: The check's recorder.
+        command_id: The command's transcript id.
+        on_output: The caller's sink, or ``None``.
+
+    Returns:
+        A sink that records each chunk and then hands it on unchanged.
+    """
+
+    def sink(stream: str, text: str) -> None:
+        """Record one chunk, then pass it to the caller's sink."""
+        terminal.command_output(command_id, stream, text)
+        if on_output is not None:
+            on_output(stream, text)
+
+    return sink

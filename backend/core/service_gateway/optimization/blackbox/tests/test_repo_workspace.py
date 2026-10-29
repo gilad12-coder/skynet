@@ -6,12 +6,23 @@ import base64
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from core.exceptions import ServiceError
+
 from ..repo_tree import unpack_tree, version_patch
-from ..repo_workspace import WORK_DIR, RepoWorkspace, redact
-from ..sandbox import LocalSubprocessRuntime, SandboxSpec
+from ..repo_workspace import (
+    _PROBE_OK,
+    PREPARED_DIR,
+    WORK_DIR,
+    NetworkCutoffError,
+    RepoSetupError,
+    RepoWorkspace,
+    redact,
+)
+from ..sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 
 
 def _archive(root: Path, files: dict[str, str]) -> Path:
@@ -54,93 +65,359 @@ def _patch(root: Path, archive: Path, edits: dict[str, str]) -> str:
     return version_patch(checkout)
 
 
+class _Box:
+    """Run commands on the host, but track the network state a real box would have."""
+
+    def __init__(self, inner: Any, *, online: bool, cutoff: str) -> None:
+        """Wrap a local session.
+
+        Args:
+            inner: The real local session commands run in.
+            online: Whether the box opened with network access.
+            cutoff: ``"ok"``, ``"refused"`` (the switch raises) or ``"leaky"``
+                (the switch returns but hosts stay reachable).
+        """
+        self._inner = inner
+        self.online = online
+        self._cutoff = cutoff
+        self.commands: list[tuple[str, bool, dict[str, str] | None]] = []
+        self.closed = False
+
+    def write_files(self, files: dict[str, str]) -> None:
+        """Write into the wrapped box."""
+        self._inner.write_files(files)
+
+    def read_file(self, path: str) -> str | None:
+        """Read from the wrapped box."""
+        return self._inner.read_file(path)
+
+    def run(self, command: str, **options: Any) -> CommandResult:
+        """Record the command with the network state it ran under, answering the reachability probe."""
+        self.commands.append((command, self.online, options.get("env")))
+        if "/dev/tcp/" in command:
+            return CommandResult(exit_code=1) if self.online else CommandResult(exit_code=0, stdout=_PROBE_OK)
+        return self._inner.run(command, **options)
+
+    def disable_network(self) -> None:
+        """Switch the network off, or fail the way the configured provider would."""
+        if self._cutoff == "refused":
+            raise ServiceError("provider refused the policy change")
+        if self._cutoff == "ok":
+            self.online = False
+
+    def close(self) -> None:
+        """Close the wrapped box."""
+        self.closed = True
+        self._inner.close()
+
+
+class _Runtime:
+    """Open recording boxes over the local runtime."""
+
+    def __init__(self, cutoff: str = "ok") -> None:
+        """Choose how the network switch behaves.
+
+        Args:
+            cutoff: Passed to every box opened.
+        """
+        self._local = LocalSubprocessRuntime()
+        self._cutoff = cutoff
+        self.boxes: list[_Box] = []
+
+    def open(self, spec: SandboxSpec) -> _Box:
+        """Open one recording box."""
+        box = _Box(self._local.open(spec), online=not spec.network_disabled, cutoff=self._cutoff)
+        self.boxes.append(box)
+        return box
+
+
+_ONLINE = SandboxSpec(lifetime_seconds=60, allowed_hosts=("pypi.org",))
+
+
+def _space(archive: Path, runtime: Any, *, setup: str | None, spec: SandboxSpec = _ONLINE) -> RepoWorkspace:
+    """Build a workspace over ``archive`` with one secret.
+
+    Args:
+        archive: Packed tree.
+        runtime: Where its box opens.
+        setup: The setup command.
+        spec: The box's network profile.
+
+    Returns:
+        The workspace.
+    """
+    return RepoWorkspace(
+        runtime=runtime,
+        spec=spec,
+        archive=archive,
+        editable_paths=["src"],
+        readonly_paths=[],
+        setup_command=setup,
+        secrets={"API_KEY": "very-secret-value"},
+    )
+
+
 @pytest.fixture
-def workspace(tmp_path: Path) -> Iterator[tuple[RepoWorkspace, Path, Path]]:
-    """Open a workspace over a small tree with a setup command that reads a secret.
+def workspace(tmp_path: Path) -> Iterator[tuple[RepoWorkspace, _Runtime, Path, Path]]:
+    """Open a workspace whose setup builds a file and leaves a stray one.
 
     Args:
         tmp_path: Scratch folder.
 
     Yields:
-        The workspace, the archive and the scratch folder.
+        The workspace, its runtime, the archive and the scratch folder.
     """
     archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "tests/test_app.py": "t\n"})
-    space = RepoWorkspace(
-        runtime=LocalSubprocessRuntime(),
-        spec=SandboxSpec(lifetime_seconds=60),
-        archive=archive,
-        editable_paths=["src"],
-        readonly_paths=[],
-        setup_command='echo "token=$API_KEY"; cat src/app.py > built.txt; touch stray.txt',
-        secrets={"API_KEY": "very-secret-value"},
-    )
-    yield space, archive, tmp_path
+    runtime = _Runtime()
+    space = _space(archive, runtime, setup='echo "key=${API_KEY:-unset}"; cat src/app.py > built.txt')
+    yield space, runtime, archive, tmp_path
     space.close()
 
 
-def test_each_version_is_set_up_on_a_fresh_copy_with_secrets_redacted(
-    workspace: tuple[RepoWorkspace, Path, Path],
+def test_setup_runs_once_online_without_secrets_and_versions_run_offline(
+    workspace: tuple[RepoWorkspace, _Runtime, Path, Path],
 ) -> None:
-    """Apply the patch, run setup with the secret, hide it from logs, and start every version clean."""
-    space, archive, root = workspace
-    streamed: list[str] = []
+    """Prepare the starting commit once with network, then lay every version out on a copy with it off."""
+    space, runtime, archive, root = workspace
 
-    first = space.checkout(
-        _patch(root / "one", archive, {"src/app.py": "x = 2\n"}),
-        on_output=lambda stream, piece: streamed.append(piece),
-    )
-
-    assert first.path == WORK_DIR
-    assert first.problems == ()
-    built = space.session().read_file(f"{WORK_DIR}/built.txt")
-    assert built == "x = 2\n"
-    assert "token=[secret]" in "".join(streamed)
-    assert "very-secret-value" not in first.setup_log + "".join(streamed)
-    assert "token=[secret]" in first.setup_log
-
+    first = space.checkout(_patch(root / "one", archive, {"src/app.py": "x = 2\n"}))
+    space.session().run(f"touch {WORK_DIR}/stray.txt")
     second = space.checkout("")
 
-    assert second.path == WORK_DIR
+    assert first.path == second.path == WORK_DIR
+    box = runtime.boxes[0]
+    assert len(runtime.boxes) == 1
+    setups = [entry for entry in box.commands if "built.txt" in entry[0]]
+    assert len(setups) == 1
+    assert setups[0][1] is True
+    assert setups[0][2] is None
+    assert "key=unset" in space.setup_log
+    version_runs = [entry for entry in box.commands if "version.patch" in entry[0] or "stray" in entry[0]]
+    assert len(version_runs) == 3
+    assert all(online is False for _, online, _ in version_runs)
     assert space.session().read_file(f"{WORK_DIR}/built.txt") == "x = 1\n"
+    assert space.session().read_file(f"{WORK_DIR}/stray.txt") is None
 
 
-def test_versions_outside_the_editable_paths_never_reach_the_box(
-    workspace: tuple[RepoWorkspace, Path, Path],
+def test_version_code_never_runs_while_the_network_is_on(
+    workspace: tuple[RepoWorkspace, _Runtime, Path, Path],
 ) -> None:
-    """Refuse a version that edits the tests before anything runs."""
-    space, archive, root = workspace
+    """Every command after setup, including the reachability check, runs only once the switch landed."""
+    space, runtime, archive, root = workspace
 
-    result = space.checkout(_patch(root / "one", archive, {"tests/test_app.py": "rigged\n"}))
+    space.checkout(_patch(root / "one", archive, {"src/app.py": "x = 2\n"}))
 
-    assert result.path is None
-    assert result.problems == ("'tests/test_app.py' is outside the editable paths.",)
+    commands = runtime.boxes[0].commands
+    probe = next(index for index, entry in enumerate(commands) if "/dev/tcp/" in entry[0])
+    assert all(online for _, online, _ in commands[:probe])
+    assert not any(online for _, online, _ in commands[probe:])
+    assert all("version.patch" not in command for command, _, _ in commands[:probe])
+
+
+@pytest.mark.parametrize("cutoff", ["refused", "leaky"])
+def test_a_failed_network_cutoff_stops_the_workspace(tmp_path: Path, cutoff: str) -> None:
+    """Close the box and refuse every version when the network cannot be switched off and confirmed."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
+    runtime = _Runtime(cutoff)
+    space = _space(archive, runtime, setup="true")
+
+    with pytest.raises(NetworkCutoffError):
+        space.checkout(_patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"}))
+    with pytest.raises(NetworkCutoffError):
+        space.checkout("")
+
+    assert len(runtime.boxes) == 1
+    assert runtime.boxes[0].closed
+    assert all("version.patch" not in command for command, _, _ in runtime.boxes[0].commands)
+
+
+def test_a_box_that_cannot_switch_its_network_off_is_refused(tmp_path: Path) -> None:
+    """Fail closed when the runtime offers no way to take an online box offline."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
+    space = _space(archive, LocalSubprocessRuntime(), setup=None)
+
+    with pytest.raises(NetworkCutoffError, match="cannot switch"):
+        space.session()
+
+
+def test_an_offline_box_is_not_switched_or_probed(tmp_path: Path) -> None:
+    """A box that opened offline needs no switch, so a run without setup never reaches a registry."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
+    runtime = _Runtime("refused")
+    space = _space(archive, runtime, setup=None, spec=SandboxSpec(lifetime_seconds=60, network_disabled=True))
+    try:
+        assert space.checkout("").path == WORK_DIR
+    finally:
+        space.close()
+
+    assert not any(online for _, online, _ in runtime.boxes[0].commands)
+    assert all("/dev/tcp/" not in command for command, _, _ in runtime.boxes[0].commands)
 
 
 def test_failed_setup_and_broken_patches_are_reported(tmp_path: Path) -> None:
-    """Explain a setup that exits non-zero and a patch that does not apply."""
+    """Stop on a setup that exits non-zero, and explain a patch that does not apply."""
     archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
-    space = RepoWorkspace(
-        runtime=LocalSubprocessRuntime(),
-        spec=SandboxSpec(lifetime_seconds=60),
-        archive=archive,
-        editable_paths=["."],
-        readonly_paths=[],
-        setup_command="echo boom; exit 3",
-        secrets={},
-    )
+    failing = _space(archive, _Runtime(), setup="echo boom; exit 3")
+    with pytest.raises(RepoSetupError, match="exit 3") as failed:
+        failing.session()
+    assert "boom" in str(failed.value)
+
+    space = _space(archive, _Runtime(), setup=None)
     try:
-        failed = space.checkout("")
         broken = space.checkout(
             "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-y\n+z\n"
         )
     finally:
         space.close()
-
-    assert failed.problems == ("The setup command failed (exit 3).",)
-    assert "boom" in failed.setup_log
     assert broken.problems[0].startswith("The change does not apply cleanly")
+
+
+def test_versions_outside_the_editable_paths_never_reach_the_box(
+    workspace: tuple[RepoWorkspace, _Runtime, Path, Path],
+) -> None:
+    """Refuse a version that edits the tests before anything runs."""
+    space, runtime, archive, root = workspace
+
+    result = space.checkout(_patch(root / "one", archive, {"tests/test_app.py": "rigged\n"}))
+
+    assert result.path is None
+    assert result.problems == ("'tests/test_app.py' is outside the editable paths.",)
+    assert runtime.boxes == []
 
 
 def test_redact_hides_long_values_only() -> None:
     """Mask real secrets while leaving short values that would scramble ordinary output."""
     assert redact("key=abcdefgh on=1", ["abcdefgh", "1"]) == "key=[secret] on=1"
+
+
+def test_protected_paths_win_over_editable_ones_before_the_box_opens(tmp_path: Path) -> None:
+    """Lay out an allowed edit, but refuse one to a protected judge file inside an editable folder."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "src/judge.py": "ok = True\n"})
+    runtime = _Runtime()
+    space = RepoWorkspace(
+        runtime=runtime,
+        spec=_ONLINE,
+        archive=archive,
+        editable_paths=["src"],
+        readonly_paths=[],
+        setup_command=None,
+        secrets={},
+        protected_paths=["optimize.toml", "src/judge.py"],
+    )
+    try:
+        rigged = space.checkout(_patch(tmp_path / "rigged", archive, {"src/judge.py": "ok = 'always'\n"}))
+        assert rigged.path is None
+        assert rigged.problems == (
+            "'src/judge.py' is protected by the repository's optimize.toml ([paths] protected).",
+        )
+        assert runtime.boxes == []
+        rules = space.checkout(_patch(tmp_path / "rules", archive, {"optimize.toml": "[paths]\neditable = ['.']\n"}))
+        assert rules.path is None
+        allowed = space.checkout(_patch(tmp_path / "allowed", archive, {"src/app.py": "x = 2\n"}))
+        assert allowed.path == WORK_DIR
+    finally:
+        space.close()
+
+
+def _guarded(tmp_path: Path) -> tuple[RepoWorkspace, Path]:
+    """Build a workspace whose evaluation folder is protected and whose source is editable.
+
+    Args:
+        tmp_path: Scratch folder.
+
+    Returns:
+        The workspace and its archive.
+    """
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "eval/labels.csv": "a,1\n", "eval/judge.py": "ok = True\n"})
+    space = RepoWorkspace(
+        runtime=_Runtime(),
+        spec=_ONLINE,
+        archive=archive,
+        editable_paths=["src"],
+        readonly_paths=[],
+        setup_command=None,
+        secrets={},
+        protected_paths=["eval", "optimize.toml"],
+    )
+    return space, archive
+
+
+def test_a_source_only_version_whose_code_rewrites_the_labels_is_caught(tmp_path: Path) -> None:
+    """Flag protected files the version's code changes while it runs, even though its patch names only source."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        assert space.checkout(version).path == WORK_DIR
+        assert space.stamp_before_run() is None
+        assert space.protected_changes() == ()
+
+        space.checkout(version)
+        space.stamp_before_run()
+        space.session().run(f"cd {WORK_DIR} && printf 'a,0\\n' > eval/labels.csv && touch eval/extra.csv")
+        assert space.protected_changes() == (
+            "'eval/extra.csv' is protected by the repository's optimize.toml ([paths] protected),"
+            " and the version's code changed it while it ran.",
+            "'eval/labels.csv' is protected by the repository's optimize.toml ([paths] protected),"
+            " and the version's code changed it while it ran.",
+        )
+
+        space.checkout(version)
+        space.stamp_before_run()
+        space.session().run(f"rm {WORK_DIR}/eval/judge.py")
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/judge.py"]
+    finally:
+        space.close()
+
+
+def test_a_protected_file_rewritten_and_restored_while_the_version_runs_is_caught(tmp_path: Path) -> None:
+    """Flag a protected file the version's code rewrites and then restores, and a protected file it adds and removes."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        space.checkout(version)
+        space.stamp_before_run()
+        space.session().run(
+            f"cd {WORK_DIR} && saved=$(cat eval/labels.csv) && printf 'a,0\\n' > eval/labels.csv"
+            " && printf '%s\\n' \"$saved\" > eval/labels.csv"
+        )
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
+
+        space.checkout(version)
+        space.stamp_before_run()
+        space.session().run(f"cd {WORK_DIR} && touch eval/extra.csv && rm eval/extra.csv")
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval"]
+
+        space.checkout(version)
+        space.stamp_before_run()
+        space.session().run(f"cd {WORK_DIR} && cat eval/labels.csv eval/judge.py > /dev/null")
+        assert space.protected_changes() == ()
+    finally:
+        space.close()
+
+
+def test_tampering_with_the_prepared_tree_is_caught_on_the_next_version(tmp_path: Path) -> None:
+    """Compare against fingerprints the parent holds, so rewriting the prepared copy in the box does not hide a change."""
+    space, archive = _guarded(tmp_path)
+    try:
+        version = _patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"})
+        space.checkout(version)
+        space.session().run(f"printf 'a,0\\n' > {PREPARED_DIR}/eval/labels.csv")
+
+        space.checkout(version)
+        space.stamp_before_run()
+
+        assert [problem.split("'")[1] for problem in space.protected_changes()] == ["eval/labels.csv"]
+    finally:
+        space.close()
+
+
+def test_a_workspace_without_protected_paths_skips_the_check(
+    workspace: tuple[RepoWorkspace, _Runtime, Path, Path],
+) -> None:
+    """Run no fingerprinting when the repository protects nothing."""
+    space, runtime, _, _ = workspace
+
+    space.checkout("")
+
+    assert space.protected_changes() == ()
+    assert all("hashlib" not in command for command, _, _ in runtime.boxes[0].commands)

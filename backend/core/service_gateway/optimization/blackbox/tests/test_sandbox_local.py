@@ -59,7 +59,7 @@ def session() -> Iterator[LocalSubprocessSession]:
     Yields:
         The open session; closed afterwards.
     """
-    box = LocalSubprocessRuntime().open(SandboxSpec(lifetime_seconds=60, env={"SKYNET_SPEC": "from-spec"}))
+    box = LocalSubprocessRuntime().open(SandboxSpec(lifetime_seconds=60, env={"APP_SPEC": "from-spec"}))
     try:
         yield box
     finally:
@@ -76,14 +76,14 @@ def test_local_session_runs_commands_in_a_private_scrubbed_directory(
         {
             "probe.py": "import os, sys\n"
             "print(open('data/in.txt').read())\n"
-            "print(os.environ.get('SKYNET_SPEC'), os.environ.get('SKYNET_CALL'), os.environ.get('HOST_ONLY'))\n"
+            "print(os.environ.get('APP_SPEC'), os.environ.get('APP_CALL'), os.environ.get('HOST_ONLY'))\n"
             "print(os.environ['HOME'] == os.getcwd())\n"
             "sys.stderr.write('warned')\n"
             "sys.exit(3)\n",
         }
     )
 
-    result = session.run("python3 probe.py", env={"SKYNET_CALL": "per-call"}, timeout_seconds=30)
+    result = session.run("python3 probe.py", env={"APP_CALL": "per-call"}, timeout_seconds=30)
 
     assert result.exit_code == 3
     assert result.timed_out is False

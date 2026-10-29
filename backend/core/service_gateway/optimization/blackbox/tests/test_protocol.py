@@ -14,6 +14,7 @@ from ..protocol import (
     Task,
     candidate_key,
 )
+from ..runner import normalize_score
 from .mocks import vowel_scorer
 
 
@@ -131,6 +132,27 @@ def test_scorer_abort_is_not_floored() -> None:
         server.evaluate("anything")
 
 
+def test_a_scorer_without_feedback_stops_the_run() -> None:
+    """Missing feedback is a scorer error that ends the run with the contract message, not a silent zero."""
+
+    def bare(candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
+        """Return a bare number the way a scorer without feedback would.
+
+        Args:
+            candidate: Ignored.
+            case: Ignored.
+
+        Returns:
+            Never; the contract check raises.
+        """
+        return normalize_score(0.5)
+
+    server = EvalServer(bare, max_evals=5)
+
+    with pytest.raises(ScorerAbortError, match="The scorer must return feedback"):
+        server.evaluate("anything")
+
+
 def test_on_eval_fires_only_at_the_root() -> None:
     """The listener sees every evaluation once, whichever lane made it."""
     seen: list[tuple[int, float]] = []
@@ -154,7 +176,7 @@ def test_task_mode_flags() -> None:
     assert Task(seed_candidate=None).str_mode
     assert not Task(seed_candidate={"a": "b"}).str_mode
     assert not Task(seed_candidate="hi").has_dataset
-    assert Task(seed_candidate="hi", val_set=[{"x": 1}]).has_dataset
+    assert Task(seed_candidate="hi", cases=[{"x": 1}]).has_dataset
 
 
 def test_history_lists_distinct_versions_in_first_seen_order() -> None:
@@ -188,49 +210,3 @@ def test_evaluate_logs_a_debug_heartbeat_per_scorer_call(caplog: pytest.LogCaptu
         "scorer eval 1/5 score=0.500",
         "scorer eval 2/5 score=0.750",
     ]
-
-
-def test_primed_score_serves_the_first_evaluation_without_a_scorer_run() -> None:
-    """A primed (version, case) pair is returned once for free, then measured afresh."""
-    server = EvalServer(vowel_scorer, max_evals=2)
-    server.prime("aaa", {"i": 0}, 0.25, {"note": "measured outside the budget"})
-
-    assert server.recorded("aaa", {"i": 0}) == 0.25
-    assert server.recorded("aaa", {"i": 1}) is None
-    assert server.evaluate("aaa", {"i": 0}) == (0.25, {"note": "measured outside the budget"})
-    assert server.used == 0
-    assert server.mean_score("aaa") == 0.25
-    assert server.recorded("aaa", {"i": 0}) == 0.25
-
-    assert server.evaluate("aaa", {"i": 0}) == (1.0, {"vowels": 3})
-    assert server.used == 1
-    assert server.recorded("aaa", {"i": 0}) == 1.0
-    assert server.recorded("aaa") is None
-
-
-def test_primed_scores_reach_lanes_but_not_the_listener() -> None:
-    """A free evaluation counts for best tracking only: no budget, no listener tick."""
-    seen: list[float] = []
-    parent = EvalServer(vowel_scorer, max_evals=4, on_eval=lambda server, score: seen.append(score))
-    lane = parent.lane(4)
-    parent.prime("xxa", None, 0.5, {})
-
-    assert lane.evaluate("xxa") == (0.5, {})
-
-    assert (lane.used, parent.used, seen) == (0, 0, [])
-    assert lane.best_score == parent.best_score == 0.5
-    assert lane.evaluate("aaa") == (1.0, {"vowels": 3})
-    assert (lane.used, parent.used, seen) == (1, 1, [1.0])
-
-
-def test_recorded_scores_are_kept_per_case_at_the_root() -> None:
-    """Scores are remembered per (version, case) across lanes, keyed by the case's content."""
-    parent = EvalServer(vowel_scorer, max_evals=4)
-    lane = parent.lane(4)
-
-    lane.evaluate("axxx", {"i": 0, "target": "aeiou"})
-
-    assert parent.recorded("axxx", {"target": "aeiou", "i": 0}) == 0.25
-    assert lane.recorded("axxx", {"i": 0, "target": "aeiou"}) == 0.25
-    assert parent.recorded("axxx", {"i": 1}) is None
-    assert parent.recorded({"a": "axxx"}, {"i": 0, "target": "aeiou"}) is None

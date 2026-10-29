@@ -29,12 +29,6 @@ class _Gateway:
         """Return the same authored source for assertion at the sandbox boundary."""
         return {**payload, "_protected_fixture": True}
 
-    def validate_recovery_runtime(self, _runtime: str) -> None:
-        """Accept a fresh run with no recovery plan."""
-
-    def checkpoint_recovery_plan(self) -> None:
-        """Return no recovery plan for a store without checkpoint support."""
-
     def close(self) -> None:
         """Close the transport fixture without external resources."""
 
@@ -53,7 +47,7 @@ def _payload(marker: Path, runtime: str) -> dict[str, Any]:
         "import os\n"
         "import pathlib\n"
         "import socket\n"
-        f"pathlib.Path({str(marker)!r}).write_text(os.environ.get('SKYNET_PARENT_ONLY_SECRET', 'missing'))\n"
+        f"pathlib.Path({str(marker)!r}).write_text(os.environ.get('APP_PARENT_ONLY_SECRET', 'missing'))\n"
         "socket.create_connection(('127.0.0.1', 1), timeout=0.1)\n"
     )
     return {
@@ -135,7 +129,7 @@ def test_worker_orchestrator_skips_host_exec_and_dispatches_authored_source_to_o
     worker.enqueue_job("protected-dspy")
     context, _process = make_mp_context(result_events=[make_result_event()])
     service = MagicMock()
-    monkeypatch.setenv("SKYNET_PARENT_ONLY_SECRET", "must-stay-in-parent")
+    monkeypatch.setenv("APP_PARENT_ONLY_SECRET", "must-stay-in-parent")
     monkeypatch.setattr(engine.settings, "openrouter_api_key", SecretStr("fixture-only"))
 
     with (

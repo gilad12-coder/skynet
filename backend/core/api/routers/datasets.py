@@ -94,7 +94,7 @@ class RequestUserDatasetRequest(BaseModel):
     prompt: str = Field(
         default="",
         max_length=400,
-        description="Short Hebrew sentence explaining why a dataset is needed.",
+        description="Short sentence, in the user's reply language, explaining why a dataset is needed.",
     )
 
 

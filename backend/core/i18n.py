@@ -1,4 +1,4 @@
-"""Backend facade over the shared Skynet i18n catalog.
+"""Backend facade over the shared i18n catalog.
 
 The canonical catalog lives at ``i18n/locales/he.json`` in the repo root, and
 ``scripts/generate_i18n.py`` copies it into ``backend/core/i18n_locales/he.json``
@@ -20,7 +20,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# Lookup the in-package copy first (works for wheel installs and air-gap),
+from core.brand import APP_NAME
+
+# Lookup the in-package copy first (works for wheel installs),
 # and fall back to the repo-root canonical when running from a source tree
 # without the bundled copy. Module-level constant so import never blocks on
 # disk I/O — the catalog itself is read lazily by ``_catalog()``.
@@ -28,6 +30,9 @@ _PACKAGE_CATALOG = Path(__file__).resolve().parent / "i18n_locales" / "he.json"
 _REPO_CATALOG = Path(__file__).resolve().parents[2] / "i18n" / "locales" / "he.json"
 CATALOG_PATH = _PACKAGE_CATALOG if _PACKAGE_CATALOG.is_file() else _REPO_CATALOG
 TERM_PATTERN = re.compile(r"{term\.([A-Za-z0-9_]+)}")
+# The app's name comes from i18n/brand.json rather than the catalogs, so every
+# locale resolves {term.appName} to the same untranslated brand.
+_BRAND_TERMS: dict[str, str] = {"appName": APP_NAME}
 
 _TERM_KEYS: dict[str, str] = {
     "TERM_OPTIMIZATION": "optimization",
@@ -138,6 +143,8 @@ def term(key: str) -> str:
         The Hebrew term string from the catalog, or ``key`` itself when the
         catalog has no entry.
     """
+    if key in _BRAND_TERMS:
+        return _BRAND_TERMS[key]
     value = _terms().get(key)
     return value if isinstance(value, str) else key
 
@@ -197,6 +204,126 @@ def t(key: str, /, **params: Any) -> str:
     """
     template = _messages().get(key, key)
     template = TERM_PATTERN.sub(lambda match: term(match.group(1)), template)
+    if params:
+        try:
+            return template.format(**params)
+        except (KeyError, IndexError, ValueError):
+            return template
+    return template
+
+
+DEFAULT_LOCALE = "en"
+_LOCALE_TAG = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*")
+
+
+def request_locale(explicit: str | None, accept_language: str | None = None) -> str:
+    """Pick the locale to answer a request in.
+
+    The UI's own locale wins over ``Accept-Language``: the browser sends its
+    language, which can differ from the language the user chose in the app.
+
+    Args:
+        explicit: Locale tag the client named in the request body, if any.
+        accept_language: Raw ``Accept-Language`` header, if any.
+
+    Returns:
+        A locale tag; English when neither source names a usable one.
+    """
+    if explicit and _LOCALE_TAG.fullmatch(explicit.strip()):
+        return explicit.strip()
+    ranked: list[tuple[float, int, str]] = []
+    for position, part in enumerate((accept_language or "").split(",")):
+        tag, _, quality = part.strip().partition(";")
+        tag = tag.strip()
+        if not _LOCALE_TAG.fullmatch(tag):
+            continue
+        weight = 1.0
+        if quality.strip().startswith("q="):
+            try:
+                weight = float(quality.strip()[2:])
+            except ValueError:
+                continue
+        if weight > 0:
+            ranked.append((-weight, position, tag))
+    return min(ranked)[2] if ranked else DEFAULT_LOCALE
+
+
+@lru_cache(maxsize=64)
+def _overlay(locale: str) -> dict[str, Any]:
+    """Load one per-locale overlay catalog, or an empty mapping when absent.
+
+    Args:
+        locale: Locale tag matching an ``i18n/locales/<locale>.json`` file.
+
+    Returns:
+        The parsed overlay, or ``{}`` when no file exists for ``locale``.
+    """
+    if not re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*", locale):
+        return {}
+    for directory in (_PACKAGE_CATALOG.parent, _REPO_CATALOG.parent):
+        path = directory / f"{locale}.json"
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return {}
+
+
+def locale_chain(locale: str | None) -> list[str]:
+    """Return the lookup order for ``locale``, ending at the Hebrew base.
+
+    Mirrors the frontend registry: a regional tag falls back to its language,
+    every non-Hebrew locale then falls back to English, and Hebrew is last
+    because it is the only complete catalog.
+
+    Args:
+        locale: Requested locale tag (``"pt-BR"``, ``"en"``); ``None`` means
+            the Hebrew base.
+
+    Returns:
+        Distinct locale tags to try in order.
+    """
+    if not locale:
+        return ["he"]
+    language = locale.split("-", 1)[0]
+    chain: list[str] = []
+    for tag in (locale, language, "en", "he"):
+        if tag and tag not in chain:
+            chain.append(tag)
+        if tag == "he":
+            break
+    return chain
+
+
+def t_locale(locale: str | None, key: str, /, **params: Any) -> str:
+    """Look up and format a user-facing string in ``locale``.
+
+    Walks :func:`locale_chain` so a key a locale has not translated degrades to
+    English, then Hebrew, never to a blank. ``{term.x}`` placeholders resolve
+    through the same chain.
+
+    Args:
+        locale: Recipient locale tag; ``None`` renders the Hebrew base.
+        key: Catalog identifier for the message template.
+        **params: Optional placeholder values substituted via ``str.format``.
+
+    Returns:
+        The localized, formatted string (or ``key`` when no locale has it).
+    """
+    chain = locale_chain(locale)
+
+    def lookup(section: str, name: str) -> str | None:
+        """Return the first ``section``/``name`` value found along the chain."""
+        for tag in chain:
+            values = (_catalog() if tag == "he" else _overlay(tag)).get(section, {})
+            value = values.get(name) if isinstance(values, dict) else None
+            if isinstance(value, str):
+                return value
+        return None
+
+    template = lookup("messages", key) or key
+    template = TERM_PATTERN.sub(
+        lambda match: _BRAND_TERMS.get(match.group(1)) or lookup("terms", match.group(1)) or match.group(1),
+        template,
+    )
     if params:
         try:
             return template.format(**params)

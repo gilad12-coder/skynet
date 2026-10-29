@@ -13,6 +13,8 @@ from ..config import settings
 
 def email_configured() -> bool:
     """Return whether an SMTP relay is configured for outbound mail."""
+    # PR previews keep email verification: their acceptance checks must prove
+    # the same signup, login and code flow that staging and production serve.
     return bool(settings.smtp_host)
 
 

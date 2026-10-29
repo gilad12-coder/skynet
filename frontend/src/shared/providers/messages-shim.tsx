@@ -4,7 +4,7 @@ import type { Locale } from "@/shared/lib/locale";
 import { getPublishedCatalog, serializeMessages } from "@/shared/lib/runtime-messages";
 
 /**
- * Inline `window.__SKYNET_MESSAGES__` shim, rendered so the catalog reaches the
+ * Inline `window.__APP_MESSAGES__` shim, rendered so the catalog reaches the
  * browser exactly once.
  *
  * A `<script>` emitted by the Server Component layout is serialized into the
@@ -19,12 +19,10 @@ import { getPublishedCatalog, serializeMessages } from "@/shared/lib/runtime-mes
  */
 export function MessagesShim({ locale }: { locale: Locale }) {
   const catalog =
-    typeof window === "undefined"
-      ? getPublishedCatalog(locale)
-      : (window.__SKYNET_MESSAGES__ ?? {});
+    typeof window === "undefined" ? getPublishedCatalog(locale) : (window.__APP_MESSAGES__ ?? {});
   return (
     <script
-      id="skynet-messages"
+      id="app-messages"
       suppressHydrationWarning
       dangerouslySetInnerHTML={{ __html: serializeMessages(catalog) }}
     />

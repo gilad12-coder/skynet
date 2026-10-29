@@ -200,7 +200,7 @@ export function TaggerAutotagLive({ config, data, annotations, status }: Props) 
                           "flex min-h-0 flex-1 items-center justify-center rounded-xl border px-3 text-center",
                           (config.categories?.length ?? 0) >= 7 ? "text-sm" : "text-base",
                           selected
-                            ? "border-primary/40 bg-primary/10 font-medium text-primary"
+                            ? "on-primary font-medium"
                             : "border-border/50 text-muted-foreground/50",
                         )}
                       >

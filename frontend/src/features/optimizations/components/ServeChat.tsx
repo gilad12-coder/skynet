@@ -9,7 +9,12 @@ import { Button } from "@/shared/ui/primitives/button";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import type { ServeInfoResponse, WorkflowNodeTrace } from "@/shared/types/api";
-import { autoResizeTextarea, Composer, MessageActions } from "@/shared/ui/agent";
+import {
+  autoResizeTextarea,
+  CollapsibleMessage,
+  Composer,
+  MessageActions,
+} from "@/shared/ui/agent";
 import {
   USER_BUBBLE_EDIT_CANCEL_CLASS,
   USER_BUBBLE_EDIT_SEND_CLASS,
@@ -138,23 +143,25 @@ export function ServeChat({
               ) : (
                 <div className="flex justify-start group/user">
                   <div
-                    className="max-w-[92%] rounded-2xl rounded-br-sm bg-[#3D2E22] px-4 py-3 text-sm text-[#FAF8F5] shadow-sm sm:max-w-[80%]"
+                    className="max-w-[92%] rounded-2xl rounded-br-sm bg-primary-fill px-4 py-3 text-sm text-primary-foreground sm:max-w-[80%]"
                     dir="ltr"
                   >
-                    {serveInfo.input_fields.map((k, i, arr) => (
-                      <div key={k} className="font-mono leading-relaxed">
-                        <span className="text-[#C8A882] text-xs">
-                          {k}
-                          {msg("optimizations.serve.field_separator")}
-                        </span>
-                        <span className="whitespace-pre-wrap break-words">
-                          {run.inputs[k] ?? ""}
-                        </span>
-                        {i < arr.length - 1 && arr.length > 1 && (
-                          <div className="h-px bg-white/10 my-1.5" />
-                        )}
-                      </div>
-                    ))}
+                    <CollapsibleMessage>
+                      {serveInfo.input_fields.map((k, i, arr) => (
+                        <div key={k} className="font-mono leading-relaxed">
+                          <span className="text-primary text-xs">
+                            {k}
+                            {msg("optimizations.serve.field_separator")}
+                          </span>
+                          <span className="whitespace-pre-wrap break-words">
+                            {run.inputs[k] ?? ""}
+                          </span>
+                          {i < arr.length - 1 && arr.length > 1 && (
+                            <div className="h-px bg-white/10 dark:bg-black/10 my-1.5" />
+                          )}
+                        </div>
+                      ))}
+                    </CollapsibleMessage>
                   </div>
                   {!serveLoading && (
                     <Button
@@ -162,7 +169,7 @@ export function ServeChat({
                       variant="ghost"
                       size="icon-xs"
                       onClick={() => setEditingRunTs(run.ts)}
-                      className="ms-1.5 self-center text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/user:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:opacity-100"
+                      className="ms-1.5 self-center text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/user:opacity-100 any-pointer-coarse:opacity-100"
                       aria-label={msg("auto.features.optimizations.components.servechat.literal.1")}
                     >
                       <PencilSimple className="size-3.5" />
@@ -227,12 +234,12 @@ export function ServeChat({
           <div className="space-y-3">
             <div className="flex justify-start">
               <div
-                className="max-w-[92%] rounded-2xl rounded-br-sm bg-[#3D2E22] px-4 py-3 text-sm text-[#FAF8F5] shadow-sm sm:max-w-[80%]"
+                className="max-w-[92%] rounded-2xl rounded-br-sm bg-primary-fill px-4 py-3 text-sm text-primary-foreground sm:max-w-[80%]"
                 dir="ltr"
               >
                 {serveInfo.input_fields.map((k, i, arr) => (
                   <div key={k} className="font-mono leading-relaxed">
-                    <span className="text-[#C8A882] text-xs">
+                    <span className="text-primary text-xs">
                       {k}
                       {msg("optimizations.serve.field_separator")}
                     </span>
@@ -240,7 +247,7 @@ export function ServeChat({
                       {streamingRun.inputs[k] ?? ""}
                     </span>
                     {i < arr.length - 1 && arr.length > 1 && (
-                      <div className="h-px bg-white/10 my-1.5" />
+                      <div className="h-px bg-white/10 dark:bg-black/10 my-1.5" />
                     )}
                   </div>
                 ))}
@@ -249,13 +256,13 @@ export function ServeChat({
             <div className="px-1" dir="ltr">
               {Object.keys(streamingRun.partial).length === 0 ? (
                 <div className="flex items-center gap-1.5 py-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#3D2E22]/30 animate-bounce" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary-fill/30 animate-bounce" />
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-[#3D2E22]/30 animate-bounce"
+                    className="w-1.5 h-1.5 rounded-full bg-primary-fill/30 animate-bounce"
                     style={{ animationDelay: "150ms" }}
                   />
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-[#3D2E22]/30 animate-bounce"
+                    className="w-1.5 h-1.5 rounded-full bg-primary-fill/30 animate-bounce"
                     style={{ animationDelay: "300ms" }}
                   />
                   <span className="text-xs text-muted-foreground/40">
@@ -384,7 +391,7 @@ export function ServeChat({
                         }
                       }}
                       rows={1}
-                      className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-[#DDD4C8] bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-[#C8A882] focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                      className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-border bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-primary-fill focus:outline-none focus-visible:outline-none focus-visible:ring-0 sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
                     />
                   </div>
                 ))}
@@ -418,7 +425,7 @@ function NodeTraceStrip({ traces }: { traces: WorkflowNodeTrace[] }) {
             {trace.error ? (
               <X className="size-3 shrink-0 text-destructive" />
             ) : (
-              <Check className="size-3 shrink-0 text-[#5A7247]" />
+              <Check className="size-3 shrink-0 text-[#5A7247] dark:text-[#adc899]" />
             )}
             <span className="truncate font-mono text-foreground">{trace.name}</span>
             <span className="text-[0.625rem] uppercase text-muted-foreground/70">{trace.kind}</span>

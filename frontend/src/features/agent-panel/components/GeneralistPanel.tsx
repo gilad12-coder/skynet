@@ -6,7 +6,7 @@ import { useCompletionNotification } from "@/shared/hooks/use-completion-notific
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ClockCounterClockwise, SidebarSimple, Plus, Sparkle, MagicWand } from "@/shared/ui/icons";
+import { ClockCounterClockwise, SidebarSimple, Plus, MagicWand } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
@@ -17,26 +17,39 @@ import { AgentThread } from "@/shared/ui/agent/agent-thread";
 import { ChatErrorBanner } from "@/shared/ui/agent/chat-error-banner";
 import { ChatTranscript } from "@/shared/ui/agent/chat-transcript";
 import { Composer } from "@/shared/ui/agent/composer";
+import { AppMark } from "@/shared/ui/app-mark";
 import { ComposerModelMenu } from "@/shared/ui/agent/composer-model-menu";
-import type { AgentThinking, AgentToolCall } from "@/shared/ui/agent/types";
+import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent/types";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-splash-overlay";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg } from "@/shared/lib/messages";
 
-import { parseAgentPreferencePatch, useUserPrefs } from "@/features/settings";
+import { useLocalAgentMenuModels } from "@/features/local-runtime";
+import {
+  agentSubscriptionFor,
+  parseAgentPreferencePatch,
+  useSettingsModal,
+  useUserPrefs,
+} from "@/features/settings";
+import { I18N_KEY } from "@/shared/lib/i18n";
 
 import { useConversationStore } from "../hooks/use-conversation-store";
 import { useGeneralistAgent, type SessionEventContext } from "../hooks/use-generalist-agent";
-import { useCodeAuthoringAgent } from "../hooks/use-code-authoring-agent";
 import { useGeneralistPanelState } from "../hooks/use-panel-state";
 import { getConversation } from "../lib/conversation-api";
 import { TRUST_MODE_HUE, useTrustMode } from "../hooks/use-trust-mode";
 import { extractWizardPatch, useWizardStateOptional } from "../hooks/use-wizard-state";
-import type { ToolEndPayload, ToolStartPayload, WizardState } from "../lib/types";
+import {
+  SCREEN_CHATS_KEY,
+  decodeScreenChats,
+  encodeScreenChats,
+  parseScreenNav,
+  switchScreenChat,
+} from "../lib/screen-agent";
+import type { ToolEndPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
-import { registerTutorialHook } from "@/features/tutorial";
 
 import { MAX_WIDTH, MIN_WIDTH, NARROW_VIEWPORT_QUERY } from "../constants";
 
@@ -45,26 +58,31 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { DATASET_FILE_ACCEPT, DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
 import { LibraryDatasetCard, type ConfirmedLibraryDataset } from "./LibraryDatasetCard";
 import { InferenceFormCard } from "./InferenceFormCard";
-import { CodeAuthoringCard } from "./CodeAuthoringCard";
 import { MinimizedPill } from "./MinimizedPill";
 import { PresenceStrip } from "./PresenceStrip";
 import { ToolCallRow } from "./ToolCallRow";
 import { ToolsCarousel } from "./ToolsCarousel";
 import { TrustToggle } from "./TrustToggle";
-import { getToolRenderer } from "./tool-renderers";
+import { getToolKind, getToolRenderer } from "./tool-renderers";
+import { AGENT_PROMPT_EVENT, takeQueuedAgentPrompt } from "../lib/prompt-queue";
 
 const REQUEST_DATASET_TOOL = "request_user_dataset_datasets_request_upload_post";
 const REQUEST_LIBRARY_TOOL = "request_user_dataset_from_library";
 const REQUEST_INFERENCE_TOOL = "request_user_inference";
 const REQUEST_PAIR_INFERENCE_TOOL = "request_user_pair_inference";
-const REQUEST_CODE_TOOL = "request_code_authoring";
+
+// Tools that keep their own interactive card instead of folding into the
+// turn's activity line as a plain step.
+const RICH_CARD_TOOLS = new Set<string>([
+  REQUEST_DATASET_TOOL,
+  REQUEST_LIBRARY_TOOL,
+  REQUEST_INFERENCE_TOOL,
+  REQUEST_PAIR_INFERENCE_TOOL,
+]);
 
 // Submit tools whose success should mirror the manual wizard submit button:
 // play the splash banner, then route to the new optimization's details.
-const SUBMIT_TOOLS: ReadonlySet<string> = new Set([
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
-]);
+const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
 
 /**
  * Pull the new optimization's id out of a submit tool result. The backend's
@@ -79,6 +97,18 @@ function extractOptimizationId(result: unknown): string | null {
     top.result && typeof top.result === "object" ? (top.result as Record<string, unknown>) : top;
   const candidate = inner.optimization_id ?? inner.id;
   return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+// Never shown, so not translated: the agent replies in the user's language
+// either way, and one fixed text lets a reopened chat recognize it.
+const SCREEN_KICKOFF =
+  "[The wizard opened this screen; I typed nothing.] If what you know is enough, fill this screen in and continue; otherwise ask me the one thing you need.";
+
+/** A reopened chat stores the wizard's kickoff as a user turn; it stays unshown. */
+function hideKickoffs(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((m) =>
+    m.role === "user" && m.content.trim() === SCREEN_KICKOFF ? { ...m, hidden: true } : m,
+  );
 }
 
 function getEffectiveMinWidth(): number {
@@ -103,7 +133,8 @@ interface GeneralistPanelProps {
  * Mounted once in the app shell so the thread survives route changes.
  */
 export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
-  const { open, setOpen, width, setWidth, pillDock } = useGeneralistPanelState();
+  const { open, setOpen, width, setWidth, pillDock, panelDock, pillHidden } =
+    useGeneralistPanelState();
   const { mode: trustMode, next: cycleTrust } = useTrustMode();
   const { updatePrefs } = useUserPrefs();
   const reduceMotion = useReducedMotion();
@@ -118,11 +149,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const closePanel = React.useCallback(() => {
     setOpen(false);
   }, [setOpen]);
-
-  React.useEffect(
-    () => registerTutorialHook("setGeneralistPanelOpen", (next) => setOpen(next)),
-    [setOpen],
-  );
 
   // Track the narrow viewport so the panel can render as a full-screen
   // overlay drawer (rather than a side-by-side aside) at <=1023px. We collapse
@@ -149,8 +175,29 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const wizardCtx = useWizardStateOptional();
   const effectiveWizard: WizardState = (() => {
     const base = wizardCtx?.state ?? {};
-    return wizardState ? { ...base, ...wizardState } : base;
+    const merged = wizardState ? { ...base, ...wizardState } : base;
+    const screen = wizardCtx?.wizardScreen;
+    if (screen == null) return merged;
+    const issue = wizardCtx?.screenIssue;
+    return issue
+      ? { ...merged, wizard_screen: screen, screen_issue: issue }
+      : { ...merged, wizard_screen: screen };
   })();
+  // Each wizard screen has its own agent and its own chat. Moving to a
+  // screen resumes the chat held there, or opens a fresh one whose agent
+  // starts by itself; an agent's Back leaves the earlier screen its request.
+  const shownScreen = wizardCtx?.wizardScreen ?? null;
+  const screenChatsRef = React.useRef(new Map<string, string>());
+  const screenOpeningRef = React.useRef<string | null>(null);
+  const shownScreenRef = React.useRef<string | null>(null);
+  const [kickoffScreen, setKickoffScreen] = React.useState<string | null>(null);
+  const keepScreenChats = React.useCallback(() => {
+    try {
+      window.sessionStorage.setItem(SCREEN_CHATS_KEY, encodeScreenChats(screenChatsRef.current));
+    } catch {
+      // Storage full or blocked: a reload then starts the screen's chat fresh.
+    }
+  }, []);
 
   // Agent-submit splash: a successful submit tool plays the same full-screen
   // banner the manual wizard button shows, then routes to the new job's
@@ -208,48 +255,51 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (!wizardCtx) return;
       const patch = extractWizardPatch(ev.result);
       if (Object.keys(patch).length > 0) wizardCtx.applyAgentPatch(patch);
+      const nav = ev.status === "ok" ? parseScreenNav(ev.result) : null;
+      if (nav) {
+        screenOpeningRef.current = nav.action === "back" && nav.request ? nav.request : null;
+        wizardCtx.navigateScreen(nav);
+      }
     },
     [updatePrefs, wizardCtx, startSubmitSplash],
   );
 
-  const store = useConversationStore({ enabled: open });
+  const store = useConversationStore({ enabled: open || panelDock !== null });
 
   const handleConversationMeta = React.useCallback(
     (id: string, title: string, ctx: SessionEventContext) => {
       store.upsertFromMeta(id, title);
       if (!ctx.isActive) return;
+      if (shownScreenRef.current) {
+        screenChatsRef.current.set(shownScreenRef.current, id);
+        keepScreenChats();
+      }
       store.setActiveId(id);
       // The user is actively in this conversation — every new turn is "seen"
       // by definition. Without this, the row would render as unread the
       // moment the server bumps its updated_at.
       store.markSeen(id);
     },
-    [store],
+    [store, keepScreenChats],
   );
 
-  // Arm the code-authoring mirror only on a live tool-start (not a reopened
-  // historical call). The code agent itself is hosted below at panel scope, so
-  // its run + timer survive the aside collapse / auto-minimize.
-  const [codeArmed, setCodeArmed] = React.useState(false);
-  const handedOffRef = React.useRef(false);
-  const handleToolStart = React.useCallback((ev: ToolStartPayload, ctx: SessionEventContext) => {
-    // The code agent is a panel-scoped singleton tied to the visible chat; a
-    // background chat requesting authoring must not hijack it mid-use.
-    if (!ctx.isActive) return;
-    if (ev.tool === REQUEST_CODE_TOOL) {
-      handedOffRef.current = false;
-      setCodeArmed(true);
-    }
-  }, []);
-
+  const { openTo: openSettingsTo } = useSettingsModal();
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("generalist"));
   const agent = useGeneralistAgent({
     wizardState: effectiveWizard,
     trustMode,
-    onToolStart: handleToolStart,
     onToolEnd: handleToolEnd,
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
+  // Each conversation on view gets fresh turn components, so one chat's
+  // timers and "already shown" text never carry into another. A new chat
+  // getting its id from its first turn is still the same chat.
+  const [chatView, setChatView] = React.useState({ id: agent.conversationId, key: 0 });
+  if (chatView.id !== agent.conversationId) {
+    const sameChat = chatView.id === null && streaming;
+    setChatView({ id: agent.conversationId, key: sameChat ? chatView.key : chatView.key + 1 });
+  }
   // Any conversation still streaming or waiting its turn keeps the user's
   // notification pending; it fires once they have all settled.
   useCompletionNotification(
@@ -288,7 +338,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (!agent.activateConversation(id)) {
         const detail = await getConversation(id);
         if (!detail) return;
-        agent.openConversation(id, detail.messages);
+        agent.openConversation(id, hideKickoffs(detail.messages));
       }
       store.setActiveId(id);
       store.markSeen(id);
@@ -311,9 +361,115 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   }, [searchParams, setOpen, handlePickConversation, router]);
 
   const handleNewConversation = React.useCallback(() => {
+    if (shownScreenRef.current) {
+      screenChatsRef.current.delete(shownScreenRef.current);
+      keepScreenChats();
+    }
     agent.newSession();
     store.setActiveId(null);
-  }, [agent, store]);
+  }, [agent, store, keepScreenChats]);
+
+  // Swap the chat when the screen on view changes. Off the wizard the chat
+  // on view stays put. The conversation id is read through a ref so a turn
+  // landing mid-switch cannot re-run this for the same screen.
+  const conversationIdRef = React.useRef(agent.conversationId);
+  const reopenedScreen = wizardCtx?.reopenedScreen ?? null;
+  const reopenedScreenRef = React.useRef(reopenedScreen);
+  // Declared before the screen-switch effect, so it is current when that runs.
+  React.useEffect(() => {
+    reopenedScreenRef.current = reopenedScreen;
+  }, [reopenedScreen]);
+  const restoredSetupRef = React.useRef(wizardCtx?.restoredSetup ?? false);
+  React.useEffect(() => {
+    restoredSetupRef.current = wizardCtx?.restoredSetup ?? false;
+  }, [wizardCtx?.restoredSetup]);
+  React.useEffect(() => {
+    conversationIdRef.current = agent.conversationId;
+  }, [agent.conversationId]);
+  const { activateConversation, openConversation, newSession, send: sendToAgent } = agent;
+  const setActiveConversation = store.setActiveId;
+  React.useEffect(() => {
+    if (shownScreen === null) return;
+    const from = shownScreenRef.current;
+    shownScreenRef.current = shownScreen;
+    if (from === null && screenChatsRef.current.size === 0) {
+      // A reload that reopened the setup brings each screen's chat back
+      // with it; any other setup starts with none. Gate on the wizard's
+      // restored flag rather than the reopened screen: this panel's chunk
+      // loads lazily, so the wizard may already have moved off that screen
+      // (clearing it) before this effect first runs.
+      if (restoredSetupRef.current) {
+        let saved: string | null = null;
+        try {
+          saved = window.sessionStorage.getItem(SCREEN_CHATS_KEY);
+        } catch {
+          // Blocked storage: the screens start fresh.
+        }
+        screenChatsRef.current = decodeScreenChats(saved);
+      } else keepScreenChats();
+    }
+    const next = switchScreenChat(
+      screenChatsRef.current,
+      from,
+      conversationIdRef.current,
+      shownScreen,
+    );
+    keepScreenChats();
+    if (next.kind === "stay") return;
+    const opening = screenOpeningRef.current;
+    screenOpeningRef.current = null;
+    const sendOpening = () => {
+      if (opening) sendToAgent(opening, undefined, { hidden: true });
+    };
+    if (next.kind === "fresh") {
+      newSession();
+      setActiveConversation(null);
+      if (opening) sendOpening();
+      else if (shownScreen !== reopenedScreenRef.current) setKickoffScreen(shownScreen);
+      return;
+    }
+    const id = next.conversationId;
+    setActiveConversation(id);
+    if (activateConversation(id)) {
+      sendOpening();
+      return;
+    }
+    void getConversation(id).then((detail) => {
+      if (shownScreenRef.current !== shownScreen) return;
+      if (detail) openConversation(id, hideKickoffs(detail.messages));
+      else newSession();
+      sendOpening();
+    });
+  }, [
+    shownScreen,
+    activateConversation,
+    openConversation,
+    newSession,
+    sendToAgent,
+    setActiveConversation,
+    keepScreenChats,
+  ]);
+
+  // A fresh screen's agent opens the chat by itself: it fills the screen from
+  // what it already knows and continues, or asks the one thing it lacks. It
+  // waits for the chat to be on view (Manual hides it) and never talks over
+  // a chat that already started. A cloned run arrives filled in, so its
+  // agents wait for the user, as the task interview does. It also waits for
+  // the screen left behind to finish its turn: two turns running tool calls
+  // at once left one of them hanging on a call that never returned.
+  const cloned = searchParams.has("clone");
+  const chatEmpty = agent.messages.length === 0 && agent.status === "idle";
+  const backgroundBusy = agent.backgroundBusyCount > 0;
+  React.useEffect(() => {
+    if (kickoffScreen === null) return;
+    if (kickoffScreen !== shownScreen || !chatEmpty || cloned) {
+      setKickoffScreen(null);
+      return;
+    }
+    if (!panelDock || backgroundBusy) return;
+    setKickoffScreen(null);
+    sendToAgent(SCREEN_KICKOFF, undefined, { hidden: true });
+  }, [kickoffScreen, shownScreen, chatEmpty, cloned, panelDock, backgroundBusy, sendToAgent]);
 
   // Deleting the conversation you're currently viewing must drop you back to a
   // clean slate — otherwise the panel keeps showing the just-deleted thread and
@@ -329,13 +485,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     [agent, store],
   );
 
-  const thinking: AgentThinking = {
-    reasoning: agent.reasoning,
-    startedAt: agent.reasoningStartedAt,
-    endedAt: agent.reasoningEndedAt,
-    streaming,
-  };
-
   const [draft, setDraft] = React.useState("");
   const [attachOpen, setAttachOpen] = React.useState(false);
   // The + button opens the OS file picker directly; the popover only appears
@@ -343,127 +492,15 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   const attachInputRef = React.useRef<HTMLInputElement | null>(null);
   const [attachFile, setAttachFile] = React.useState<File | null>(null);
   const confirmedDatasetCallsRef = React.useRef<Set<string>>(new Set());
-  // Latest dataset the user confirmed in-panel — supplies columns + roles +
-  // sample rows to the hosted code agent. Kept as state (not a ref) so the
-  // hosted agent re-renders into "armed" once a dataset is attached.
-  const [lastConfirmedDataset, setLastConfirmedDataset] = React.useState<ConfirmedDataset | null>(
-    null,
-  );
-
-  // Host the canonical code agent at panel scope (mirroring how the wizard
-  // hosts it at wizard scope) so authoring survives the aside collapse /
-  // auto-minimize / conversation switch instead of restarting on remount.
-  const codeAgent = useCodeAuthoringAgent({
-    dataset: lastConfirmedDataset,
-    armed: codeArmed,
-    moduleName:
-      typeof effectiveWizard.module_name === "string" ? effectiveWizard.module_name : undefined,
-    optimizerName:
-      typeof effectiveWizard.optimizer_name === "string"
-        ? effectiveWizard.optimizer_name
-        : undefined,
-    // Code authoring follows the conversation's chosen model, so picking a
-    // concrete model in the composer (instead of the auto-router default) also
-    // steers the seed — the escape hatch when the default is rate-limited.
-    model: agent.model,
-    reasoningEffort: agent.reasoningEffort,
-  });
-  // The agent's turn ends BEFORE its card finishes (the code agent streams
-  // after the turn), so the composer locks on this signal — not ``streaming``
-  // alone — or the user could fire "submit" mid-authoring against a wizard
-  // that has no validated code yet.
-  const codeAuthoringActive = codeAgent.status === "streaming";
-
-  // Drop any prior authoring session when the conversation changes (new chat or
-  // one loaded from history) so its code + timer don't leak across threads.
-  //
-  // Guard against the *handoff turn itself* tripping this reset: the agentSend
-  // below assigns a fresh conversation id (null → realId) for a brand-new
-  // thread, and that materialization must NOT clear the just-set handoff latch
-  // (it would let the completion effect re-fire and double-send code_ready_note
-  // ~31ms apart). So reset only on a genuine thread switch — a change between
-  // two distinct known ids, or a drop back to null (new chat / delete) — never
-  // on the initial null → id assignment of the current thread.
-  const codeAgentReset = codeAgent.reset;
-  const lastConvIdRef = React.useRef<string | null>(agent.conversationId);
-  React.useEffect(() => {
-    const prev = lastConvIdRef.current;
-    lastConvIdRef.current = agent.conversationId;
-    if (prev === agent.conversationId) return;
-    if (prev === null && agent.conversationId !== null) return;
-    setCodeArmed(false);
-    handedOffRef.current = false;
-    codeAgentReset();
-  }, [agent.conversationId, codeAgentReset]);
-
-  // Auto-orchestrate: once authoring settles with valid code, write it into the
-  // shared wizard state and nudge the generalist to proceed — no manual "the
-  // code is ready". On validation failure we don't hand off; the card surfaces
-  // the error (mirroring the code agent) and the user steers via chat.
-  const applyAgentPatch = wizardCtx?.applyAgentPatch;
-  const agentSend = agent.send;
-  React.useEffect(() => {
-    if (handedOffRef.current) return;
-    if (!codeArmed) return;
-    if (agent.status === "streaming") return;
-    if (codeAgent.status !== "done") return;
-    // The metric is required for every module; validate it first.
-    if (!codeAgent.metricCode.trim()) return;
-    const metVal = codeAgent.metricValidation;
-    if (!metVal || metVal.errors.length > 0) return;
-    // The authored program differs by module: a workflow run carries the graph
-    // (validated authoritatively by the backend on submit — the canvas already
-    // surfaces graph issues), a single-module run carries the Signature.
-    let authoredCode: Partial<WizardState>;
-    if (codeAgent.isWorkflow) {
-      const spec = codeAgent.workflowSpec;
-      // Require a real step between the input/output anchors before handing off.
-      if (!spec || spec.nodes.length < 3) return;
-      authoredCode = { workflow: spec, metric_code: codeAgent.metricCode };
-    } else {
-      if (!codeAgent.signatureCode.trim()) return;
-      const sigVal = codeAgent.signatureValidation;
-      if (!sigVal || sigVal.errors.length > 0) return;
-      authoredCode = {
-        signature_code: codeAgent.signatureCode,
-        metric_code: codeAgent.metricCode,
-      };
-    }
-    handedOffRef.current = true;
-    // Ride the authored program on this SAME nudge turn as an explicit override,
-    // not just via applyAgentPatch. agentSend reads a render-lagged snapshot, so
-    // without the override the code_ready_note turn would ship a wizard_state
-    // with empty program fields — the agent would see "Code incomplete", reject
-    // the Model step as out-of-order, and loop back into request_code_authoring.
-    // Mirrors the dataset handoff above.
-    applyAgentPatch?.(authoredCode);
-    agentSend(
-      msg("auto.features.agent.panel.components.generalistpanel.code_ready_note"),
-      authoredCode,
-    );
-  }, [
-    codeArmed,
-    agent.status,
-    agentSend,
-    applyAgentPatch,
-    codeAgent.status,
-    codeAgent.isWorkflow,
-    codeAgent.workflowSpec,
-    codeAgent.signatureCode,
-    codeAgent.metricCode,
-    codeAgent.signatureValidation,
-    codeAgent.metricValidation,
-  ]);
 
   const handleDatasetConfirm = React.useCallback(
     async (callId: string, confirmed: ConfirmedDataset) => {
       confirmedDatasetCallsRef.current.add(callId);
-      setLastConfirmedDataset(confirmed);
       // Stage the rows on the backend before notifying the agent so the
       // very next turn's wizard_state carries ``staged_dataset_id``. The
       // submit wizard's own staging path only runs when its form is
       // mounted; without this call an agent-panel-only flow ends up
-      // calling ``submit_job_run_post`` with no dataset and 422s.
+      // calling ``submit_unified_run_optimize_post`` with no dataset and 422s.
       let stagedDatasetId: string | undefined;
       try {
         const staged = await stageDatasetForAgent({
@@ -484,12 +521,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
           dataset_ready: true,
           columns_configured: true,
           dataset_columns: confirmed.columns,
-          column_roles: confirmed.columnRoles,
           column_kinds: confirmed.columnKinds,
+          column_roles: confirmed.columnRoles,
         },
       };
       // Persist before dispatch so the wizard can replay it after navigation;
-      // the listener in use-submit-wizard reads+clears this key on mount.
+      // the listener in use-unified-wizard reads+clears this key on mount.
       try {
         window.sessionStorage.setItem("wizard:staged-dataset", JSON.stringify(stagedDetail));
       } catch {
@@ -505,7 +542,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (stagedDatasetId && wizardCtx) {
         wizardCtx.setField("staged_dataset_id", stagedDatasetId, "user");
         wizardCtx.setField("dataset_columns", confirmed.columns, "user");
-        wizardCtx.setField("column_roles", confirmed.columnRoles, "user");
         wizardCtx.setField("dataset_ready", true, "user");
         wizardCtx.setField("columns_configured", true, "user");
       }
@@ -528,7 +564,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             dataset_ready: true,
             columns_configured: true,
             dataset_columns: confirmed.columns,
-            column_roles: confirmed.columnRoles,
           }
         : undefined;
       agent.send(note, wizardOverride);
@@ -546,7 +581,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (wizardCtx) {
         wizardCtx.setField("source_dataset_id", picked.sourceDatasetId, "user");
         wizardCtx.setField("dataset_columns", picked.columns, "user");
-        wizardCtx.setField("column_roles", picked.columnRoles, "user");
         wizardCtx.setField("dataset_ready", true, "user");
         wizardCtx.setField("columns_configured", true, "user");
       }
@@ -568,7 +602,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
         dataset_ready: true,
         columns_configured: true,
         dataset_columns: picked.columns,
-        column_roles: picked.columnRoles,
       };
       agent.send(note, wizardOverride);
     },
@@ -582,16 +615,31 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     setDraft("");
   }, [agent, draft]);
 
+  // Prompts other features queue (the first-login setup) open the panel and
+  // go out as if typed; one queued before the lazy panel mounted drains here.
+  const agentSend = agent.send;
+  React.useEffect(() => {
+    const drain = () => {
+      const prompt = takeQueuedAgentPrompt();
+      if (!prompt) return;
+      setOpen(true);
+      agentSend(prompt);
+    };
+    drain();
+    window.addEventListener(AGENT_PROMPT_EVENT, drain);
+    return () => window.removeEventListener(AGENT_PROMPT_EVENT, drain);
+  }, [agentSend, setOpen]);
+
   const handleRunCode = React.useCallback(
     (code: string, language: string) => {
-      if (streaming || codeAuthoringActive) return;
+      if (streaming) return;
       const prompt = formatMsg("shared.agent.run_code_prompt", {
         language: language || "code",
         code,
       });
       agent.send(prompt);
     },
-    [agent, streaming, codeAuthoringActive],
+    [agent, streaming],
   );
 
   const resizingRef = React.useRef(false);
@@ -647,9 +695,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       if (call.tool === REQUEST_INFERENCE_TOOL || call.tool === REQUEST_PAIR_INFERENCE_TOOL) {
         return <InferenceFormCard call={call} disabled={streaming} />;
       }
-      if (call.tool === REQUEST_CODE_TOOL) {
-        return <CodeAuthoringCard agent={codeAgent} />;
-      }
       const renderer = getToolRenderer(call.tool);
       if (renderer?.card && call.status !== "running") {
         return renderer.card(call);
@@ -657,22 +702,304 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
       const summary = renderer?.summary?.(call) ?? null;
       return <ToolCallRow call={call} isRetry={ctx.isRetry} summary={summary} />;
     },
-    [handleDatasetConfirm, handleLibraryPick, streaming, codeAgent],
+    [handleDatasetConfirm, handleLibraryPick, streaming],
   );
+
+  // Every call is a step in the turn's activity group except the ones the
+  // user acts on: the request cards and the submit summary, which links to
+  // the new run.
+  const isStepCall = React.useCallback((call: AgentToolCall) => {
+    if (RICH_CARD_TOOLS.has(call.tool)) return false;
+    return !(SUBMIT_TOOLS.has(call.tool) && call.status !== "running");
+  }, []);
+  const stepKind = React.useCallback((call: AgentToolCall) => getToolKind(call.tool), []);
 
   const emptyState = (
     <EmptyState
-      icon={Sparkle}
-      iconWrap="circle"
+      icon={AppMark}
       variant="compact"
       title={msg("auto.features.agent.panel.components.generalistpanel.1")}
     />
   );
 
+  const chatBody = (
+    <div dir={dir} className="relative flex min-w-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="inline-flex size-6 shrink-0 overflow-hidden rounded-full bg-secondary">
+            <AppMark className="size-full" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 leading-tight">
+              <span className="text-[0.8125rem] font-medium">
+                {msg("auto.features.agent.panel.components.generalistpanel.3")}
+              </span>
+              <Popover>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={msg(
+                          "auto.features.agent.panel.components.generalistpanel.literal.2",
+                        )}
+                      >
+                        <MagicWand className="size-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {msg("auto.features.agent.panel.components.generalistpanel.4")}
+                  </TooltipContent>
+                </Tooltip>
+                <PopoverContent side="bottom" align="center" sideOffset={8} className="p-0">
+                  <ToolsCarousel />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setDrawerOpen(true)}
+                className="relative text-muted-foreground hover:text-foreground"
+                aria-label={msg(
+                  "auto.features.agent.panel.components.generalistpanel.history_button",
+                )}
+              >
+                <ClockCounterClockwise className="size-3.5" />
+                {agent.backgroundBusyCount > 0 && (
+                  <CountBadge overlay aria-hidden="true">
+                    {agent.backgroundBusyCount}
+                  </CountBadge>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {msg("auto.features.agent.panel.components.generalistpanel.history_button")}
+              {agent.backgroundBusyCount > 0 && (
+                <>
+                  {" · "}
+                  {formatMsg("agent.parallel.background_count", {
+                    p1: agent.backgroundBusyCount,
+                  })}
+                </>
+              )}
+            </TooltipContent>
+          </Tooltip>
+          {agent.messages.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={handleNewConversation}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={msg(
+                    "auto.features.agent.panel.components.generalistpanel.new_conversation",
+                  )}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {msg("auto.features.agent.panel.components.generalistpanel.new_conversation")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {/* Docked, the host (the wizard's Manual mode) hides the chat. */}
+          {!panelDock && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={closePanel}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={msg("auto.features.agent.panel.components.generalistpanel.literal.4")}
+                >
+                  {/* Icon points toward the edge the panel collapses to:
+                      right when docked right (LTR), left when docked left (RTL). */}
+                  {isRtl ? (
+                    <SidebarSimple className="size-3.5" />
+                  ) : (
+                    <SidebarSimple className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {msg("auto.features.agent.panel.components.generalistpanel.6")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      <AgentThread
+        className="overscroll-contain"
+        isEmpty={agent.messages.length === 0}
+        emptyState={emptyState}
+        scrollDeps={[
+          agent.messages.length,
+          agent.messages[agent.messages.length - 1]?.content,
+          agent.messages[agent.messages.length - 1]?.toolCalls?.length,
+          agent.messages[agent.messages.length - 1]?.thinkingSegments?.at(-1)?.reasoning,
+          agent.statusLabel,
+          agent.pendingApproval?.id ?? "",
+        ]}
+      >
+        <ChatTranscript
+          key={chatView.key}
+          messages={agent.messages}
+          streaming={streaming}
+          editAndResend={agent.editAndResend}
+          renderToolCall={renderToolCall}
+          isStepCall={isStepCall}
+          stepKind={stepKind}
+          onRunCode={handleRunCode}
+          animatePairs
+          trailing={() => (
+            <>
+              {agent.pendingApproval && (
+                <ApprovalCard payload={agent.pendingApproval} onResolve={agent.confirmApproval} />
+              )}
+              {agent.error && (
+                <ChatErrorBanner
+                  message={agent.error}
+                  retryLabel={msg(
+                    "auto.features.agent.panel.components.generalistpanel.error_retry",
+                  )}
+                  onRetry={
+                    agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                      ? undefined
+                      : agent.retry
+                  }
+                  action={
+                    agent.errorCode === I18N_KEY.BILLING_INSUFFICIENT_FUNDS ? (
+                      <Button size="sm" className="h-7" onClick={() => openSettingsTo("billing")}>
+                        {msg("billing.action.add_funds")}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+            </>
+          )}
+        />
+      </AgentThread>
+
+      <Composer
+        value={draft}
+        onChange={setDraft}
+        onSubmit={handleSubmit}
+        onStop={agent.stop}
+        placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
+        streaming={activeBusy}
+        midTurn={agent.midTurn}
+        modelMenu={
+          <ComposerModelMenu
+            value={agent.model}
+            onChange={agent.setModel}
+            effort={agent.reasoningEffort}
+            onEffortChange={agent.setReasoningEffort}
+            models={localMenuModels}
+          />
+        }
+        leadingControls={
+          <>
+            <input
+              ref={attachInputRef}
+              type="file"
+              accept={DATASET_FILE_ACCEPT}
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) {
+                  setAttachFile(file);
+                  setAttachOpen(true);
+                }
+              }}
+            />
+            <Popover
+              open={attachOpen}
+              onOpenChange={(open) => {
+                setAttachOpen(open);
+                if (!open) setAttachFile(null);
+              }}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={msg("agent.composer.attach")}
+                      onClick={(e) => {
+                        // Skip the popover toggle — go straight to the
+                        // OS file picker; the popover opens on pick.
+                        e.preventDefault();
+                        attachInputRef.current?.click();
+                      }}
+                      className={cn(
+                        "inline-flex size-9 items-center justify-center rounded-full",
+                        "text-muted-foreground transition-colors cursor-pointer",
+                        "hover:bg-accent/60 hover:text-foreground",
+                        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top">{msg("agent.composer.attach")}</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-96 max-w-[calc(100vw-2rem)] p-3"
+              >
+                <DatasetUploadCard
+                  initialFile={attachFile}
+                  onConfirm={(confirmed) => {
+                    setAttachOpen(false);
+                    setAttachFile(null);
+                    void handleDatasetConfirm(`user-attach-${confirmed.fileName}`, confirmed);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+            <TrustToggle mode={trustMode} onCycle={cycleTrust} plain />
+          </>
+        }
+        sendAriaLabel={msg("auto.features.agent.panel.components.generalistpanel.literal.6")}
+        stopAriaLabel={msg("auto.features.agent.panel.components.generalistpanel.literal.7")}
+      />
+
+      <PresenceStrip active={streaming} hue={hue} />
+    </div>
+  );
+
+  // A surface that hides the agent (the wizard) owns its own entry point, so a
+  // panel left open on another page must not reappear over it.
+  const showAside = open && !panelDock && !pillHidden;
+
   return (
     <>
+      {panelDock && createPortal(chatBody, panelDock)}
       <AnimatePresence>
-        {open && isNarrow && (
+        {showAside && isNarrow && (
           <motion.div
             key="generalist-backdrop"
             initial={{ opacity: 0 }}
@@ -684,7 +1011,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             className="fixed inset-0 z-40 bg-black/50"
           />
         )}
-        {open && (
+        {showAside && (
           <motion.aside
             key="generalist-panel"
             dir={dir}
@@ -692,294 +1019,24 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             animate={{ x: 0, opacity: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { x: isRtl ? -24 : 24, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            style={{ width: isNarrow ? "100vw" : `min(${width}px, 92vw)` }}
+            style={isNarrow ? undefined : { width: `min(${width}px, 92vw)` }}
             className={cn(
               "fixed end-0 inset-y-0 z-40 flex h-dvh shrink-0",
+              // Full-screen only in the phone shell. Tablet-width windows
+              // (iPad portrait at 834, 2/3 Split View) keep a side drawer over
+              // the backdrop instead of a stretched phone sheet; the resize
+              // handle is hidden below lg, so this is MIN_WIDTH (480).
+              isNarrow && "w-screen md:w-[min(480px,92vw)]",
               "bg-background/95 backdrop-blur-xl border-s border-border/60",
               // Shadow falls from the panel toward the page content — rightward
               // when docked left (RTL), leftward when docked right (LTR).
               isRtl
-                ? "shadow-[8px_0_32px_rgba(61,46,34,0.06)]"
-                : "shadow-[-8px_0_32px_rgba(61,46,34,0.06)]",
+                ? "shadow-[8px_0_32px_rgba(0,0,0,0.06)]"
+                : "shadow-[-8px_0_32px_rgba(0,0,0,0.06)]",
             )}
             aria-label={msg("auto.features.agent.panel.components.generalistpanel.literal.1")}
           >
-            <div
-              dir={dir}
-              className="relative flex min-w-0 flex-1 flex-col"
-              data-tutorial="agent-panel"
-            >
-              <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="inline-flex size-6 items-center justify-center rounded-full text-[#FAF8F5]"
-                    style={{ backgroundColor: hue }}
-                  >
-                    <Sparkle className="size-3" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 leading-tight">
-                      <span className="text-[0.8125rem] font-medium">
-                        {msg("auto.features.agent.panel.components.generalistpanel.3")}
-                      </span>
-                      <Popover>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="text-muted-foreground hover:text-foreground"
-                                aria-label={msg(
-                                  "auto.features.agent.panel.components.generalistpanel.literal.2",
-                                )}
-                              >
-                                <MagicWand className="size-3.5" />
-                              </Button>
-                            </PopoverTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {msg("auto.features.agent.panel.components.generalistpanel.4")}
-                          </TooltipContent>
-                        </Tooltip>
-                        <PopoverContent side="bottom" align="center" sideOffset={8} className="p-0">
-                          <ToolsCarousel />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    {agent.statusLabel && (
-                      <div className="text-[0.6875rem] text-muted-foreground truncate">
-                        {agent.statusLabel}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => setDrawerOpen(true)}
-                        className="relative text-muted-foreground hover:text-foreground"
-                        aria-label={msg(
-                          "auto.features.agent.panel.components.generalistpanel.history_button",
-                        )}
-                      >
-                        <ClockCounterClockwise className="size-3.5" />
-                        {agent.backgroundBusyCount > 0 && (
-                          <CountBadge overlay aria-hidden="true">
-                            {agent.backgroundBusyCount}
-                          </CountBadge>
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {msg("auto.features.agent.panel.components.generalistpanel.history_button")}
-                      {agent.backgroundBusyCount > 0 && (
-                        <>
-                          {" · "}
-                          {formatMsg("agent.parallel.background_count", {
-                            p1: agent.backgroundBusyCount,
-                          })}
-                        </>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                  {agent.messages.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={handleNewConversation}
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={msg(
-                            "auto.features.agent.panel.components.generalistpanel.new_conversation",
-                          )}
-                        >
-                          <Plus className="size-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {msg(
-                          "auto.features.agent.panel.components.generalistpanel.new_conversation",
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={closePanel}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label={msg(
-                          "auto.features.agent.panel.components.generalistpanel.literal.4",
-                        )}
-                      >
-                        {/* Icon points toward the edge the panel collapses to:
-                            right when docked right (LTR), left when docked left (RTL). */}
-                        {isRtl ? (
-                          <SidebarSimple className="size-3.5" />
-                        ) : (
-                          <SidebarSimple className="size-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {msg("auto.features.agent.panel.components.generalistpanel.6")}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-
-              <AgentThread
-                className="overscroll-contain"
-                isEmpty={agent.messages.length === 0}
-                emptyState={emptyState}
-                scrollDeps={[
-                  agent.messages.length,
-                  agent.messages[agent.messages.length - 1]?.content,
-                  agent.messages[agent.messages.length - 1]?.toolCalls?.length,
-                  agent.reasoning,
-                  agent.statusLabel,
-                  agent.pendingApproval?.id ?? "",
-                ]}
-              >
-                <ChatTranscript
-                  messages={agent.messages}
-                  streaming={streaming}
-                  editAndResend={agent.editAndResend}
-                  thinking={thinking}
-                  renderToolCall={renderToolCall}
-                  onRunCode={handleRunCode}
-                  animatePairs
-                  trailing={() => (
-                    <>
-                      {agent.pendingApproval && (
-                        <ApprovalCard
-                          payload={agent.pendingApproval}
-                          onResolve={agent.confirmApproval}
-                        />
-                      )}
-                      {agent.error && (
-                        <ChatErrorBanner
-                          message={agent.error}
-                          retryLabel={msg(
-                            "auto.features.agent.panel.components.generalistpanel.error_retry",
-                          )}
-                          onRetry={agent.retry}
-                        />
-                      )}
-                    </>
-                  )}
-                />
-              </AgentThread>
-
-              <Composer
-                value={draft}
-                onChange={setDraft}
-                onSubmit={handleSubmit}
-                onStop={agent.stop}
-                placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
-                streaming={activeBusy}
-                disabled={codeAuthoringActive}
-                modelMenu={
-                  <ComposerModelMenu
-                    value={agent.model}
-                    onChange={agent.setModel}
-                    effort={agent.reasoningEffort}
-                    onEffortChange={agent.setReasoningEffort}
-                  />
-                }
-                leadingControls={
-                  <>
-                    <input
-                      ref={attachInputRef}
-                      type="file"
-                      accept={DATASET_FILE_ACCEPT}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        if (file) {
-                          setAttachFile(file);
-                          setAttachOpen(true);
-                        }
-                      }}
-                    />
-                    <Popover
-                      open={attachOpen}
-                      onOpenChange={(open) => {
-                        setAttachOpen(open);
-                        if (!open) setAttachFile(null);
-                      }}
-                    >
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              disabled={codeAuthoringActive}
-                              aria-label={msg("agent.composer.attach")}
-                              onClick={(e) => {
-                                // Skip the popover toggle — go straight to the
-                                // OS file picker; the popover opens on pick.
-                                e.preventDefault();
-                                attachInputRef.current?.click();
-                              }}
-                              className={cn(
-                                "inline-flex size-9 items-center justify-center rounded-full",
-                                "text-muted-foreground transition-colors cursor-pointer",
-                                "hover:bg-accent/60 hover:text-foreground",
-                                "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                                "disabled:pointer-events-none disabled:opacity-50",
-                              )}
-                            >
-                              <Plus className="size-4" />
-                            </button>
-                          </PopoverTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">{msg("agent.composer.attach")}</TooltipContent>
-                      </Tooltip>
-                      <PopoverContent
-                        side="top"
-                        align="start"
-                        sideOffset={8}
-                        className="w-96 max-w-[calc(100vw-2rem)] p-3"
-                      >
-                        <DatasetUploadCard
-                          initialFile={attachFile}
-                          onConfirm={(confirmed) => {
-                            setAttachOpen(false);
-                            setAttachFile(null);
-                            void handleDatasetConfirm(
-                              `user-attach-${confirmed.fileName}`,
-                              confirmed,
-                            );
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <TrustToggle mode={trustMode} onCycle={cycleTrust} plain />
-                  </>
-                }
-                sendAriaLabel={msg(
-                  "auto.features.agent.panel.components.generalistpanel.literal.6",
-                )}
-                stopAriaLabel={msg(
-                  "auto.features.agent.panel.components.generalistpanel.literal.7",
-                )}
-              />
-
-              <PresenceStrip active={streaming} hue={hue} />
-            </div>
+            {chatBody}
 
             {/* Resize handle on the inline-start edge — the side that faces the
                 page content, so dragging it grows/shrinks the panel. */}
@@ -990,7 +1047,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
               tabIndex={-1}
               className={cn(
                 "absolute top-0 start-0 h-full w-1 cursor-col-resize",
-                "hover:bg-[#C8A882]/40 active:bg-[#C8A882]/60 transition-colors",
+                "hover:bg-primary-fill/25 active:bg-primary-fill/40 transition-colors",
                 "max-lg:hidden",
               )}
             />
@@ -1000,15 +1057,16 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
       {/* A registered dock re-homes the pill into a surface's own chrome
           (the tagger footers), so the launcher never floats over that
-          surface's bottom controls. */}
+          surface's bottom controls. A surface with its own agent hides it. */}
       {!open &&
+        !panelDock &&
+        !pillHidden &&
         (pillDock ? (
           createPortal(
             <MinimizedPill
               onOpen={openPanel}
               active={streaming || agent.backgroundBusyCount > 0}
               statusLabel={agent.statusLabel}
-              hue={hue}
               inline
             />,
             pillDock,
@@ -1018,7 +1076,6 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             onOpen={openPanel}
             active={streaming || agent.backgroundBusyCount > 0}
             statusLabel={agent.statusLabel}
-            hue={hue}
           />
         ))}
 

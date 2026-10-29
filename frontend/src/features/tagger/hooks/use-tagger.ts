@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   createTaggerSession,
+  deleteTaggerSession,
   updateTaggerSession,
   renameTaggerSession,
   stashTaggerSession,
@@ -16,6 +17,7 @@ import {
   type TaggerSessionDetail,
   type InterviewOption,
 } from "@/shared/lib/api";
+import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { msg } from "@/shared/lib/messages";
 import {
   clearRecentSession,
@@ -43,12 +45,13 @@ import type {
 import {
   REVIEW_BATCH_SIZE,
   agreementOver,
+  assistFailureKind,
   assistModelPatch,
   calibrationTarget,
   flaggedRowIds,
   initialAssistState,
   interviewComposerEffort,
-  interviewComposerModel,
+  interviewRequestModel,
   labelsAgree,
   sampleRowIds,
 } from "../lib/assist";
@@ -60,6 +63,17 @@ export const TAGGER_SESSIONS_CHANGED = "tagger-sessions-changed";
 
 const AUTOSAVE_INTERVAL_MS = 60_000;
 const AUTOTAG_POLL_MS = 2_500;
+
+/**
+ * Discard a session that never got past its setup interview. It has not
+ * started labeling, so it is not something to come back to; the server also
+ * hides such sessions from every list and sweeps any a closed tab left behind.
+ */
+export function discardUnstartedSession(sessionId: string): void {
+  void deleteTaggerSession(sessionId)
+    .then(() => window.dispatchEvent(new Event(TAGGER_SESSIONS_CHANGED)))
+    .catch(() => {});
+}
 
 function isTagged(ann: Annotation, mode: AnnotationMode): boolean {
   if (ann === undefined || ann === null) return false;
@@ -246,6 +260,12 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
         current_index: 0,
       })
         .then((detail) => {
+          const path = window.location.pathname;
+          const stillHere = path === "/tagger" || path.startsWith("/tagger/");
+          if (!stillHere && startPhase === "interview") {
+            discardUnstartedSession(detail.id);
+            return;
+          }
           setSessionId(detail.id);
           window.dispatchEvent(new Event(TAGGER_SESSIONS_CHANGED));
           // Move to the session's own URL so leaving and returning (control panel,
@@ -260,10 +280,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             phase: phaseRef.current,
             current_index: currentIndexRef.current,
           });
-          const path = window.location.pathname;
-          if (path === "/tagger" || path.startsWith("/tagger/")) {
-            router.replace(`/tagger/${detail.id}`);
-          }
+          if (stillHere) router.replace(`/tagger/${detail.id}`);
         })
         .catch(() => {
           // Best-effort: a storage-quota 409 opens the shared modal centrally and
@@ -275,6 +292,9 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   );
 
   const backToSetup = useCallback(() => {
+    if (sessionId && !readOnly && phaseRef.current === "interview") {
+      discardUnstartedSession(sessionId);
+    }
     setConfig(null);
     setData([]);
     setColumns([]);
@@ -290,7 +310,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     // sidebar's resume window nor a reload reopens the session we just left.
     clearRecentSession("tagger");
     router.replace("/tagger");
-  }, [router]);
+  }, [router, sessionId, readOnly]);
 
   // Buffer each edit as pending rather than writing on every keystroke; the
   // autosave loop and the leave-the-page handler drain it. Only the mutable
@@ -356,12 +376,12 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   // which unmounts this hook) — so a returning user resumes where they left off
   // without a write on every annotation. At each of those points we also stamp
   // this session as recently visited, so the sidebar's Text-tagging button can
-  // resume it when the user returns within the resume window.
+  // resume it when the user returns within the resume window. A session still
+  // in its setup interview is never stamped: it is not one to resume.
   useEffect(() => {
     if (!sessionId) return;
-    markRecentSession("tagger", sessionId);
     const interval = window.setInterval(() => {
-      markRecentSession("tagger", sessionId);
+      if (phaseRef.current !== "interview") markRecentSession("tagger", sessionId);
       flush();
     }, AUTOSAVE_INTERVAL_MS);
     const onLeave = () => {
@@ -369,7 +389,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       // Refresh rather than set: a deliberate exit (back / start over) just
       // cleared the mark, and re-stamping it here would hand the sidebar back
       // the session the user explicitly left.
-      refreshRecentSession("tagger", sessionId);
+      if (phaseRef.current !== "interview") refreshRecentSession("tagger", sessionId);
       flush();
     };
     const onHide = () => {
@@ -384,6 +404,31 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       onLeave();
     };
   }, [sessionId, flush]);
+
+  useEffect(() => {
+    if (sessionId && phase !== "interview") markRecentSession("tagger", sessionId);
+  }, [sessionId, phase]);
+
+  // Navigating away from a session still in its setup interview discards it.
+  // Only a session opened at /tagger/[id] does this: the /tagger instance
+  // unmounts on the hand-off redirect right after creating its session. The
+  // delete waits a tick so StrictMode's dev-only remount cancels it.
+  const ownedSessionId = initialSession?.role === "owner" ? initialSession.id : null;
+  const discardTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ownedSessionId) return;
+    if (discardTimerRef.current !== null) {
+      window.clearTimeout(discardTimerRef.current);
+      discardTimerRef.current = null;
+    }
+    return () => {
+      if (localeReloadingRef.current || phaseRef.current !== "interview") return;
+      discardTimerRef.current = window.setTimeout(() => {
+        discardTimerRef.current = null;
+        discardUnstartedSession(ownedSessionId);
+      }, 0);
+    };
+  }, [ownedSessionId]);
 
   /** Merge a partial update into the assist state (no-op without assist). */
   const patchAssist = useCallback((patch: Partial<AssistState>) => {
@@ -674,7 +719,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             // role/content go over the wire.
             turns: turns.map(({ role, content }) => ({ role, content })),
             locale: getActiveLocale(),
-            model: interviewComposerModel(state) ?? undefined,
+            model: (await interviewRequestModel(state)) ?? undefined,
             reasoning_effort: interviewComposerEffort(state) ?? undefined,
           },
           {
@@ -751,14 +796,16 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     interviewAbortRef.current?.abort();
   }, []);
 
-  // Fire the opening interview question once the session exists server-side.
-  useEffect(() => {
-    if (phase !== "interview" || !sessionId) return;
-    const state = assistRef.current;
-    if (!state || state.interview.turns.length > 0 || state.interview.done) return;
-    if (interviewBusy) return;
-    void sendInterviewMessage(null);
-  }, [phase, sessionId]);
+  // Fire the opening interview question once per session, once it exists
+  // server-side. A dataset over the server's budget opens with its fixed message.
+  useAgentKickoff(
+    phase === "interview" && sessionId ? sessionId : null,
+    useCallback(() => {
+      const state = assistRef.current;
+      if (!state || state.interview.turns.length > 0 || state.interview.done) return;
+      void sendInterviewMessage(null);
+    }, [sendInterviewMessage]),
+  );
 
   /**
    * Confirm the task contract (answer style, artifacts, rubric) and leave the
@@ -783,8 +830,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       setColumns(result.columns);
       setConfig((prev) => (prev ? { ...prev, inputColumns: result.columns } : prev));
       return true;
-    } catch {
-      setAssistError("synthesize");
+    } catch (err) {
+      setAssistError(assistFailureKind(err, "synthesize"));
       return false;
     } finally {
       setGenerating(false);
@@ -863,8 +910,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
         // Predictions compile their few-shot examples server-side, so the
         // server must see the freshest labels before the first chunk runs.
         await flushNow();
-      } catch {
-        setAssistError("predict");
+      } catch (err) {
+        setAssistError(assistFailureKind(err, "predict"));
         setRoundLoading(false);
         return;
       }
@@ -918,7 +965,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             for (const [id, pred] of Object.entries(predictions)) applyPrediction(id, pred);
             completed = true;
           },
-          onError: () => setAssistError("predict"),
+          onError: (code) => setAssistError(assistFailureKind(code, "predict")),
           signal: controller.signal,
         });
         if (completed) await flushNow().catch(() => {});
@@ -1003,8 +1050,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       await taggerAssistAutotagStart(sessionId);
       pendingRef.current = null;
       setPhase("autotagging");
-    } catch {
-      setAssistError("autotag");
+    } catch (err) {
+      setAssistError(assistFailureKind(err, "autotag"));
     }
   }, [sessionId, flushNow]);
 

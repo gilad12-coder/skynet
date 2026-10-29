@@ -16,7 +16,6 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
-import { useUserPrefs } from "@/features/settings";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
@@ -71,22 +70,21 @@ function ExpandTextButton({
   const expandLabel = msg("optimization.config.expand");
   return (
     <>
-      <TooltipButton tooltip={expandLabel}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => setOpen(true)}
-          aria-label={expandLabel}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <ArrowsOut className="size-3.5" aria-hidden="true" />
-        </Button>
-      </TooltipButton>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        autoTooltip={false}
+        onClick={() => setOpen(true)}
+        aria-label={expandLabel}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        <ArrowsOut className="size-3.5" aria-hidden="true" />
+      </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] sm:max-w-[min(40rem,92vw)]">
+        <DialogContent className="flex w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] flex-col overflow-hidden sm:max-w-[min(40rem,92vw)]">
           <DialogTitleRow title={label} />
-          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-border/45 bg-[#F8F4EE] p-4">
+          <div className="max-h-[70dvh] min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-border/45 bg-muted p-4">
             <p
               className={cn("whitespace-pre-wrap break-words text-sm", mono && "font-mono")}
               dir={mono ? "ltr" : "auto"}
@@ -113,12 +111,12 @@ export function SlideHeroCard({
   icon: ReactNode;
 }) {
   return (
-    <article className="flex min-h-40 min-w-0 flex-col justify-between gap-6 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] sm:p-6">
+    <article className="flex min-h-40 min-w-0 flex-col justify-between gap-6 rounded-2xl border border-border/60 bg-muted p-5 sm:p-6">
       <div className="flex items-start justify-between gap-3">
-        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#3D2E22] text-[#FAF8F5] [&_svg]:size-5">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary-fill text-primary-foreground [&_svg]:size-5">
           {icon}
         </span>
-        <span className="font-mono text-[0.625rem] tabular-nums text-[#8C7A6B]/70" dir="ltr">
+        <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground/70" dir="ltr">
           0{index + 1}
         </span>
       </div>
@@ -198,9 +196,9 @@ export function SplitBar({
   fractions: { train: number; val: number; test: number };
 }) {
   return (
-    <div className="flex min-h-28 flex-1 overflow-hidden rounded-2xl border border-border/50 bg-muted/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]">
+    <div className="flex min-h-28 flex-1 overflow-hidden rounded-2xl border border-border/50 bg-muted/30">
       <div
-        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-[#3D2E22] p-2 text-[#FAF8F5] transition-[width] sm:items-stretch sm:justify-between sm:p-5"
+        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-primary-fill p-2 text-primary-foreground transition-[width] sm:items-stretch sm:justify-between sm:p-5"
         style={{ width: `${fractions.train * 100}%` }}
       >
         <span className="hidden truncate text-[0.625rem] font-semibold uppercase tracking-[0.08em] opacity-70 sm:block">
@@ -211,7 +209,7 @@ export function SplitBar({
         </span>
       </div>
       <div
-        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-[#C8A882] p-2 text-[#3D2E22] transition-[width] sm:items-stretch sm:justify-between sm:p-5"
+        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-chart-3 p-2 text-foreground transition-[width] sm:items-stretch sm:justify-between sm:p-5"
         style={{ width: `${fractions.val * 100}%` }}
       >
         <span className="hidden truncate text-[0.625rem] font-semibold uppercase tracking-[0.08em] opacity-70 sm:block">
@@ -222,7 +220,7 @@ export function SplitBar({
         </span>
       </div>
       <div
-        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-[#8C7A6B] p-2 text-[#FAF8F5] transition-[width] sm:items-stretch sm:justify-between sm:p-5"
+        className="flex min-w-0 flex-col items-center justify-center gap-3 bg-muted-foreground p-2 text-primary-foreground transition-[width] sm:items-stretch sm:justify-between sm:p-5"
         style={{ width: `${fractions.test * 100}%` }}
       >
         <span className="hidden truncate text-[0.625rem] font-semibold uppercase tracking-[0.08em] opacity-70 sm:block">
@@ -249,8 +247,7 @@ export function ConfigCarousel({
   slides: ConfigSlide[];
   renderSlide: (index: number) => ReactNode;
 }) {
-  const { prefs } = useUserPrefs();
-  const prefersReducedMotion = useReducedMotion() || prefs.liteMode;
+  const prefersReducedMotion = useReducedMotion();
   const isRtl = getActiveDir() === "rtl";
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState<1 | -1>(isRtl ? -1 : 1);
@@ -278,8 +275,7 @@ export function ConfigCarousel({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3 }}
-      className="w-full overflow-hidden rounded-2xl border border-border bg-card/80 shadow-lg backdrop-blur-xl"
-      data-tutorial="config-summary"
+      className="w-full overflow-hidden rounded-2xl border border-border bg-card/80 backdrop-blur-xl"
       role="region"
       aria-label={currentSlide.label}
       tabIndex={0}
@@ -294,7 +290,7 @@ export function ConfigCarousel({
     >
       <div className="flex items-center justify-between gap-5 border-b border-border/60 bg-secondary/35 px-5 py-4 sm:px-6 sm:py-5 lg:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#EDE7DD] text-[#3D2E22] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-primary">
             {currentSlide.icon}
           </span>
           <div className="min-w-0">
@@ -318,32 +314,32 @@ export function ConfigCarousel({
           aria-label={currentSlide.label}
         >
           {slides.map((slide, index) => (
-            <button
-              key={slide.id}
-              type="button"
-              onClick={() => goToSlide(index)}
-              aria-label={slide.label}
-              aria-current={activeSlide === index ? "step" : undefined}
-              className={cn(
-                "flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-start transition-[background-color,border-color,color,transform] duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 focus-visible:ring-offset-2 active:scale-[0.98]",
-                activeSlide === index
-                  ? "border-[#C8A882]/70 bg-background text-foreground shadow-sm"
-                  : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/55 hover:text-foreground",
-              )}
-            >
-              <span
+            <TooltipButton key={slide.id} tooltip={slide.label}>
+              <button
+                type="button"
+                onClick={() => goToSlide(index)}
+                aria-label={slide.label}
+                aria-current={activeSlide === index ? "step" : undefined}
                 className={cn(
-                  "grid size-8 shrink-0 place-items-center rounded-lg transition-colors [&_svg]:size-4",
+                  "flex shrink-0 cursor-pointer items-center rounded-xl border p-1.5 transition-[background-color,border-color,color,transform] duration-150",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 active:scale-[0.98]",
                   activeSlide === index
-                    ? "bg-[#3D2E22] text-[#FAF8F5]"
-                    : "bg-[#EDE7DD] text-[#8C7A6B]",
+                    ? "border-primary-fill/70 bg-background text-foreground"
+                    : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/55 hover:text-foreground",
                 )}
               >
-                {slide.icon}
-              </span>
-              <span className="hidden truncate text-xs font-semibold lg:block">{slide.label}</span>
-            </button>
+                <span
+                  className={cn(
+                    "grid size-8 shrink-0 place-items-center rounded-lg transition-colors [&_svg]:size-4",
+                    activeSlide === index
+                      ? "bg-primary-fill text-primary-foreground"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {slide.icon}
+                </span>
+              </button>
+            </TooltipButton>
           ))}
         </div>
       </div>
@@ -375,7 +371,7 @@ export function ConfigCarousel({
             animate="center"
             exit="exit"
             transition={prefersReducedMotion ? { duration: 0 } : SLIDE_TRANSITION}
-            className="min-h-[24rem] w-full"
+            className="w-full"
           >
             {renderSlide(activeSlide)}
           </motion.div>
@@ -383,16 +379,19 @@ export function ConfigCarousel({
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-border/60 bg-secondary/25 px-4 py-3 sm:px-6">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToSlide(activeSlide - 1)}
           disabled={!previousSlide}
-          aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.14")}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={
+            previousSlide?.label ??
+            msg("auto.features.agent.panel.components.toolscarousel.literal.14")
+          }
+          className="bg-primary-fill text-primary-foreground hover:bg-primary-hover hover:text-primary-foreground [@media(hover:none)_and_(pointer:coarse)]:size-11"
         >
           <PreviousIcon className="size-4" aria-hidden="true" />
-          <span className="hidden sm:inline">{previousSlide?.label}</span>
-        </button>
+        </Button>
 
         <div className="flex items-center justify-center gap-1 sm:hidden">
           {slides.map((slide, index) => (
@@ -402,28 +401,30 @@ export function ConfigCarousel({
               onClick={() => goToSlide(index)}
               aria-label={slide.label}
               aria-current={activeSlide === index ? "step" : undefined}
-              className="flex size-6 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="flex size-6 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <span
                 className={cn(
                   "h-1.5 rounded-full transition-[width,background-color] duration-200",
-                  activeSlide === index ? "w-5 bg-[#3D2E22]" : "w-1.5 bg-[#3D2E22]/20",
+                  activeSlide === index ? "w-5 bg-primary-fill" : "w-1.5 bg-primary-fill/20",
                 )}
               />
             </button>
           ))}
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToSlide(activeSlide + 1)}
           disabled={!nextSlide}
-          aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.15")}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={
+            nextSlide?.label ?? msg("auto.features.agent.panel.components.toolscarousel.literal.15")
+          }
+          className="bg-primary-fill text-primary-foreground hover:bg-primary-hover hover:text-primary-foreground [@media(hover:none)_and_(pointer:coarse)]:size-11"
         >
-          <span className="hidden sm:inline">{nextSlide?.label}</span>
           <NextIcon className="size-4" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
     </motion.section>
   );
@@ -504,9 +505,9 @@ export function ModelCard({
   const endpointLabel = msg("optimization.config.model_endpoint");
   const showParams = params && (temp != null || maxTok != null || reasoning);
   return (
-    <article className="flex min-h-36 min-w-0 flex-col justify-between gap-5 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+    <article className="flex min-h-36 min-w-0 flex-col justify-between gap-5 rounded-2xl border border-border/60 bg-muted p-5">
       <div className="flex min-w-0 items-start gap-3.5">
-        <span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-border/45 bg-background shadow-sm">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-border/45 bg-background">
           <ProviderLogo slug={modelProviderSlug(name)} size={30} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -529,7 +530,7 @@ export function ModelCard({
         >
           {params && temp != null && (
             <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${temperatureLabel}: ${temp}`}
               title={temperatureLabel}
             >
@@ -539,7 +540,7 @@ export function ModelCard({
           )}
           {params && maxTok != null && (
             <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${maxTokensLabel}: ${maxTok}`}
               title={maxTokensLabel}
             >
@@ -550,7 +551,7 @@ export function ModelCard({
           {params && reasoning && <ReasoningPill value={reasoning} />}
           {billingValue && (
             <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${billingLabel}: ${billingValue}`}
               title={billingLabel}
             >
@@ -564,7 +565,7 @@ export function ModelCard({
           )}
           {baseUrl && (
             <span
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${endpointLabel}: ${baseUrl}`}
               title={`${endpointLabel}: ${baseUrl}`}
             >

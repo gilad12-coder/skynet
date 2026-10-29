@@ -6,10 +6,50 @@ function executablePython(code: string): string {
   );
 }
 
+/**
+ * Mirrors the backend static check (`safe_exec._introspect_source`): any `llm`
+ * name, `.llm` attribute or imported `llm` means the metric needs a model.
+ * Over-matching only sends a model the run may not use; under-matching
+ * leaves the backend failing `metric.model` with no picker to fix it.
+ */
 export function scorerCallsModel(code: string): boolean {
-  const executable = executablePython(code);
-  const aliases = [...executable.matchAll(/\bllm\s+as\s+(\w+)/g)].map((match) => match[1]);
-  return ["llm", ...aliases].some((name) => new RegExp(`\\b${name}\\s*\\(`).test(executable));
+  return /\bllm\b/.test(executablePython(code));
+}
+
+interface MetricModelEvidence {
+  workspace: {
+    metricCode: string;
+    lastCheck: { uses_llm?: boolean } | null;
+    lastCheckSnapshot: string | null;
+  };
+}
+
+function checkedMetricCode(snapshot: string | null): string | null {
+  if (!snapshot) return null;
+  try {
+    const parsed: unknown = JSON.parse(snapshot);
+    return parsed && typeof parsed === "object" && "metricCode" in parsed
+      ? String((parsed as { metricCode: unknown }).metricCode)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one answer to "does the metric call a model" for the picker, gating,
+ * cost and payload. The sandboxed check's `uses_llm` wins while it was run on
+ * this exact metric code; only the metric code is compared (not the whole
+ * snapshot) so picking a model after the check cannot flip the answer back.
+ */
+export function metricUsesModel(state: MetricModelEvidence): boolean {
+  const { metricCode, lastCheck, lastCheckSnapshot } = state.workspace;
+  if (
+    typeof lastCheck?.uses_llm === "boolean" &&
+    checkedMetricCode(lastCheckSnapshot) === metricCode
+  )
+    return lastCheck.uses_llm;
+  return scorerCallsModel(metricCode);
 }
 
 /** Make the runtime's legacy injected helpers explicit without moving future imports. */

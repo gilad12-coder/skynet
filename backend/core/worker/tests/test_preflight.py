@@ -35,8 +35,8 @@ def test_evaluation_check_does_not_call_models(monkeypatch: pytest.MonkeyPatch) 
     assert result["checks"][-1] == {"key": "sample_prediction", "status": "pending"}
 
 
-def test_execution_checks_each_task_model_without_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Perform a sample prediction and actual metric for each grid task configuration."""
+def test_execution_checks_the_task_model_without_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Perform a sample prediction and actual metric for the single task model."""
     calls = []
 
     def build(config: Any, **kwargs: Any) -> DummyLM:
@@ -45,12 +45,10 @@ def test_execution_checks_each_task_model_without_search(monkeypatch: pytest.Mon
         return DummyLM([{"answer": "yes"}])
 
     monkeypatch.setattr(preflight, "build_language_model", build)
-    payload = _payload()
-    payload["generation_models"] = [{"name": "test/a"}, {"name": "test/b"}]
     with dspy.context():
-        result = preflight.run_dspy_preflight(payload, {"scope": "execution"})
-    assert calls == ["test/a", "test/b"]
-    assert [score["score"] for score in result["sample_scores"]] == [1.0, 1.0]
+        result = preflight.run_dspy_preflight(_payload(), {"scope": "execution"})
+    assert calls == ["test/model"]
+    assert [score["score"] for score in result["sample_scores"]] == [1.0]
     assert all(check["status"] == "succeeded" for check in result["checks"])
 
 

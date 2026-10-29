@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
-from typing import Annotated, Any
+from collections.abc import AsyncIterable, AsyncIterator, Callable
+from types import TracebackType
+from typing import Annotated, Any, Literal
 
 import dspy
 from dspy.streaming import StreamListener, StreamResponse
-from fastapi import APIRouter, Depends, Header
-from pydantic import AliasChoices, BaseModel, Field
+from fastapi import APIRouter, Depends, Header, Request
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
 from ...billing import ProviderKeyVault, resolve_byok_model_config
@@ -40,10 +41,12 @@ from ...constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ...models import ModelConfig, ServeInfoResponse, ServeRequest, ServeResponse
+from ...models.serve import reject_model_override
 from ...service_gateway.agents.generalist import TrustMode, get_approval_registry
 from ...service_gateway.agents.react_serve import run_react_chat
 from ...service_gateway.language_models import build_language_model
 from ...service_gateway.optimization.workflow import capture_node_traces
+from ...telemetry.server_events import record_server_event
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import job_owner
 from ..errors import DomainError
@@ -69,6 +72,173 @@ from ._helpers import (
 logger = logging.getLogger(__name__)
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
+
+SERVE_INFERENCE_EVENT = "serve_inference"
+
+ServeChannel = Literal["api_token", "share_link", "ui"]
+ServeRoute = Literal["serve", "serve_stream", "pair", "pair_stream", "chat"]
+
+
+def serve_channel(request: Request) -> ServeChannel:
+    """Classify how a serve call was authenticated.
+
+    The channel comes only from the auth path (``get_authenticated_user``
+    stamps PAT requests), never from the request body, so a caller cannot pass
+    a playground click off as a production integration.
+
+    Args:
+        request: Incoming request after authentication ran.
+
+    Returns:
+        ``"api_token"`` for a personal-access-token call, else ``"ui"``.
+    """
+    channel = getattr(getattr(request, "state", None), "auth_channel", None)
+    return "api_token" if channel == "api_token" else "ui"
+
+
+class ServeInferenceEvent:
+    """Record exactly one ``serve_inference`` telemetry row for one serve call.
+
+    Used as a sync or async context manager around a serve handler: an
+    exception records ``error``, a normal exit records ``ok``. A streaming
+    handler hands its event source to :meth:`stream` instead, which defers the
+    row until the stream ends so the status reflects how the stream finished.
+    """
+
+    def __init__(
+        self,
+        job_store: Any,
+        *,
+        username: str,
+        optimization_id: str,
+        channel: ServeChannel,
+        route: ServeRoute,
+        pair_index: int | None = None,
+    ) -> None:
+        """Capture the structural, PII-free facts of one serve call.
+
+        Args:
+            job_store: Store whose engine backs ``telemetry_events``.
+            username: Server-trusted caller identity.
+            optimization_id: Served job id; the metric joins it to the owner.
+            channel: How the caller authenticated.
+            route: Which serve endpoint handled the call.
+            pair_index: Grid pair index for pair routes.
+        """
+        self._engine = getattr(job_store, "engine", None)
+        self._username = username
+        self._properties: dict[str, Any] = {
+            "optimization_id": optimization_id,
+            "channel": channel,
+            "route": route,
+        }
+        if pair_index is not None:
+            self._properties["pair_index"] = pair_index
+        self._deferred = False
+        self._recorded = False
+
+    def record(self, status: Literal["ok", "error"]) -> None:
+        """Write the row once; later calls and telemetry failures are no-ops.
+
+        Args:
+            status: ``"ok"`` or ``"error"``.
+        """
+        if self._recorded:
+            return
+        self._recorded = True
+        try:
+            record_server_event(
+                self._engine,
+                username=self._username,
+                name=SERVE_INFERENCE_EVENT,
+                properties={**self._properties, "status": status},
+            )
+        except Exception:
+            logger.warning("telemetry: serve_inference not recorded", exc_info=True)
+
+    def stream(self, source: AsyncIterable[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
+        """Defer the row to the end of a streamed response.
+
+        Args:
+            source: The handler's ``{event, data}`` stream.
+
+        Returns:
+            The same events, recording the row when the stream ends.
+        """
+        self._deferred = True
+        return self._recorded_stream(source)
+
+    async def _recorded_stream(self, source: AsyncIterable[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
+        """Mirror ``source`` and record its outcome on teardown.
+
+        A stream that the client drops before it completes counts as an error:
+        the caller never received a result.
+
+        Args:
+            source: Upstream event stream.
+
+        Yields:
+            The upstream events unchanged.
+        """
+        status: Literal["ok", "error"] = "error"
+        failed = False
+        try:
+            async for event in source:
+                if event.get("event") == "error":
+                    failed = True
+                yield event
+            status = "error" if failed else "ok"
+        finally:
+            await asyncio.to_thread(self.record, status)
+
+    def __enter__(self) -> ServeInferenceEvent:
+        """Enter the tracked handler body.
+
+        Returns:
+            This event, so a streaming handler can call :meth:`stream`.
+        """
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Record the handler's outcome unless a stream took it over.
+
+        Args:
+            exc_type: Exception type raised by the handler, if any.
+            exc: Exception raised by the handler, if any.
+            traceback: Traceback of that exception.
+        """
+        if exc_type is not None:
+            self.record("error")
+        elif not self._deferred:
+            self.record("ok")
+
+    async def __aenter__(self) -> ServeInferenceEvent:
+        """Enter the tracked async handler body.
+
+        Returns:
+            This event, so a streaming handler can call :meth:`stream`.
+        """
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Record the outcome off the event loop, since the write is blocking.
+
+        Args:
+            exc_type: Exception type raised by the handler, if any.
+            exc: Exception raised by the handler, if any.
+            traceback: Traceback of that exception.
+        """
+        await asyncio.to_thread(self.__exit__, exc_type, exc, traceback)
 
 
 def _resolve_inference_model_config(job_store, username: str, model_config: ModelConfig) -> ModelConfig:
@@ -100,23 +270,16 @@ def _resolve_inference_model_config(job_store, username: str, model_config: Mode
         raise DomainError("billing.byok_missing_connection", status=400, provider=str(exc)) from exc
 
 
-def _pair_model_config(
-    model_name: str,
-    overview: dict[str, Any],
-    override: ModelConfig | None,
-) -> ModelConfig:
-    """Resolve a grid pair's persisted model config or an explicit override.
+def _pair_model_config(model_name: str, overview: dict[str, Any]) -> ModelConfig:
+    """Resolve a grid pair's persisted model config.
 
     Args:
         model_name: Pair generation-model identifier.
         overview: Parent grid payload overview.
-        override: Optional caller-supplied model config.
 
     Returns:
-        The matching persisted config, explicit override, or legacy name-only config.
+        The matching persisted config, or a legacy name-only config.
     """
-    if override is not None:
-        return override
     for raw_config in overview.get(PAYLOAD_OVERVIEW_GENERATION_MODELS, []):
         if not isinstance(raw_config, dict):
             continue
@@ -132,7 +295,7 @@ class RequestUserInferenceRequest(BaseModel):
     prompt: str = Field(
         default="",
         max_length=400,
-        description="Short Hebrew sentence explaining why inference is being offered.",
+        description="Short sentence, in the user's reply language, explaining why inference is being offered.",
     )
 
 
@@ -169,10 +332,6 @@ class ServeChatRequest(BaseModel):
         default="ask",
         description="'ask'/'auto_safe' confirm every tool, 'yolo' confirms none.",
     )
-    model_config_override: ModelConfig | None = Field(
-        default=None,
-        description="Optional model override. Uses the run's model if omitted.",
-    )
     max_cost_cents: int | None = Field(
         validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
@@ -181,6 +340,19 @@ class ServeChatRequest(BaseModel):
         strict=True,
         description="Optional cap in cents for this one chat turn; omitted, the turn draws on the account balance.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _locked_model(cls, data: Any) -> Any:
+        """Refuse a caller-chosen model; the program runs on the one it was optimized with.
+
+        Args:
+            data: Raw request body.
+
+        Returns:
+            The unchanged body.
+        """
+        return reject_model_override(data)
 
 
 class ServeChatConfirmRequest(BaseModel):
@@ -346,7 +518,7 @@ def _protected_program_call(
         job_store: Store backing artifacts and billing.
         job_data: Persisted protected optimization row.
         optimization_id: Program identity.
-        req: Caller inputs, model override, and optional one-request maximum.
+        req: Caller inputs and optional one-request maximum.
         current_user: Authenticated spending owner.
         idempotency_key: Transport replay identity.
         pair_index: Optional grid pair selection.
@@ -360,9 +532,7 @@ def _protected_program_call(
     if pair_index is None:
         artifact, overview, model_name = load_program_metadata(job_store, optimization_id, current_user)
         model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-        if req.model_config_override is not None:
-            model_config = req.model_config_override
-        elif model_settings:
+        if model_settings:
             model_config = ModelConfig.model_validate(model_settings)
         elif model_name:
             model_config = ModelConfig(name=model_name)
@@ -371,7 +541,7 @@ def _protected_program_call(
     else:
         artifact, pair, overview = load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         pair_model = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
-        model_config = _pair_model_config(pair_model, overview, req.model_config_override)
+        model_config = _pair_model_config(pair_model, overview)
     input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
     workflow = workflow_spec_from_overview(overview)
     if workflow is not None:
@@ -918,18 +1088,20 @@ def create_serve_router(*, job_store) -> APIRouter:
     def serve_program(
         optimization_id: str,
         req: ServeRequest,
+        request: Request,
         current_user: AuthenticatedUserDep,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> ServeResponse:
         """Run a blocking inference call through the compiled program.
 
-        Model resolution: ``model_config_override`` → stored job settings →
-        stored model name. All ``input_fields`` must be supplied; extras are
+        The program always runs on the model settings it was optimized with:
+        stored job settings, else the stored model name. All ``input_fields`` must be supplied; extras are
         ignored.
 
         Args:
             optimization_id: Optimization id whose program should run.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
+            request: Incoming request; its auth channel tags the telemetry row.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -940,24 +1112,28 @@ def create_serve_router(*, job_store) -> APIRouter:
                 spendable balance), 404 (unknown or inaccessible), 409 (not
                 in a serveable state).
         """
-        job_data = load_job_for_user(job_store, optimization_id, current_user)
-        if _protected_api_runtime(job_data) is not None:
-            return ServeResponse.model_validate(
-                _protected_program_call(
-                    job_store=job_store,
-                    job_data=job_data,
-                    optimization_id=optimization_id,
-                    req=req,
-                    current_user=current_user,
-                    idempotency_key=idempotency_key,
+        with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
+            optimization_id=optimization_id,
+            channel=serve_channel(request),
+            route="serve",
+        ):
+            job_data = load_job_for_user(job_store, optimization_id, current_user)
+            if _protected_api_runtime(job_data) is not None:
+                return ServeResponse.model_validate(
+                    _protected_program_call(
+                        job_store=job_store,
+                        job_data=job_data,
+                        optimization_id=optimization_id,
+                        req=req,
+                        current_user=current_user,
+                        idempotency_key=idempotency_key,
+                    )
                 )
-            )
-        program, result, overview = load_program(job_store, optimization_id, current_user)
-        artifact = result.program_artifact
+            program, result, overview = load_program(job_store, optimization_id, current_user)
+            artifact = result.program_artifact
 
-        if req.model_config_override:
-            model_config = req.model_config_override
-        else:
             model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
             model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
             if model_settings:
@@ -967,65 +1143,65 @@ def create_serve_router(*, job_store) -> APIRouter:
             else:
                 raise DomainError("serve.no_model_config", status=400)
 
-        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-        workflow_spec = workflow_spec_from_overview(overview)
-        if workflow_spec is not None:
-            input_fields = workflow_spec.input_field_names()
-            output_fields = workflow_spec.output_field_names()
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+            workflow_spec = workflow_spec_from_overview(overview)
+            if workflow_spec is not None:
+                input_fields = workflow_spec.input_field_names()
+                output_fields = workflow_spec.output_field_names()
 
-        if not input_fields:
-            input_fields, output_fields = _column_mapping_fields(overview)
-        if not input_fields:
-            raise DomainError("serve.no_declared_inputs", status=400)
-        missing = [f for f in input_fields if f not in req.inputs]
-        if missing:
-            raise DomainError(
-                "serve.missing_inputs",
-                status=400,
-                missing=missing,
-                input_fields=input_fields,
-            )
-        filtered_inputs = {f: req.inputs[f] for f in input_fields}
+            if not input_fields:
+                input_fields, output_fields = _column_mapping_fields(overview)
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            missing = [f for f in input_fields if f not in req.inputs]
+            if missing:
+                raise DomainError(
+                    "serve.missing_inputs",
+                    status=400,
+                    missing=missing,
+                    input_fields=input_fields,
+                )
+            filtered_inputs = {f: req.inputs[f] for f in input_fields}
 
-        enforce_llm_balance(job_store, current_user.username)
-        model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
-        lm = build_language_model(model_config)
+            enforce_llm_balance(job_store, current_user.username)
+            model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
+            lm = build_language_model(model_config)
 
-        node_traces = None
-        try:
-            with dspy.context(lm=lm):
-                if workflow_spec is not None:
-                    with capture_node_traces() as raw_traces:
+            node_traces = None
+            try:
+                with dspy.context(lm=lm):
+                    if workflow_spec is not None:
+                        with capture_node_traces() as raw_traces:
+                            prediction = program(**filtered_inputs)
+                        node_traces = sanitize_node_traces(raw_traces)
+                    else:
                         prediction = program(**filtered_inputs)
-                    node_traces = sanitize_node_traces(raw_traces)
-                else:
-                    prediction = program(**filtered_inputs)
-        finally:
-            # A failed inference still consumed provider tokens (dspy retries
-            # under the hood), so the debit rides ``finally``.
-            meter_llm_run(
-                getattr(job_store, "engine", None),
-                current_user.username,
-                [lm],
-                description="Serve inference",
-                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+            finally:
+                # A failed inference still consumed provider tokens (dspy retries
+                # under the hood), so the debit rides ``finally``.
+                meter_llm_run(
+                    getattr(job_store, "engine", None),
+                    current_user.username,
+                    [lm],
+                    description="Serve inference",
+                    token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+                )
+
+            outputs: dict[str, Any] = {}
+            if output_fields:
+                for field in output_fields:
+                    outputs[field] = getattr(prediction, field, None)
+            else:
+                outputs = {key: val for key, val in prediction.toDict().items() if key not in req.inputs}
+
+            return ServeResponse(
+                optimization_id=optimization_id,
+                outputs=_cap_serve_outputs(outputs),
+                input_fields=input_fields,
+                output_fields=output_fields,
+                model_used=model_config.normalized_identifier(),
+                node_traces=node_traces,
             )
-
-        outputs: dict[str, Any] = {}
-        if output_fields:
-            for field in output_fields:
-                outputs[field] = getattr(prediction, field, None)
-        else:
-            outputs = {key: val for key, val in prediction.toDict().items() if key not in req.inputs}
-
-        return ServeResponse(
-            optimization_id=optimization_id,
-            outputs=_cap_serve_outputs(outputs),
-            input_fields=input_fields,
-            output_fields=output_fields,
-            model_used=model_config.normalized_identifier(),
-            node_traces=node_traces,
-        )
 
     @router.post(
         "/serve/{optimization_id}/stream",
@@ -1034,6 +1210,7 @@ def create_serve_router(*, job_store) -> APIRouter:
     async def serve_program_stream(
         optimization_id: str,
         req: ServeRequest,
+        request: Request,
         current_user: AuthenticatedUserDep,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
@@ -1047,7 +1224,8 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Args:
             optimization_id: Optimization id whose program should run.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
+            request: Incoming request; its auth channel tags the telemetry row.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1057,45 +1235,49 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 400, 402, 404 (including inaccessible to caller),
                 or 409 mirroring the non-streaming route.
         """
-        try:
-            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
-        except DomainError as error:
-            if error.status_code != 404:
-                raise
-            job_data = None
-        if job_data is not None and _protected_api_runtime(job_data) is not None:
-            _interaction_authority(req.max_cost_cents, idempotency_key)
-            source = _protected_sse(
-                lambda emit: _protected_program_call(
-                    job_store=job_store,
-                    job_data=job_data,
-                    optimization_id=optimization_id,
-                    req=req,
-                    current_user=current_user,
-                    idempotency_key=idempotency_key,
-                    stream=True,
-                    on_event=emit,
-                ),
-                final_event="final",
-            )
-            return StreamingResponse(
-                sse_from_events(source),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
-        # Offload the synchronous DB read + program deserialization so it does
-        # not block the single event loop (and every other in-flight request /
-        # SSE stream) before the first byte is produced.
-        program, result, overview = await asyncio.to_thread(load_program, job_store, optimization_id, current_user)
-        artifact = result.program_artifact
+        async with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
+            optimization_id=optimization_id,
+            channel=serve_channel(request),
+            route="serve_stream",
+        ) as inference:
+            try:
+                job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+            except DomainError as error:
+                if error.status_code != 404:
+                    raise
+                job_data = None
+            if job_data is not None and _protected_api_runtime(job_data) is not None:
+                _interaction_authority(req.max_cost_cents, idempotency_key)
+                source = _protected_sse(
+                    lambda emit: _protected_program_call(
+                        job_store=job_store,
+                        job_data=job_data,
+                        optimization_id=optimization_id,
+                        req=req,
+                        current_user=current_user,
+                        idempotency_key=idempotency_key,
+                        stream=True,
+                        on_event=emit,
+                    ),
+                    final_event="final",
+                )
+                return StreamingResponse(
+                    sse_from_events(inference.stream(source)),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            # Offload the synchronous DB read + program deserialization so it does
+            # not block the single event loop (and every other in-flight request /
+            # SSE stream) before the first byte is produced.
+            program, result, overview = await asyncio.to_thread(load_program, job_store, optimization_id, current_user)
+            artifact = result.program_artifact
 
-        if req.model_config_override:
-            model_config = req.model_config_override
-        else:
             model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
             model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
             if model_settings:
@@ -1105,62 +1287,62 @@ def create_serve_router(*, job_store) -> APIRouter:
             else:
                 raise DomainError("serve.no_model_config", status=400)
 
-        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-        workflow_spec = workflow_spec_from_overview(overview)
-        if workflow_spec is not None:
-            # Workflows serve their anchor fields. Per-output-field token
-            # listeners still attach; if streamify can't wire them onto the
-            # composed program the generator's fallback runs blocking
-            # inference and emits a single final event.
-            input_fields = workflow_spec.input_field_names()
-            output_fields = workflow_spec.output_field_names()
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+            workflow_spec = workflow_spec_from_overview(overview)
+            if workflow_spec is not None:
+                # Workflows serve their anchor fields. Per-output-field token
+                # listeners still attach; if streamify can't wire them onto the
+                # composed program the generator's fallback runs blocking
+                # inference and emits a single final event.
+                input_fields = workflow_spec.input_field_names()
+                output_fields = workflow_spec.output_field_names()
 
-        if not input_fields:
-            input_fields, output_fields = _column_mapping_fields(overview)
-        if not input_fields:
-            raise DomainError("serve.no_declared_inputs", status=400)
-        missing = [f for f in input_fields if f not in req.inputs]
-        if missing:
-            raise DomainError(
-                "serve.missing_inputs",
-                status=400,
-                missing=missing,
+            if not input_fields:
+                input_fields, output_fields = _column_mapping_fields(overview)
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            missing = [f for f in input_fields if f not in req.inputs]
+            if missing:
+                raise DomainError(
+                    "serve.missing_inputs",
+                    status=400,
+                    missing=missing,
+                    input_fields=input_fields,
+                )
+            filtered_inputs = {f: req.inputs[f] for f in input_fields}
+
+            await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+            model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
+            lm = build_language_model(model_config)
+            model_used = model_config.normalized_identifier()
+            listeners = [StreamListener(signature_field_name=f) for f in output_fields]
+            source = _stream_program_inference(
+                program=program,
+                lm=lm,
+                filtered_inputs=filtered_inputs,
                 input_fields=input_fields,
+                output_fields=output_fields,
+                listeners=listeners,
+                model_used=model_used,
+                error_log_context=f"job {optimization_id}",
             )
-        filtered_inputs = {f: req.inputs[f] for f in input_fields}
-
-        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
-        model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
-        lm = build_language_model(model_config)
-        model_used = model_config.normalized_identifier()
-        listeners = [StreamListener(signature_field_name=f) for f in output_fields]
-        source = _stream_program_inference(
-            program=program,
-            lm=lm,
-            filtered_inputs=filtered_inputs,
-            input_fields=input_fields,
-            output_fields=output_fields,
-            listeners=listeners,
-            model_used=model_used,
-            error_log_context=f"job {optimization_id}",
-        )
-        metered = stream_with_llm_metering(
-            source,
-            job_store=job_store,
-            username=current_user.username,
-            description="Serve inference",
-            usage_sink=[lm],
-            token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
-        )
-        return StreamingResponse(
-            sse_from_events(metered),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+            metered = stream_with_llm_metering(
+                source,
+                job_store=job_store,
+                username=current_user.username,
+                description="Serve inference",
+                usage_sink=[lm],
+                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+            )
+            return StreamingResponse(
+                sse_from_events(inference.stream(metered)),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
     @router.get(
         "/serve/{optimization_id}/pair/{pair_index}/info",
@@ -1213,19 +1395,20 @@ def create_serve_router(*, job_store) -> APIRouter:
         optimization_id: str,
         pair_index: int,
         req: ServeRequest,
+        request: Request,
         current_user: AuthenticatedUserDep,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> ServeResponse:
         """Run inference through one grid-search pair's compiled program.
 
-        Default model is the pair's generation model; override with
-        ``model_config_override``. All ``input_fields`` must be supplied;
+        The program always runs on the pair's generation model. All ``input_fields`` must be supplied;
         extras are ignored.
 
         Args:
             optimization_id: Grid-search optimization id.
             pair_index: Index of the pair in the grid-search result.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
+            request: Incoming request; its auth channel tags the telemetry row.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1236,70 +1419,78 @@ def create_serve_router(*, job_store) -> APIRouter:
                 balance), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
-        job_data = load_job_for_user(job_store, optimization_id, current_user)
-        if _protected_api_runtime(job_data) is not None:
-            return ServeResponse.model_validate(
-                _protected_program_call(
-                    job_store=job_store,
-                    job_data=job_data,
-                    optimization_id=optimization_id,
-                    req=req,
-                    current_user=current_user,
-                    idempotency_key=idempotency_key,
-                    pair_index=pair_index,
-                )
-            )
-        program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, current_user)
-        artifact = pair.program_artifact
-
-        model_config = _pair_model_config(pair.generation_model, overview, req.model_config_override)
-
-        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-
-        if not input_fields:
-            raise DomainError("serve.no_declared_inputs", status=400)
-        missing = [f for f in input_fields if f not in req.inputs]
-        if missing:
-            raise DomainError(
-                "serve.missing_inputs",
-                status=400,
-                missing=missing,
-                input_fields=input_fields,
-            )
-        filtered_inputs = {f: req.inputs[f] for f in input_fields}
-
-        enforce_llm_balance(job_store, current_user.username)
-        model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
-        lm = build_language_model(model_config)
-
-        try:
-            with dspy.context(lm=lm):
-                prediction = program(**filtered_inputs)
-        finally:
-            # A failed inference still consumed provider tokens (dspy retries
-            # under the hood), so the debit rides ``finally``.
-            meter_llm_run(
-                getattr(job_store, "engine", None),
-                current_user.username,
-                [lm],
-                description="Serve inference",
-                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
-            )
-
-        outputs: dict[str, Any] = {}
-        if output_fields:
-            for field in output_fields:
-                outputs[field] = getattr(prediction, field, None)
-        else:
-            outputs = {key: val for key, val in prediction.toDict().items() if key not in req.inputs}
-
-        return ServeResponse(
+        with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
             optimization_id=optimization_id,
-            outputs=_cap_serve_outputs(outputs),
-            input_fields=input_fields,
-            output_fields=output_fields,
-            model_used=model_config.normalized_identifier(),
-        )
+            channel=serve_channel(request),
+            route="pair",
+            pair_index=pair_index,
+        ):
+            job_data = load_job_for_user(job_store, optimization_id, current_user)
+            if _protected_api_runtime(job_data) is not None:
+                return ServeResponse.model_validate(
+                    _protected_program_call(
+                        job_store=job_store,
+                        job_data=job_data,
+                        optimization_id=optimization_id,
+                        req=req,
+                        current_user=current_user,
+                        idempotency_key=idempotency_key,
+                        pair_index=pair_index,
+                    )
+                )
+            program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, current_user)
+            artifact = pair.program_artifact
+
+            model_config = _pair_model_config(pair.generation_model, overview)
+
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            missing = [f for f in input_fields if f not in req.inputs]
+            if missing:
+                raise DomainError(
+                    "serve.missing_inputs",
+                    status=400,
+                    missing=missing,
+                    input_fields=input_fields,
+                )
+            filtered_inputs = {f: req.inputs[f] for f in input_fields}
+
+            enforce_llm_balance(job_store, current_user.username)
+            model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
+            lm = build_language_model(model_config)
+
+            try:
+                with dspy.context(lm=lm):
+                    prediction = program(**filtered_inputs)
+            finally:
+                # A failed inference still consumed provider tokens (dspy retries
+                # under the hood), so the debit rides ``finally``.
+                meter_llm_run(
+                    getattr(job_store, "engine", None),
+                    current_user.username,
+                    [lm],
+                    description="Serve inference",
+                    token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+                )
+
+            outputs: dict[str, Any] = {}
+            if output_fields:
+                for field in output_fields:
+                    outputs[field] = getattr(prediction, field, None)
+            else:
+                outputs = {key: val for key, val in prediction.toDict().items() if key not in req.inputs}
+
+            return ServeResponse(
+                optimization_id=optimization_id,
+                outputs=_cap_serve_outputs(outputs),
+                input_fields=input_fields,
+                output_fields=output_fields,
+                model_used=model_config.normalized_identifier(),
+            )
 
     @router.post(
         "/serve/{optimization_id}/pair/{pair_index}/stream",
@@ -1309,6 +1500,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         optimization_id: str,
         pair_index: int,
         req: ServeRequest,
+        request: Request,
         current_user: AuthenticatedUserDep,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
@@ -1321,7 +1513,8 @@ def create_serve_router(*, job_store) -> APIRouter:
         Args:
             optimization_id: Grid-search optimization id.
             pair_index: Index of the pair in the grid-search result.
-            req: Inference request carrying inputs and optional model override.
+            req: Inference request carrying inputs.
+            request: Incoming request; its auth channel tags the telemetry row.
             current_user: Authenticated caller resolved from the bearer token.
 
         Returns:
@@ -1332,30 +1525,93 @@ def create_serve_router(*, job_store) -> APIRouter:
                 balance), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
-        try:
-            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
-        except DomainError as error:
-            if error.status_code != 404:
-                raise
-            job_data = None
-        if job_data is not None and _protected_api_runtime(job_data) is not None:
-            _interaction_authority(req.max_cost_cents, idempotency_key)
-            source = _protected_sse(
-                lambda emit: _protected_program_call(
-                    job_store=job_store,
-                    job_data=job_data,
-                    optimization_id=optimization_id,
-                    req=req,
-                    current_user=current_user,
-                    idempotency_key=idempotency_key,
-                    pair_index=pair_index,
-                    stream=True,
-                    on_event=emit,
-                ),
-                final_event="final",
+        async with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
+            optimization_id=optimization_id,
+            channel=serve_channel(request),
+            route="pair_stream",
+            pair_index=pair_index,
+        ) as inference:
+            try:
+                job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+            except DomainError as error:
+                if error.status_code != 404:
+                    raise
+                job_data = None
+            if job_data is not None and _protected_api_runtime(job_data) is not None:
+                _interaction_authority(req.max_cost_cents, idempotency_key)
+                source = _protected_sse(
+                    lambda emit: _protected_program_call(
+                        job_store=job_store,
+                        job_data=job_data,
+                        optimization_id=optimization_id,
+                        req=req,
+                        current_user=current_user,
+                        idempotency_key=idempotency_key,
+                        pair_index=pair_index,
+                        stream=True,
+                        on_event=emit,
+                    ),
+                    final_event="final",
+                )
+                return StreamingResponse(
+                    sse_from_events(inference.stream(source)),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            # Offload the synchronous DB read + program deserialization so it does
+            # not block the single event loop before the first byte is produced.
+            program, pair, overview = await asyncio.to_thread(
+                load_pair_program, job_store, optimization_id, pair_index, current_user
+            )
+            artifact = pair.program_artifact
+
+            model_config = _pair_model_config(pair.generation_model, overview)
+
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            missing = [f for f in input_fields if f not in req.inputs]
+            if missing:
+                raise DomainError(
+                    "serve.missing_inputs",
+                    status=400,
+                    missing=missing,
+                    input_fields=input_fields,
+                )
+            filtered_inputs = {f: req.inputs[f] for f in input_fields}
+
+            await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+            model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
+            lm = build_language_model(model_config)
+            model_used = model_config.normalized_identifier()
+            listeners = [StreamListener(signature_field_name=f) for f in output_fields]
+            source = _stream_program_inference(
+                program=program,
+                lm=lm,
+                filtered_inputs=filtered_inputs,
+                input_fields=input_fields,
+                output_fields=output_fields,
+                listeners=listeners,
+                model_used=model_used,
+                error_log_context=f"job {optimization_id} pair {pair_index}",
+            )
+            metered = stream_with_llm_metering(
+                source,
+                job_store=job_store,
+                username=current_user.username,
+                description="Serve inference",
+                usage_sink=[lm],
+                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
             )
             return StreamingResponse(
-                sse_from_events(source),
+                sse_from_events(inference.stream(metered)),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -1363,61 +1619,6 @@ def create_serve_router(*, job_store) -> APIRouter:
                     "X-Accel-Buffering": "no",
                 },
             )
-        # Offload the synchronous DB read + program deserialization so it does
-        # not block the single event loop before the first byte is produced.
-        program, pair, overview = await asyncio.to_thread(
-            load_pair_program, job_store, optimization_id, pair_index, current_user
-        )
-        artifact = pair.program_artifact
-
-        model_config = _pair_model_config(pair.generation_model, overview, req.model_config_override)
-
-        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-
-        if not input_fields:
-            raise DomainError("serve.no_declared_inputs", status=400)
-        missing = [f for f in input_fields if f not in req.inputs]
-        if missing:
-            raise DomainError(
-                "serve.missing_inputs",
-                status=400,
-                missing=missing,
-                input_fields=input_fields,
-            )
-        filtered_inputs = {f: req.inputs[f] for f in input_fields}
-
-        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
-        model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
-        lm = build_language_model(model_config)
-        model_used = model_config.normalized_identifier()
-        listeners = [StreamListener(signature_field_name=f) for f in output_fields]
-        source = _stream_program_inference(
-            program=program,
-            lm=lm,
-            filtered_inputs=filtered_inputs,
-            input_fields=input_fields,
-            output_fields=output_fields,
-            listeners=listeners,
-            model_used=model_used,
-            error_log_context=f"job {optimization_id} pair {pair_index}",
-        )
-        metered = stream_with_llm_metering(
-            source,
-            job_store=job_store,
-            username=current_user.username,
-            description="Serve inference",
-            usage_sink=[lm],
-            token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
-        )
-        return StreamingResponse(
-            sse_from_events(metered),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
 
     @router.post(
         "/serve/{optimization_id}/chat",
@@ -1426,6 +1627,7 @@ def create_serve_router(*, job_store) -> APIRouter:
     async def serve_chat_stream(
         optimization_id: str,
         req: ServeChatRequest,
+        request: Request,
         current_user: AuthenticatedUserDep,
         authorization: str | None = Header(default=None),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -1440,8 +1642,8 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Args:
             optimization_id: The react run to chat against.
-            req: Chat request with the user's message, prior turns, trust mode,
-                and an optional model override.
+            req: Chat request with the user's message, prior turns and trust mode.
+            request: Incoming request; its auth channel tags the telemetry row.
             current_user: Authenticated caller; non-admins are restricted to
                 their own runs.
             authorization: Caller's bearer token, forwarded into the agent's MCP
@@ -1455,80 +1657,82 @@ def create_serve_router(*, job_store) -> APIRouter:
                 run, or not served from a live-MCP source), 400 (no model),
                 402 (caller has no spendable balance).
         """
-        try:
-            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
-        except DomainError as error:
-            if error.status_code != 404:
-                raise
-            job_data = None
-        if job_data is not None and _protected_api_runtime(job_data) is not None:
-            maximum, key = _interaction_authority(req.max_cost_cents, idempotency_key)
-            artifact, overview, model_name = await asyncio.to_thread(
-                load_program_metadata, job_store, optimization_id, current_user
-            )
-            raw_artifact = artifact if isinstance(artifact, dict) else artifact.model_dump(mode="json")
-            overlay = raw_artifact.get("react_overlay")
-            if not isinstance(overlay, dict):
-                raise DomainError("serve.chat_not_react", status=409)
-            stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
-            tool_source = stored.get("tool_source") or overlay.get("tool_source")
-            if not isinstance(tool_source, dict) or tool_source.get("kind") != "live_mcp":
-                raise DomainError("serve.chat_requires_live_mcp", status=409)
-            model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
-            if req.model_config_override is not None:
-                model_config = req.model_config_override
-            elif model_settings:
-                model_config = ModelConfig.model_validate(model_settings)
-            elif model_name:
-                model_config = ModelConfig(name=model_name)
-            else:
-                raise DomainError("serve.no_model_config", status=400)
-            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-            if not input_fields:
-                raise DomainError("serve.no_declared_inputs", status=400)
-            inputs = dict.fromkeys(input_fields, "")
-            inputs[input_fields[0]] = req.user_message
-            source = _protected_sse(
-                lambda emit: _protected_result(
-                    job_store=job_store,
-                    job_data=job_data,
-                    artifact=artifact,
-                    overview=overview,
-                    model_config=model_config,
-                    inputs=inputs,
-                    interaction={
-                        "kind": "react_chat",
-                        "optimization_id": optimization_id,
-                        "input_fields": input_fields,
-                        "output_fields": output_fields,
-                        "stream": True,
+        async with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
+            optimization_id=optimization_id,
+            channel=serve_channel(request),
+            route="chat",
+        ) as inference:
+            try:
+                job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+            except DomainError as error:
+                if error.status_code != 404:
+                    raise
+                job_data = None
+            if job_data is not None and _protected_api_runtime(job_data) is not None:
+                maximum, key = _interaction_authority(req.max_cost_cents, idempotency_key)
+                artifact, overview, model_name = await asyncio.to_thread(
+                    load_program_metadata, job_store, optimization_id, current_user
+                )
+                raw_artifact = artifact if isinstance(artifact, dict) else artifact.model_dump(mode="json")
+                overlay = raw_artifact.get("react_overlay")
+                if not isinstance(overlay, dict):
+                    raise DomainError("serve.chat_not_react", status=409)
+                stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+                tool_source = stored.get("tool_source") or overlay.get("tool_source")
+                if not isinstance(tool_source, dict) or tool_source.get("kind") != "live_mcp":
+                    raise DomainError("serve.chat_requires_live_mcp", status=409)
+                model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+                if model_settings:
+                    model_config = ModelConfig.model_validate(model_settings)
+                elif model_name:
+                    model_config = ModelConfig(name=model_name)
+                else:
+                    raise DomainError("serve.no_model_config", status=400)
+                input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+                if not input_fields:
+                    raise DomainError("serve.no_declared_inputs", status=400)
+                inputs = dict.fromkeys(input_fields, "")
+                inputs[input_fields[0]] = req.user_message
+                source = _protected_sse(
+                    lambda emit: _protected_result(
+                        job_store=job_store,
+                        job_data=job_data,
+                        artifact=artifact,
+                        overview=overview,
+                        model_config=model_config,
+                        inputs=inputs,
+                        interaction={
+                            "kind": "react_chat",
+                            "optimization_id": optimization_id,
+                            "input_fields": input_fields,
+                            "output_fields": output_fields,
+                            "stream": True,
+                        },
+                        max_cost_cents=maximum,
+                        idempotency_key=key,
+                        current_user=current_user,
+                        on_event=emit,
+                        require_tool_approval=req.trust_mode != "yolo",
+                    ),
+                    final_event="done",
+                )
+                return StreamingResponse(
+                    sse_from_events(inference.stream(source)),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
                     },
-                    max_cost_cents=maximum,
-                    idempotency_key=key,
-                    current_user=current_user,
-                    on_event=emit,
-                    require_tool_approval=req.trust_mode != "yolo",
-                ),
-                final_event="done",
+                )
+            # Offload the synchronous DB read + program deserialization so it does
+            # not block the single event loop before the first byte is produced.
+            signature_cls, program_state_json, react_overlay, overview = await asyncio.to_thread(
+                load_react_chat_inputs, job_store, optimization_id, current_user
             )
-            return StreamingResponse(
-                sse_from_events(source),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
-        # Offload the synchronous DB read + program deserialization so it does
-        # not block the single event loop before the first byte is produced.
-        signature_cls, program_state_json, react_overlay, overview = await asyncio.to_thread(
-            load_react_chat_inputs, job_store, optimization_id, current_user
-        )
 
-        if req.model_config_override:
-            model_config = req.model_config_override
-        else:
             model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
             model_name = overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, "")
             if model_settings:
@@ -1538,40 +1742,40 @@ def create_serve_router(*, job_store) -> APIRouter:
             else:
                 raise DomainError("serve.no_model_config", status=400)
 
-        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
-        model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
-        lm = build_language_model(model_config)
-        tool_source = react_overlay.tool_source or {}
-        mcp_url = tool_source.get("mcp_url") or settings.generalist_agent_mcp_url
+            await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+            model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
+            lm = build_language_model(model_config)
+            tool_source = react_overlay.tool_source or {}
+            mcp_url = tool_source.get("mcp_url") or settings.generalist_agent_mcp_url
 
-        source = run_react_chat(
-            signature_cls=signature_cls,
-            program_state_json=program_state_json,
-            react_overlay=react_overlay,
-            user_message=req.user_message,
-            trust_mode=req.trust_mode,
-            lm=lm,
-            model_name=model_config.normalized_identifier(),
-            mcp_url=mcp_url,
-            auth_header=authorization,
-        )
-        metered = stream_with_llm_metering(
-            source,
-            job_store=job_store,
-            username=current_user.username,
-            description="Serve chat",
-            usage_sink=[lm],
-            token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
-        )
-        return StreamingResponse(
-            sse_from_events(metered),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+            source = run_react_chat(
+                signature_cls=signature_cls,
+                program_state_json=program_state_json,
+                react_overlay=react_overlay,
+                user_message=req.user_message,
+                trust_mode=req.trust_mode,
+                lm=lm,
+                model_name=model_config.normalized_identifier(),
+                mcp_url=mcp_url,
+                auth_header=authorization,
+            )
+            metered = stream_with_llm_metering(
+                source,
+                job_store=job_store,
+                username=current_user.username,
+                description="Serve chat",
+                usage_sink=[lm],
+                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+            )
+            return StreamingResponse(
+                sse_from_events(inference.stream(metered)),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
     @router.post(
         "/serve/{optimization_id}/chat/confirm",

@@ -1,9 +1,9 @@
 import { Suspense } from "react";
-import { OptimizationDetailGate } from "@/features/optimizations";
+import { OptimizationDetailGate, OptimizationDetailSkeleton } from "@/features/optimizations";
 
 export default function JobDetailPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<OptimizationDetailSkeleton />}>
       <OptimizationDetailGate />
     </Suspense>
   );

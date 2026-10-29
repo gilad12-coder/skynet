@@ -147,12 +147,12 @@ export function SearchBar({
   }, []);
 
   return (
-    <div data-tutorial="explore-search" className="mx-auto flex w-full max-w-3xl flex-col gap-2.5">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5">
       <div className="flex items-center justify-center">
         <CorpusToggle value={corpus} onChange={onCorpusChange} signedIn={signedIn} />
       </div>
       <div
-        className={`group relative flex h-11 items-center gap-1 rounded-2xl border border-border bg-background ps-4 pe-1 transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-foreground/40 focus-within:shadow-[0_2px_24px_-12px_oklch(0.25_0.04_45/.18)] ${
+        className={`group relative flex h-11 items-center gap-1 rounded-2xl border border-border bg-background ps-4 pe-1 transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-foreground/40 ${
           isActive ? "border-foreground/25" : ""
         }`}
       >
@@ -198,7 +198,7 @@ export function SearchBar({
             type="button"
             onClick={clearAll}
             aria-label={msg("explore.search.clear")}
-            className="size-9 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+            className="size-9 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
           >
             <X className="size-4" aria-hidden="true" />
           </button>
@@ -209,7 +209,7 @@ export function SearchBar({
               type="button"
               onClick={onClearFilters}
               aria-label={msg("explore.filters.reset")}
-              className="size-9 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="size-9 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
             >
               <FunnelX className="size-[1.05rem]" aria-hidden="true" />
             </button>
@@ -221,7 +221,7 @@ export function SearchBar({
           onClick={onOpenFilters}
           aria-label={msg("explore.filters.button")}
           aria-expanded={filtersOpen}
-          className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2.5 text-[13px] text-foreground/70 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+          className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2.5 text-[13px] text-foreground/70 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
         >
           <FadersHorizontal className="size-[1.125rem]" aria-hidden="true" />
           {filtersCount > 0 && <CountBadge dir="ltr">{filtersCount}</CountBadge>}

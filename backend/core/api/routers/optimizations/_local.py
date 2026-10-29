@@ -5,33 +5,30 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
 
+from ....billing.budgets import BudgetService
 from ....billing.protected_credentials import scrub_execution_credentials
 from ....constants import (
-    OPTIMIZATION_TYPE_GRID_SEARCH,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
     PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
-    PAYLOAD_OVERVIEW_TOTAL_PAIRS,
     PAYLOAD_OVERVIEW_USERNAME,
 )
-from ....i18n import t
 from ....models import (
-    GridSearchRequest,
     OptimizationStatus,
     OptimizationSubmissionResponse,
     RunRequest,
 )
 from ....models.common import OptimizationType
-from ....notifications import notify_job_started
 from ....worker.engine import get_worker
 from ...auth import AuthenticatedUser
 from ...converters import parse_overview
@@ -119,6 +116,31 @@ async def stream_dashboard_snapshots(
         await asyncio.sleep(DASHBOARD_POLL_SECONDS)
 
 
+def execution_budget_view(job_store: Any, job_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the caller-safe execution budget snapshot for one job.
+
+    Reads the live budget when the job has one and the store is database
+    backed, and falls back to the copy frozen into the terminal evidence.
+
+    Args:
+        job_store: Job store, whose ``engine`` backs the budget service.
+        job_data: Job fields holding ``execution_budget_id``, ``username``
+            and ``terminal_evidence``.
+
+    Returns:
+        The budget fields without the owner and account balance, or ``None``
+        when the job has no budget.
+    """
+    execution_budget = (job_data.get("terminal_evidence") or {}).get("execution_budget")
+    if job_data.get("execution_budget_id") is not None and getattr(job_store, "engine", None) is not None:
+        execution_budget = asdict(
+            BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
+        )
+        execution_budget.pop("username", None)
+        execution_budget.pop("account_available_cents", None)
+    return execution_budget
+
+
 async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[dict[str, Any]]:
     """Yield live status updates for a single optimization.
 
@@ -148,9 +170,10 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
             return
 
         status = raw.get("status", "pending")
-        log_count, progress_count = await asyncio.gather(
+        log_count, progress_count, execution_budget = await asyncio.gather(
             loop.run_in_executor(None, job_store.get_log_count, optimization_id),
             loop.run_in_executor(None, job_store.get_progress_count, optimization_id),
+            loop.run_in_executor(None, execution_budget_view, job_store, raw),
         )
         yield {
             "event": "message",
@@ -163,6 +186,7 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
                 "terminal_evidence": raw.get("terminal_evidence"),
                 "stop_reason": raw.get("stop_reason"),
                 "result_availability": raw.get("result_availability"),
+                "execution_budget": execution_budget,
                 "log_count": log_count,
                 "progress_count": progress_count,
             },
@@ -183,17 +207,17 @@ def clone_payload(
 ) -> tuple[str, Any]:
     """Return ``(new_optimization_id, payload_model)`` from a stored payload dict.
 
-    Re-parses the stored payload into the original Pydantic request model,
+    Re-parses the stored payload into a ``RunRequest``,
     assigns a fresh UUID and seed, and overrides the display name if given.
 
     Args:
         source_payload: Stored submission payload dict.
-        optimization_type: ``"run"`` or ``"grid_search"``.
+        optimization_type: Stored optimization type; only ``"run"`` reaches here.
         new_name: Optional override for the cloned optimization's display name.
 
     Returns:
         ``(new_id, payload_model)`` where ``payload_model`` is a parsed
-        ``RunRequest`` or ``GridSearchRequest`` ready to be enqueued.
+        ``RunRequest`` ready to be enqueued.
 
     Raises:
         DomainError: 409 when the stored payload no longer validates against
@@ -211,11 +235,8 @@ def clone_payload(
     }
     if new_name is not None:
         copy["name"] = new_name
-    request_cls: type[GridSearchRequest] | type[RunRequest] = (
-        GridSearchRequest if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH else RunRequest
-    )
     try:
-        payload = request_cls.model_validate(copy)
+        payload = RunRequest.model_validate(copy)
     except ValidationError as exc:
         raise DomainError(
             "optimization.cannot_resubmit_payload",
@@ -240,22 +261,20 @@ def persist_and_enqueue(
 ) -> OptimizationSubmissionResponse:
     """Persist a cloned/retried payload and hand it to the worker.
 
-    Writes the overview dict the same way ``/run`` and ``/grid-search`` do,
+    Writes the run overview dict,
     then hands the payload to the background worker and fires the
     job-started notification.
 
     Args:
         job_store: Job-store the new row is written to.
         new_id: Pre-allocated optimization id for the new run.
-        payload: Parsed ``RunRequest`` or ``GridSearchRequest``.
-        optimization_type: ``"run"`` or ``"grid_search"``.
+        payload: Parsed ``RunRequest``.
+        optimization_type: Stored optimization type, ``"run"``.
 
     Returns:
         An ``OptimizationSubmissionResponse`` describing the enqueued run.
     """
     fingerprint = compute_task_fingerprint(payload.signature_code, payload.metric_code, payload.dataset)
-    is_grid = optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH
-
     overview: dict[str, Any] = {
         PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: optimization_type,
         PAYLOAD_OVERVIEW_NAME: payload.name,
@@ -273,14 +292,9 @@ def persist_and_enqueue(
         "optimizer_kwargs": dict(payload.optimizer_kwargs),
         "compile_kwargs": dict(payload.compile_kwargs),
         "task_fingerprint": fingerprint,
+        PAYLOAD_OVERVIEW_MODEL_NAME: payload.model_settings.normalized_identifier(),
+        PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.model_settings.model_dump()),
     }
-    if is_grid:
-        overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS] = len(payload.generation_models) * len(payload.reflection_models)
-        overview["generation_models"] = [m.model_dump() for m in payload.generation_models]
-        overview["reflection_models"] = [m.model_dump() for m in payload.reflection_models]
-    else:
-        overview[PAYLOAD_OVERVIEW_MODEL_NAME] = payload.model_settings.normalized_identifier()
-        overview[PAYLOAD_OVERVIEW_MODEL_SETTINGS] = strip_api_key(payload.model_settings.model_dump())
 
     job_store.create_job(new_id)
     job_store.set_payload_overview(new_id, overview)
@@ -288,21 +302,6 @@ def persist_and_enqueue(
     worker = get_worker(job_store, service=None)
     worker.submit_job(new_id, payload)
 
-    notify_job_started(
-        optimization_id=new_id,
-        username=payload.username,
-        optimization_type=optimization_type,
-        optimizer_name=payload.optimizer_name,
-        module_name=payload.module_name,
-        model_name=(
-            t(
-                "optimization.pairs_label",
-                count=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS, 0),
-            )
-            if is_grid
-            else payload.model_settings.normalized_identifier()
-        ),
-    )
     return OptimizationSubmissionResponse(
         optimization_id=new_id,
         optimization_type=cast(OptimizationType, optimization_type),

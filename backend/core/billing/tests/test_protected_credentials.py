@@ -22,7 +22,7 @@ from ...storage.models import (
     ProtectedCredentialModel,
 )
 from ..budgets import BudgetService
-from ..byok_vault import ProviderKeyVault, ResolvedConnection
+from ..byok_vault import ProviderKeyVault
 from ..operation_pricing import json_fingerprint
 from ..protected_credentials import (
     MCP_CREDENTIAL_REF_FIELD,
@@ -41,7 +41,6 @@ from ..protected_credentials import (
     resolve_repo_secrets,
     scrub_execution_credentials,
 )
-from ..protected_execution import claude_code_anthropic_key
 
 
 @dataclass
@@ -506,53 +505,6 @@ def test_reconciliation_refuses_noncanonical_saved_endpoints(harness: _Harness, 
     """
     harness.store(api_base=endpoint)
     assert resolve_current_openrouter_key("alice", json_fingerprint("fixture-alice-key"), vault=harness.vault) is None
-
-
-class _AnthropicVault:
-    """Return one fixed Anthropic connection, or none."""
-
-    def __init__(self, connection: ResolvedConnection | None) -> None:
-        """Hold the connection the vault resolves.
-
-        Args:
-            connection: What ``resolve_connection`` returns.
-        """
-        self.connection = connection
-        self.calls: list[tuple[str, str, bool]] = []
-
-    def resolve_connection(self, username: str, provider: str, *, verified_only: bool = False) -> Any:
-        """Record the lookup and return the fixed connection.
-
-        Args:
-            username: Account looked up.
-            provider: Provider slug looked up.
-            verified_only: Whether only verified keys qualify.
-
-        Returns:
-            The fixed connection.
-        """
-        self.calls.append((username, provider, verified_only))
-        return self.connection
-
-
-def test_claude_code_key_is_the_owner_verified_anthropic_key_and_never_echoed() -> None:
-    """Return only a verified key on Anthropic's own endpoint, and keep it out of every refusal."""
-    vault = _AnthropicVault(ResolvedConnection("anthropic", "sk-ant-secret", None, {}))
-    assert claude_code_anthropic_key(vault, "alice") == "sk-ant-secret"
-    assert vault.calls == [("alice", "anthropic", True)]
-    assert (
-        claude_code_anthropic_key(
-            _AnthropicVault(ResolvedConnection("anthropic", "sk-ant-secret", "https://api.anthropic.com", {})), "alice"
-        )
-        == "sk-ant-secret"
-    )
-    for vault in (
-        _AnthropicVault(None),
-        _AnthropicVault(ResolvedConnection("anthropic", "sk-ant-secret", "https://proxy.example/v1", {})),
-    ):
-        with pytest.raises(ValueError) as refused:
-            claude_code_anthropic_key(vault, "alice")
-        assert "sk-ant-secret" not in str(refused.value)
 
 
 def _repo_payload(secrets: list[dict[str, Any]]) -> dict[str, Any]:

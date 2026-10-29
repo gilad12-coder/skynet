@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ClaudeCode, Codex, OpenCode } from "@lobehub/icons";
+import { Codex, OpenCode } from "@lobehub/icons";
 import type { BlackboxHarness } from "@/shared/types/api";
 
 /**
@@ -41,8 +41,6 @@ function renderMark(harness: BlackboxHarness, size: number): React.ReactNode {
           iconStyle={glyphStyle}
         />
       );
-    case "claude_code":
-      return <ClaudeCode.Avatar size={size} iconClassName={GLYPH_CLASS} iconStyle={glyphStyle} />;
     case "opencode":
       return <OpenCode.Avatar size={size} iconClassName={GLYPH_CLASS} iconStyle={glyphStyle} />;
     case "prime":
@@ -57,7 +55,7 @@ function PiMark({ size }: { size: number }) {
     <span
       role="img"
       aria-label="Pi"
-      className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground"
+      className="inline-flex items-center justify-center rounded-full bg-primary-fill text-primary-foreground"
       style={{ width: size, height: size }}
     >
       <svg

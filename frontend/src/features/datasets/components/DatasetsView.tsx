@@ -31,28 +31,23 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { DATASET_UPLOAD_ACCEPT, parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { cn } from "@/shared/lib/utils";
-import { ListPageSkeleton } from "@/shared/ui/list-page-skeleton";
 import { ImportFromMenu } from "@/features/connectors";
-import { registerTutorialHook } from "@/features/tutorial";
 import { useDatasets } from "../hooks/use-datasets";
 import { DatasetCard } from "./DatasetCard";
-import { DatasetDetailDialog } from "./DatasetDetailDialog";
 import { DatasetRenameDialog } from "./DatasetRenameDialog";
 import { DatasetShareDialog } from "./DatasetShareDialog";
+import { DATASETS_LAYOUT_KEY, DatasetsSkeleton } from "./DatasetsSkeleton";
+import { rememberLayout } from "@/shared/lib/layout-hint";
 
 /**
  * Top-level /datasets page: the personal dataset library. Lists owned and
  * shared-in datasets as searchable cards over a usage meter, with a drag-in /
- * click upload that parses CSV/JSON/XLSX and saves a new entry. Selecting a card
- * (or arriving with ``?open=<id>``) opens a read-only detail sheet with a row
- * preview and the reverse link to every optimization that used the dataset.
+ * click upload that parses CSV/JSON/XLSX and saves a new entry. Clicking a card
+ * (or arriving with ``?open=<id>``) opens that dataset's page, where it can be
+ * viewed, edited, exported, tagged and traced to the optimizations that used it.
  */
 export function DatasetsView() {
-  const { datasets: fetchedDatasets, loading, error, refetch } = useDatasets();
-  // Demo overlay the guided tour injects, so a new account still has a card to
-  // select; background refetches can never overwrite it.
-  const [demoDatasets, setDemoDatasets] = React.useState<DatasetSummary[] | null>(null);
-  const datasets = demoDatasets ?? fetchedDatasets;
+  const { datasets, loading, error, refetch } = useDatasets();
   const handleImported = (dataset: DatasetSummary, provider: ConnectorProvider) => {
     track(TelemetryEvent.DatasetCreated, { source: provider, rows: dataset.row_count });
     refetch();
@@ -60,7 +55,14 @@ export function DatasetsView() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [search, setSearch] = React.useState("");
-  const [selected, setSelected] = React.useState<DatasetSummary | null>(null);
+  const openDataset = React.useCallback(
+    (dataset: DatasetSummary, replace = false) => {
+      const href = `/datasets/${dataset.id}/edit?name=${encodeURIComponent(dataset.name)}`;
+      if (replace) router.replace(href);
+      else router.push(href);
+    },
+    [router],
+  );
   const [dragging, setDragging] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
@@ -73,21 +75,6 @@ export function DatasetsView() {
   const [renameOpen, setRenameOpen] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const deepLinkedRef = React.useRef(false);
-
-  React.useEffect(() => registerTutorialHook("setDemoDatasets", setDemoDatasets), []);
-  React.useEffect(
-    () => registerTutorialHook("setSelectedDatasetIds", (ids) => setSelectedIds(new Set(ids))),
-    [],
-  );
-  React.useEffect(() => {
-    const onExit = () => {
-      setDemoDatasets(null);
-      setSelectedIds(new Set());
-      setAnchorId(null);
-    };
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
-  }, []);
 
   // Drop selections that stopped resolving to an owned dataset (deleted in
   // another tab, or ownership changed), so the bar never counts ghosts.
@@ -122,20 +109,19 @@ export function DatasetsView() {
     }
   };
 
-  // Honour ?open=<id> once the list has loaded: open that dataset's detail sheet
-  // (the navigable link from an optimization's source-dataset row). Guarded so
-  // it fires a single time, not again after the user closes the sheet. When the
-  // id resolves to nothing — the source dataset was deleted or unshared — say so
-  // rather than dead-ending silently on the click.
+  // Honour ?open=<id> once the list has loaded: go to that dataset's page (the
+  // navigable link from an optimization's source-dataset row). Guarded so it
+  // fires a single time. When the id resolves to nothing — the source dataset
+  // was deleted or unshared — say so rather than dead-ending silently.
   React.useEffect(() => {
     if (deepLinkedRef.current || loading || error) return;
     const openId = searchParams.get("open");
     if (!openId) return;
     deepLinkedRef.current = true;
     const match = datasets.find((d) => d.id === openId);
-    if (match) setSelected(match);
+    if (match) openDataset(match, true);
     else toast.info(msg("datasets.open.not_found"));
-  }, [datasets, loading, error, searchParams]);
+  }, [datasets, loading, error, searchParams, openDataset]);
 
   // Per-dataset actions only make sense with exactly one selected, as in the
   // dashboard jobs bar; selection is owner-only, so every one of them applies.
@@ -210,17 +196,22 @@ export function DatasetsView() {
     [uploading, refetch],
   );
 
-  if (loading && !demoDatasets) {
+  const datasetCount = loading || error ? null : datasets.length;
+  React.useEffect(() => {
+    if (datasetCount != null) rememberLayout(DATASETS_LAYOUT_KEY, datasetCount);
+  }, [datasetCount]);
+
+  if (loading) {
     return (
-      <div className="pb-16" data-tutorial="datasets-library">
+      <div className="pb-16">
         <DataHubTabs active="datasets" />
-        <ListPageSkeleton />
+        <DatasetsSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="pb-16" data-tutorial="datasets-library">
+    <div className="pb-16">
       <DataHubTabs active="datasets" />
       <input
         ref={fileInputRef}
@@ -234,10 +225,7 @@ export function DatasetsView() {
       />
 
       {datasets.length > 0 && (
-        <div
-          className="flex flex-col gap-2.5 sm:flex-row sm:items-center"
-          data-tutorial="datasets-add"
-        >
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
           <SearchField
             value={search}
             onValueChange={setSearch}
@@ -278,10 +266,10 @@ export function DatasetsView() {
         }}
         className={cn(
           "mt-5 rounded-xl border border-dashed transition-colors duration-150",
-          dragging ? "border-[#3D2E22]/50 bg-[#3D2E22]/[0.03]" : "border-transparent",
+          dragging ? "border-primary-fill/50 bg-primary-fill/[0.03]" : "border-transparent",
         )}
       >
-        {error && !demoDatasets ? (
+        {error ? (
           <EmptyState icon={Database} title={msg("datasets.error")} />
         ) : datasets.length === 0 ? (
           <EmptyState
@@ -303,7 +291,7 @@ export function DatasetsView() {
         ) : (
           <div className="flex flex-col gap-2.5 p-0.5">
             {dragging && (
-              <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
+              <p className="pointer-events-none py-2 text-center text-sm font-medium text-primary/70">
                 {msg("datasets.upload.drop")}
               </p>
             )}
@@ -311,7 +299,7 @@ export function DatasetsView() {
               <DatasetCard
                 key={dataset.id}
                 dataset={dataset}
-                onOpen={setSelected}
+                onOpen={openDataset}
                 onChanged={refetch}
                 selected={selectedIds.has(dataset.id)}
                 onToggleSelect={(shiftKey) => toggleSelected(dataset.id, shiftKey)}
@@ -328,7 +316,6 @@ export function DatasetsView() {
           setAnchorId(null);
         }}
         onDelete={() => setBulkOpen(true)}
-        tutorialId="datasets-selection"
       >
         {soleSelected && (
           <>
@@ -406,8 +393,6 @@ export function DatasetsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <DatasetDetailDialog dataset={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

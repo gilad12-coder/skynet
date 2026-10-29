@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from ...api.errors import DomainError
+from ...brand import APP_NAME
 from .. import github_publish
 from ..github_publish import RepoPublishError, open_pull_request, push_version
 
@@ -83,7 +84,7 @@ def test_push_creates_one_commit_on_the_pinned_commit(tmp_path: Path) -> None:
     assert _git(origin, "rev-parse", f"{head}^") == pinned
     assert _git(origin, "show", f"{head}:src/app.py") == "x = 2"
     assert _git(origin, "show", f"{head}:src/new.py") == "y = 3"
-    assert _git(origin, "log", "-1", "--format=%an %s", head) == "Skynet Apply it"
+    assert _git(origin, "log", "-1", "--format=%an %s", head) == f"{APP_NAME} Apply it"
 
 
 def test_push_refuses_a_version_that_does_not_apply(tmp_path: Path) -> None:

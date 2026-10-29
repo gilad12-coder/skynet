@@ -14,7 +14,6 @@ import {
 } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { type Range } from "@codemirror/state";
-import { tags } from "@lezer/highlight";
 import {
   HighlightStyle,
   LanguageDescription,
@@ -35,24 +34,25 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { FIND_SHORTCUT, useEditorFind } from "@/shared/ui/code-editor-find";
-import { useLiteMode } from "@/features/settings";
+import { CODE_HIGHLIGHT_SPECS } from "@/shared/ui/code-highlight-style";
+import { inCommentOrString } from "@/shared/ui/code-completion";
 
 const beigeEditorTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "#FAF6F0",
-      color: "#3D2E22",
+      backgroundColor: "var(--card)",
+      color: "var(--foreground)",
       fontSize: "12.5px",
     },
     ".cm-content": {
-      caretColor: "#7C6350",
+      caretColor: "var(--primary)",
       fontFamily: "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace",
       fontSize: "12.5px",
     },
     ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "#7C6350",
+      borderLeftColor: "var(--primary)",
     },
-    /* Raise the selection layer so the highlight shows over the beige
+    /* Raise the selection layer so the highlight shows over the editor
        background (its default negative z-index hides behind it). Lifting it
        above .cm-content means it must stay click-through: the layer carries
        no pointer-events:none of its own, so once on top a select-all would
@@ -74,39 +74,39 @@ const beigeEditorTheme = EditorView.theme(
       outline: "1px solid rgba(160, 120, 70, 0.35)",
     },
     ".cm-focused .cm-cursor": {
-      borderLeftColor: "#3D2E22",
+      borderLeftColor: "var(--foreground)",
       borderLeftWidth: "2px",
     },
     ".cm-activeLine": {
-      backgroundColor: "rgba(245, 237, 228, 0.3)",
+      backgroundColor: "color-mix(in srgb, var(--foreground) 4%, transparent)",
     },
     ".cm-gutters": {
-      backgroundColor: "#F3ECE3",
-      color: "#B09878",
+      backgroundColor: "var(--muted)",
+      color: "var(--muted-foreground)",
       border: "none",
-      borderRight: "1px solid #E5DDD4",
+      borderRight: "1px solid var(--border)",
       fontSize: "12px",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: "#EDE4D8",
-      color: "#7C6350",
+      backgroundColor: "var(--accent)",
+      color: "var(--text-2)",
     },
     ".cm-foldPlaceholder": {
-      backgroundColor: "#E8DDD4",
+      backgroundColor: "var(--accent)",
       border: "none",
-      color: "#7C6350",
+      color: "var(--text-2)",
     },
     ".cm-matchingBracket": {
-      backgroundColor: "#E8DDD4",
-      outline: "1px solid #C8B8A4",
+      backgroundColor: "var(--accent)",
+      outline: "1px solid var(--border)",
     },
     /* ── Find panel & search matches ── */
     ".cm-panels": {
-      backgroundColor: "#F3ECE3",
-      color: "#3D2E22",
+      backgroundColor: "var(--muted)",
+      color: "var(--foreground)",
     },
     ".cm-panels.cm-panels-top": {
-      borderBottom: "1px solid #E5DDD4",
+      borderBottom: "1px solid var(--border)",
     },
     ".cm-searchMatch": {
       backgroundColor: "rgba(160, 120, 70, 0.22)",
@@ -115,17 +115,17 @@ const beigeEditorTheme = EditorView.theme(
     },
     ".cm-searchMatch.cm-searchMatch-selected": {
       backgroundColor: "rgba(139, 94, 60, 0.42)",
-      outline: "1px solid #8B5E3C",
+      outline: "1px solid var(--code-keyword)",
     },
     /* ── Autocomplete tooltip ── */
     ".cm-tooltip": {
-      backgroundColor: "#FAF6F0",
-      border: "1px solid #E5DDD4",
+      backgroundColor: "var(--popover)",
+      border: "1px solid var(--border)",
       borderRadius: "8px",
-      boxShadow: "0 4px 12px rgba(60, 46, 34, 0.1)",
+      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
     },
     ".cm-tooltip.cm-tooltip-autocomplete": {
-      backgroundColor: "#FAF6F0",
+      backgroundColor: "var(--popover)",
     },
     ".cm-tooltip-autocomplete > ul": {
       fontFamily: "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace",
@@ -133,20 +133,20 @@ const beigeEditorTheme = EditorView.theme(
     },
     ".cm-tooltip-autocomplete > ul > li": {
       padding: "3px 8px",
-      color: "#3D2E22",
+      color: "var(--foreground)",
     },
     ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
-      backgroundColor: "#E8DDD4",
-      color: "#3D2E22",
+      backgroundColor: "var(--accent)",
+      color: "var(--foreground)",
     },
     ".cm-completionIcon": {
-      color: "#8C7A6B",
+      color: "var(--muted-foreground)",
     },
     ".cm-completionLabel": {
-      color: "#3D2E22",
+      color: "var(--foreground)",
     },
     ".cm-completionMatchedText": {
-      color: "#8B5E3C",
+      color: "var(--code-keyword)",
       fontWeight: "bold",
       textDecoration: "none",
     },
@@ -154,29 +154,7 @@ const beigeEditorTheme = EditorView.theme(
   { dark: false },
 );
 
-const beigeHighlightStyle = HighlightStyle.define([
-  { tag: tags.keyword, color: "#8B5E3C", fontWeight: "bold" },
-  { tag: tags.operator, color: "#7C6350" },
-  { tag: tags.special(tags.variableName), color: "#6B4226" },
-  { tag: tags.typeName, color: "#8B6914" },
-  { tag: tags.atom, color: "#8B6914" },
-  { tag: tags.number, color: "#986832" },
-  { tag: tags.definition(tags.variableName), color: "#3D2E22" },
-  { tag: tags.string, color: "#5A7247" },
-  { tag: tags.special(tags.string), color: "#5A7247" },
-  { tag: tags.comment, color: "#B09878", fontStyle: "italic" },
-  { tag: tags.variableName, color: "#3D2E22" },
-  { tag: tags.bracket, color: "#8C7A6B" },
-  { tag: tags.tagName, color: "#8B5E3C" },
-  { tag: tags.attributeName, color: "#8B6914" },
-  { tag: tags.propertyName, color: "#6B4226" },
-  { tag: tags.className, color: "#6B4226" },
-  { tag: tags.function(tags.variableName), color: "#7C5030" },
-  { tag: tags.bool, color: "#8B6914" },
-  { tag: tags.null, color: "#8B6914" },
-  { tag: tags.self, color: "#8B5E3C", fontStyle: "italic" },
-  { tag: tags.punctuation, color: "#8C7A6B" },
-]);
+const beigeHighlightStyle = HighlightStyle.define(CODE_HIGHLIGHT_SPECS);
 
 const beigeTheme: Extension = [beigeEditorTheme, syntaxHighlighting(beigeHighlightStyle)];
 
@@ -202,6 +180,7 @@ const dspyCompletions = [
 function dspyCompletion(context: CompletionContext): CompletionResult | null {
   const word = context.matchBefore(/[\w.]+/);
   if (!word || (word.from === word.to && !context.explicit)) return null;
+  if (inCommentOrString(context.state, context.pos)) return null;
   return {
     from: word.from,
     options: dspyCompletions,
@@ -393,7 +372,6 @@ export function CodeEditor({
   const [running, setRunning] = useState(false);
   const [formatting, setFormatting] = useState(false);
   const [result, setResult] = useState<ValidationResult | null>(null);
-  const lite = useLiteMode();
 
   useEffect(() => {
     if (validationResult !== undefined) setResult(dedupeIssues(validationResult));
@@ -467,16 +445,16 @@ export function CodeEditor({
 
   return (
     <div
-      className="rounded-xl border border-border/60 overflow-visible flex flex-col shadow-sm w-full"
-      style={readOnly ? undefined : { maxHeight: "60vh" }}
+      className="rounded-xl border border-border/60 overflow-visible flex flex-col w-full"
+      style={readOnly ? undefined : { maxHeight: "60svh" }}
       dir="ltr"
     >
-      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-[#F3ECE3] text-[0.6875rem] text-[#8C7A6B] border-b border-[#E5DDD4] rounded-t-xl">
-        <span className="min-w-0 flex-1 break-words font-semibold text-[#7C6350] tracking-wide flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-muted text-[0.6875rem] text-muted-foreground border-b border-border-subtle rounded-t-xl">
+        <span className="min-w-0 flex-1 break-words font-semibold text-[var(--text-2)] tracking-wide flex items-center gap-1.5">
           {shownLabel}
         </span>
 
-        {!lite && !collapsed && (
+        {!collapsed && (
           <TooltipButton
             tooltip={formatMsg("shared.code_editor.find.open_tip", { shortcut: FIND_SHORTCUT })}
           >
@@ -559,7 +537,7 @@ export function CodeEditor({
           className="group/editor-action"
         >
           <span className="inline-flex transition-transform duration-150 ease-out group-hover/editor-action:scale-110 group-focus-visible/editor-action:scale-110 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none">
-            <CopyGlyph copied={copied} className="size-3" checkClassName="text-[#3D2E22]" />
+            <CopyGlyph copied={copied} className="size-3" checkClassName="text-primary" />
           </span>
         </Button>
       </div>
@@ -577,62 +555,41 @@ export function CodeEditor({
             <div
               className="relative overflow-y-auto [&_.cm-editor]:!outline-none"
               style={{
-                minHeight: readOnly ? height : `min(${height}, calc(60vh - 4rem))`,
-                maxHeight: readOnly ? undefined : "calc(60vh - 4rem)",
+                minHeight: readOnly ? height : `min(${height}, calc(60svh - 4rem))`,
+                maxHeight: readOnly ? undefined : "calc(60svh - 4rem)",
               }}
             >
-              {lite ? (
-                readOnly ? (
-                  <pre
-                    dir="ltr"
-                    className="m-0 overflow-auto bg-[#FAF6F0] px-4 py-3 font-mono text-[12.5px] leading-relaxed text-[#3D2E22] whitespace-pre"
-                    style={{ minHeight: height }}
-                  >
-                    {value}
-                  </pre>
-                ) : (
-                  <textarea
-                    dir="ltr"
-                    value={value}
-                    onChange={(e) => handleChange(e.target.value)}
-                    spellCheck={false}
-                    className="block w-full resize-y bg-[#FAF6F0] px-4 py-3 font-mono text-[12.5px] leading-relaxed text-[#3D2E22] outline-none"
-                    style={{ height }}
-                  />
-                )
-              ) : (
-                <>
-                  <CodeMirror
-                    ref={editorRef}
-                    value={value}
-                    height={height}
-                    theme={beigeTheme}
-                    extensions={extensions}
-                    onChange={handleChange}
-                    readOnly={readOnly}
-                    basicSetup={{
-                      lineNumbers: true,
-                      foldGutter: true,
-                      bracketMatching: true,
-                      autocompletion: true,
-                      completionKeymap: true,
-                      // The find panel extension binds its own search keys.
-                      searchKeymap: false,
-                      highlightActiveLine: true,
-                      highlightSelectionMatches: false,
-                      indentOnInput: true,
-                      tabSize: 4,
-                    }}
-                  />
-                  {find.panel}
-                </>
-              )}
+              <>
+                <CodeMirror
+                  ref={editorRef}
+                  value={value}
+                  height={height}
+                  theme={beigeTheme}
+                  extensions={extensions}
+                  onChange={handleChange}
+                  readOnly={readOnly}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    bracketMatching: true,
+                    autocompletion: true,
+                    completionKeymap: true,
+                    // The find panel extension binds its own search keys.
+                    searchKeymap: false,
+                    highlightActiveLine: true,
+                    highlightSelectionMatches: false,
+                    indentOnInput: true,
+                    tabSize: 4,
+                  }}
+                />
+                {find.panel}
+              </>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       {collapsed && (
-        <div className="bg-[#FAF6F0] text-[#B09878] text-xs italic px-4 py-2">
+        <div className="bg-muted text-muted-foreground text-xs italic px-4 py-2">
           {formatMsg("shared.code_editor.lines_hidden", { count: lineCount })}
         </div>
       )}
@@ -640,22 +597,22 @@ export function CodeEditor({
       {/* The console is deliberately English-only, like the code whose issues
           it reports — its strings are not localized. */}
       {hasOutput && (
-        <div dir="ltr" className="bg-[#EFE5D5] border-t border-[#E5DDD4] text-left">
+        <div dir="ltr" className="bg-muted border-t border-border-subtle text-left">
           {!running && result && (
             <div
               className={`flex items-center justify-between gap-2 px-3 py-1.5 ${
-                hasConsoleBody ? "border-b border-[#E5DDD4]/60" : ""
+                hasConsoleBody ? "border-b border-border-subtle/60" : ""
               }`}
             >
               <div className="flex items-center gap-1.5 min-w-0">
                 {result.errors.length > 0 && (
-                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-full bg-[#E8D7C5] text-[#3D2E22] tabular-nums">
+                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-md bg-[#E8D7C5] dark:bg-[#524435] text-primary tabular-nums">
                     <span className="size-1.5 rounded-full bg-[#6B4226]" aria-hidden="true" />
                     {result.errors.length === 1 ? "1 error" : `${result.errors.length} errors`}
                   </span>
                 )}
                 {result.warnings.length > 0 && (
-                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-full bg-[#EBE0B8] text-[#5C4509] tabular-nums">
+                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-md bg-[#EBE0B8] dark:bg-[#4d4424] text-[#5C4509] dark:text-[#e4ca92] tabular-nums">
                     <span className="size-1.5 rounded-full bg-[#8B6914]" aria-hidden="true" />
                     {result.warnings.length === 1
                       ? "1 warning"
@@ -663,8 +620,8 @@ export function CodeEditor({
                   </span>
                 )}
                 {result.valid && result.errors.length === 0 && result.warnings.length === 0 && (
-                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-full bg-[#EDE4D8] text-[#3D2E22]">
-                    <span className="size-1.5 rounded-full bg-[#7C6350]" aria-hidden="true" />
+                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium px-2 py-0.5 rounded-md bg-primary-fill text-primary-foreground">
+                    <span className="size-1.5 rounded-full bg-primary-fill" aria-hidden="true" />
                     {"No issues"}
                   </span>
                 )}
@@ -673,23 +630,21 @@ export function CodeEditor({
                 {(result.errors.length > 0 || result.warnings.length > 0) && (
                   <CopyButton text={consoleText} ariaLabel="Copy output" copiedAriaLabel="Copied" />
                 )}
-                <TooltipButton tooltip="Clear" side="top">
-                  <button
-                    type="button"
-                    onClick={() => setResult(null)}
-                    className="close-button"
-                    aria-label="Clear"
-                  >
-                    <X />
-                  </button>
-                </TooltipButton>
+                <button
+                  type="button"
+                  onClick={() => setResult(null)}
+                  className="close-button"
+                  aria-label="Clear"
+                >
+                  <X />
+                </button>
               </div>
             </div>
           )}
           {hasConsoleBody && (
             <div className="py-1 max-h-48 overflow-y-auto">
               {running && (
-                <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-[#8C7A6B]">
+                <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground">
                   <CircleNotch className="size-3.5 animate-spin" />
                   {"Running validation…"}
                 </div>
@@ -697,13 +652,13 @@ export function CodeEditor({
               {result?.errors.map((err, i) => (
                 <div
                   key={`e${i}`}
-                  className="flex items-stretch border-l-2 border-[#6B4226] bg-[#E8D7C5]/35 hover:bg-[#E8D7C5]/60 transition-colors"
+                  className="flex items-stretch border-l-2 border-[#6B4226] dark:border-[#c29375] bg-[#E8D7C5]/35 dark:bg-[#524435]/35 hover:bg-[#E8D7C5]/60 dark:hover:bg-[#524435]/60 transition-colors"
                   role="alert"
                 >
-                  <div className="flex-1 min-w-0 pl-3 pr-4 py-1.5 text-xs font-mono leading-relaxed text-[#3D2E22] break-words">
+                  <div className="flex-1 min-w-0 pl-3 pr-4 py-1.5 text-xs font-mono leading-relaxed text-primary break-words">
                     {linkifyMessage(
                       err,
-                      "underline decoration-[#6B4226]/40 underline-offset-2 hover:decoration-[#6B4226] transition-colors",
+                      "underline decoration-[#6B4226]/40 dark:decoration-[#f0bfa0]/40 underline-offset-2 hover:decoration-[#6B4226] dark:hover:decoration-[#f0bfa0] transition-colors",
                     )}
                   </div>
                 </div>
@@ -711,10 +666,10 @@ export function CodeEditor({
               {result?.warnings.map((w, i) => (
                 <div
                   key={`w${i}`}
-                  className="flex items-stretch border-l-2 border-[#8B6914] bg-[#EBE0B8]/35 hover:bg-[#EBE0B8]/60 transition-colors"
+                  className="flex items-stretch border-l-2 border-[#8B6914] bg-[#EBE0B8]/35 dark:bg-[#4d4424]/35 hover:bg-[#EBE0B8]/60 dark:hover:bg-[#4d4424]/60 transition-colors"
                   role="status"
                 >
-                  <div className="flex-1 min-w-0 pl-3 pr-4 py-1.5 text-xs font-mono leading-relaxed text-[#5C4509] break-words">
+                  <div className="flex-1 min-w-0 pl-3 pr-4 py-1.5 text-xs font-mono leading-relaxed text-[#5C4509] dark:text-[#e4ca92] break-words">
                     {w}
                   </div>
                 </div>

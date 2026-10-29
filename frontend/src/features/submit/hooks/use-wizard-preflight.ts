@@ -5,6 +5,7 @@ import { msg } from "@/shared/lib/messages";
 import { notifyUser, requestNotificationPermission } from "@/shared/lib/os-notifications";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getExecutionBudget, runWizardPreflight } from "@/shared/lib/api";
+import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type {
   PreflightScope,
   WizardPreflightPayload,
@@ -23,11 +24,21 @@ import {
   type ValidationProgress,
   type ValidationStatus,
 } from "../lib/preflight-store";
-import { preflightIdentity, upgradeLegacyIdentity } from "../lib/validation-evidence";
+import {
+  preflightIdentity as legacyPreflightIdentity,
+  upgradeLegacyIdentity,
+} from "../lib/validation-evidence";
 import type { ToastApi } from "../lib/validation-toast";
 import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
+import { preflightFailure } from "../lib/wizard-telemetry";
 
 export type { ValidationPhase, ValidationProgress };
+
+// The identity helper is still typed for the retired workflows; it only embeds
+// the workflow name in the identity, so "unified" passes through unchanged.
+function preflightIdentity(workflow: PreflightWorkflow, payload: object): string {
+  return legacyPreflightIdentity(workflow as Parameters<typeof legacyPreflightIdentity>[0], payload);
+}
 
 // One store for the page: a check keeps running while the user is elsewhere
 // in the app, and a wizard restored from the draft joins it where it is.
@@ -41,7 +52,7 @@ const store = new PreflightStore({
   settleUsage: waitForPreflightUsage,
 });
 
-const WORKFLOWS: PreflightWorkflow[] = ["anything", "dspy"];
+const WORKFLOWS: PreflightWorkflow[] = ["unified"];
 
 /** Notify when a check finishes, wherever in the app the user is. */
 export function usePreflightNotifications(): void {
@@ -49,10 +60,14 @@ export function usePreflightNotifications(): void {
     const seen = new Map<PreflightWorkflow, ValidationStatus | undefined>();
     const follow = () => {
       for (const workflow of WORKFLOWS) {
-        const status = store.getState(workflow).progress?.status;
+        const progress = store.getState(workflow).progress;
+        const status = progress?.status;
         const previous = seen.get(workflow);
         seen.set(workflow, status);
         if (status === previous) continue;
+        // Mounted once at the root, so each failed check is reported exactly once.
+        const failure = preflightFailure(previous, progress);
+        if (failure) track(TelemetryEvent.SetupCheckFailed, { ...failure });
         if (status === "running") requestNotificationPermission();
         else if (previous === "running" && status === "succeeded")
           notifyUser(msg("notify.check.passed"));

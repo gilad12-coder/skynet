@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..api.errors import DomainError
+from ..brand import APP_NAME
 from .github import API_URL, PROVIDER, _headers
 from .github_repo import GITHUB_HOST, RepoFetchError, _git, git_auth_env
 from .transport import get_json, request
 
-COMMIT_AUTHOR = ["-c", "user.name=Skynet", "-c", "user.email=noreply@skynetml.com", "-c", "commit.gpgsign=false"]
+COMMIT_AUTHOR = ["-c", f"user.name={APP_NAME}", "-c", "user.email=noreply@skynetml.com", "-c", "commit.gpgsign=false"]
 # The branch holds a reviewed diff, never LFS objects, so LFS filters stay off.
 _NO_LFS = ["-c", "filter.lfs.process=", "-c", "filter.lfs.clean=cat", "-c", "filter.lfs.smudge=cat"]
 
@@ -79,7 +80,7 @@ def push_version(
         RepoPublishError: When the clone, the patch or the push fails.
     """
     environment = git_auth_env(token)
-    workdir = Path(tempfile.mkdtemp(prefix="skynet-publish-"))
+    workdir = Path(tempfile.mkdtemp(prefix="app-publish-"))
     try:
         _git(["init", "--quiet"], workdir, environment)
         _git(["remote", "add", "origin", remote or f"{GITHUB_HOST}/{repository}.git"], workdir, environment)

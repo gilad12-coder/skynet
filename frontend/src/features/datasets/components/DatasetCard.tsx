@@ -3,7 +3,7 @@
 import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
 import * as React from "react";
 import Link from "next/link";
-import { CircleNotch, Copy, Database, PencilSimple, Table, Tag, Trash } from "@/shared/ui/icons";
+import { CircleNotch, Copy, Database, PencilSimple, Tag, Trash } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
@@ -38,7 +38,7 @@ import { DatasetShareDialog } from "./DatasetShareDialog";
  * One library dataset rendered as a clickable card: name, row/column
  * counts, size and last-updated, plus role-gated actions. Owners get share /
  * rename / delete; everyone else (shared-in) gets clone-to-my-library. Clicking
- * the card body opens the detail sheet via ``onOpen``.
+ * the card body opens the dataset page via ``onOpen``.
  */
 export function DatasetCard({
   dataset,
@@ -55,7 +55,6 @@ export function DatasetCard({
   onToggleSelect: (shiftKey: boolean) => void;
 }) {
   const isOwner = dataset.role === "owner";
-  const canEdit = isOwner || dataset.role === "editor";
   const [renameOpen, setRenameOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -189,23 +188,6 @@ export function DatasetCard({
               </Link>
             </Button>
           </TooltipButton>
-          {canEdit && (
-            <TooltipButton tooltip={msg("datasets.action.edit")}>
-              <Button
-                asChild
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label={msg("datasets.action.edit")}
-              >
-                <Link
-                  href={`/datasets/${dataset.id}/edit?name=${encodeURIComponent(dataset.name)}`}
-                >
-                  <Table className="size-4" />
-                </Link>
-              </Button>
-            </TooltipButton>
-          )}
           {isOwner ? (
             <>
               <DatasetShareDialog datasetId={dataset.id} />
@@ -221,17 +203,16 @@ export function DatasetCard({
                 </Button>
               </TooltipButton>
               <span aria-hidden="true" className={LIST_ROW_ACTION_DIVIDER_CLASS} />
-              <TooltipButton tooltip={msg("datasets.action.delete")}>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => setDeleteOpen(true)}
-                  aria-label={msg("datasets.action.delete")}
-                >
-                  <Trash className="size-4" />
-                </Button>
-              </TooltipButton>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteOpen(true)}
+                autoTooltip={false}
+                aria-label={msg("datasets.action.delete")}
+              >
+                <Trash className="size-4" />
+              </Button>
             </>
           ) : (
             <TooltipButton tooltip={msg("datasets.action.clone")}>

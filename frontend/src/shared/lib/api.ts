@@ -6,13 +6,12 @@ import type {
 import type {
   BlackboxAgentRunResponse,
   BlackboxCandidate,
+  BlackboxRunRequest,
   ScorerDependencyLock,
   BlackboxEngineCatalogResponse,
-  BlackboxRunRequest,
   ColumnMapping,
   EvalExampleResult,
   GridSearchResult,
-  GridSearchRequest,
   ModelCatalogResponse,
   ModelPrivacySettings,
   OptimizationDatasetResponse,
@@ -23,7 +22,8 @@ import type {
   ProfileDatasetRequest,
   ProfileDatasetResponse,
   QueueStatusResponse,
-  RunRequest,
+  RepositoryFileResponse,
+  RepositoryTreeResponse,
   ServeInfoResponse,
   ServeResponse,
   ValidateCodeResponse,
@@ -32,17 +32,47 @@ import type {
   WorkflowDryRunResponse,
   WorkflowSpec,
 } from "@/shared/types/api";
+import type {
+  ArtifactKind,
+  CheckTerminalEvent,
+  ContractCheckRequest,
+  ContractCheckResponse,
+  DataMode,
+  FileVerification,
+  InputsInferenceRequest,
+  InputsInferenceResponse,
+  OptimizerCatalogResponse,
+  TaskInterviewRequest,
+  TaskInterviewTurnResult,
+  UnifiedAuthoringContext,
+  UnifiedRunRequest,
+} from "@/shared/types/unified-run";
+import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import type { TurnStats } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
+import {
+  ACCOUNT_MISSING_CODE,
+  announceAccountMissing,
+  isAccountMissingResponse,
+} from "@/shared/lib/account-missing";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
+import type { RunUsage } from "@/shared/types/run-usage";
+import type {
+  ContinuousEnableRequest,
+  ContinuousPlan,
+  ContinuousState,
+  ScheduleRule,
+} from "@/shared/types/continuous";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
+import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
+import { streamResumableTurn } from "@/shared/lib/resumable-turn";
 
 // Resolve the runtime API base lazily on every call. Capturing it once at
-// module load races the injected `window.__SKYNET_ENV__` script: the framework
+// module load races the injected `window.__APP_ENV__` script: the framework
 // chunks execute (and evaluate this module) before that inline `<head>` script
 // runs, so a module-scope const freezes the build-time `localhost:8000`
 // fallback and every request hits the wrong origin. Reading at call time always
@@ -138,8 +168,15 @@ export async function fetchWithAuthRetry(url: string, init: RequestInit): Promis
   const res = await send(_authToken);
   if (res.status !== 401) return res;
   const fresh = await refreshAuthTokenOn401();
-  if (!fresh) return res;
-  return send(fresh);
+  const final = fresh ? await send(fresh) : res;
+  if (final.status === 401) {
+    const body = await final
+      .clone()
+      .text()
+      .catch(() => "");
+    if (isAccountMissingResponse(final.status, body)) announceAccountMissing();
+  }
+  return final;
 }
 
 function cachedGet<T>(path: string, maxAge = GET_CACHE_MS): Promise<T> {
@@ -204,8 +241,22 @@ const INSUFFICIENT_FUNDS_CODE = I18N_KEY.BILLING_INSUFFICIENT_FUNDS;
 /** Browser event the central error path fires when a submit hits the balance gate. */
 export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 
-/** Browser event fired after a storage-freeing delete so the meter re-reads usage. */
+/** Browser event fired after work that debits the wallet, such as an agent turn, so the balance re-reads. */
+export const WALLET_CHANGED_EVENT = "wallet-changed";
+
+/** Fire {@link WALLET_CHANGED_EVENT}. */
+export function announceWalletChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
+}
+/** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
+
+/** Fire {@link STORAGE_CHANGED_EVENT} once a mutation that adds or frees stored bytes succeeds. */
+async function changesStorage<T>(mutation: Promise<T>): Promise<T> {
+  const res = await mutation;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
+  return res;
+}
 
 /**
  * Error carrying the backend's structured envelope so callers can branch on the
@@ -314,8 +365,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (parsed.code === INSUFFICIENT_FUNDS_CODE && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(INSUFFICIENT_FUNDS_EVENT));
     }
+    // A missing account cannot recover by refreshing the bearer; the session
+    // provider signs the browser out instead of letting every call fail.
+    if (res.status === 401 && parsed.code === ACCOUNT_MISSING_CODE) {
+      announceAccountMissing();
+    }
+    // The framework's bare "Not Found" / "Method Not Allowed" means this server
+    // has no such route: it runs an older version than the app. Say that
+    // instead of echoing the framework's words.
+    const missingRoute =
+      (res.status === 404 && parsed.message === "Not Found") ||
+      (res.status === 405 && parsed.message === "Method Not Allowed");
     throw new ApiError(
-      parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+      missingRoute
+        ? msg("shared.api.route_missing", {
+            method: init?.method ?? "GET",
+            path: endpointTag(path),
+          })
+        : (parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status })),
       { status: res.status, code: parsed.code, params: parsed.params },
     );
   }
@@ -401,14 +468,6 @@ export function postTelemetry(body: unknown): void {
   }
 }
 
-export function submitRun(payload: RunRequest, idempotencyKey?: string) {
-  return request<OptimizationSubmissionResponse>("/run", {
-    method: "POST",
-    body: JSON.stringify(payload),
-    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
-  });
-}
-
 export interface WorkflowDryRunStreamHandlers {
   onToken: (field: string, chunk: string) => void;
   onFinal: (result: WorkflowDryRunResponse) => void;
@@ -416,19 +475,75 @@ export interface WorkflowDryRunStreamHandlers {
   signal?: AbortSignal;
 }
 
-export function submitGridSearch(payload: GridSearchRequest, idempotencyKey?: string) {
-  return request<OptimizationSubmissionResponse>("/grid-search", {
+export function submitUnifiedRun(req: UnifiedRunRequest, opts?: { idempotencyKey?: string }) {
+  return request<OptimizationSubmissionResponse>("/optimize", {
     method: "POST",
-    body: JSON.stringify(payload),
-    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
+    body: JSON.stringify(req),
+    ...(opts?.idempotencyKey ? { headers: { "Idempotency-Key": opts.idempotencyKey } } : {}),
   });
 }
 
-export function submitBlackboxRun(payload: BlackboxRunRequest, idempotencyKey?: string) {
+/** Queue a repository run; prompts, code, text and DSPy programs submit to `/optimize`. */
+export function submitRepoRun(req: BlackboxRunRequest, opts?: { idempotencyKey?: string }) {
   return request<OptimizationSubmissionResponse>("/blackbox/run", {
     method: "POST",
-    body: JSON.stringify(payload),
-    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
+    body: JSON.stringify(req),
+    ...(opts?.idempotencyKey ? { headers: { "Idempotency-Key": opts.idempotencyKey } } : {}),
+  });
+}
+
+export function getOptimizerCatalog(kind: ArtifactKind, mode: DataMode, signal?: AbortSignal) {
+  const query = `artifact_kind=${encodeURIComponent(kind)}&data_mode=${encodeURIComponent(mode)}`;
+  return request<OptimizerCatalogResponse>(`/optimizers?${query}`, { signal });
+}
+
+// The server words each check's `message` in this locale for API readers;
+// the wizard itself renders `message_code`.
+export async function runContractCheck(
+  req: ContractCheckRequest,
+  signal?: AbortSignal,
+  onPhase?: (phase: string) => void,
+  onTerminal?: (event: CheckTerminalEvent) => void,
+): Promise<ContractCheckResponse> {
+  if (!onPhase)
+    return request<ContractCheckResponse>("/optimizations/contract-check", {
+      method: "POST",
+      body: JSON.stringify({ ...req, locale: getActiveLocale() }),
+      signal,
+    });
+  const response = await fetchWithAuthRetry(`${apiBase()}/optimizations/contract-check/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
+    signal,
+  });
+  if (!response.ok || !response.body)
+    throw new Error(parseErrorMessage(await response.text()) ?? msg("submit.preflight.failed"));
+  let result: ContractCheckResponse | undefined;
+  await readServerSentEvents(response.body, ({ event, data }) => {
+    if (event === "phase" && typeof data.phase === "string") onPhase(data.phase);
+    if (event === "terminal") onTerminal?.(data as unknown as CheckTerminalEvent);
+    if (event === "result") result = data as unknown as ContractCheckResponse;
+    if (event === "error")
+      throw new Error(parseErrorMessage(JSON.stringify(data)) ?? msg("submit.preflight.failed"));
+  });
+  if (!result) throw new Error(msg("submit.preflight.failed"));
+  return result;
+}
+
+export function staticContractCheck(req: ContractCheckRequest, signal?: AbortSignal) {
+  return request<ContractCheckResponse>("/optimizations/contract-check/static", {
+    method: "POST",
+    body: JSON.stringify({ ...req, locale: getActiveLocale() }),
+    signal,
+  });
+}
+
+export function inferInputs(req: InputsInferenceRequest, signal?: AbortSignal) {
+  return request<InputsInferenceResponse>("/optimizations/infer-inputs", {
+    method: "POST",
+    body: JSON.stringify(req),
+    signal,
   });
 }
 
@@ -439,6 +554,24 @@ export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSign
   );
 }
 
+/** Charged cents one call of a model reserves before it is sent; null when unpriced. */
+export interface ModelCallHold {
+  name: string;
+  token_source: "managed" | "byok";
+  cents: number | null;
+}
+
+export function getModelCallHolds(
+  models: Array<{ name: string; token_source: "managed" | "byok" }>,
+  signal?: AbortSignal,
+) {
+  return request<{ holds: ModelCallHold[]; box_hold_cents: number }>("/models/call-holds", {
+    method: "POST",
+    body: JSON.stringify({ models }),
+    signal,
+  });
+}
+
 export async function runWizardPreflight(
   payload: WizardPreflightRequest,
   signal?: AbortSignal,
@@ -447,13 +580,13 @@ export async function runWizardPreflight(
   if (!onPhase)
     return request<WizardPreflightResponse>("/wizard/preflight", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, locale: getActiveLocale() }),
       signal,
     });
   const response = await fetchWithAuthRetry(`${apiBase()}/wizard/preflight/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, locale: getActiveLocale() }),
     signal,
   });
   if (!response.ok || !response.body)
@@ -585,6 +718,97 @@ export function deleteStorageQuotaOverride(username: string) {
   });
 }
 
+export interface NorthStarFirstLiftsWeek {
+  /** Monday (UTC, `YYYY-MM-DD`) that starts the signup week. */
+  signup_week: string;
+  signups: number;
+  /** Signups that got a lifted run within 48 hours. */
+  first_lifts: number;
+}
+
+export interface NorthStarLiftedUsersWeek {
+  week: string;
+  new_lifted: number;
+  returning_lifted: number;
+}
+
+export interface NorthStarInUseWeek {
+  week: string;
+  users_in_use: number;
+}
+
+/** Every series holds exactly `weeks` rows, newest first, zero-filled. */
+export interface NorthStarMetricsResponse {
+  weeks: number;
+  first_lifts: NorthStarFirstLiftsWeek[];
+  lifted_users: NorthStarLiftedUsersWeek[];
+  lifted_in_use: NorthStarInUseWeek[];
+}
+
+/** Admin-only; non-admins get a 403. */
+export function getNorthStarMetrics(weeks = 8) {
+  return request<NorthStarMetricsResponse>(`/telemetry/metrics/north-star?weeks=${weeks}`);
+}
+
+export interface AdminDashboardTotals {
+  signups: number;
+  activated: number;
+  active_users: number;
+  runs_started: number;
+  runs_succeeded: number;
+  runs_failed: number;
+  revenue_cents: number;
+  usage_cents: number;
+  serve_calls: number;
+  serve_errors: number;
+}
+
+export interface AdminDashboardDay {
+  /** UTC calendar day, `YYYY-MM-DD`. */
+  day: string;
+  signups: number;
+  activated: number;
+  active_users: number;
+  runs_succeeded: number;
+  runs_failed: number;
+  runs_other: number;
+}
+
+export interface AdminFailureReason {
+  stage: string;
+  error_class: string | null;
+  count: number;
+}
+
+export interface AdminTopProgram {
+  optimization_id: string;
+  name: string | null;
+  owner: string | null;
+  calls: number;
+  errors: number;
+}
+
+export interface AdminEventCount {
+  name: string;
+  count: number;
+  users: number;
+}
+
+/** `daily` holds one row per day of the window, oldest first, zero-filled. */
+export interface AdminDashboardResponse {
+  days: number;
+  totals: AdminDashboardTotals;
+  daily: AdminDashboardDay[];
+  failure_reasons: AdminFailureReason[];
+  top_programs: AdminTopProgram[];
+  top_events: AdminEventCount[];
+}
+
+/** Admin-only; non-admins get a 403. */
+export function getAdminDashboard(days = 30) {
+  return request<AdminDashboardResponse>(`/admin/dashboard?days=${days}`);
+}
+
 export interface ApiTokenInfo {
   last4: string;
   created_at: string;
@@ -631,6 +855,14 @@ export interface SecurityStatus {
   email_2fa_enabled: boolean;
   email_2fa_available: boolean;
   passkeys: PasskeyInfo[];
+  identities: LinkedIdentity[];
+}
+
+/** A Google or GitHub account that signs in to the caller's account. */
+export interface LinkedIdentity {
+  provider: string;
+  email: string;
+  linked_at: string;
 }
 
 export interface TotpSetup {
@@ -700,6 +932,13 @@ export function deletePasskey(credentialId: string) {
   });
 }
 
+/** Stop a linked Google or GitHub account from signing in to the caller's account. */
+export function unlinkIdentity(provider: string) {
+  return request<{ ok: boolean }>(`/auth/security/identities/${encodeURIComponent(provider)}`, {
+    method: "DELETE",
+  });
+}
+
 export interface AccountDeletionResult {
   deleted_rows: number;
   anonymized_rows: number;
@@ -752,19 +991,226 @@ export function checkPackageRegistry(indexUrl: string) {
   });
 }
 
+export type NotificationEventType =
+  | "needs_input"
+  | "budget_near"
+  | "failed"
+  | "finished"
+  | "new_best"
+  | "stuck"
+  | "shared"
+  | "product_news";
+export type NotificationChannel = "inbox" | "email" | "chrome" | "slack";
+/** The channels a non-urgent event may wait on before it goes out. */
+export type NotificationHeldChannel = Exclude<NotificationChannel, "inbox">;
+export type NotificationGrid = Record<NotificationEventType, Record<NotificationChannel, boolean>>;
+
 export interface NotificationPreferences {
-  job_updates_enabled: boolean;
-  sharing_updates_enabled: boolean;
+  /** Event type -> channel -> on. */
+  grid: NotificationGrid;
+  /** Minutes non-urgent events wait on the held channels. */
+  hold_minutes: number;
+  /** Channels whose non-urgent sends wait, and are dropped once the item is read. */
+  held_channels: NotificationHeldChannel[];
+  stuck_fraction: number;
+  budget_alert_fraction: number;
 }
 
-/** Fetch the caller's optional product-email preferences. */
+export interface NotificationPreferencesPatch {
+  /** Only the cells to change. */
+  grid?: Partial<Record<NotificationEventType, Partial<Record<NotificationChannel, boolean>>>>;
+  hold_minutes?: number;
+  held_channels?: NotificationHeldChannel[];
+}
+
+/** Fetch where each notification event is routed. */
 export function getNotificationPreferences() {
   return request<NotificationPreferences>("/account/notification-preferences");
 }
 
-/** Persist one or more optional product-email preference switches. */
-export function updateNotificationPreferences(patch: Partial<NotificationPreferences>) {
+/** Change grid cells and hold settings; untouched fields keep their value. */
+export function updateNotificationPreferences(patch: NotificationPreferencesPatch) {
   return request<NotificationPreferences>("/account/notification-preferences", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export type NotificationTab = "focused" | "everything";
+
+export interface NotificationFacts {
+  score?: number | null;
+  /** Score change versus the run's baseline. */
+  delta?: number | null;
+  /** Dollars spent. */
+  spent?: number | null;
+  /** The run's spending limit in dollars. */
+  limit?: number | null;
+  /** Seconds the run has taken. */
+  duration?: number | null;
+  /** A localized sentence (the news body, a share's details). */
+  detail?: string | null;
+  actor?: string | null;
+  /** A share's kind: an invite, a role change or an ownership transfer. */
+  kind?: "invite" | "role" | "transfer" | null;
+  role?: string | null;
+}
+
+export interface NotificationItem {
+  id: string;
+  event_type: NotificationEventType;
+  optimization_id: string | null;
+  /** The run's name, or the news headline. */
+  title: string;
+  facts: NotificationFacts;
+  link: string | null;
+  focused: boolean;
+  urgent: boolean;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationPage {
+  items: NotificationItem[];
+  next_cursor: string | null;
+}
+
+export interface NotificationUnreadCounts {
+  focused: number;
+  everything: number;
+}
+
+/** One page of the inbox, newest first. Never cached: it is polled. */
+export function listNotifications(tab: NotificationTab, cursor?: string | null) {
+  const q = new URLSearchParams({ tab });
+  if (cursor) q.set("cursor", cursor);
+  return request<NotificationPage>(`/notifications?${q.toString()}`);
+}
+
+export function getNotificationUnreadCount() {
+  return request<NotificationUnreadCounts>("/notifications/unread-count");
+}
+
+export function markNotificationRead(id: string) {
+  return request<{ marked: number }>(`/notifications/${encodeURIComponent(id)}/read`, {
+    method: "POST",
+  });
+}
+
+export function markAllNotificationsRead(tab: NotificationTab) {
+  return request<{ marked: number }>(`/notifications/read-all?tab=${tab}`, { method: "POST" });
+}
+
+/** Take one item out of the caller's inbox; held email, Chrome and Slack sends still go out. */
+export function removeNotification(id: string) {
+  return request<{ removed: number }>(`/notifications/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Take every item on a tab out of the caller's inbox. */
+export function clearNotifications(tab: NotificationTab) {
+  return request<{ removed: number }>(`/notifications?tab=${tab}`, { method: "DELETE" });
+}
+
+/** The VAPID key browsers subscribe with; null while web push is off on the server. */
+export function getPushVapidKey() {
+  return request<{ public_key: string | null }>("/notifications/push/vapid-key");
+}
+
+/** Save (or refresh) this browser's web push subscription for the caller. */
+export function savePushSubscription(subscription: {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}) {
+  return request<{ subscribed: boolean }>("/notifications/push/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(subscription),
+  });
+}
+
+/** Forget this browser's web push subscription; repeating it is harmless. */
+export function deletePushSubscription(endpoint: string) {
+  return request<{ subscribed: boolean }>("/notifications/push/subscriptions", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export interface SlackConnection {
+  /** Whether this server has a Slack app set up. */
+  configured: boolean;
+  connected: boolean;
+  /** "broken": Slack refused the last post; sends are paused until fixed. */
+  status: "connected" | "broken" | null;
+  /** Slack's error code that broke the connection. */
+  broken_reason: string | null;
+  team_name: string | null;
+  target: "dm" | "channel" | null;
+  channel_id: string | null;
+  channel_name: string | null;
+}
+
+export interface SlackChannelOption {
+  id: string;
+  name: string;
+  is_private: boolean;
+  /** Whether the app is already in the channel (it can only post where it is). */
+  is_member: boolean;
+}
+
+/** Whether Slack is set up and where the caller's Slack notifications go. */
+export function getSlackConnection() {
+  return request<SlackConnection>("/notifications/slack");
+}
+
+/** Mint the "Add to Slack" URL; the page navigates to it. */
+export function startSlackOAuth() {
+  return request<{ authorize_url: string }>("/notifications/slack/oauth/start", { method: "POST" });
+}
+
+/** The channels the Slack app can see in the caller's workspace. */
+export function listSlackChannels() {
+  return request<{ channels: SlackChannelOption[]; truncated: boolean }>(
+    "/notifications/slack/channels",
+  );
+}
+
+/** Post to a channel, or (null) as a direct message from the app. */
+export function updateSlackTarget(channelId: string | null) {
+  return request<SlackConnection>("/notifications/slack", {
+    method: "PATCH",
+    body: JSON.stringify({ channel_id: channelId }),
+  });
+}
+
+/** Revoke and forget the caller's Slack install; repeating it is harmless. */
+export function disconnectSlack() {
+  return request<SlackConnection>("/notifications/slack", { method: "DELETE" });
+}
+
+export type ExperienceLevelValue = "guided" | "standard" | "expert";
+
+export interface AccountExperience {
+  level: ExperienceLevelValue | null;
+  intake_completed: boolean;
+  intake: Record<string, unknown> | null;
+}
+
+export interface AccountExperiencePatch {
+  level?: ExperienceLevelValue;
+  intake?: Record<string, unknown>;
+  intake_completed?: boolean;
+}
+
+/** Fetch the caller's abstraction level and first-login setup answers. */
+export function getAccountExperience() {
+  return request<AccountExperience>("/account/experience");
+}
+
+/** Persist the caller's abstraction level and/or setup answers. */
+export function updateAccountExperience(patch: AccountExperiencePatch) {
+  return request<AccountExperience>("/account/experience", {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
@@ -783,9 +1229,37 @@ export function updateModelPrivacy(settings: ModelPrivacySettings) {
   });
 }
 
-/** Download every record the caller owns as an untyped JSON bundle. */
-export function exportAccountData() {
-  return request<Record<string, unknown>>("/account/export");
+export type AccountExportFormat = "json" | "csv" | "xlsx" | "parquet" | "feather" | "pkl";
+
+/**
+ * Download every record the caller owns in `format` and hand the file to the
+ * browser. JSON and Pickle are one file, Excel is one workbook with a sheet per
+ * table, and CSV, Parquet and Feather are a ZIP with one file per table. The
+ * name is built here because a cross-origin response hides `Content-Disposition`.
+ */
+export async function exportAccountData(format: AccountExportFormat): Promise<void> {
+  const res = await fetchWithAuthRetry(
+    `${apiBase()}/account/export?format=${encodeURIComponent(format)}`,
+    { method: "GET" },
+  );
+  if (!res.ok) {
+    const parsed = parseError(await res.text().catch(() => ""));
+    throw new ApiError(
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+      { status: res.status, code: parsed.code, params: parsed.params },
+    );
+  }
+  const blob = await res.blob();
+  const stamp = new Date().toISOString().slice(0, 10);
+  const zipped = format === "csv" || format === "parquet" || format === "feather";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `skynet-account-export_${stamp}${zipped ? `_${format}.zip` : `.${format}`}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /**
@@ -1202,10 +1676,12 @@ export function importHuggingFaceDataset(body: {
   split: string;
   name?: string;
 }) {
-  return request<SaveDatasetResponse>("/connectors/huggingface/import", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>("/connectors/huggingface/import", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /** Every connector the backend knows, in the order ``GET /connectors`` lists them. */
@@ -1224,6 +1700,7 @@ export type ConnectorProvider =
   | "supabase"
   | "bigquery"
   | "snowflake"
+  | "foundry"
   | "langfuse"
   | "langsmith"
   | "braintrust"
@@ -1275,6 +1752,66 @@ export function browseConnector(provider: ConnectorProvider, location: string, s
   return request<{ entries: ConnectorEntry[]; location_url?: string | null }>(
     `/connectors/${provider}/browse?${params}`,
   );
+}
+
+/** One repository the linked GitHub account can see, as the repository picker shows it. */
+export interface GithubRepository {
+  full_name: string;
+  private: boolean;
+  description: string | null;
+  language: string | null;
+  default_branch: string | null;
+  pushed_at: string | null;
+}
+
+/**
+ * The linked account's repositories, most recently pushed first. A ``search``
+ * written as ``owner/name`` also offers that public repository by itself.
+ */
+export function listGithubRepositories(search: string) {
+  const params = new URLSearchParams({ search });
+  return request<{ repositories: GithubRepository[] }>(`/connectors/github/repos?${params}`);
+}
+
+/** A repository's branch names and its default branch. */
+export function listGithubBranches(repo: string) {
+  const params = new URLSearchParams({ repo });
+  return request<{ default_branch: string | null; branches: string[] }>(
+    `/connectors/github/branches?${params}`,
+  );
+}
+
+/** One file or folder of a GitHub repository tree. */
+export interface GithubTreeEntry {
+  path: string;
+  type: "file" | "dir";
+}
+
+/** Every file and folder of a repository; ``truncated`` when GitHub listed only part of it. */
+export interface GithubTreeResponse {
+  entries: GithubTreeEntry[];
+  truncated: boolean;
+}
+
+/** One repository file's text, or the flag that explains why it has none. */
+export interface GithubFileResponse {
+  path: string;
+  text: string | null;
+  binary: boolean;
+  too_large: boolean;
+  missing: boolean;
+}
+
+/** A repository's whole tree at a branch or commit id (empty for the default branch). */
+export function githubRepoTree(repo: string, ref: string) {
+  const params = new URLSearchParams({ repo, branch: ref });
+  return request<GithubTreeResponse>(`/connectors/github/tree?${params}`);
+}
+
+/** One repository file at a branch or commit id (empty for the default branch), read when it is opened. */
+export function githubRepoFile(repo: string, ref: string, path: string) {
+  const params = new URLSearchParams({ repo, ref, path });
+  return request<GithubFileResponse>(`/connectors/github/file?${params}`);
 }
 
 /** A short-lived token, API key and app id for opening the Google Picker as the caller. */
@@ -1474,12 +2011,93 @@ export function getJob(
   return cachedGet<OptimizationStatusResponse>(`/optimizations/${optimizationId}`, JOB_CACHE_MS);
 }
 
+/** A run's charges and model activity, pre-aggregated per role, model, stage, pair and candidate. */
+export function getRunUsage(optimizationId: string, pairIndex?: number | null) {
+  const qs = pairIndex == null ? "" : `?pair_index=${pairIndex}`;
+  return request<RunUsage>(`/optimizations/${encodeURIComponent(optimizationId)}/usage${qs}`);
+}
+
+/** Continuous optimization of one run: its plan (or null) and whether one can start. */
+export function getContinuousState(optimizationId: string) {
+  return request<ContinuousState>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+  );
+}
+
+export function enableContinuous(optimizationId: string, body: ContinuousEnableRequest) {
+  return request<ContinuousPlan>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/continuous`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** Pause or resume a plan. */
+export function setContinuousPaused(planId: string, paused: boolean) {
+  return request<ContinuousPlan>(
+    `/continuous/${encodeURIComponent(planId)}/${paused ? "pause" : "resume"}`,
+    { method: "POST" },
+  );
+}
+
+/** Delete a plan and its check history; the runs it started stay. The route returns 204. */
+export async function deleteContinuous(planId: string): Promise<void> {
+  const res = await fetchWithAuthRetry(`${apiBase()}/continuous/${encodeURIComponent(planId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+    );
+  }
+}
+
+/** Replace when a plan checks; a paused plan stays paused. */
+export function updateContinuousSchedule(planId: string, rule: ScheduleRule) {
+  return request<ContinuousPlan>(`/continuous/${encodeURIComponent(planId)}/schedule`, {
+    method: "PUT",
+    body: JSON.stringify(rule),
+  });
+}
+
+/** Approve (the candidate becomes the incumbent) or reject a candidate in review. */
+export function reviewContinuousCycle(planId: string, cycleId: string, approve: boolean) {
+  return request<ContinuousPlan>(
+    `/continuous/${encodeURIComponent(planId)}/cycles/${encodeURIComponent(cycleId)}/${approve ? "approve" : "reject"}`,
+    { method: "POST" },
+  );
+}
+
 export function getOptimizationPayload(optimizationId: string) {
   return request<OptimizationPayloadResponse>(`/optimizations/${optimizationId}/payload`);
 }
 
 export function getOptimizationDataset(optimizationId: string) {
   return request<OptimizationDatasetResponse>(`/optimizations/${optimizationId}/dataset`);
+}
+
+// A repository run's pinned commit never changes, so its tree and files are
+// cached for the page's lifetime.
+const REPOSITORY_CACHE_MS = Number.POSITIVE_INFINITY;
+
+/** A repository run's file tree at its pinned commit. */
+export function getRepositoryTree(optimizationId: string) {
+  return cachedGet<RepositoryTreeResponse>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/repository/tree`,
+    REPOSITORY_CACHE_MS,
+  );
+}
+
+/** One file of a repository run at its pinned commit. */
+export function getRepositoryFile(optimizationId: string, path: string) {
+  const q = new URLSearchParams({ path });
+  return cachedGet<RepositoryFileResponse>(
+    `/optimizations/${encodeURIComponent(optimizationId)}/repository/file?${q.toString()}`,
+    REPOSITORY_CACHE_MS,
+  );
 }
 
 export function getTestResults(optimizationId: string) {
@@ -1498,6 +2116,40 @@ export function getAgentRun(optimizationId: string, runId: number, sinceTranscri
   return request<BlackboxAgentRunResponse>(
     `/optimizations/${optimizationId}/agent-runs/${runId}?${q.toString()}`,
   );
+}
+
+/**
+ * Download a repository run's whole repository at its pinned commit with one
+ * version's patch applied, as a zip. The version is named by its patch text,
+ * which the server checks against the ones the run recorded.
+ */
+export async function downloadRepositoryArchive(
+  optimizationId: string,
+  patch: string,
+  fileName: string,
+): Promise<void> {
+  const res = await fetchWithAuthRetry(
+    `${apiBase()}/optimizations/${optimizationId}/repository/archive`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patch }),
+    },
+  );
+  if (!res.ok) {
+    const parsed = parseError(await res.text().catch(() => ""));
+    throw new ApiError(
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
+      { status: res.status, code: parsed.code, params: parsed.params },
+    );
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /**
@@ -1787,10 +2439,12 @@ export function saveDataset(body: {
   dataset: Array<Record<string, unknown>>;
   column_schema?: DatasetColumnSchema;
 }) {
-  return request<SaveDatasetResponse>("/datasets/library", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>("/datasets/library", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /** Replace a saved dataset's rows in place, keeping its identity (editor+). */
@@ -1799,17 +2453,21 @@ export function editDatasetRows(
   rows: Array<Record<string, unknown>>,
   columnSchema?: DatasetColumnSchema,
 ) {
-  return request<DatasetSummary>(`/datasets/library/${datasetId}/rows`, {
-    method: "PUT",
-    body: JSON.stringify({ rows, column_schema: columnSchema }),
-  });
+  return changesStorage(
+    request<DatasetSummary>(`/datasets/library/${datasetId}/rows`, {
+      method: "PUT",
+      body: JSON.stringify({ rows, column_schema: columnSchema }),
+    }),
+  );
 }
 
 /** Clone a dataset shared with the caller into their own library (viewer+). */
 export function cloneDataset(datasetId: string) {
-  return request<SaveDatasetResponse>(`/datasets/library/${datasetId}/clone`, {
-    method: "POST",
-  });
+  return changesStorage(
+    request<SaveDatasetResponse>(`/datasets/library/${datasetId}/clone`, {
+      method: "POST",
+    }),
+  );
 }
 
 /**
@@ -1933,7 +2591,7 @@ export async function deleteTaggerSession(sessionId: string) {
   const res = await request<{ id: string; deleted: boolean }>(`/tagging-sessions/${sessionId}`, {
     method: "DELETE",
   });
-  invalidateCache("/tagging-sessions");
+  invalidateCache("/tagging-sessions", "/usage/storage");
   return res;
 }
 
@@ -1951,9 +2609,11 @@ export async function moveTaggerSessionToLibrary(
     column_schema?: DatasetColumnSchema;
   },
 ) {
-  const res = await request<SaveDatasetResponse>(
-    `/datasets/library/from-tagging-session/${sessionId}`,
-    { method: "POST", body: JSON.stringify(body) },
+  const res = await changesStorage(
+    request<SaveDatasetResponse>(`/datasets/library/from-tagging-session/${sessionId}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   );
   invalidateCache("/tagging-sessions");
   return res;
@@ -2002,15 +2662,17 @@ export function synthesizeTaggerDataset(
   sessionId: string,
   body: { brief: string; rows: number; columns: string[] },
 ) {
-  return request<{
-    columns: string[];
-    rows: Array<Record<string, unknown>>;
-    cents: number;
-    model: string;
-  }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return changesStorage(
+    request<{
+      columns: string[];
+      rows: Array<Record<string, unknown>>;
+      cents: number;
+      model: string;
+    }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 /**
@@ -2022,6 +2684,8 @@ export interface StorageUsageResponse {
   used_bytes: number;
   quota_bytes: number;
   breakdown: Record<string, number>;
+  /** How many deletable items each category holds, keyed like ``breakdown``. */
+  counts?: Record<string, number>;
 }
 
 /** Fetch the caller's unified storage usage backing the meter and quota modal. */
@@ -2037,7 +2701,7 @@ export function getStorageUsage() {
  */
 export interface StorageItem {
   id: string;
-  type: "optimization" | "dataset" | "chat" | "staged_upload";
+  type: "optimization" | "dataset" | "tagging_session" | "chat" | "staged_upload";
   name: string;
   bytes: number;
 }
@@ -2050,7 +2714,7 @@ export interface StorageItemsResponse {
 /**
  * List every deletable item in one storage category for that category's cleanup
  * drawer. ``category`` must be a deletable category (optimizations, datasets,
- * agent_chats, staged_uploads); byproduct categories 404.
+ * tagging_sessions, agent_chats, staged_uploads); byproduct categories 404.
  */
 export function getStorageCategoryItems(category: string) {
   return request<StorageItemsResponse>(`/usage/storage/categories/${encodeURIComponent(category)}`);
@@ -2073,9 +2737,11 @@ export function renameDataset(datasetId: string, name: string) {
 
 /** Delete a saved dataset and its bytes (owner only). */
 export function deleteDataset(datasetId: string) {
-  return request<{ deleted: boolean }>(`/datasets/library/${datasetId}`, {
-    method: "DELETE",
-  });
+  return changesStorage(
+    request<{ deleted: boolean }>(`/datasets/library/${datasetId}`, {
+      method: "DELETE",
+    }),
+  );
 }
 
 /** List the runs the caller can see that were submitted from a dataset. */
@@ -2273,14 +2939,6 @@ export async function deleteGridPair(optimizationId: string, pairIndex: number) 
   invalidateCache("/optimizations");
   return res;
 }
-export async function resumeGridPair(optimizationId: string, pairIndex: number) {
-  const res = await request<{ optimization_id: string; status: string }>(
-    `/optimizations/${optimizationId}/pair/${pairIndex}/resume`,
-    { method: "POST" },
-  );
-  invalidateCache("/optimizations");
-  return res;
-}
 
 export async function bulkDeleteJobs(optimizationIds: string[]) {
   const res = await request<{
@@ -2307,6 +2965,7 @@ export async function bulkDeleteDatasets(ids: string[]): Promise<BulkDeleteResul
     body: JSON.stringify({ ids }),
   });
   invalidateCache("/datasets/library", "/usage/storage");
+  window.dispatchEvent(new Event(STORAGE_CHANGED_EVENT));
   return res;
 }
 
@@ -2450,6 +3109,11 @@ export async function bulkDeleteStorageItems(
     };
   }
   if (type === "dataset") return bulkDeleteDatasets(ids);
+  if (type === "tagging_session") {
+    const res = await bulkDeleteTaggerSessions(ids);
+    invalidateCache("/usage/storage");
+    return res;
+  }
   if (type === "staged_upload") return bulkDeleteStagedUploads(ids);
   return bulkDeleteConversations(ids);
 }
@@ -2587,6 +3251,8 @@ export interface SidebarJobItem {
   role?: ShareRole | null;
   /** Folder this run is filed in; absent when unfiled. */
   folder_id?: string | null;
+  /** True when the run belongs to a continuous plan (an automation). */
+  automated?: boolean;
 }
 
 export function listJobsSidebar(params?: { username?: string; limit?: number; offset?: number }) {
@@ -2963,19 +3629,6 @@ export interface CodeAgentChatTurn {
   content: string;
 }
 
-/** Black-box authoring context. Present on "prompt" / "code" / "anything"
- *  jobs: the agent then drafts the starting point (signature slot) and the
- *  Python scorer (metric slot) instead of DSPy code, and works without a
- *  dataset — cases are optional context. */
-export interface BlackboxAuthoringContext {
-  recipe: "prompt" | "code" | "anything";
-  objective: string;
-  background?: string;
-  target_kind?: "text" | "agent";
-  // True when a model is attached in the Scorer step, so the scorer may call llm().
-  scorer_has_model?: boolean;
-}
-
 export interface CodeAgentRequest {
   dataset_columns: string[];
   // Plain string roles (input/output/ignore); the code agent only consumes
@@ -2989,6 +3642,8 @@ export interface CodeAgentRequest {
   prior_metric?: string;
   prior_signature_validation?: string;
   prior_metric_validation?: string;
+  // Unified authoring: the workspace's files besides run.py and metric.py.
+  prior_files?: Record<string, string>;
   initial_signature?: string;
   initial_metric?: string;
   // Workflow graph currently on the canvas. Non-null switches both agent
@@ -3007,14 +3662,28 @@ export interface CodeAgentRequest {
   model?: string;
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
-  blackbox?: BlackboxAuthoringContext;
+  unified?: UnifiedAuthoringContext;
+  // Unified authoring only: the agent opens the conversation itself; the server
+  // supplies the hidden opening message in place of `user_message`.
+  kickoff?: boolean;
+  // Client-generated id of this turn; messages posted to /agent-steer with
+  // it are delivered into the running turn.
+  steer_key?: string;
 }
 
 export type CodeAgentToolName =
   | "edit_signature"
+  | "edit_run"
   | "edit_metric"
+  | "write_file"
+  | "delete_file"
+  | "verify_code"
+  | "open_file"
   | "edit_seed"
   | "edit_scorer"
+  | "set_brief"
+  | "list_repo_folder"
+  | "read_repo_file"
   | "add_node"
   | "update_node"
   | "remove_node"
@@ -3023,9 +3692,17 @@ export type CodeAgentToolName =
 
 const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_signature",
+  "edit_run",
   "edit_metric",
+  "write_file",
+  "delete_file",
+  "verify_code",
+  "open_file",
   "edit_seed",
   "edit_scorer",
+  "set_brief",
+  "list_repo_folder",
+  "read_repo_file",
   "add_node",
   "update_node",
   "remove_node",
@@ -3037,12 +3714,54 @@ interface CodeAgentToolStart {
   id: string;
   tool: CodeAgentToolName;
   reason: string;
+  /** The file a write_file / delete_file / open_file call is about. */
+  path?: string;
 }
 
 interface CodeAgentToolEnd {
   id: string;
   tool: CodeAgentToolName;
   status: string;
+  path?: string;
+  /** The 1-based line an open_file call shows. */
+  line?: number;
+}
+
+/** A `verify_code` call's result: one verdict per workspace file. */
+export interface CodeAgentVerification {
+  id: string;
+  ok: boolean;
+  files: FileVerification[];
+}
+
+function parseVerification(data: unknown): CodeAgentVerification | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = data as Record<string, unknown>;
+  const lines = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const files = (Array.isArray(raw.files) ? raw.files : [])
+    .filter((f): f is Record<string, unknown> => !!f && typeof f === "object")
+    .map((f) => ({
+      path: String(f.path ?? ""),
+      ok: f.ok === true,
+      errors: lines(f.errors),
+      warnings: lines(f.warnings),
+    }))
+    .filter((f) => f.path);
+  return { id: String(raw.id ?? ""), ok: raw.ok === true, files };
+}
+
+function parseFiles(data: unknown): Record<string, string> | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  return Object.fromEntries(
+    Object.entries(data as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+export interface AgentQuestion {
+  question: string;
+  options: Array<{ label: string; description: string }>;
 }
 
 export interface CodeAgentHandlers {
@@ -3051,14 +3770,33 @@ export interface CodeAgentHandlers {
   // `source` names the emitting stream ("signature" | "metric" | "workflow" |
   // "agent") — seed mode runs two authors in parallel over one SSE stream.
   onReasoningPatch?: (chunk: string, source: string) => void;
+  // Unified seed: one parallel author ("signature" = run code, or "metric")
+  // finished, its contract check and repair included.
+  onArtifactDone?: (source: string) => void;
   onMessagePatch?: (chunk: string) => void;
   onSignatureReplace?: (code: string) => void;
   onMetricReplace?: (code: string) => void;
+  // Unified chat: the code an edit_run ("signature") / edit_metric ("metric")
+  // call writes, while the model writes it; `reset` starts a new draft. The
+  // finished, checked code still arrives on the matching *Replace.
+  // A write_file draft has `source` "file" and names its `path`.
+  onCodeDraft?: (ev: { source: string; chunk: string; reset: boolean; path?: string }) => void;
+  // Unified chat: an extra workspace file written or deleted.
+  onFileReplace?: (path: string, code: string) => void;
+  onFileDelete?: (path: string) => void;
+  // Unified: a verify_code call's per-file result.
+  onVerifyResult?: (result: CodeAgentVerification) => void;
   // Full-graph snapshot after a seed draft or a successful graph tool op;
   // changedNodeId (null for seed/removals) drives the canvas pulse.
   onWorkflowReplace?: (workflow: WorkflowSpec, changedNodeId: string | null) => void;
   onToolStart?: (ev: CodeAgentToolStart) => void;
   onToolEnd?: (ev: CodeAgentToolEnd) => void;
+  // Black-box chat: a question the agent asks with clickable answers.
+  onAsk?: (ask: AgentQuestion) => void;
+  // Black-box chat: objective / background text the agent wrote from the conversation.
+  onBrief?: (fields: { objective?: string; background?: string }) => void;
+  // The agent read these steered messages at a step boundary; `text` joins them.
+  onSteerApplied?: (ev: { ids: string[]; text: string }) => void;
   onDone: (result: {
     signature_code: string;
     metric_code: string;
@@ -3078,8 +3816,13 @@ export interface CodeAgentHandlers {
     signatureValid?: boolean;
     metricValid?: boolean;
     validationError?: string | null;
+    /** Unified paths: the workspace's extra files after the turn. */
+    files?: Record<string, string>;
+    /** Unified paths: the turn's last verify_code result, or null when nothing was checked. */
+    verification?: CodeAgentVerification | null;
   }) => void;
-  onError: (message: string) => void;
+  /** `code` is the server's error code when the request was refused (e.g. a quota). */
+  onError: (message: string, code?: string) => void;
   signal?: AbortSignal;
 }
 
@@ -3088,28 +3831,19 @@ export async function streamCodeAgent(
   req: CodeAgentRequest,
   handlers: CodeAgentHandlers,
 ): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetchWithAuthRetry(`${apiBase()}/optimizations/ai-generate-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(req),
-      signal: handlers.signal,
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    handlers.onError(msg("auto.shared.lib.api.literal.11"));
-    return;
-  }
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    handlers.onError(
-      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
-    );
-    return;
-  }
   const processEvent = ({ event, data }: ServerSentEvent) => {
-    if (event === "signature_patch") {
+    const opening = kickoffOpening(event, data);
+    if (opening !== null) {
+      // Only a chat-mode kickoff gets it, so the empty code never lands.
+      handlers.onDone({
+        signature_code: "",
+        metric_code: "",
+        assistant_message: opening,
+        model: null,
+        served_model: null,
+        stats: null,
+      });
+    } else if (event === "signature_patch") {
       handlers.onSignaturePatch(String(data.chunk ?? ""));
     } else if (event === "metric_patch") {
       handlers.onMetricPatch(String(data.chunk ?? ""));
@@ -3118,8 +3852,25 @@ export async function streamCodeAgent(
         String(data.chunk ?? ""),
         typeof data.source === "string" && data.source ? data.source : "agent",
       );
+    } else if (event === "artifact_done") {
+      handlers.onArtifactDone?.(String(data.source ?? ""));
     } else if (event === "message_patch") {
       handlers.onMessagePatch?.(String(data.chunk ?? ""));
+    } else if (event === "code_draft") {
+      handlers.onCodeDraft?.({
+        source: String(data.source ?? ""),
+        chunk: String(data.chunk ?? ""),
+        reset: Boolean(data.reset),
+        ...(typeof data.path === "string" && data.path && { path: data.path }),
+      });
+    } else if (event === "file_replace") {
+      if (typeof data.path === "string" && data.path)
+        handlers.onFileReplace?.(data.path, String(data.code ?? ""));
+    } else if (event === "file_delete") {
+      if (typeof data.path === "string" && data.path) handlers.onFileDelete?.(data.path);
+    } else if (event === "verify_result") {
+      const result = parseVerification(data);
+      if (result) handlers.onVerifyResult?.(result);
     } else if (event === "signature_replace") {
       handlers.onSignatureReplace?.(String(data.code ?? ""));
     } else if (event === "metric_replace") {
@@ -3138,6 +3889,7 @@ export async function streamCodeAgent(
           id: String(data.id ?? ""),
           tool,
           reason: String(data.reason ?? ""),
+          ...(typeof data.path === "string" && data.path && { path: data.path }),
         });
       }
     } else if (event === "tool_end") {
@@ -3147,8 +3899,26 @@ export async function streamCodeAgent(
           id: String(data.id ?? ""),
           tool,
           status: String(data.status ?? "ok"),
+          ...(typeof data.path === "string" && data.path && { path: data.path }),
+          ...(typeof data.line === "number" && data.line > 0 && { line: data.line }),
         });
       }
+    } else if (event === "ask") {
+      const options = Array.isArray(data.options) ? data.options : [];
+      handlers.onAsk?.({
+        question: String(data.question ?? ""),
+        options: options
+          .filter((o): o is Record<string, unknown> => !!o && typeof o === "object")
+          .map((o) => ({ label: String(o.label ?? ""), description: String(o.description ?? "") }))
+          .filter((o) => o.label.trim().length > 0),
+      });
+    } else if (event === "brief") {
+      handlers.onBrief?.({
+        ...(typeof data.objective === "string" ? { objective: data.objective } : {}),
+        ...(typeof data.background === "string" ? { background: data.background } : {}),
+      });
+    } else if (event === "steer_applied") {
+      handlers.onSteerApplied?.(parseSteerApplied(data));
     } else if (event === "done") {
       const rawModel = data.model;
       const rawServedModel = data.served_model;
@@ -3170,36 +3940,72 @@ export async function streamCodeAgent(
         signatureValid: data.signature_valid !== false,
         metricValid: data.metric_valid !== false,
         validationError: typeof data.validation_error === "string" ? data.validation_error : null,
+        ...("files" in data && { files: parseFiles(data.files) ?? {} }),
+        ...("verification" in data && { verification: parseVerification(data.verification) }),
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.12")));
     }
   };
-  try {
-    await readServerSentEvents(res.body, processEvent);
-  } catch (err) {
-    if ((err as Error)?.name !== "AbortError") {
-      handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.10"));
-    }
+  // The turn outlives any one connection (the edge cuts requests at 15 min);
+  // streamResumableTurn reconnects and replays from the last event id.
+  const result = await streamResumableTurn({
+    fetch: fetchWithAuthRetry,
+    read: readServerSentEvents,
+    apiBase: apiBase(),
+    startPath: "/optimizations/ai-generate-code",
+    startInit: {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(req),
+    },
+    onEvent: processEvent,
+    signal: handlers.signal,
+  });
+  if (result.status !== "failed" || result.started) announceWalletChange();
+  if (result.status !== "failed") return;
+  if (result.response) {
+    const res = result.response;
+    const text = await res.text().catch(() => "");
+    const parsed = parseError(text);
+    handlers.onError(
+      parsed.message ?? formatMsg("auto.shared.lib.api.template.5", { p1: res.status }),
+      parsed.code,
+    );
+  } else if (!result.started) {
+    handlers.onError(msg("auto.shared.lib.api.literal.11"));
+  } else {
+    const err = result.error;
+    handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.10"));
   }
 }
 
-export interface CodeInterviewRequest {
-  dataset_columns: string[];
-  column_roles: Record<string, string>;
-  column_kinds?: Record<string, "text" | "image">;
-  sample_rows: Array<Record<string, unknown>>;
-  turns: CodeAgentChatTurn[];
-  // LiteLLM id of the model the optimized program will run on; empty when
-  // the user hasn't reached the model step yet.
-  job_model?: string;
-  locale?: string;
-  /** LiteLLM id of the catalog model conducting the interview; absent runs
-   *  the server default. */
-  model?: string;
-  /** Reasoning-effort level for the chosen model; absent runs its default. */
-  reasoning_effort?: string;
-  blackbox?: BlackboxAuthoringContext;
+/** Deliver a message into the running turn opened with `steerKey`; resolves
+ *  the message's id, which a later `steer_applied` event or withdraw names. */
+export async function postAgentSteer(steerKey: string, text: string): Promise<string> {
+  const res = await request<{ id: string }>("/optimizations/agent-steer", {
+    method: "POST",
+    body: JSON.stringify({ steer_key: steerKey, text }),
+  });
+  return String(res.id);
+}
+
+/** Read a `steer_applied` event's payload. */
+export function parseSteerApplied(data: Record<string, unknown>): { ids: string[]; text: string } {
+  return {
+    ids: Array.isArray(data.ids) ? data.ids.map(String) : [],
+    text: String(data.text ?? ""),
+  };
+}
+
+/** Take back messages the turn opened with `steerKey` never read: only `ids`
+ *  when given, otherwise all of them. Resolves the ids actually returned. */
+export async function withdrawAgentSteers(steerKey: string, ids?: string[]): Promise<string[]> {
+  const res = await request<{ ids: string[] }>("/optimizations/agent-steer/withdraw", {
+    method: "POST",
+    body: JSON.stringify(ids ? { steer_key: steerKey, ids } : { steer_key: steerKey }),
+  });
+  return Array.isArray(res.ids) ? res.ids.map(String) : [];
 }
 
 /**
@@ -3229,102 +4035,96 @@ export function parseInterviewOptions(raw: unknown): InterviewOption[] {
     .filter((option) => option.label);
 }
 
-interface CodeInterviewTurnResult {
-  message: string;
-  options: InterviewOption[];
-  brief: string[];
-  objective: string;
-  done: boolean;
-  model?: string | null;
-  /** Concrete model the Auto Router picked for this turn, when resolved. */
-  served_model?: string | null;
+export interface TaskInterviewHandlers {
+  onMessagePatch?: (chunk: string) => void;
+  onReasoning?: (chunk: string) => void;
+  /** The server is retrying a failed attempt; drop streamed partial text. */
+  onReset?: () => void;
+  onDone: (result: TaskInterviewTurnResult) => void;
+  /** `code` is the backend's error code when the turn was refused before it started. */
+  onError: (message: string, code?: string) => void;
 }
 
-export interface CodeInterviewHandlers {
-  onReasoningPatch?: (chunk: string) => void;
-  onMessagePatch?: (chunk: string) => void;
-  /** The reply is fully streamed; options/brief are still generating. */
-  onMessageEnd?: () => void;
-  /** The streamed ``done`` field settled: the turn ends in the brief
-   *  (final) or in another question — pick the matching placeholder. */
-  onTurnHint?: (final: boolean) => void;
-  /** The server is retrying a failed attempt — drop streamed partial text. */
-  onMessageReset?: () => void;
-  onDone: (turn: CodeInterviewTurnResult) => void;
-  onError: (message: string) => void;
-  signal?: AbortSignal;
+function parseCandidate(raw: unknown): string | Record<string, string> | null {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")]),
+    );
+  }
+  return null;
 }
 
 /**
- * Stream one Signature & Metric interview turn via SSE. Mirrors the tagger's
- * `streamInterviewTurn` — same transport, same `reasoning_patch` /
- * `message_patch` event shapes, terminal `interview_done`.
+ * Stream one wizard Task-step interview turn over the resumable SSE
+ * transport; the terminal `interview_done` carries the drafted task and
+ * artifact.
  */
-export async function streamCodeInterviewTurn(
-  req: CodeInterviewRequest,
-  handlers: CodeInterviewHandlers,
-): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetchWithAuthRetry(`${apiBase()}/optimizations/code-interview`, {
+export async function streamTaskInterviewTurn(
+  req: TaskInterviewRequest,
+  handlers: TaskInterviewHandlers,
+  signal?: AbortSignal,
+): Promise<TaskInterviewTurnResult | null> {
+  let outcome: TaskInterviewTurnResult | null = null;
+  let failed = false;
+  const result = await streamResumableTurn({
+    fetch: fetchWithAuthRetry,
+    read: readServerSentEvents,
+    apiBase: apiBase(),
+    startPath: "/optimizations/task-interview",
+    startInit: {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(req),
-      signal: handlers.signal,
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    handlers.onError(msg("submit.code.interview.error"));
-    return;
-  }
-  if (!res.ok || !res.body) {
-    handlers.onError(msg("submit.code.interview.error"));
-    return;
-  }
-  let finished = false;
-  try {
-    await readServerSentEvents(res.body, ({ event, data }) => {
+    },
+    signal,
+    onEvent: ({ event, data }) => {
       switch (event) {
         case "reasoning_patch":
-          handlers.onReasoningPatch?.(String(data.chunk ?? ""));
+          handlers.onReasoning?.(String(data.chunk ?? ""));
           break;
         case "message_patch":
           handlers.onMessagePatch?.(String(data.chunk ?? ""));
           break;
-        case "message_end":
-          handlers.onMessageEnd?.();
-          break;
-        case "turn_hint":
-          handlers.onTurnHint?.(data.final === true);
-          break;
         case "message_reset":
-          handlers.onMessageReset?.();
+          handlers.onReset?.();
           break;
-        case "interview_done":
-          finished = true;
-          handlers.onDone({
+        case "interview_done": {
+          const kind = data.artifact_kind;
+          outcome = {
             message: String(data.message ?? ""),
             options: parseInterviewOptions(data.options),
-            brief: Array.isArray(data.brief) ? data.brief.map(String) : [],
-            objective: typeof data.objective === "string" ? data.objective.trim() : "",
             done: data.done === true,
+            objective: typeof data.objective === "string" ? data.objective : "",
+            background: typeof data.background === "string" ? data.background : "",
+            artifact_kind:
+              kind === "prompt" || kind === "code" || kind === "dspy_program" || kind === "text"
+                ? kind
+                : null,
+            starting_version: parseCandidate(data.starting_version),
+            artifact_rationale:
+              typeof data.artifact_rationale === "string" ? data.artifact_rationale : "",
             model: typeof data.model === "string" && data.model ? data.model : null,
             served_model:
               typeof data.served_model === "string" && data.served_model ? data.served_model : null,
-          });
+          };
+          handlers.onDone(outcome);
           break;
+        }
         case "error":
-          finished = true;
+          failed = true;
           handlers.onError(msg("submit.code.interview.error"));
           break;
       }
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    if (!finished) handlers.onError(msg("submit.code.interview.error"));
-    return;
+    },
+  });
+  if (result.status === "aborted") return null;
+  if (!outcome && !failed) {
+    const refused = result.status === "failed" ? result.response : undefined;
+    const code = refused ? parseError(await refused.text().catch(() => "")).code : undefined;
+    handlers.onError(msg("submit.code.interview.error"), code);
   }
-  if (!finished) handlers.onError(msg("submit.code.interview.error"));
+  return outcome;
 }
 
 export interface PublicDashboardPoint {

@@ -1,7 +1,7 @@
 """Harness catalog: how each coding agent is installed, pointed at the gateway and run.
 
 A harness is the program that turns a model into a coding agent — Pi,
-Codex, Claude Code, OpenCode, Prime Agent, or a user-supplied command. Every entry
+Codex, OpenCode, Prime Agent, or a user-supplied command. Every entry
 knows the file its instructions live in (that file is the text under
 optimization), how to install itself, the config that routes its model
 calls to Skynet's gateway, the command that runs one case headlessly, and
@@ -18,9 +18,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ....config import with_legacy_env
 from ....exceptions import ServiceError
 from ....models.blackbox import (
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_CODEX,
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
@@ -30,29 +30,29 @@ from ....models.blackbox import (
 )
 from .harness_bridge import (
     PARSERS,
-    parse_claude_output,
     parse_codex_output,
     parse_opencode_output,
     parse_pi_output,
     parse_plain_output,
 )
 
-PROVIDER = "skynet"
+PROVIDER = "app"
 PROMPT_FILE = "task/PROMPT.md"
 ANSWER_FILE = "output/answer.txt"
-ENV_MODEL = "SKYNET_MODEL"
-ENV_GATEWAY_URL = "SKYNET_GATEWAY_URL"
-ENV_API_KEY = "SKYNET_API_KEY"
-ENV_PROMPT_FILE = "SKYNET_PROMPT_FILE"
-ENV_ANSWER_FILE = "SKYNET_ANSWER_FILE"
+ENV_MODEL = "APP_MODEL"
+ENV_GATEWAY_URL = "APP_GATEWAY_URL"
+ENV_API_KEY = "APP_API_KEY"
+ENV_PROMPT_FILE = "APP_PROMPT_FILE"
+ENV_ANSWER_FILE = "APP_ANSWER_FILE"
 # Substituted verbatim into a custom harness's commands; the env vars above
-# are the quoting-safe alternative.
+# are the quoting-safe alternative. Saved custom commands may still use the
+# ``SKYNET_*`` spellings, so every launch sets both.
 PLACEHOLDERS = ("{model}", "{gateway_url}", "{api_key}", "{prompt_file}", "{answer_file}")
 
 Usage = dict[str, int]
 OutputParser = Callable[[str], tuple[str | None, Usage]]
 # The parser a launch names must also exist inside the sandbox, where the
-# bridge replays it without Skynet on the path; the bridge owns the table.
+# bridge replays it without the backend on the path; the bridge owns the table.
 _PARSER_NAMES = {parser: name for name, parser in PARSERS.items()}
 
 _PROMPT_ARG = f'"$(cat "${ENV_PROMPT_FILE}")"'
@@ -82,7 +82,6 @@ PI_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_VERSION = "0.87.1"
 CODEX_VERSION = "0.153.0"
 OPENCODE_VERSION = "1.18.27"
-CLAUDE_CODE_VERSION = "2.1.259"
 # Prime Agent is a Pi fork that ships as a versioned npm tarball on its own
 # release CDN (``<base>/latest.json`` names the current one), not on npm.
 PRIME_AGENT_VERSION = "0.9.7"
@@ -92,14 +91,13 @@ PRIME_AGENT_TARBALL = (
 )
 # Its config dir; the run points ``PRIME_AGENT_CODING_AGENT_DIR`` here so the
 # models.json the box receives is the one it reads.
-_PRIME_AGENT_DIR = ".skynet/prime"
+_PRIME_AGENT_DIR = ".app/prime"
 # The sandbox image ships a prebuilt kernel here because protected sandboxes
 # cannot download one; elsewhere it is absent and Prime Agent bootstraps its own.
 PRIME_AGENT_IMAGE_KERNEL = "/opt/prime-agent/kernel-venv/bin/python"
 _PINNED_HARNESSES = {
     BLACKBOX_HARNESS_PI: ("pi", PI_VERSION),
     BLACKBOX_HARNESS_CODEX: ("codex", CODEX_VERSION),
-    BLACKBOX_HARNESS_CLAUDE_CODE: ("claude", CLAUDE_CODE_VERSION),
     BLACKBOX_HARNESS_OPENCODE: ("opencode", OPENCODE_VERSION),
     BLACKBOX_HARNESS_PRIME: ("prime-agent", PRIME_AGENT_VERSION),
 }
@@ -110,8 +108,8 @@ _OPENROUTER_PREFIX = "openrouter/"
 # The sandbox image ships its own pi in /usr/local/bin. A pinned copy lives in
 # a private prefix put ahead of it on PATH, so the version the transcript logs
 # is the one that ran.
-_PI_PREFIX = '"$HOME/.skynet/pi"'
-_PI_PATH = 'export PATH="$HOME/.skynet/pi/bin:$PATH"'
+_PI_PREFIX = '"$HOME/.app/pi"'
+_PI_PATH = 'export PATH="$HOME/.app/pi/bin:$PATH"'
 
 
 def _pi_install() -> str:
@@ -185,7 +183,8 @@ def _with_relay_config(command: str, files: dict[str, str], gateway: GatewayConf
         The original command preceded by a scoped endpoint substitution.
     """
     script = (
-        "import os,pathlib; endpoint=os.environ.get('SKYNET_BUDGET_RELAY_URL'); "
+        "import os,pathlib; "
+        "endpoint=os.environ.get('APP_BUDGET_RELAY_URL') or os.environ.get('SKYNET_BUDGET_RELAY_URL'); "
         f"files={list(files)!r}; old={gateway.url!r}; "
         "[(lambda p: p.write_text(p.read_text().replace(old,endpoint)))(pathlib.Path(name)) "
         "for name in files if endpoint]"
@@ -216,15 +215,17 @@ def _base_env(model: str, gateway: GatewayConfig) -> dict[str, str]:
     Returns:
         Environment variables for the sandbox.
     """
-    return {
-        ENV_MODEL: model,
-        ENV_GATEWAY_URL: gateway.url,
-        ENV_API_KEY: gateway.api_key,
-        ENV_PROMPT_FILE: PROMPT_FILE,
-        ENV_ANSWER_FILE: ANSWER_FILE,
-        "CI": "1",
-        "NO_COLOR": "1",
-    }
+    return with_legacy_env(
+        {
+            ENV_MODEL: model,
+            ENV_GATEWAY_URL: gateway.url,
+            ENV_API_KEY: gateway.api_key,
+            ENV_PROMPT_FILE: PROMPT_FILE,
+            ENV_ANSWER_FILE: ANSWER_FILE,
+            "CI": "1",
+            "NO_COLOR": "1",
+        }
+    )
 
 
 def _pi_models_json(model: str, gateway: GatewayConfig) -> tuple[dict[str, Any], str]:
@@ -283,9 +284,9 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     return HarnessLaunch(
         instructions_file="AGENTS.md",
         install_command=_pi_install(),
-        files={".skynet/pi/models.json": json.dumps(models_json, indent=2)},
+        files={".app/pi/models.json": json.dumps(models_json, indent=2)},
         run_command=(
-            f'{_PI_PATH}; mkdir -p "$HOME/.pi/agent" && cp .skynet/pi/models.json "$HOME/.pi/agent/models.json" && '
+            f'{_PI_PATH}; mkdir -p "$HOME/.pi/agent" && cp .app/pi/models.json "$HOME/.pi/agent/models.json" && '
             f"pi --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
@@ -308,7 +309,7 @@ def _codex_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         f'model_provider = "{PROVIDER}"\n'
         "\n"
         f"[model_providers.{PROVIDER}]\n"
-        'name = "Skynet gateway"\n'
+        'name = "Model gateway"\n'
         f"base_url = {json.dumps(gateway.url)}\n"
         f'env_key = "{ENV_API_KEY}"\n'
         'wire_api = "responses"\n'
@@ -319,47 +320,13 @@ def _codex_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     return HarnessLaunch(
         instructions_file="AGENTS.md",
         install_command=_npm_install("codex", "@openai/codex", CODEX_VERSION),
-        files={".skynet/codex/config.toml": config_toml},
+        files={".app/codex/config.toml": config_toml},
         run_command=(
-            'CODEX_HOME="$PWD/.skynet/codex" codex exec --skip-git-repo-check '
+            'CODEX_HOME="$PWD/.app/codex" codex exec --skip-git-repo-check '
             f"--dangerously-bypass-approvals-and-sandbox --json {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
         parse_output=parse_codex_output,
-    )
-
-
-def _claude_code_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
-    """Build the launch for Claude Code (``@anthropic-ai/claude-code``).
-
-    Needs a gateway that speaks the Anthropic Messages API (LiteLLM does).
-
-    Args:
-        model: Target model id.
-        gateway: Gateway URL and key.
-
-    Returns:
-        The launch.
-    """
-    env = _base_env(model, gateway)
-    # The Anthropic SDK appends ``/v1/messages`` itself.
-    base_url = gateway.url.removesuffix("/v1")
-    env.update(
-        {
-            "ANTHROPIC_BASE_URL": base_url,
-            "ANTHROPIC_AUTH_TOKEN": gateway.api_key,
-            "DISABLE_AUTOUPDATER": "1",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        }
-    )
-    return HarnessLaunch(
-        instructions_file="CLAUDE.md",
-        install_command=_npm_install("claude", "@anthropic-ai/claude-code", CLAUDE_CODE_VERSION),
-        run_command=(
-            f'claude -p {_PROMPT_ARG} --model "${ENV_MODEL}" --output-format json --dangerously-skip-permissions'
-        ),
-        env=env,
-        parse_output=parse_claude_output,
     )
 
 
@@ -378,7 +345,7 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         "provider": {
             PROVIDER: {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "Skynet gateway",
+                "name": "Model gateway",
                 "options": {"baseURL": gateway.url, "apiKey": f"{{env:{ENV_API_KEY}}}"},
                 "models": {model: {"name": model}},
             }
@@ -428,6 +395,55 @@ def _prime_agent_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     )
 
 
+# The tools a ShinkaEvolve agent-editor session gets: it reads, searches and
+# edits the version's files, and can run nothing.
+PI_EDITOR_TOOLS = ("read", "grep", "find", "ls", "edit", "write")
+# Each editor session reads its own config from its workspace, so concurrent
+# sessions on different model routes never share one ``~/.pi/agent``.
+PI_EDITOR_CONFIG_DIR = ".app/pi"
+
+
+def pi_editor_launch(
+    model: str, gateway: GatewayConfig, *, headers: dict[str, str] | None = None, protected: bool = False
+) -> HarnessLaunch:
+    """Build the Pi launch a ShinkaEvolve agent-editor session runs.
+
+    It is Pi's catalog launch narrowed to file tools, with every extension,
+    skill and context file switched off so the prompt is all it sees.
+
+    Args:
+        model: Model id the route serves.
+        gateway: Route URL and key the session calls.
+        headers: Extra headers every model request carries (the usage tags).
+        protected: Require the image's pinned Pi and the sandbox-local relay.
+
+    Returns:
+        The launch.
+    """
+    model = model.removeprefix(_OPENROUTER_PREFIX)
+    models_json, model_arg = _pi_models_json(model, gateway)
+    if headers:
+        models_json["providers"][PROVIDER]["headers"] = dict(headers)
+    files = {f"{PI_EDITOR_CONFIG_DIR}/models.json": json.dumps(models_json, indent=2)}
+    # The prompt can carry whole files of a repository version; an ``@file``
+    # attachment avoids the kernel's per-argument size limit that inlining hits.
+    run_command = (
+        f'{_PI_PATH}; PI_CODING_AGENT_DIR="$PWD/{PI_EDITOR_CONFIG_DIR}" pi --mode json --no-session '
+        f"--no-extensions --no-skills --no-context-files --tools {','.join(PI_EDITOR_TOOLS)} "
+        f'--provider {PROVIDER} --model {model_arg} @"${ENV_PROMPT_FILE}" "Do the task in the attached file."'
+    )
+    if protected:
+        run_command = _with_relay_config(run_command, files, gateway)
+    return HarnessLaunch(
+        instructions_file="AGENTS.md",
+        install_command=pinned_harness_check(BLACKBOX_HARNESS_PI) if protected else _pi_install(),
+        files=files,
+        run_command=run_command,
+        env=_base_env(model, gateway),
+        parse_output=parse_pi_output,
+    )
+
+
 def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected: bool = False) -> str | None:
     """Substitute the custom-harness placeholders into ``command``.
 
@@ -457,7 +473,6 @@ def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected:
 _CATALOG: dict[str, Callable[[str, GatewayConfig], HarnessLaunch]] = {
     BLACKBOX_HARNESS_PI: _pi_launch,
     BLACKBOX_HARNESS_CODEX: _codex_launch,
-    BLACKBOX_HARNESS_CLAUDE_CODE: _claude_code_launch,
     BLACKBOX_HARNESS_OPENCODE: _opencode_launch,
     BLACKBOX_HARNESS_PRIME: _prime_agent_launch,
 }

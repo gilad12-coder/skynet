@@ -24,15 +24,8 @@ import { TERMS } from "@/shared/lib/terms";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useColumnFilters, useColumnResize } from "@/shared/ui/excel-filter";
 import { ACTIVE_STATUSES, getJobTypeLabel, getStatusLabel } from "@/shared/constants/job-status";
-import type { OptimizationSummaryResponse, PaginatedJobsResponse } from "@/shared/types/api";
-import {
-  bulkCancelJobs,
-  bulkPinOptimizations,
-  pauseJob,
-  resumeJob,
-  type DashboardAnalytics,
-} from "@/shared/lib/api";
-import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
+import type { OptimizationSummaryResponse } from "@/shared/types/api";
+import { bulkCancelJobs, bulkPinOptimizations, pauseJob, resumeJob } from "@/shared/lib/api";
 import { transformChartData } from "../lib/transform-chart-data";
 import { useQueueStatus } from "../hooks/use-queue-status";
 import { getDashboardStats } from "../lib/get-dashboard-stats";
@@ -48,6 +41,7 @@ import { BulkActionBar } from "./BulkActionBar";
 import { DeleteDialogs } from "./DeleteDialogs";
 import { JobsTab } from "./JobsTab";
 import { AnalyticsTab } from "./AnalyticsTab";
+import { isVisible, useExperienceLevel } from "@/features/experience";
 
 function getJobField(job: OptimizationSummaryResponse, key: string): unknown {
   return (job as unknown as Record<string, unknown>)[key];
@@ -79,6 +73,10 @@ export function DashboardView() {
   // Sync from URL on mount / when ?tab= changes (supports deep-linking from
   // UserFieldPreview and bookmarked tab URLs).
   const urlTab = searchParams.get("tab");
+  // Guided drops Analytics (and with one tab left, the tab bar); a deep link
+  // to it still opens it.
+  const showAnalytics =
+    isVisible("dashboard.analytics", useExperienceLevel()) || urlTab === "analytics";
   useEffect(() => {
     if (urlTab === "jobs" || urlTab === "analytics") {
       setActiveTab(urlTab);
@@ -95,9 +93,6 @@ export function DashboardView() {
     },
     [router, searchParams],
   );
-  // Expose for tutorial beforeShow
-  useEffect(() => registerTutorialHook("setTab", setActiveTab), []);
-
   const analyticsFilters = useAnalyticsFilters();
 
   const {
@@ -131,31 +126,6 @@ export function DashboardView() {
     dataset: analyticsFilters.dataset,
   });
 
-  // Demo overlay state — tutorial injects fake data here so background
-  // fetches (realtime polling, initial load) can never overwrite it.
-  const [demoJobs, setDemoJobs] = useState<PaginatedJobsResponse | null>(null);
-  const [demoAnalytics, setDemoAnalytics] = useState<DashboardAnalytics | null>(null);
-  const effectiveData = demoJobs ?? data;
-  const effectiveAnalytics = demoAnalytics ?? analyticsData;
-
-  // Tutorial hooks — registered after data hooks are available
-  useEffect(
-    () => registerTutorialQuery("hasDashboardData", () => (data?.items.length ?? 0) > 0),
-    [data],
-  );
-  useEffect(() => registerTutorialHook("setDemoJobs", setDemoJobs), []);
-  useEffect(() => registerTutorialHook("setDemoAnalytics", setDemoAnalytics), []);
-
-  // Clear demo overlay when tutorial exits so real data shows through
-  useEffect(() => {
-    const onExit = () => {
-      setDemoJobs(null);
-      setDemoAnalytics(null);
-    };
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
-  }, []);
-
   const queueStatus = useQueueStatus();
 
   // Cross-component sync (sidebar delete/rename, etc.): refetch the
@@ -186,12 +156,12 @@ export function DashboardView() {
     setBulkDeleteOpen,
     bulkDeleting,
     confirmBulkDelete,
-  } = useBulkDelete({ data, setData, setPageOffset, fetchJobs, visibleData: effectiveData });
+  } = useBulkDelete({ data, setData, setPageOffset, fetchJobs });
 
   const selectedJobs = useMemo(() => {
-    if (!effectiveData || !Array.isArray(effectiveData.items)) return [];
-    return effectiveData.items.filter((job) => selectedIds.has(job.optimization_id));
-  }, [effectiveData, selectedIds]);
+    if (!data || !Array.isArray(data.items)) return [];
+    return data.items.filter((job) => selectedIds.has(job.optimization_id));
+  }, [data, selectedIds]);
   const hasCompleteSelection = selectedIds.size > 0 && selectedJobs.length === selectedIds.size;
   const selectedJob = hasCompleteSelection && selectedJobs.length === 1 ? selectedJobs[0] : null;
   const canEditSelection =
@@ -221,8 +191,7 @@ export function DashboardView() {
 
   const handleCloneSelected = () => {
     if (!selectedJob) return;
-    const recipe = selectedJob.optimization_type === "blackbox" ? "anything" : "program";
-    router.push(`/submit?clone=${selectedJob.optimization_id}&recipe=${recipe}`);
+    router.push(`/submit?clone=${selectedJob.optimization_id}`);
   };
 
   const handleTogglePinSelected = async () => {
@@ -341,15 +310,14 @@ export function DashboardView() {
   // when the server actually skipped them.
   const canBulkDelete = useMemo(() => {
     if (isAdmin) return true;
-    if (!effectiveData || !Array.isArray(effectiveData.items) || selectedIds.size === 0)
-      return false;
+    if (!data || !Array.isArray(data.items) || selectedIds.size === 0) return false;
     if (!hasCompleteSelection) return false;
     return selectedJobs.every((job) => job.role == null || job.role === "owner");
-  }, [isAdmin, effectiveData, selectedIds.size, hasCompleteSelection, selectedJobs]);
+  }, [isAdmin, data, selectedIds.size, hasCompleteSelection, selectedJobs]);
 
   const filteredItems = useMemo(() => {
-    if (!effectiveData || !Array.isArray(effectiveData.items)) return [];
-    const items = effectiveData.items.filter((job) => {
+    if (!data || !Array.isArray(data.items)) return [];
+    const items = data.items.filter((job) => {
       for (const [col, allowed] of Object.entries(filters)) {
         if (allowed.size === 0) continue;
         const val = String(getJobField(job, col) ?? "");
@@ -362,7 +330,7 @@ export function DashboardView() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return items;
-  }, [effectiveData, filters, sortKey, sortDir]);
+  }, [data, filters, sortKey, sortDir]);
 
   // Every currently-visible (filtered + loaded) row is selectable. The
   // bulk-delete handler cancels active jobs before deleting, mirroring
@@ -388,9 +356,9 @@ export function DashboardView() {
   };
 
   const filterOptions = useMemo(() => {
-    if (!effectiveData || !Array.isArray(effectiveData.items))
+    if (!data || !Array.isArray(data.items))
       return {} as Record<string, Array<{ value: string; label: string }>>;
-    const items = effectiveData.items;
+    const items = data.items;
     const unique = (key: string, labelFn?: (v: string) => string) => {
       const vals = [...new Set(items.map((j) => String(getJobField(j, key) ?? "")))]
         .filter(Boolean)
@@ -423,32 +391,30 @@ export function DashboardView() {
       module_name: unique("module_name"),
       optimizer_name: unique("optimizer_name"),
     };
-  }, [effectiveData, sessionUser]);
+  }, [data, sessionUser]);
 
-  const chartData = useMemo(() => transformChartData(effectiveAnalytics), [effectiveAnalytics]);
+  const chartData = useMemo(() => transformChartData(analyticsData), [analyticsData]);
 
   const stats = useMemo(
     () =>
       getDashboardStats({
-        data: effectiveData,
+        data,
         filteredItems,
-        // Demo jobs come without server counts; the real ones would show a
-        // new user zeros above a table full of demo runs.
-        counts: demoJobs ? null : counts,
-        analyticsData: effectiveAnalytics,
+        counts,
+        analyticsData,
         activeTab,
       }),
-    [effectiveData, filteredItems, counts, demoJobs, effectiveAnalytics, activeTab],
+    [data, filteredItems, counts, analyticsData, activeTab],
   );
 
   // Owner/Role columns and the shared stat card only appear once the caller
   // actually collaborates — a solo user's control panel stays unchanged.
   const hasShared =
-    (!demoJobs && (counts?.shared ?? 0) > 0) ||
-    (Array.isArray(effectiveData?.items) && effectiveData.items.some((j) => Boolean(j.role))) ||
+    (counts?.shared ?? 0) > 0 ||
+    (Array.isArray(data?.items) && data.items.some((j) => Boolean(j.role))) ||
     false;
 
-  if (initialLoad && !effectiveData) {
+  if (initialLoad && !data) {
     return <DashboardSkeleton />;
   }
 
@@ -467,45 +433,43 @@ export function DashboardView() {
 
         <FadeIn delay={0.2}>
           {mounted && (
-            <Tabs value={activeTab} onValueChange={handleTabChange}>
-              <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
-                <TabsTrigger value="jobs" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
-                  {activeTab === "jobs" && (
-                    <motion.span
-                      layoutId="dashboardTabPill"
-                      transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="relative z-10 inline-flex items-center gap-1.5">
-                    <Table className="size-3.5" />
-                    {TERMS.optimizationPlural}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger
-                  value="analytics"
-                  data-tutorial="analytics-tab"
-                  className={SLIDING_PILL_TABS_TRIGGER_CLASS}
-                >
-                  {activeTab === "analytics" && (
-                    <motion.span
-                      layoutId="dashboardTabPill"
-                      transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="relative z-10 inline-flex items-center gap-1.5">
-                    <ChartBar className="size-3.5" />
-                    {msg("auto.features.dashboard.components.dashboardview.1")}
-                  </span>
-                </TabsTrigger>
-              </TabsList>
+            <Tabs value={activeTab} onValueChange={handleTabChange} data-setup="dashboard">
+              {showAnalytics && (
+                <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
+                  <TabsTrigger value="jobs" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
+                    {activeTab === "jobs" && (
+                      <motion.span
+                        layoutId="dashboardTabPill"
+                        transition={tabPillTransition}
+                        className="absolute inset-0 z-0 rounded-md bg-primary-fill"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      <Table className="size-3.5" />
+                      {TERMS.optimizationPlural}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger value="analytics" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
+                    {activeTab === "analytics" && (
+                      <motion.span
+                        layoutId="dashboardTabPill"
+                        transition={tabPillTransition}
+                        className="absolute inset-0 z-0 rounded-md bg-primary-fill"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      <ChartBar className="size-3.5" />
+                      {msg("auto.features.dashboard.components.dashboardview.1")}
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
               <TabsContent value="jobs">
                 <JobsTab
-                  data={effectiveData}
+                  data={data}
                   loading={loading}
                   error={error}
                   filteredItems={filteredItems}
@@ -537,7 +501,7 @@ export function DashboardView() {
               <TabsContent value="analytics">
                 <AnalyticsTab
                   analyticsLoading={analyticsLoading}
-                  analyticsData={effectiveAnalytics}
+                  analyticsData={analyticsData}
                   chartData={chartData}
                   filters={analyticsFilters}
                   sessionUser={sessionUser}
@@ -553,6 +517,7 @@ export function DashboardView() {
           canManageShare={canManageSelectedShare}
           canPause={pausableSelectedIds.length > 0}
           canResume={resumableSelectedIds.length > 0}
+          canClone={selectedJob?.optimization_type !== "grid_search"}
           canStop={activeSelectedIds.length > 0}
           canTogglePin={canEditSelection}
           selectedJobId={selectedJob?.optimization_id ?? null}

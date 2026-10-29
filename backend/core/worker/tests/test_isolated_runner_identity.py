@@ -1,4 +1,4 @@
-"""Verify the guest refuses an image that differs from its worker and says how."""
+"""Verify the guest refuses a request its image's protocol cannot read."""
 
 from __future__ import annotations
 
@@ -9,29 +9,27 @@ from typing import Any
 import pytest
 
 from core.worker import isolated_runner
-from core.worker.checkpoint_compat import runtime_identity
 
 
-def test_guest_names_the_mismatched_identity_parts(
+def test_guest_refuses_an_unknown_protocol(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Stop before authored code and list the parts the image and worker disagree on.
+    """Stop before authored code and ask for a rebuilt image.
 
     Args:
         tmp_path: Guest request staging directory.
         monkeypatch: Runner and argument substitutions.
         capfd: Captures the framed event the guest writes to its real stdout.
     """
-    expected = runtime_identity()
-    expected["python"] = "0.0.0"
-    expected["dependencies"]["gepa"] = "0.0.0"
     request = tmp_path / "request.json"
     request.write_text(
-        json.dumps({"payload": {}, "artifact_id": "g1", "nonce": "fixture", "runtime_identity": expected})
+        json.dumps(
+            {"payload": {}, "artifact_id": "g1", "nonce": "fixture", "protocol": isolated_runner.SANDBOX_PROTOCOL + 1}
+        )
     )
 
     def unexpected(*_args: Any, **_kwargs: Any) -> None:
-        """Fail if authored code runs on an incompatible image."""
+        """Fail if authored code runs on an image that cannot read the request."""
         raise AssertionError("the guest ran the optimizer on an incompatible image")
 
     monkeypatch.setattr(isolated_runner, "run_service_in_subprocess", unexpected)
@@ -42,16 +40,11 @@ def test_guest_names_the_mismatched_identity_parts(
     prefix = f"{isolated_runner.EVENT_PREFIX}fixture "
     assert line.startswith(prefix)
     event = json.loads(line[len(prefix) :])
-    assert event["type"] == "error"
-    assert event["error"].startswith(isolated_runner.INCOMPATIBLE_IMAGE_MESSAGE)
-    assert "python: " in event["error"]
-    assert "gepa: " in event["error"]
-    assert event["error"].count("0.0.0 in the worker") == 2
-    assert "source_sha256" not in event["error"]
+    assert event == {"type": "error", "error": isolated_runner.INCOMPATIBLE_IMAGE_MESSAGE, "traceback": ""}
 
 
-def test_matching_identity_runs_the_optimizer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Let the guest proceed when its identity equals the worker's.
+def test_guest_ignores_worker_dependency_versions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the optimizer whatever the worker's own Python and packages are.
 
     Args:
         tmp_path: Guest request staging directory.
@@ -59,7 +52,15 @@ def test_matching_identity_runs_the_optimizer(tmp_path: Path, monkeypatch: pytes
     """
     request = tmp_path / "request.json"
     request.write_text(
-        json.dumps({"payload": {}, "artifact_id": "g1", "nonce": "fixture", "runtime_identity": runtime_identity()})
+        json.dumps(
+            {
+                "payload": {},
+                "artifact_id": "g1",
+                "nonce": "fixture",
+                "protocol": isolated_runner.SANDBOX_PROTOCOL,
+                "runtime_identity": {"python": "0.0.0", "dependencies": {"litellm": "0.0.0"}},
+            }
+        )
     )
     observed: list[str] = []
 

@@ -2,15 +2,12 @@
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { memo, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  ArrowCounterClockwise,
   CaretLeft,
   CaretRight,
   CircleNotch,
   Crown,
   Gauge,
-  Play,
   Trash,
   Trophy,
   X,
@@ -40,9 +37,7 @@ import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/mot
 import { HelpTip } from "@/shared/ui/help-tip";
 import type { OptimizationStatusResponse, PairResult } from "@/shared/types/api";
 import { formatPercent } from "@/shared/lib";
-import { deleteGridPair, resumeGridPair } from "@/shared/lib/api";
-import { ChartTable } from "@/shared/charts/chart-table";
-import { useLiteMode } from "@/features/settings";
+import { deleteGridPair } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
@@ -50,6 +45,7 @@ import { computePairScores } from "../lib/pair-scores";
 import { ReasoningPill } from "./ui-primitives";
 import {
   CombinedTip,
+  GridEmptyState,
   ScatterTip,
   ScoreTip,
   computePareto,
@@ -66,11 +62,9 @@ function GridOverviewImpl({
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
 }) {
-  const lite = useLiteMode();
   const OpenIcon = getActiveDir() === "rtl" ? CaretLeft : CaretRight;
   const [pendingDelete, setPendingDelete] = useState<PairResult | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [rerunningPair, setRerunningPair] = useState<number | null>(null);
   const [pairFilter, setPairFilter] = useState<number | null>(null);
   const [hiddenPairSeries, setHiddenPairSeries] = useState<Set<string>>(new Set());
   const [hiddenCombinedSeries, setHiddenCombinedSeries] = useState<Set<string>>(new Set());
@@ -115,24 +109,6 @@ function GridOverviewImpl({
       toast.error(err instanceof Error ? err.message : msg("optimization.delete.failed"));
     } finally {
       setDeleting(false);
-    }
-  };
-  const router = useRouter();
-  const handlePairRerun = async (pairIndex: number, resume: boolean) => {
-    if (!resume) {
-      router.push(`/submit?clone=${job.optimization_id}&pair=${pairIndex}&recipe=program`);
-      return;
-    }
-    setRerunningPair(pairIndex);
-    try {
-      await resumeGridPair(job.optimization_id, pairIndex);
-      toast.success(msg("optimization.pair.resume.success"));
-      // The grid re-enters running in place — the parent's poll picks up the change.
-      window.dispatchEvent(new Event("optimizations-changed"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("optimization.pair.resume.failed"));
-    } finally {
-      setRerunningPair(null);
     }
   };
   const gridResult = job.grid_result;
@@ -208,6 +184,7 @@ function GridOverviewImpl({
   }, [gridResult]);
 
   if (!derived) return null;
+  if (derived.prs.length === 0) return <GridEmptyState />;
   const {
     prs,
     completedPrs,
@@ -240,7 +217,7 @@ function GridOverviewImpl({
     pairFilter != null ? (prs.find((p) => p.pair_index === pairFilter) ?? null) : null;
 
   return (
-    <div className="space-y-4" data-tutorial="grid-search">
+    <div className="space-y-4">
       <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <StaggerItem>
           <TiltCard
@@ -248,7 +225,7 @@ function GridOverviewImpl({
             onClick={qualityPair ? () => setPairFilter(qualityPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Trophy className="size-3 text-[#C8A882]" />
+              <Trophy className="size-3 text-primary" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.7")}
               </p>
@@ -271,7 +248,7 @@ function GridOverviewImpl({
             onClick={speedPair ? () => setPairFilter(speedPair.pair_index) : undefined}
           >
             <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Gauge className="size-3 text-[#3D2E22]" />
+              <Gauge className="size-3 text-primary" />
               <p className="text-[0.625rem] text-muted-foreground">
                 {msg("auto.features.optimizations.components.gridoverview.8")}
               </p>
@@ -298,11 +275,8 @@ function GridOverviewImpl({
         <FadeIn delay={0.1}>
           {pairFilter != null && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
-              <span className="group inline-flex items-center gap-1.5 rounded-lg bg-[#3D2E22]/[0.06] border border-[#3D2E22]/10 pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-[#3D2E22]/[0.1] hover:border-[#3D2E22]/20">
-                <span
-                  className="font-mono text-[0.6875rem] font-medium text-[#3D2E22]/80"
-                  dir="ltr"
-                >
+              <span className="group inline-flex items-center gap-1.5 rounded-lg border on-primary pe-1 ps-2.5 py-1 transition-all duration-150 hover:bg-primary-fill/[0.1] hover:border-primary-fill/20">
+                <span className="font-mono text-[0.6875rem] font-medium text-primary/80" dir="ltr">
                   {selectedPair ? pairLabel(selectedPair) : "—"}
                 </span>
                 <button
@@ -328,117 +302,76 @@ function GridOverviewImpl({
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                {lite ? (
-                  <div className="h-[280px] min-w-0">
-                    <ChartTable
-                      rows={scatterPoints.filter((p) => matchesFilter(p.pair_index))}
-                      onRowClick={(row) => handleBarClick(row)}
-                      columns={[
-                        {
-                          key: "name",
-                          label: msg("auto.features.optimizations.components.gridoverview.9"),
-                        },
-                        {
-                          key: "quality",
-                          label: msg(
-                            "auto.features.optimizations.components.gridoverview.literal.4",
-                          ),
-                          align: "end",
-                          format: (value) =>
-                            typeof value === "number"
-                              ? formatMsg("optimizations.grid.format.percent", {
-                                  value: value.toFixed(1),
-                                })
-                              : msg("common.empty"),
-                        },
-                        {
-                          key: "latency",
-                          label: msg(
+                <div className="h-[280px] min-w-0" dir="ltr">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 10, right: 30, bottom: 35, left: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis
+                        type="number"
+                        dataKey="latency"
+                        name="latency"
+                        unit="s"
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10 }}
+                        className="fill-muted-foreground"
+                        label={{
+                          value: msg(
                             "auto.features.optimizations.components.gridoverview.literal.3",
                           ),
-                          align: "end",
-                          format: (value) =>
-                            typeof value === "number"
-                              ? formatMsg("optimizations.grid.format.seconds", {
-                                  value: value.toFixed(2),
-                                })
-                              : msg("common.empty"),
-                        },
-                      ]}
-                    />
-                  </div>
-                ) : (
-                  <div className="h-[280px] min-w-0" dir="ltr">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 10, right: 30, bottom: 35, left: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis
-                          type="number"
-                          dataKey="latency"
-                          name="latency"
-                          unit="s"
-                          tickLine={false}
-                          axisLine={false}
-                          tick={{ fontSize: 10 }}
-                          className="fill-muted-foreground"
-                          label={{
-                            value: msg(
-                              "auto.features.optimizations.components.gridoverview.literal.3",
-                            ),
-                            position: "insideBottom",
-                            offset: -15,
-                            fontSize: 10,
-                          }}
+                          position: "insideBottom",
+                          offset: -15,
+                          fontSize: 10,
+                        }}
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="quality"
+                        name="quality"
+                        unit="%"
+                        domain={[0, 100]}
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10 }}
+                        className="fill-muted-foreground"
+                        label={{
+                          value: msg(
+                            "auto.features.optimizations.components.gridoverview.literal.4",
+                          ),
+                          angle: -90,
+                          position: "center",
+                          dx: -15,
+                          fontSize: 10,
+                        }}
+                      />
+                      <ZAxis range={[70, 70]} />
+                      <Tooltip content={<ScatterTip />} cursor={{ strokeDasharray: "3 3" }} />
+                      {!hiddenScatterSeries.has("dominated") && (
+                        <Scatter
+                          data={dominatedFiltered}
+                          fill="var(--color-muted-foreground)"
+                          fillOpacity={0.35}
+                          cursor="pointer"
+                          onClick={handleBarClick}
                         />
-                        <YAxis
-                          type="number"
-                          dataKey="quality"
-                          name="quality"
-                          unit="%"
-                          domain={[0, 100]}
-                          tickLine={false}
-                          axisLine={false}
-                          tick={{ fontSize: 10 }}
-                          className="fill-muted-foreground"
-                          label={{
-                            value: msg(
-                              "auto.features.optimizations.components.gridoverview.literal.4",
-                            ),
-                            angle: -90,
-                            position: "center",
-                            dx: -15,
-                            fontSize: 10,
-                          }}
+                      )}
+                      {!hiddenScatterSeries.has("pareto") && (
+                        <Scatter
+                          data={paretoFiltered}
+                          fill="var(--color-chart-1)"
+                          cursor="pointer"
+                          onClick={handleBarClick}
                         />
-                        <ZAxis range={[70, 70]} />
-                        <Tooltip content={<ScatterTip />} cursor={{ strokeDasharray: "3 3" }} />
-                        {!hiddenScatterSeries.has("dominated") && (
-                          <Scatter
-                            data={dominatedFiltered}
-                            fill="var(--color-muted-foreground)"
-                            fillOpacity={0.35}
-                            cursor="pointer"
-                            onClick={handleBarClick}
-                          />
-                        )}
-                        {!hiddenScatterSeries.has("pareto") && (
-                          <Scatter
-                            data={paretoFiltered}
-                            fill="#3D2E22"
-                            cursor="pointer"
-                            onClick={handleBarClick}
-                          />
-                        )}
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
+                      )}
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
                 <div className="mt-2 flex items-center justify-center gap-4 text-[0.6875rem]">
                   {[
                     {
                       key: "pareto",
                       label: msg("auto.features.optimizations.components.gridoverview.literal.5"),
-                      color: "#3D2E22",
+                      color: "var(--color-chart-1)",
                     },
                     {
                       key: "dominated",
@@ -482,7 +415,9 @@ function GridOverviewImpl({
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              <div className="grid gap-4 md:grid-cols-2">
+              {/* Two charts side by side need lg: at md the content beside the sidebar
+                  (834px iPad portrait) leaves each chart under 300px. */}
+              <div className="grid gap-4 lg:grid-cols-2">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -492,134 +427,91 @@ function GridOverviewImpl({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
-                    {lite ? (
-                      <div className="h-[220px] min-w-0">
-                        <ChartTable
-                          rows={pairScoresFiltered}
-                          onRowClick={(row) => handleBarClick(row)}
-                          columns={[
-                            {
-                              key: "name",
-                              label: msg(
+                    <div className="h-[220px] min-w-0" dir="ltr">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={pairScoresFiltered}
+                          layout="vertical"
+                          margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
+                        >
+                          <CartesianGrid
+                            horizontal={false}
+                            strokeDasharray="3 3"
+                            className="stroke-muted"
+                          />
+                          <XAxis
+                            type="number"
+                            domain={[0, 105]}
+                            tickLine={false}
+                            axisLine={false}
+                            tick={{ fontSize: 10 }}
+                            className="fill-muted-foreground"
+                            label={{
+                              value: msg(
+                                "auto.features.optimizations.components.gridoverview.literal.7",
+                              ),
+                              position: "insideBottom",
+                              offset: -2,
+                              fontSize: 10,
+                            }}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            tick={{ fontSize: 10 }}
+                            width={80}
+                            tickFormatter={(v: string) =>
+                              v.length > 12 ? `${v.slice(0, 11)}…` : v
+                            }
+                            className="fill-muted-foreground"
+                            tickLine={false}
+                            axisLine={false}
+                            label={{
+                              value: msg(
                                 "auto.features.optimizations.components.gridoverview.literal.8",
                               ),
-                            },
-                            {
-                              key: "baselineScore",
-                              label: msg(
+                              angle: -90,
+                              position: "left",
+                              offset: 10,
+                              fontSize: 10,
+                            }}
+                          />
+                          <Tooltip content={<ScoreTip />} />
+                          {!hiddenPairSeries.has(
+                            msg("auto.features.optimizations.components.gridoverview.literal.9"),
+                          ) && (
+                            <Bar
+                              dataKey="baselineScore"
+                              name={msg(
                                 "auto.features.optimizations.components.gridoverview.literal.10",
-                              ),
-                              align: "end",
-                              format: (value) =>
-                                typeof value === "number"
-                                  ? formatMsg("optimizations.grid.format.percent", {
-                                      value: String(value),
-                                    })
-                                  : msg("common.empty"),
-                            },
-                            {
-                              key: "optimizedScore",
-                              label: msg(
+                              )}
+                              fill="var(--color-chart-4)"
+                              radius={[0, 3, 3, 0]}
+                              barSize={12}
+                              animationDuration={400}
+                              cursor="pointer"
+                              onClick={handleBarClick}
+                            />
+                          )}
+                          {!hiddenPairSeries.has(
+                            msg("auto.features.optimizations.components.gridoverview.literal.11"),
+                          ) && (
+                            <Bar
+                              dataKey="optimizedScore"
+                              name={msg(
                                 "auto.features.optimizations.components.gridoverview.literal.12",
-                              ),
-                              align: "end",
-                              format: (value) =>
-                                typeof value === "number"
-                                  ? formatMsg("optimizations.grid.format.percent", {
-                                      value: String(value),
-                                    })
-                                  : msg("common.empty"),
-                            },
-                          ]}
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-[220px] min-w-0" dir="ltr">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={pairScoresFiltered}
-                            layout="vertical"
-                            margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
-                          >
-                            <CartesianGrid
-                              horizontal={false}
-                              strokeDasharray="3 3"
-                              className="stroke-muted"
+                              )}
+                              fill="var(--color-chart-2)"
+                              radius={[0, 3, 3, 0]}
+                              barSize={12}
+                              animationDuration={400}
+                              cursor="pointer"
+                              onClick={handleBarClick}
                             />
-                            <XAxis
-                              type="number"
-                              domain={[0, 105]}
-                              tickLine={false}
-                              axisLine={false}
-                              tick={{ fontSize: 10 }}
-                              className="fill-muted-foreground"
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.7",
-                                ),
-                                position: "insideBottom",
-                                offset: -2,
-                                fontSize: 10,
-                              }}
-                            />
-                            <YAxis
-                              type="category"
-                              dataKey="name"
-                              tick={{ fontSize: 10 }}
-                              width={80}
-                              tickFormatter={(v: string) =>
-                                v.length > 12 ? `${v.slice(0, 11)}…` : v
-                              }
-                              className="fill-muted-foreground"
-                              tickLine={false}
-                              axisLine={false}
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.8",
-                                ),
-                                angle: -90,
-                                position: "left",
-                                offset: 10,
-                                fontSize: 10,
-                              }}
-                            />
-                            <Tooltip content={<ScoreTip />} />
-                            {!hiddenPairSeries.has(
-                              msg("auto.features.optimizations.components.gridoverview.literal.9"),
-                            ) && (
-                              <Bar
-                                dataKey="baselineScore"
-                                name={msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.10",
-                                )}
-                                fill="var(--color-chart-4)"
-                                radius={[0, 3, 3, 0]}
-                                barSize={12}
-                                animationDuration={400}
-                                cursor="pointer"
-                                onClick={handleBarClick}
-                              />
-                            )}
-                            {!hiddenPairSeries.has(
-                              msg("auto.features.optimizations.components.gridoverview.literal.11"),
-                            ) && (
-                              <Bar
-                                dataKey="optimizedScore"
-                                name={msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.12",
-                                )}
-                                fill="var(--color-chart-2)"
-                                radius={[0, 3, 3, 0]}
-                                barSize={12}
-                                animationDuration={400}
-                                cursor="pointer"
-                                onClick={handleBarClick}
-                              />
-                            )}
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
+                          )}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                     <div className="flex justify-center gap-4 mt-1">
                       {[
                         {
@@ -672,134 +564,91 @@ function GridOverviewImpl({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
-                    {lite ? (
-                      <div className="h-[220px] min-w-0">
-                        <ChartTable
-                          rows={combinedScoresFiltered}
-                          onRowClick={(row) => handleBarClick(row)}
-                          columns={[
-                            {
-                              key: "name",
-                              label: msg(
+                    <div className="h-[220px] min-w-0" dir="ltr">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={combinedScoresFiltered}
+                          layout="vertical"
+                          margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
+                        >
+                          <CartesianGrid
+                            horizontal={false}
+                            strokeDasharray="3 3"
+                            className="stroke-muted"
+                          />
+                          <XAxis
+                            type="number"
+                            domain={[0, 100]}
+                            tickLine={false}
+                            axisLine={false}
+                            tick={{ fontSize: 10 }}
+                            className="fill-muted-foreground"
+                            label={{
+                              value: msg(
+                                "auto.features.optimizations.components.gridoverview.literal.15",
+                              ),
+                              position: "insideBottom",
+                              offset: -2,
+                              fontSize: 10,
+                            }}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            tick={{ fontSize: 10 }}
+                            width={80}
+                            tickFormatter={(v: string) =>
+                              v.length > 12 ? `${v.slice(0, 11)}…` : v
+                            }
+                            className="fill-muted-foreground"
+                            tickLine={false}
+                            axisLine={false}
+                            label={{
+                              value: msg(
                                 "auto.features.optimizations.components.gridoverview.literal.16",
                               ),
-                            },
-                            {
-                              key: "quality",
-                              label: msg(
+                              angle: -90,
+                              position: "left",
+                              offset: 10,
+                              fontSize: 10,
+                            }}
+                          />
+                          <Tooltip content={<CombinedTip />} />
+                          {!hiddenCombinedSeries.has(
+                            msg("auto.features.optimizations.components.gridoverview.literal.17"),
+                          ) && (
+                            <Bar
+                              dataKey="quality"
+                              name={msg(
                                 "auto.features.optimizations.components.gridoverview.literal.18",
-                              ),
-                              align: "end",
-                              format: (value) =>
-                                typeof value === "number"
-                                  ? formatMsg("optimizations.grid.format.percent", {
-                                      value: String(value),
-                                    })
-                                  : msg("common.empty"),
-                            },
-                            {
-                              key: "speed",
-                              label: msg(
+                              )}
+                              fill="var(--color-chart-2)"
+                              radius={[0, 3, 3, 0]}
+                              barSize={8}
+                              animationDuration={400}
+                              cursor="pointer"
+                              onClick={handleBarClick}
+                            />
+                          )}
+                          {!hiddenCombinedSeries.has(
+                            msg("auto.features.optimizations.components.gridoverview.literal.19"),
+                          ) && (
+                            <Bar
+                              dataKey="speed"
+                              name={msg(
                                 "auto.features.optimizations.components.gridoverview.literal.20",
-                              ),
-                              align: "end",
-                              format: (value) =>
-                                typeof value === "number"
-                                  ? formatMsg("optimizations.grid.format.percent", {
-                                      value: String(value),
-                                    })
-                                  : msg("common.empty"),
-                            },
-                          ]}
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-[220px] min-w-0" dir="ltr">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={combinedScoresFiltered}
-                            layout="vertical"
-                            margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
-                          >
-                            <CartesianGrid
-                              horizontal={false}
-                              strokeDasharray="3 3"
-                              className="stroke-muted"
+                              )}
+                              fill="var(--color-chart-4)"
+                              radius={[0, 3, 3, 0]}
+                              barSize={8}
+                              animationDuration={400}
+                              cursor="pointer"
+                              onClick={handleBarClick}
                             />
-                            <XAxis
-                              type="number"
-                              domain={[0, 100]}
-                              tickLine={false}
-                              axisLine={false}
-                              tick={{ fontSize: 10 }}
-                              className="fill-muted-foreground"
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.15",
-                                ),
-                                position: "insideBottom",
-                                offset: -2,
-                                fontSize: 10,
-                              }}
-                            />
-                            <YAxis
-                              type="category"
-                              dataKey="name"
-                              tick={{ fontSize: 10 }}
-                              width={80}
-                              tickFormatter={(v: string) =>
-                                v.length > 12 ? `${v.slice(0, 11)}…` : v
-                              }
-                              className="fill-muted-foreground"
-                              tickLine={false}
-                              axisLine={false}
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.16",
-                                ),
-                                angle: -90,
-                                position: "left",
-                                offset: 10,
-                                fontSize: 10,
-                              }}
-                            />
-                            <Tooltip content={<CombinedTip />} />
-                            {!hiddenCombinedSeries.has(
-                              msg("auto.features.optimizations.components.gridoverview.literal.17"),
-                            ) && (
-                              <Bar
-                                dataKey="quality"
-                                name={msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.18",
-                                )}
-                                fill="var(--color-chart-2)"
-                                radius={[0, 3, 3, 0]}
-                                barSize={8}
-                                animationDuration={400}
-                                cursor="pointer"
-                                onClick={handleBarClick}
-                              />
-                            )}
-                            {!hiddenCombinedSeries.has(
-                              msg("auto.features.optimizations.components.gridoverview.literal.19"),
-                            ) && (
-                              <Bar
-                                dataKey="speed"
-                                name={msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.20",
-                                )}
-                                fill="var(--color-chart-4)"
-                                radius={[0, 3, 3, 0]}
-                                barSize={8}
-                                animationDuration={400}
-                                cursor="pointer"
-                                onClick={handleBarClick}
-                              />
-                            )}
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
+                          )}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                     <div className="flex flex-wrap justify-center gap-3 mt-1">
                       {[
                         {
@@ -854,129 +703,99 @@ function GridOverviewImpl({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
-                    {lite ? (
-                      <div className="h-[220px] min-w-0">
-                        <ChartTable
-                          rows={pairRespTimeFiltered}
-                          onRowClick={(row) => handleBarClick(row)}
-                          columns={[
-                            {
-                              key: "name",
-                              label: msg(
+                    <div className="h-[220px] min-w-0" dir="ltr">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={pairRespTimeFiltered}
+                          layout="vertical"
+                          margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
+                        >
+                          <CartesianGrid
+                            horizontal={false}
+                            strokeDasharray="3 3"
+                            className="stroke-muted"
+                          />
+                          <XAxis
+                            type="number"
+                            tickLine={false}
+                            axisLine={false}
+                            tick={{ fontSize: 10 }}
+                            className="fill-muted-foreground"
+                            label={{
+                              value: msg(
+                                "auto.features.optimizations.components.gridoverview.literal.26",
+                              ),
+                              position: "insideBottom",
+                              offset: -2,
+                              fontSize: 10,
+                            }}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            tick={{ fontSize: 10 }}
+                            width={100}
+                            className="fill-muted-foreground"
+                            tickLine={false}
+                            axisLine={false}
+                            label={{
+                              value: msg(
                                 "auto.features.optimizations.components.gridoverview.literal.27",
                               ),
-                            },
-                            {
-                              key: "responseTime",
-                              label: msg(
-                                "auto.features.optimizations.components.gridoverview.literal.28",
-                              ),
-                              align: "end",
-                              format: (value) =>
-                                typeof value === "number"
-                                  ? formatMsg("optimizations.grid.format.seconds", {
-                                      value: String(value),
-                                    })
-                                  : msg("common.empty"),
-                            },
-                          ]}
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-[220px] min-w-0" dir="ltr">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={pairRespTimeFiltered}
-                            layout="vertical"
-                            margin={{ left: 28, right: 20, top: 5, bottom: 5 }}
-                          >
-                            <CartesianGrid
-                              horizontal={false}
-                              strokeDasharray="3 3"
-                              className="stroke-muted"
-                            />
-                            <XAxis
-                              type="number"
-                              tickLine={false}
-                              axisLine={false}
-                              tick={{ fontSize: 10 }}
-                              className="fill-muted-foreground"
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.26",
-                                ),
-                                position: "insideBottom",
-                                offset: -2,
-                                fontSize: 10,
-                              }}
-                            />
-                            <YAxis
-                              type="category"
-                              dataKey="name"
-                              tick={{ fontSize: 10 }}
-                              width={100}
-                              className="fill-muted-foreground"
-                              tickLine={false}
-                              axisLine={false}
-                              label={{
-                                value: msg(
-                                  "auto.features.optimizations.components.gridoverview.literal.27",
-                                ),
-                                angle: -90,
-                                position: "left",
-                                offset: 10,
-                                fontSize: 10,
-                              }}
-                            />
-                            <Tooltip
-                              content={({ active, payload, label }) => {
-                                if (!active || !payload?.length) return null;
-                                return (
-                                  <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-lg">
-                                    {label && (
-                                      <p className="font-semibold mb-1.5 text-foreground text-xs">
-                                        {label}
-                                      </p>
-                                    )}
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-muted-foreground">
-                                        {msg(
-                                          "auto.features.optimizations.components.gridoverview.13",
-                                        )}
-                                      </span>
-                                      <span className="font-mono font-semibold text-foreground ms-auto">
-                                        {payload[0]!.value}
-                                        {msg(
-                                          "auto.features.optimizations.components.gridoverview.14",
-                                        )}
-                                      </span>
-                                    </div>
+                              angle: -90,
+                              position: "left",
+                              offset: 10,
+                              fontSize: 10,
+                            }}
+                          />
+                          <Tooltip
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload?.length) return null;
+                              return (
+                                <div className="rounded-xl border border-border/60 bg-background/95 backdrop-blur-sm p-3 shadow-[var(--shadow-float)]">
+                                  {label && (
+                                    <p className="font-semibold mb-1.5 text-foreground text-xs">
+                                      {label}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className="text-muted-foreground">
+                                      {msg(
+                                        "auto.features.optimizations.components.gridoverview.13",
+                                      )}
+                                    </span>
+                                    <span className="font-mono font-semibold text-foreground ms-auto">
+                                      {payload[0]!.value}
+                                      {msg(
+                                        "auto.features.optimizations.components.gridoverview.14",
+                                      )}
+                                    </span>
                                   </div>
-                                );
-                              }}
-                            />
-                            <Bar
-                              dataKey="responseTime"
-                              name={msg(
-                                "auto.features.optimizations.components.gridoverview.literal.28",
-                              )}
-                              radius={[0, 3, 3, 0]}
-                              barSize={14}
-                              animationDuration={400}
-                              cursor="pointer"
-                              onClick={handleBarClick}
-                            >
-                              {pairRespTimeFiltered.map((entry, i) => (
-                                <Cell
-                                  key={i}
-                                  fill={entry.isBest ? "#C8A882" : "var(--color-chart-4)"}
-                                />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
+                                </div>
+                              );
+                            }}
+                          />
+                          <Bar
+                            dataKey="responseTime"
+                            name={msg(
+                              "auto.features.optimizations.components.gridoverview.literal.28",
+                            )}
+                            radius={[0, 3, 3, 0]}
+                            barSize={14}
+                            animationDuration={400}
+                            cursor="pointer"
+                            onClick={handleBarClick}
+                          >
+                            {pairRespTimeFiltered.map((entry, i) => (
+                              <Cell
+                                key={i}
+                                fill={entry.isBest ? "var(--color-chart-1)" : "var(--color-chart-4)"}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -985,32 +804,37 @@ function GridOverviewImpl({
         </FadeIn>
       )}
 
-      <div className="space-y-2" data-tutorial="grid-pair-list">
+      <div className="space-y-2">
         {visiblePrs.map((pr) => {
           const isOverall = scoring.overallWinner === pr.pair_index;
           const isQuality = scoring.qualityWinner === pr.pair_index;
           const isSpeed = scoring.speedWinner === pr.pair_index;
           const s = scoring.byIndex[pr.pair_index];
           const barRatio = s?.quality ?? 0;
-          // A failed pair offers Resume if it crashed mid-run (has a checkpoint),
-          // else Restart — one-to-one with a single run.
-          const pairResumable = job.grid_resumable_pairs?.includes(pr.pair_index) ?? false;
-          const rerunBusy = rerunningPair === pr.pair_index;
           return (
             <div
               key={pr.pair_index}
-              className={`group rounded-xl border p-4 transition-colors duration-200 cursor-pointer hover:shadow-sm ${
+              className={`group relative rounded-xl border p-4 transition-colors duration-200 ${
                 pr.error
-                  ? "border-[#B04030]/30 bg-[#B04030]/[0.02] hover:border-[#B04030]/50"
+                  ? "border-destructive/30 bg-destructive/[0.02] hover:border-destructive/50"
                   : isOverall
-                    ? "border-[#3D2E22]/40 bg-[#3D2E22]/[0.03] hover:border-[#3D2E22]/60"
+                    ? "on-primary"
                     : "border-border/50 bg-card/80 hover:border-border"
               }`}
-              onClick={() => onPairSelect(pr.pair_index)}
             >
-              <div className="flex items-center gap-3">
-                {isOverall && <Crown className="size-4 text-[#C8A882] shrink-0" />}
-                {pr.error && <XCircle className="size-4 text-[#B04030] shrink-0" />}
+              {/* The whole card opens the pair. A stretched button (not a
+                  button wrapping the card) keeps Rerun and Delete as sibling
+                  controls instead of invalid nested interactive elements. */}
+              <button
+                type="button"
+                onClick={() => onPairSelect(pr.pair_index)}
+                aria-label={formatMsg("optimizations.grid.open_pair", { pair: pairLabel(pr) })}
+                title={pairLabel(pr)}
+                className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+              />
+              <div className="pointer-events-none relative flex items-center gap-3">
+                {isOverall && <Crown className="size-4 text-primary shrink-0" />}
+                {pr.error && <XCircle className="size-4 text-destructive shrink-0" />}
 
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <div className="flex items-center gap-1 min-w-0">
@@ -1039,7 +863,7 @@ function GridOverviewImpl({
                         <Trophy className="size-2.5" />
                         {msg("auto.features.optimizations.components.gridoverview.15")}
                       </div>
-                      <div className={isQuality ? "font-bold text-[#3D2E22]" : "text-foreground"}>
+                      <div className={isQuality ? "font-bold text-primary" : "text-foreground"}>
                         {s ? `${Math.round(s.quality * 100)}%` : "—"}
                       </div>
                     </div>
@@ -1048,7 +872,7 @@ function GridOverviewImpl({
                         <Gauge className="size-2.5" />
                         {msg("auto.features.optimizations.components.gridoverview.16")}
                       </div>
-                      <div className={isSpeed ? "font-bold text-[#3D2E22]" : "text-foreground"}>
+                      <div className={isSpeed ? "font-bold text-primary" : "text-foreground"}>
                         {pr.avg_response_time_ms != null
                           ? formatMsg("optimizations.grid.response_time_seconds", {
                               value: (pr.avg_response_time_ms / 1000).toFixed(1),
@@ -1059,49 +883,11 @@ function GridOverviewImpl({
                   </div>
                 ) : (
                   <span
-                    className="text-[0.6875rem] text-[#B04030] truncate max-w-[280px]"
+                    className="text-[0.6875rem] text-destructive truncate max-w-[280px]"
                     title={pr.error}
                   >
                     {pr.error}
                   </span>
-                )}
-
-                {pr.error && (
-                  <TooltipButton
-                    tooltip={msg(
-                      pairResumable
-                        ? "optimization.pair.resume_tooltip"
-                        : "optimization.configure_new.tooltip",
-                    )}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="shrink-0 text-muted-foreground/50 hover:text-foreground"
-                      disabled={rerunBusy}
-                      aria-label={msg(
-                        pairResumable
-                          ? "optimization.pair.resume"
-                          : "optimization.configure_new.label",
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handlePairRerun(pr.pair_index, pairResumable);
-                      }}
-                    >
-                      {pairResumable ? (
-                        <Play
-                          className={`size-3.5${getActiveDir() === "rtl" ? " -scale-x-100" : ""}${
-                            rerunBusy ? " animate-spin" : ""
-                          }`}
-                        />
-                      ) : (
-                        <ArrowCounterClockwise
-                          className={`size-3.5${rerunBusy ? " animate-spin" : ""}`}
-                        />
-                      )}
-                    </Button>
-                  </TooltipButton>
                 )}
 
                 <TooltipButton
@@ -1110,7 +896,7 @@ function GridOverviewImpl({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="pointer-events-auto shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     aria-label={msg(
                       "auto.features.optimizations.components.gridoverview.literal.29",
                     )}
@@ -1130,8 +916,8 @@ function GridOverviewImpl({
                 <ProgressBar
                   value={barRatio * 100}
                   size="sm"
-                  color={isOverall ? "#3D2E22" : "#C8A882"}
-                  className="mt-2.5"
+                  color={isOverall ? "var(--color-chart-1)" : "var(--color-chart-3)"}
+                  className="pointer-events-none relative mt-2.5"
                   fillClassName={isOverall ? "opacity-60" : "opacity-30"}
                 />
               )}

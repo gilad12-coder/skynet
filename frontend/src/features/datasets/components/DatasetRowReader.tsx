@@ -115,7 +115,7 @@ export function DatasetRowReader({
                       })}
                       onCopied={notifyCopied}
                       onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
-                      className="opacity-100 transition-opacity lg:opacity-0 lg:group-hover/field:opacity-100 lg:focus-visible:opacity-100"
+                      className="opacity-100 transition-opacity lg:opacity-0 lg:group-hover/field:opacity-100 lg:focus-visible:opacity-100 any-pointer-coarse:opacity-100"
                     />
                   )}
                 </div>

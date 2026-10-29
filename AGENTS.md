@@ -3,12 +3,122 @@
 > Full-stack optimization platform for prompts, programs, agents, workflows,
 > datasets, and other user-supplied artifacts.
 
+## Feature gate: challenge every feature (MANDATORY)
+
+Before building any new feature, screen, setting, option or integration,
+challenge it. Do not start coding until it passes. Skynet has **no customer
+requests** yet, so a feature must clearly serve one of these two buckets:
+
+- **Business**: it makes Skynet more money or improves the business model
+  (activation, conversion, retention, paid usage, lower cost to serve).
+  Name the number it should move.
+- **Surprise and delight**: it surprises users enough that they would show
+  it to someone. Name the surprise.
+
+If the user asks for something that fits neither, push back directly, e.g.
+"Why are we building this? Which number does it move, or what's the
+surprise?" Then:
+
+1. Ask what happens if we never build it. "Nothing much" means don't.
+2. Ask whether it is the current bottleneck, or a distraction from it.
+3. Ask whether it improves the core product or only covers for a weak spot
+   (tours, nags, settings that patch bad defaults).
+4. If it passes, build the smallest version that solves the problem: delete
+   requirements that have no clear owner and reason before simplifying,
+   and don't abstract, configure or automate before the manual version works.
+
+Push hard once, then respect the user's decision and build it. Small fixes,
+bug fixes and refactors the user asked for skip the gate. For a full pass,
+run `/scope`.
+
+## Merge policy (MANDATORY)
+
+Feature PRs target `staging`, never `main`. A PR environment is a full copy of
+staging with an empty database. AWS does not build PR environments yet
+(SKY-164); until it does, run the acceptance checks on AWS staging.
+
+**Backend PRs** (no file under `frontend/`) merge themselves into `staging`
+only when **all** of these gates pass:
+
+1. Agent code review is clean.
+2. Tests and the Linear issue's acceptance checks pass in the PR environment.
+3. The diff touches only the files in the issue's `## Files` list.
+4. Up to date: the branch is rebased on the latest `staging`, then tests pass again.
+5. After the merge, the staging smoke test passes. If it fails, revert that
+   PR's single squash commit right away and reopen its issue with the failure.
+
+**UI PRs** (anything touching `frontend/`, including mixed PRs) wait for the
+user. Attach a proof card: one line naming the decision and the Linear issue,
+a 15–30s video of a browser agent walking the acceptance criteria in the PR
+environment, the review verdict, and the diff size. Merge only after the user
+approves that specific PR in chat or on GitHub.
+
+**`staging` → `main`** needs the user's approval every time. Each morning,
+send one card: the backend changes that landed, staging smoke status, and a
+60s video tour of the core flow on staging. Promote only on "promote".
+
+### Fix bugs locally, deploy once (MANDATORY)
+
+Each push rebuilds the PR preview (the sandbox image too) and starts a new
+automated review. A bug found after the push costs a full rebuild. Find the
+bugs before you push. Follow this order for every PR:
+
+1. Build the change. Run the tests, lint and typecheck locally.
+2. Review the full diff locally. Use two reviewers with fresh context (for
+   example, two subagents). Verify each finding with a failing test, then
+   fix it. Repeat until a review finds nothing new.
+3. Push once. Let CI, the preview build and the automated review gate run.
+4. Run the acceptance checks on the PR preview.
+5. Record the before-and-after videos last, on the final commit.
+
+If the review gate or the acceptance checks find a bug, fix all findings
+locally, check them again, and then push them together in one push.
+
+### PR preview environments: keep them able to run an optimization
+
+The merger has to sign up and finish a real run in each `*-pr-<n>`
+environment. Five things broke that once; keep them true:
+
+- **The proxy knows the backend's key.** A PR environment gets a fresh
+  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
+  there and every managed call (the assistant included) fails with
+  `Invalid proxy server token`. `deploy/litellm/start.py` registers
+  `LITELLM_SEED_KEY` at boot; on `staging` it must equal the backend's
+  `LITELLM_PROXY_API_KEY`.
+- **Preview accounts verify email and get credit.** In a `*-pr-<n>`
+  environment, sign-up sends a real confirmation code, exactly like `staging`
+  (the test-account helper reads it from the owned inbox), and a new account gets
+  `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
+  that can fund a budget. Production and `staging` keep a 0 grant.
+- **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
+  new account (password or OAuth sign-up) starts with the intake marked done
+  and default answers, so it lands straight in the app
+  (`new_account_intake_completed_at` in `core/api/routers/experience.py`).
+  To check a PR that changes the intake, open Settings → Account → Setup
+  questions → "Run the setup again". Production and `staging` keep the intake.
+- **The setup check routes the same models as the run.** An Auto run's
+  payload names its models under `models.*`. `run_preflight` must alias them
+  (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,
+  exactly like the worker does. Otherwise the metric model gets no metered
+  route, and the run fails with "Scorer models need a gateway the sandboxes
+  can reach". Any new payload shape must go through the same aliasing in both
+  places.
+- **A sandbox command's kill timer stays at or under five hours.** A Vercel
+  box may live 24 hours, but a process kill timer above 18,000,000 ms is
+  rejected with `timeout should be <= 18000000`, and every run fails starting
+  its model proxy. `Sandbox.run` caps `kill_after` at
+  `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
+- **Diagnose before labeling `needs-human`.** Check each service's latest
+  deployment and its events (`aws ecs describe-services --cluster
+  skynet-<env> --services backend worker frontend litellm`).
+
 ## Product and runtime model
 
 - **DSPy** is the structured program/prompt optimization path.
 - **Optimize Anything** is the black-box path. Its native engines come from the
   pinned upstream GEPA implementation and include GEPA, Best-of-N and
-  Meta-Harness, plus Skynet's own AutoResearch. `Auto` composes eligible engines without
+  Meta-Harness, plus Skynet's own AutoResearch and the pinned AutoSaddler and
+  ShinkaEvolve packages. `Auto` composes eligible engines without
   redefining their algorithms.
 - **Vercel Sandbox** is the production execution boundary for user workloads,
   including optimization setup, runs, recovery, and completed-run
@@ -30,8 +140,9 @@
 - **Dependency management**: `uv` is authoritative for backend development and
   CI; compiled `requirements*.txt` files support the pip/Docker paths. The
   frontend uses npm and a committed lockfile.
-- **Deployment**: backend containers, Helm manifests, a LiteLLM gateway, and a
-  pinned Vercel Container Registry sandbox image.
+- **Deployment**: AWS ECS Fargate backend/worker/frontend containers and a
+  LiteLLM gateway (`infra/terraform`), and a pinned Vercel Container Registry
+  sandbox image.
 
 ## Project layout
 
@@ -112,11 +223,11 @@
 │       └── types/                App-wide ambient/shared TypeScript declarations
 │
 ├── deploy/
-│   ├── helm/skynet/             Kubernetes chart and environment values
 │   └── litellm/                 Gateway image, config, callbacks, and local stack
 ├── docs/                        Auth, Stripe, and upstream-optimizer guides
 ├── i18n/                        Locale source catalogs, schema, and glossary
-├── scripts/                     i18n generation, air-gap migration, sample data
+├── scripts/                     i18n generation, sample data,
+│   └── agent/                   install (`just setup`) and health-report scripts
 ├── data/                        Repository datasets/fixtures
 ├── submission-wizard-implementation-spec.md
 ├── Justfile                     Canonical local task shortcuts
@@ -133,6 +244,32 @@ under `core/api/routers/optimizations/` are split further by lifecycle concern.
 - **Backend API**: http://localhost:8000
 - **API reference**: http://localhost:8000/reference
 - **OpenAPI document**: http://localhost:8000/openapi.json
+
+## Install and maintain (agent-ready)
+
+One command installs a fresh clone or worktree. A second command keeps the
+codebase healthy. Each one is a script that writes a log, plus an agent
+prompt that reads the log.
+
+| Recipe | What it does |
+| --- | --- |
+| `just setup` | Deterministic install: `uv sync`, `npm ci`, env files (never overwritten), Postgres/LiteLLM checks, migrations, i18n check. Safe to run again. |
+| `just install-agent` | Runs the Setup hook (`claude --init-only`), then `/install`: the agent checks the log, fixes known issues, runs tests and reports. |
+| `just install-hil` | Same as `install-agent`, but the agent asks the human before each choice. |
+| `just maintain` | Report only: npm audit, pip-audit, Dependabot alerts, outdated deps, Alembic heads, merged worktrees, Docker, untracked files. |
+| `just maintain-agent` | Runs `just maintain`, then `/maintain`: the agent explains the findings and proposes fixes as a PR. |
+
+- Scripts: `scripts/agent/init.sh`, `scripts/agent/maintain.sh`.
+- Logs: `.claude/logs/init-latest.log`, `.claude/logs/maintain-latest.log`
+  (gitignored). Logs never hold secret values.
+- Prompts: `.claude/commands/install.md`, `install-hil.md`, `maintain.md`.
+  Each has a **Common issues** list. Add a Problem / Solution pair when you
+  solve a new failure.
+- Claude Code: `.claude/settings.json` wires the scripts to the `Setup` hook
+  (`init` matcher: `claude --init-only` or `claude -p --init`;
+  `maintenance` matcher: `claude -p --maintenance`).
+- Codex, Factory, Pi and other harnesses: run `just setup` or
+  `just maintain`, then follow the matching prompt file.
 
 ## Running locally
 
@@ -186,11 +323,8 @@ stable and preview Docker build paths.
 
 - There is no auth-off mode. Hosted deployments support backend-verified local
   accounts plus optional Google and GitHub OAuth.
-- Setting `AUTH_SSO_ISSUER`, `AUTH_SSO_CLIENT_ID`, and
-  `AUTH_SSO_CLIENT_SECRET` switches the frontend to the single on-prem OIDC/ADFS
-  path.
 - The frontend and backend share `BACKEND_AUTH_SECRET`; backend identity is the
-  user's email across local, OAuth, and SSO providers.
+  user's email across local and OAuth providers.
 - See both `.env.example` files before changing auth.
 
 ## Internationalization and direction
@@ -221,9 +355,12 @@ When extracting a FastAPI route from `app.py` into a domain router, any
 inline `class FooRequest(BaseModel)` you move must **keep or drop docstrings
 exactly as in the source**. Pydantic emits the class docstring into the
 OpenAPI schema as `components.schemas.FooRequest.description` — add one
-where there wasn't one (or remove one that existed) and the `openapi.json`
-hash drifts, failing the regression gate. If you need to document the
-class for readers, use a comment above the class, not a docstring.
+where there wasn't one (or remove one that existed) and the published
+`openapi.json` changes. No test guards this any more (the old schema-hash
+regression test was removed), so compare the schema before and after by hand,
+e.g. with `.claude/skills/verify-skynet-api/scripts/openapi-hash.sh`. If you
+need to document the class for readers, use a comment above the class, not a
+docstring.
 
 ### Backend — domain router factory pattern
 

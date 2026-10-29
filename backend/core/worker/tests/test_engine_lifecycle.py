@@ -7,9 +7,10 @@ Methods tested (no real subprocesses, no real multiprocessing.Queue):
   BackgroundWorker.dump_thread_stacks       — returns a string without raising
   get_worker                                — singleton contract, pending IDs enqueued
   reset_worker_for_tests                    — clears the module-level singleton
+  BackgroundWorker._process_job             — run_completed / run_failed telemetry facts
 
 Methods intentionally NOT tested here:
-  start() / _worker_loop() / _process_job() — require real threads + real mp.Process
+  start() / _worker_loop()                  — require real threads + real mp.Process
 """
 
 from __future__ import annotations
@@ -18,12 +19,13 @@ import queue
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import cast
-from unittest.mock import MagicMock, call
+from typing import Any, cast
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 import core.worker.engine as engine_module
+from core.exceptions import INFRASTRUCTURE_INTERRUPTION
 from core.storage.base import JobStore
 from core.worker.constants import (
     EVENT_AGENT_RUN,
@@ -35,7 +37,7 @@ from core.worker.constants import (
 from core.worker.engine import BackgroundWorker, get_worker, reset_worker_for_tests
 
 from .conftest import FakeJobStore
-from .mocks import fake_mp_process
+from .mocks import REAL_RUN_PAYLOAD, fake_mp_process, make_mp_context
 
 
 @pytest.fixture(autouse=True)
@@ -722,3 +724,165 @@ def test_stop_blackbox_sandboxes_swallows_a_failed_sweep(
 
     assert runtime.swept == ["opt-1"]
     assert store.append_log_calls == []
+
+
+def test_renewing_lease_touches_activity_while_a_blocking_step_runs(
+    worker: BackgroundWorker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A step that outlasts the lease window keeps renewing the lease until it exits."""
+    touches: list[int] = []
+    monkeypatch.setattr(worker, "_lease_seconds", 0.06)
+    monkeypatch.setattr(worker, "_touch_activity", touches.append)
+
+    with worker._renewing_lease(1):
+        threading.Event().wait(0.2)
+        renewed_during_step = len(touches)
+
+    assert renewed_during_step >= 3
+    assert len(touches) == renewed_during_step + 1
+    assert set(touches) == {1}
+
+
+_SAMPLE_ROWS = [{"question": "Capital of France?", "answer": "Paris"}, {"question": "2 + 2?", "answer": "4"}]
+_OUTCOME_OVERVIEW = {"optimization_type": "run", "username": "alice", "optimizer_name": "gepa"}
+
+
+def _run_outcome_event(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+    events: list[dict[str, Any]],
+    *,
+    dataset: list[dict[str, Any]] | None = None,
+    job_id: str = "opt-outcome",
+) -> tuple[str, dict[str, Any]]:
+    """Run one mocked job and return its outcome event's name and properties.
+
+    Args:
+        worker: Worker under test.
+        store: In-memory store the job is seeded into.
+        events: Events the fake optimizer process emits.
+        dataset: Dataset rows for the stored payload; the default payload's otherwise.
+        job_id: Id of the seeded job.
+
+    Returns:
+        The recorded event name and its properties.
+    """
+    payload = {**REAL_RUN_PAYLOAD, "dataset": dataset or REAL_RUN_PAYLOAD["dataset"]}
+    store.seed_job(job_id, payload=payload, payload_overview=_OUTCOME_OVERVIEW)
+    worker.enqueue_job(job_id)
+    ctx, _proc = make_mp_context(exitcode=0, result_events=events)
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+    with (
+        patch.object(engine_module, "SAMPLE_DATASETS", {"qa": {"rows": _SAMPLE_ROWS}}),
+        patch.object(engine_module, "notify_job_completed"),
+        patch.object(engine_module, "record_server_event") as record,
+        patch.object(worker, "_get_service"),
+    ):
+        worker._process_job(job_id, 0)
+    record.assert_called_once()
+    return record.call_args.kwargs["name"], record.call_args.kwargs["properties"]
+
+
+def test_run_completed_carries_lift_held_out_and_sample_flag(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A finished run on a bundled sample reports its scores, held-out facts and from_sample."""
+    result = {
+        "baseline_test_metric": 0.5,
+        "optimized_test_metric": 0.8,
+        "split_counts": {"train": 10, "val": 5, "test": 24},
+    }
+    name, props = _run_outcome_event(worker, store, [{"type": EVENT_RESULT, "result": result}], dataset=_SAMPLE_ROWS)
+
+    assert name == "run_completed"
+    assert props["baseline"] == 0.5
+    assert props["optimized"] == 0.8
+    assert props["lift"] == pytest.approx(0.3)
+    assert props["held_out"] is True
+    assert props["held_out_rows"] == 24
+    assert props["from_sample"] is True
+
+
+def test_run_completed_from_upload_without_scores(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A user upload is not a sample, and a result without scores reports a null lift."""
+    name, props = _run_outcome_event(worker, store, [{"type": EVENT_RESULT, "result": {"module_name": "m"}}])
+
+    assert name == "run_completed"
+    assert props["from_sample"] is False
+    assert props["lift"] is None
+
+
+def test_run_failed_separates_sandbox_and_optimizer_errors(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """Sandbox and optimizer failures get different stages and a class name, never the error text."""
+    _, sandbox = _run_outcome_event(
+        worker,
+        store,
+        [
+            {
+                "type": EVENT_ERROR,
+                "error": "sandbox lost secret-path",
+                "error_type": "SandboxGone",
+                "failure_kind": INFRASTRUCTURE_INTERRUPTION,
+            }
+        ],
+    )
+    _, optimizer = _run_outcome_event(
+        worker,
+        store,
+        [{"type": EVENT_ERROR, "error": "metric blew up on private-row", "error_type": "ZeroDivisionError"}],
+        job_id="opt-optimizer-error",
+    )
+
+    assert sandbox["failure_stage"] == "sandbox"
+    assert sandbox["error_class"] == "InfrastructureInterruptionError"
+    assert optimizer["failure_stage"] == "optimize"
+    assert optimizer["error_class"] == "ZeroDivisionError"
+    for props in (sandbox, optimizer):
+        assert not any("secret" in str(value) or "private" in str(value) for value in props.values())
+
+
+def test_run_failed_before_dispatch_is_preflight(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A job that fails before reaching the sandbox reports the preflight stage."""
+    store.seed_job("opt-empty", payload=None, payload_overview=_OUTCOME_OVERVIEW)
+    worker.enqueue_job("opt-empty")
+    with (
+        patch.object(engine_module, "notify_job_completed"),
+        patch.object(engine_module, "record_server_event") as record,
+    ):
+        worker._process_job("opt-empty", 0)
+
+    assert record.call_args.kwargs["properties"]["failure_stage"] == "preflight"
+    assert record.call_args.kwargs["properties"]["error_class"] == "ValueError"
+
+
+def test_outcome_helper_raising_never_changes_job_status(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A crash in the run-outcome helper is swallowed and the run still succeeds."""
+    store.seed_job("opt-helper", payload=dict(REAL_RUN_PAYLOAD), payload_overview=_OUTCOME_OVERVIEW)
+    worker.enqueue_job("opt-helper")
+    ctx, _proc = make_mp_context(exitcode=0, result_events=[{"type": EVENT_RESULT, "result": {"best_score": 1}}])
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+    with (
+        patch.object(engine_module, "completed_properties", side_effect=RuntimeError("helper bug")),
+        patch.object(engine_module, "notify_job_completed"),
+        patch.object(engine_module, "record_server_event") as record,
+        patch.object(worker, "_get_service"),
+    ):
+        worker._process_job("opt-helper", 0)
+
+    assert store._jobs["opt-helper"]["status"] == "success"
+    record.assert_not_called()

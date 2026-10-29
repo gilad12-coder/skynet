@@ -1,37 +1,22 @@
-# check=skip=SecretsUsedInArgOrEnv
-# ^ SENTRY_AUTH_TOKEN is deliberately a build ARG: Railway exposes variables to
-#   Dockerfile builds only through ARG (no BuildKit secret mounts). It lives in
-#   the discarded build stage only, so the lint rule does not apply here.
-# On-prem mirrors / artifactory: see AIRGAP.html.
-#
-# Build args:
-#   BASE_IMAGE   — node:20-alpine compatible image; override with internal mirror.
-#   NPM_REGISTRY — npm registry URL; override with Artifactory for air-gap builds.
-#                  registry.npmjs.org tarball URLs in the lockfile are rewritten
-#                  to it. xlsx is the exception: it installs from cdn.sheetjs.com,
-#                  which is not on npm, so that host is left as is.
-ARG BASE_IMAGE=node:20-alpine
-ARG NPM_REGISTRY=https://registry.npmjs.org/
-
-FROM ${BASE_IMAGE} AS base
+FROM node:20-alpine AS base
 ENV NEXT_TELEMETRY_DISABLED=1
 
 FROM base AS deps
-ARG NPM_REGISTRY
 WORKDIR /app
 
 COPY package.json package-lock.json .npmrc* ./
-RUN npm config set registry "$NPM_REGISTRY" \
-    && npm config set replace-registry-host npmjs \
-    && npm ci
+# The npm download cache and Next's compile cache live in cache mounts, so a
+# rebuild reuses them even when a layer above them changes.
+RUN --mount=type=cache,id=frontend-npm,target=/root/.npm \
+    npm ci --prefer-offline
 
 FROM base AS build
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Baked at build time for air-gap correctness: Next.js inlines these NEXT_PUBLIC_*
-# values at `npm run build`, so they cannot be overridden on a prebuilt image.
+# Next.js inlines these NEXT_PUBLIC_* values at `npm run build`, so they must be
+# build args; they cannot be overridden on a prebuilt image.
 ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_FEATURE_GENERALIST_AGENT
 ARG NEXT_PUBLIC_SENTRY_DSN
@@ -42,20 +27,15 @@ ENV NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=$NEXT_PUBLIC_FEATURE_GENERALIST_AGENT
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
-# Sentry source-map upload (withSentryConfig in next.config.ts) runs inside
-# `npm run build`, so it only sees these when they are declared as build args.
-# Railway passes service variables into a Dockerfile build solely via ARG.
-# Build-stage only: nothing here is copied into the runner image.
-# .git is dockerignored, so the plugin cannot read the commit itself; it does
-# read RAILWAY_GIT_COMMIT_SHA, which keeps the uploaded release equal to the
-# one sentry.server.config.ts / sentry.edge.config.ts report at runtime.
-ARG SENTRY_ORG
-ARG SENTRY_PROJECT
-ARG SENTRY_AUTH_TOKEN
-ARG RAILWAY_GIT_COMMIT_SHA
+# .git is dockerignored, so withSentryConfig (next.config.ts) cannot read the
+# commit itself. It reads SENTRY_RELEASE during `npm run build` and bakes it
+# into the bundle as the Sentry release name. APP_GIT_SHA names the commit.
+ARG APP_GIT_SHA
+ENV SENTRY_RELEASE=$APP_GIT_SHA
 # The footer's AGPL source link points at this commit (legal-config.ts).
-ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
-RUN node scripts/generate-third-party-licenses.mjs && npm run build
+ENV NEXT_PUBLIC_SOURCE_COMMIT=$APP_GIT_SHA
+RUN --mount=type=cache,id=frontend-next-cache,target=/app/.next/cache \
+    node scripts/generate-third-party-licenses.mjs && npm run build
 
 FROM base AS runner
 WORKDIR /app
@@ -63,9 +43,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 
-# Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).
-# OpenShift assigns a random UID at runtime but always with GID 0, so runtime files must be
-# group-0-owned and group-writable. Alpine uses busybox addgroup/adduser syntax.
+# Run as a non-root user. Alpine uses busybox addgroup/adduser syntax.
 RUN addgroup -g 1001 appuser 2>/dev/null || true \
     && adduser -u 1001 -G root -h /home/appuser -s /sbin/nologin -D appuser
 

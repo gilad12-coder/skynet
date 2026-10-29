@@ -3,6 +3,8 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import type { ActivityKind } from "@/shared/lib/activity-summary";
+
 import { AgentBubble } from "./agent-bubble";
 import { MessageActions } from "./message-actions";
 import { TtftIndicator } from "./ttft-indicator";
@@ -26,8 +28,12 @@ interface ChatTranscriptProps {
   editAndResend: (index: number, content: string) => void;
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
+  isStepCall?: (call: AgentToolCall) => boolean;
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   toolCallsBeforeContent?: boolean;
   onRunCode?: (code: string, language: string) => void;
+  /** What an agent message shows after its text, such as a tool's closing outcome. */
+  renderAfterContent?: (msg: AgentMessage) => React.ReactNode;
   animatePairs?: boolean;
   trailing?: (state: ChatTranscriptState) => React.ReactNode;
 }
@@ -42,8 +48,11 @@ export function ChatTranscript({
   editAndResend,
   thinking,
   renderToolCall,
+  isStepCall,
+  stepKind,
   toolCallsBeforeContent,
   onRunCode,
+  renderAfterContent,
   animatePairs,
   trailing,
 }: ChatTranscriptProps) {
@@ -60,7 +69,7 @@ export function ChatTranscript({
         if (currentUser) {
           result.push({ key: `t-${seq++}`, user: currentUser, agent: null });
         }
-        currentUser = { msg: m, index: idx };
+        currentUser = m.hidden ? null : { msg: m, index: idx };
       } else {
         result.push({ key: `t-${seq++}`, user: currentUser, agent: m });
         currentUser = null;
@@ -133,10 +142,17 @@ export function ChatTranscript({
     // null (no text, tools, or reasoning yet). The ember stands in for that
     // empty placeholder and is unmounted the moment any of those signals lands.
     const pairThinking = pair.key === latestAgentKey ? thinking : undefined;
-    const hasThinking = Boolean(
-      pairThinking && (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
-    );
+    const hasThinking = agentMsg?.thinkingSegments
+      ? agentMsg.thinkingSegments.some(
+          (s) => s.reasoning || (isStreamingThisPair && s.startedAt),
+        )
+      : Boolean(
+          pairThinking &&
+            (pairThinking.reasoning || (pairThinking.streaming && pairThinking.startedAt)),
+        );
+    // A turn with a history shows Codex's own "Thinking" line from the start.
     const isWaitingFirstToken =
+      !(renderToolCall && isStepCall) &&
       isStreamingThisPair &&
       agentText.length === 0 &&
       !(agentMsg?.toolCalls?.length ?? 0) &&
@@ -162,15 +178,19 @@ export function ChatTranscript({
           ))}
 
         {agentMsg && !isEditing && (
-          <div className="flex justify-end">
-            <div className="flex flex-col items-end gap-1 max-w-[88%]">
+          <div className="flex">
+            <div className="flex w-full min-w-0 flex-col items-start gap-1.5 pt-1">
               {isWaitingFirstToken && <TtftIndicator />}
               <AgentBubble
                 msg={agentMsg}
                 thinking={pair.key === latestAgentKey ? thinking : undefined}
+                streaming={isStreamingThisPair}
                 renderToolCall={renderToolCall}
+                isStepCall={isStepCall}
+                stepKind={stepKind}
                 toolCallsBeforeContent={toolCallsBeforeContent}
                 onRunCode={onRunCode}
+                afterContent={renderAfterContent?.(agentMsg)}
                 className="max-w-full"
               />
               {showActions && (
@@ -209,7 +229,7 @@ export function ChatTranscript({
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-          className="space-y-1.5"
+          className="space-y-3"
         >
           {renderPairBody(pair)}
         </motion.div>
@@ -217,7 +237,7 @@ export function ChatTranscript({
     </AnimatePresence>
   ) : (
     visiblePairs.map((pair) => (
-      <div key={pair.key} className="space-y-1.5">
+      <div key={pair.key} className="space-y-3">
         {renderPairBody(pair)}
       </div>
     ))

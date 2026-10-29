@@ -65,7 +65,14 @@ export function TaggerReviewGate({
   }, [unlocked]);
 
   if (roundLoading) {
-    return <LoadingState label={msg("tagger.assist.gate.preparing")} className="min-h-[40vh]" />;
+    // Holds the rail's width so the annotation column beside it does not
+    // widen while the round loads and snap back when the rail arrives.
+    return (
+      <LoadingState
+        label={msg("tagger.assist.gate.preparing")}
+        className="min-h-[40dvh] w-full lg:w-[300px]"
+      />
+    );
   }
 
   return (
@@ -93,7 +100,11 @@ export function TaggerReviewGate({
         <CardContent className="flex flex-col gap-3">
           {assistError && (
             <p role="alert" className="text-xs text-destructive">
-              {msg("tagger.assist.gate.error")}
+              {msg(
+                assistError === "local_key"
+                  ? "tagger.assist.local_key_needed"
+                  : "tagger.assist.gate.error",
+              )}
             </p>
           )}
 

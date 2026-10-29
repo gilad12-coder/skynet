@@ -1,7 +1,6 @@
 "use client";
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -9,8 +8,8 @@ import {
   Check,
   CircleNotch,
   Clock,
-  Hourglass,
   ListChecks,
+  Terminal,
   Warning,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -29,7 +28,6 @@ import type {
   ValidationUsageWait,
 } from "../lib/preflight-store";
 import { USAGE_WAIT_ATTEMPTS, USAGE_WAIT_INTERVAL_MS } from "../lib/wait-for-preflight-usage";
-import { cnGrid } from "./blackbox/shared";
 
 type PreflightCheck = WizardPreflightResponse["checks"][number];
 
@@ -65,6 +63,13 @@ const checkKeys: Record<string, MessageKey> = {
   "scorer.model": "submit.validation.check.scorer.model",
   "scorer.readiness": "submit.validation.check.scorer.readiness",
   "target.readiness": "submit.validation.check.target.readiness",
+  "metric.contract": "submit.validation.check.metric.contract" as MessageKey,
+  // The unified contract check's items, run on the same screen.
+  "workspace.run_signature": "submit.v2.metric.check.key.workspace.run_signature",
+  "metric.signature": "submit.v2.metric.check.key.metric.signature",
+  "metric.model": "submit.v2.metric.check.key.metric.model",
+  "workspace.run": "submit.v2.metric.check.key.workspace.run",
+  "metric.shape": "submit.v2.metric.check.key.metric.shape",
 };
 
 const roleKeys: Record<string, MessageKey> = {
@@ -82,14 +87,13 @@ const checkStateKeys: Record<PreflightCheck["status"], MessageKey> = {
 
 // The steps a check walks through, in order. A step the server skips drops
 // out of "up next" as soon as a later one starts.
+// The unified run checks its code contract (metric.contract) in the evaluator
+// step, after the sandbox is up. Before a run, the models are probed first, so
+// a limit that cannot fund one call fails before the sandbox opens.
 const PLAN: Record<PreflightWorkflow, Record<PreflightScope, readonly ValidationPhase[]>> = {
-  dspy: {
+  unified: {
     evaluation: ["budget", "sandbox", "evaluator", "usage"],
-    execution: ["budget", "sandbox", "evaluator", "models", "usage"],
-  },
-  anything: {
-    evaluation: ["budget", "dependencies", "sandbox", "evaluator", "usage"],
-    execution: ["budget", "dependencies", "sandbox", "evaluator", "models", "usage"],
+    execution: ["budget", "models", "sandbox", "evaluator", "usage"],
   },
 };
 
@@ -101,8 +105,8 @@ const SUCCESS_LINGER_MS = 1200;
 // A step that has run this long gets a word of reassurance.
 const SLOW_AFTER_MS = 30_000;
 
-// Rough per-step budgets, used only to fill the progress bar and to read out
-// how much time is likely left. The evaluator step dominates a real run.
+// Rough per-step budgets, used only to fill the progress bar. The evaluator
+// step dominates a real run.
 const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   budget: 4_000,
   dependencies: 20_000,
@@ -111,10 +115,6 @@ const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
   models: 15_000,
   usage: 20_000,
 };
-
-// Below this much time left the finish is close enough that a countdown only
-// flickers, so the estimate steps aside.
-const ETA_HIDE_BELOW_MS = 8_000;
 
 // A running bar never quite fills — the last stretch belongs to the result.
 const RUNNING_BAR_CAP = 0.92;
@@ -138,6 +138,14 @@ function phaseForCheck(key: string, thrown: ValidationPhase): ValidationPhase {
   // "setup" is the run itself giving up, wherever it stood at the time.
   if (key === "setup") return thrown;
   return "evaluator";
+}
+
+/** Collapse/expand a block with a grid-rows transition. */
+function cnGrid(open: boolean): string {
+  return cn(
+    "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+    open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+  );
 }
 
 function duration(ms: number): string {
@@ -203,11 +211,20 @@ export function ValidationFrame({
   state,
   onBack,
   settled = false,
+  plan: planOverride,
+  onOpenPhase,
+  phaseNote,
 }: {
   state: ValidationProgress;
   onBack?: () => void;
   /** A finished check kept on the stage it ran from: it neither leaves by itself nor offers a way back. */
   settled?: boolean;
+  /** The steps this check walks, when it is not a preflight of `state.workflow`. */
+  plan?: readonly ValidationPhase[];
+  /** Opens a row's live log; rows without one keep only their details. */
+  onOpenPhase?: (phase: ValidationPhase) => void;
+  /** Finer progress for a running row, e.g. how many samples are done. */
+  phaseNote?: (phase: ValidationPhase) => string | undefined;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const running = state.status === "running";
@@ -258,7 +275,7 @@ export function ValidationFrame({
     checksByRow.set(row, [...(checksByRow.get(row) ?? []), check]);
   }
   const brokenRow = failedPhase ? rowFor(failedPhase) : -1;
-  const plan = PLAN[state.workflow][state.scope];
+  const plan = planOverride ?? PLAN[state.workflow][state.scope];
   const reached = plan.indexOf(current);
   const upcoming = running && reached >= 0 ? plan.slice(reached + 1) : [];
 
@@ -290,14 +307,6 @@ export function ValidationFrame({
         ? "bg-foreground/70"
         : "bg-[var(--warning)]";
 
-  // The estimate only earns a spot on a real wait: while running, off the
-  // usage poll (which shows its own countdown), and with room left to name.
-  const showEta = running && activeKey !== "usage" && remainingMs >= ETA_HIDE_BELOW_MS;
-  const etaLabel =
-    remainingMs >= 60_000
-      ? msg("submit.validation.progress.eta", { minutes: Math.ceil(remainingMs / 60_000) })
-      : msg("submit.validation.progress.eta_soon");
-
   const title = running
     ? msg("submit.validation.progress.title")
     : success
@@ -316,7 +325,7 @@ export function ValidationFrame({
 
   return (
     <section
-      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl"
+      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl"
       aria-busy={running}
       data-tutorial={settled ? undefined : "wizard-validation"}
     >
@@ -345,25 +354,7 @@ export function ValidationFrame({
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
-            <AnimatePresence initial={false}>
-              {showEta && (
-                <Badge key="eta" asChild variant="secondary" size="sm">
-                  <motion.span
-                    dir="auto"
-                    initial={reduce ? false : { opacity: 0, y: -3 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
-                  >
-                    <Hourglass aria-hidden="true" />
-                    {etaLabel}
-                  </motion.span>
-                </Badge>
-              )}
-            </AnimatePresence>
-          </div>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
           <p
             className="max-w-prose text-[15px] leading-relaxed text-muted-foreground"
             aria-live="polite"
@@ -402,6 +393,8 @@ export function ValidationFrame({
               now={now}
               open={open}
               onToggle={() => setOpened((rows) => ({ ...rows, [rowKey]: !open }))}
+              onOpenLog={onOpenPhase ? () => onOpenPhase(phase.key) : undefined}
+              note={phaseNote?.(phase.key)}
               checks={rowChecks}
               score={phase.key === "evaluator" ? score : undefined}
               usage={phase.key === "usage" ? state.usage : undefined}
@@ -444,13 +437,19 @@ export function ValidationPlan({
   workflow,
   scope,
   stale,
+  plan,
+  description,
 }: {
   workflow: PreflightWorkflow;
   scope: PreflightScope;
   stale: boolean;
+  /** The steps this check walks, when it is not a preflight of `workflow`. */
+  plan?: readonly ValidationPhase[];
+  /** Replaces the idle line, e.g. when the check cannot run yet. */
+  description?: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl">
+    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl">
       <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">
         <div
           className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"
@@ -465,12 +464,12 @@ export function ValidationPlan({
             )}
           </h2>
           <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground" dir="auto">
-            {msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
+            {description ?? msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
           </p>
         </div>
       </div>
       <ol className="divide-y divide-border/60 border-t border-border/60">
-        {PLAN[workflow][scope].map((key, index) => (
+        {(plan ?? PLAN[workflow][scope]).map((key, index) => (
           <UpcomingRow key={key} number={index + 1} phase={key} />
         ))}
       </ol>
@@ -506,6 +505,8 @@ function PhaseRow({
   now,
   open,
   onToggle,
+  onOpenLog,
+  note,
   checks,
   score,
   usage,
@@ -517,6 +518,8 @@ function PhaseRow({
   now: number;
   open: boolean;
   onToggle: () => void;
+  onOpenLog?: () => void;
+  note?: string;
   checks: PreflightCheck[];
   score: number | undefined;
   usage: ValidationUsageWait | undefined;
@@ -538,59 +541,91 @@ function PhaseRow({
     : 0;
   return (
     <li>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-controls={id}
-        className="flex w-full items-center gap-4 px-6 py-4 text-start transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-8"
-      >
-        <span
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={onOpenLog ?? onToggle}
+          aria-expanded={onOpenLog ? undefined : open}
+          aria-controls={onOpenLog ? undefined : id}
+          aria-haspopup={onOpenLog ? "dialog" : undefined}
           className={cn(
-            "relative flex size-9 shrink-0 items-center justify-center rounded-full border",
-            tone === "failed"
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : tone === "pending"
-                ? "border-[var(--warning-border)] bg-[var(--warning-dim)] text-[var(--warning)]"
-                : tone === "done"
-                  ? "border-[var(--success-border)] bg-[var(--success-dim)] text-[var(--success)]"
-                  : "border-border bg-background text-foreground",
+            "group flex min-w-0 flex-1 items-center gap-4 py-4 ps-6 text-start transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 sm:ps-8",
+            onOpenLog ? "pe-2" : "pe-6 sm:pe-8",
           )}
-          aria-hidden="true"
         >
-          {active && !reduce && (
-            <motion.span
-              className="absolute inset-0 rounded-full border border-foreground/25"
-              initial={{ opacity: 0.5, scale: 1 }}
-              animate={{ opacity: 0, scale: 1.7 }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+          <span
+            className={cn(
+              "relative flex size-9 shrink-0 items-center justify-center rounded-full border",
+              tone === "failed"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : tone === "pending"
+                  ? "border-[var(--warning-border)] bg-[var(--warning-dim)] text-[var(--warning)]"
+                  : tone === "done"
+                    ? "border-[var(--success-border)] bg-[var(--success-dim)] text-[var(--success)]"
+                    : "border-border bg-background text-foreground",
+            )}
+            aria-hidden="true"
+          >
+            {active && !reduce && (
+              <motion.span
+                className="absolute inset-0 rounded-full border border-foreground/25"
+                initial={{ opacity: 0.5, scale: 1 }}
+                animate={{ opacity: 0, scale: 1.7 }}
+                transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+              />
+            )}
+            {active ? (
+              <CircleNotch className="size-4 animate-spin" />
+            ) : tone === "failed" ? (
+              <Warning className="size-4" weight="bold" />
+            ) : tone === "pending" ? (
+              <Clock className="size-4" weight="bold" />
+            ) : (
+              <Check className="size-4" weight="bold" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium">{msg(phaseKeys[phase.key])}</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {statusWord}
+              {note ? <span className="tabular-nums"> · {note}</span> : null}
+            </span>
+          </span>
+          {onOpenLog ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground transition-colors group-hover:border-border group-hover:text-foreground">
+              <Terminal className="size-3.5" aria-hidden="true" />
+              {msg("check_terminal.open")}
+            </span>
+          ) : null}
+          <span className="text-sm tabular-nums text-muted-foreground" dir="ltr">
+            {duration(elapsedMs)}
+          </span>
+          {onOpenLog ? null : (
+            <CaretDown
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                open && "rotate-180",
+              )}
+              aria-hidden="true"
             />
           )}
-          {active ? (
-            <CircleNotch className="size-4 animate-spin" />
-          ) : tone === "failed" ? (
-            <Warning className="size-4" weight="bold" />
-          ) : tone === "pending" ? (
-            <Clock className="size-4" weight="bold" />
-          ) : (
-            <Check className="size-4" weight="bold" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[15px] font-medium">{msg(phaseKeys[phase.key])}</span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">{statusWord}</span>
-        </span>
-        <span className="text-sm tabular-nums text-muted-foreground" dir="ltr">
-          {duration(elapsedMs)}
-        </span>
-        <CaretDown
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
-            open && "rotate-180",
-          )}
-          aria-hidden="true"
-        />
-      </button>
+        </button>
+        {onOpenLog ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-controls={id}
+            aria-label={msg(open ? "check_terminal.details_hide" : "check_terminal.details_show")}
+            className="flex shrink-0 items-center pe-6 ps-2 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 sm:pe-8"
+          >
+            <CaretDown
+              className={cn("size-4 transition-transform duration-200", open && "rotate-180")}
+              aria-hidden="true"
+            />
+          </button>
+        ) : null}
+      </div>
       <div id={id} className={cnGrid(open)} inert={open ? undefined : true}>
         <div className="overflow-hidden">
           <div className="space-y-3 px-6 pb-5 ps-[4.75rem] sm:px-8 sm:ps-[5.25rem]">
@@ -624,7 +659,8 @@ function PhaseRow({
               <ul className="space-y-2">
                 {checks.map((check, index) => (
                   <motion.li
-                    key={check.key}
+                    // A contract check repeats a key once per sample.
+                    key={`${check.key}-${index}`}
                     className="flex items-start gap-2.5 text-sm"
                     initial={reduce ? false : { opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}

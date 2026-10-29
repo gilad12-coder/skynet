@@ -9,7 +9,7 @@ export interface CandidateVersion {
   /**
    * The score the run ranked it by — the validation-set figure the candidate tree
    * shows when the engine recorded one, else the mean inside the budget; falls back
-   * to the held-out metric for versions never scored there.
+   * to the final-run score for versions never scored there.
    */
   score: number | null;
   /** Running mean over every scorer call inside the budget; null before version means were recorded or when the version never went through the budget. */
@@ -68,7 +68,7 @@ export function buildVersions(result: BlackboxRunResult): CandidateVersion[] {
   if (result.seed_candidate != null && seedText.length > 0) {
     const record = history.find((v) => candidateToText(v.candidate) === seedText) ?? null;
     versions.push(
-      fromRecord(result.seed_candidate, seedText, record, result.baseline_test_metric, true),
+      fromRecord(result.seed_candidate, seedText, record, result.baseline_score ?? result.baseline_test_metric ?? null, true),
     );
     seen.add(seedText);
   }
@@ -80,7 +80,7 @@ export function buildVersions(result: BlackboxRunResult): CandidateVersion[] {
   }
   if (bestText.length > 0 && !seen.has(bestText)) {
     versions.push(
-      fromRecord(result.best_candidate, bestText, null, result.optimized_test_metric, false),
+      fromRecord(result.best_candidate, bestText, null, result.best_score ?? result.optimized_test_metric ?? null, false),
     );
   }
 
@@ -89,6 +89,43 @@ export function buildVersions(result: BlackboxRunResult): CandidateVersion[] {
     version.isBest = version.text === bestText;
   });
   return versions;
+}
+
+// Engines wrap a plain-text candidate under this one synthetic key.
+const STR_CANDIDATE_KEY = "current_candidate";
+
+function promptText(prompt: Record<string, string> | BlackboxCandidate): string {
+  if (typeof prompt === "string") return prompt;
+  const keys = Object.keys(prompt);
+  if (keys.length === 1 && keys[0] === STR_CANDIDATE_KEY) return prompt[STR_CANDIDATE_KEY] ?? "";
+  return candidateToText(prompt);
+}
+
+/**
+ * The version a candidate-tree node shows, matched by its text; a node that
+ * never became a version (rejected, or still being scored) gets one of its
+ * own with no number to name it by.
+ */
+export function versionForPrompt(
+  versions: CandidateVersion[],
+  prompt: Record<string, string>,
+): CandidateVersion | null {
+  const text = promptText(prompt);
+  if (Object.keys(prompt).length === 0) return null;
+  return (
+    versions.find((v) => v.text === text) ?? {
+      number: -1,
+      candidate: text,
+      text,
+      score: null,
+      meanScore: null,
+      evals: 0,
+      firstRun: null,
+      sideInfo: {},
+      isSeed: false,
+      isBest: false,
+    }
+  );
 }
 
 /** Index of the version a fresh view should open on: the returned best, else the last one. */

@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Database,
   FileText,
+  Tag,
   ChatText,
   Sparkle,
   Trash,
@@ -40,6 +41,11 @@ const TYPE_META: Record<
     icon: Database,
     label: "storage.type.dataset",
     href: (id) => `/datasets?open=${id}`,
+  },
+  tagging_session: {
+    icon: Tag,
+    label: "storage.type.tagging_session",
+    href: (id) => `/tagger/${id}`,
   },
   // Chats live in the slide-over agent panel; ?chat=<id> opens the panel onto
   // that conversation from whichever route the link is clicked on.
@@ -94,7 +100,7 @@ export function StorageItemRow({
     <li
       className={cn(
         "group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors duration-150",
-        selected ? "bg-primary/[0.08] hover:bg-primary/[0.12]" : "hover:bg-muted/50",
+        selected ? "bg-primary-fill/[0.08] hover:bg-primary-fill/[0.12]" : "hover:bg-muted/50",
       )}
     >
       <SelectCheckbox

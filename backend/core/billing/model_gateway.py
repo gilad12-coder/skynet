@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import copy
 import json
-import os
+import logging
 import re
 import secrets
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
-from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import httpx
 
-from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, app_env
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from .budgets import BudgetError, BudgetInsufficientError
 from .credential_safety import scrub_model_config
@@ -39,19 +39,28 @@ from .protected_credentials import (
     SCORER_URL_REF_FIELD,
     SCORER_URL_REVISION_FIELD,
 )
-from .recovery_admission import (
-    build_recovery_plan,
-    model_call_bound,
-    quote_fits_bound,
-    runtime_bound,
-    validate_recovery_runtime,
-)
 from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportError
-from .runtime import BudgetRuntime, UsagePendingError
+from .runtime import BudgetRuntime, ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
+from .usage_tags import USAGE_TAGS_HEADERS
+
+logger = logging.getLogger(__name__)
 
 ROUTE_KEY = "_skynet_budget_route"
+# Key, inside the first optimization model's route, of the embeddings route
+# ShinkaEvolve's duplicate rejection uses; it bills like the model beside it.
+EMBEDDING_ROUTE_KEY = "embedding"
+# Cheap, widely served OpenRouter embeddings model with published endpoint prices.
+SHINKA_EMBEDDING_MODEL = "openai/text-embedding-3-small"
+# Descriptor key naming the hosts a parent-owned repository scoring box may
+# reach; when present, that box is funded alongside the outer sandbox.
+PARENT_HOSTS_KEY = "parent_allowed_hosts"
 _MAX_REQUEST_BYTES = 32 * 1024 * 1024
+# The state read travels the sandbox mailbox relay, which can lag for seconds
+# under load; one slow reply must not discard a finished run's result.
+_BUDGET_STATE_ATTEMPTS = 3
+_BUDGET_STATE_TIMEOUT_SECONDS = 30
+_BUDGET_STATE_RETRY_DELAY_SECONDS = 2
 _MODEL_ATTEMPT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _TRANSIENT_SANDBOX_ERROR_TYPES = frozenset(
     {
@@ -129,6 +138,10 @@ class SandboxControl(Protocol):
         """Execute an owned guest command and return its terminal result."""
         ...
 
+    def parent_runtime(self, allowed_hosts: tuple[str, ...]) -> Any:
+        """Return a runtime for the parent's own boxes, never reachable by the guest."""
+        ...
+
     def close(self) -> None:
         """Stop every owned sandbox and settle its confirmed usage."""
         ...
@@ -144,15 +157,20 @@ def raise_gateway_stop(route: Mapping[str, Any]) -> None:
         BudgetReached: When the authoritative parent stopped admission for budget.
         UsagePendingError: When the authority is closed for another accounting reason.
     """
-    try:
-        response = httpx.get(
-            f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state",
-            headers={"Authorization": f"Bearer {route['token']}"},
-            timeout=10,
-            trust_env=False,
-        )
-    except httpx.TransportError as error:
-        raise InfrastructureInterruptionError("The trusted parent model transport was interrupted.") from error
+    url = f"{app_env('APP_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/state"
+    for attempt in range(_BUDGET_STATE_ATTEMPTS):
+        try:
+            response = httpx.get(
+                url,
+                headers={"Authorization": f"Bearer {route['token']}"},
+                timeout=_BUDGET_STATE_TIMEOUT_SECONDS,
+                trust_env=False,
+            )
+            break
+        except httpx.TransportError as error:
+            if attempt == _BUDGET_STATE_ATTEMPTS - 1:
+                raise InfrastructureInterruptionError("The trusted parent model transport was interrupted.") from error
+            time.sleep(_BUDGET_STATE_RETRY_DELAY_SECONDS)
     response.raise_for_status()
     budget = response.json()
     if budget.get("blocked_reason") == "budget_reached":
@@ -169,18 +187,22 @@ class ModelGateway:
         runtime: BudgetRuntime,
         *,
         timeout: float = 600,
-        recovery_plan: Mapping[str, Any] | None = None,
     ) -> None:
         """Start a loopback-only service for one setup or run authority.
 
         Args:
             runtime: Owner-bound, generation-fenced spending context.
             timeout: Physical provider request timeout, excluding hidden retries.
-            recovery_plan: Checkpoint-bound replay caps already covered by one ledger hold.
         """
         self.runtime = runtime
+        # The guest only sees a 402 for a call the budget could not cover, so the
+        # parent keeps the refusal to tell a spent budget from a code failure,
+        # and its type to tell the limit from the account balance.
+        self.budget_refusal: BudgetInsufficientError | None = None
         self._client = httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False)
         self._routes: dict[str, OpenRouterDispatcher] = {}
+        self._observers: dict[str, list[Callable[[Mapping[str, Any]], None]]] = {}
+        self._parent_only: set[str] = set()
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
         self._evaluator: EvaluatorEndpoint | None = None
@@ -190,16 +212,6 @@ class ModelGateway:
         self._tool_token = secrets.token_urlsafe(32)
         self._control_token = secrets.token_urlsafe(32)
         self._descriptor: dict[str, Any] | None = None
-        self._recovery_lock = threading.Lock()
-        self._recovery_plan = copy.deepcopy(dict(recovery_plan)) if recovery_plan is not None else None
-        self._seed_marker_count = 0
-        self._seed_complete = False
-        self._seed_bounds: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-        self._execution_bounds: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-        self._recovery_seed_used: dict[int, int] = {}
-        self._recovery_seed_claims: dict[tuple[str, int], int] = {}
-        self._recovery_execution_claim: tuple[str, int] | None = None
-        self._recovery_ineligible_reason: str | None = None
         # Set once the job's event queue exists, so an economy batch's polling
         # keeps the stall watchdog from mistaking a long wait for a hang.
         self.heartbeat: Callable[[], None] | None = None
@@ -276,18 +288,6 @@ class ModelGateway:
                 if route is None and not is_tools and not is_evaluator and not is_packages:
                     self._error(401, "unauthorized", "Unknown scoped model route.")
                     return
-                if self.path == "/v1/_budget/recovery-seed-complete":
-                    try:
-                        length = int(self.headers.get("Content-Length", "0"))
-                        if not 0 <= length <= 1024:
-                            raise ValueError("Recovery marker exceeds the supported size.")
-                        if length and json.loads(self.rfile.read(length)) != {}:
-                            raise ValueError("Recovery marker body must be empty.")
-                        gateway.finish_recovery_seed()
-                        self._reply(ModelHTTPResult(200, "application/json", b'{"ok":true}'))
-                    except (ValueError, TypeError) as error:
-                        self._error(422, "invalid_recovery_marker", str(error))
-                    return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     if not 0 < length <= _MAX_REQUEST_BYTES:
@@ -312,15 +312,20 @@ class ModelGateway:
                             protocol_headers={
                                 name: value
                                 for name, value in self.headers.items()
-                                if name.lower() in {"anthropic-version", "anthropic-beta"}
+                                if name.lower() in {"anthropic-version", "anthropic-beta"} | USAGE_TAGS_HEADERS
                             },
                         )
                     )
                     self._reply(response)
+                    if route is not None and not (is_tools or is_evaluator or is_packages):
+                        gateway._observe(route, body, response)
                 except BudgetReached:
                     self._error(402, "budget_reached", "The remaining budget cannot cover the next operation.")
                 except BudgetInsufficientError:
                     self._error(402, "budget_insufficient", "Increase the total budget or add funds to continue.")
+                except ProviderFailedError as error:
+                    # Only this attempt's bill is open; a 5xx lets the harness retry with a fresh attempt.
+                    self._error(502, "provider_failed", str(error))
                 except (UsagePendingError, BudgetError):
                     self._error(424, "usage_pending", "Previous work must settle before another attempt is admitted.")
                 except (UnpricedOperationError, ValueError, TypeError) as error:
@@ -390,141 +395,21 @@ class ModelGateway:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="budget-model-gateway")
         self._thread.start()
 
-    @staticmethod
-    def _bound_key(bound: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
-        """Return the prompt-free identity of one repeatable model request ceiling."""
-        return (
-            str(bound.get("role")),
-            str(bound.get("model")),
-            str(bound.get("price_binding")),
-            str(bound.get("max_cents")),
-            str(bound.get("max_wallet_cents")),
-        )
-
-    def _observe_model_quote(
-        self,
-        role: str,
-        model: str,
-        quote: Any,
-        operation_key: str,
-        attempt: int,
-    ) -> bool:
-        """Record initial seed bounds or enforce the persisted replay call quota.
-
-        Args:
-            role: Fixed model-route role.
-            model: Exact provider model slug.
-            quote: Fresh verified quote for the fully resolved physical request.
-            operation_key: Stable identity of the physical model attempt.
-            attempt: Retry number within that operation identity.
-
-        Returns:
-            Whether this exact attempt owns recovery headroom in the ledger.
-        """
-        observed = model_call_bound(role, model, quote)
-        claim = (operation_key, attempt)
-        with self._recovery_lock:
-            if self._recovery_plan is None:
-                target = self._execution_bounds if self._seed_complete else self._seed_bounds
-                key = self._bound_key(observed)
-                current = target.get(key)
-                if current is None:
-                    target[key] = observed
-                elif not self._seed_complete:
-                    current["count"] = int(current["count"]) + 1
-                return False
-            if not self._seed_complete:
-                bounds = self._recovery_plan.get("seed_reevaluation", {}).get("model_calls", [])
-                claimed_index = self._recovery_seed_claims.get(claim)
-                if claimed_index is not None:
-                    if not quote_fits_bound(bounds[claimed_index], role, model, quote):
-                        raise ValueError("A recovered seed attempt identity changed its bounded request.")
-                    return True
-                for index, bound in enumerate(bounds):
-                    used = self._recovery_seed_used.get(index, 0)
-                    if used < int(bound.get("count", 0)) and quote_fits_bound(bound, role, model, quote):
-                        self._recovery_seed_used[index] = used + 1
-                        self._recovery_seed_claims[claim] = index
-                        key = self._bound_key(observed)
-                        current = self._seed_bounds.get(key)
-                        if current is None:
-                            self._seed_bounds[key] = observed
-                        else:
-                            current["count"] = int(current["count"]) + 1
-                        return True
-                raise ValueError("Recovered seed evaluation exceeded its persisted model-call or price bound.")
-            if self._recovery_execution_claim is None:
-                bounds = self._recovery_plan.get("execution_headroom", {}).get("model_calls", [])
-                if not any(quote_fits_bound(bound, role, model, quote) for bound in bounds):
-                    raise ValueError("The resumed operation differs from its persisted execution headroom bound.")
-                self._recovery_execution_claim = claim
-            elif self._recovery_execution_claim == claim:
-                return True
-            self._execution_bounds.setdefault(self._bound_key(observed), observed)
-            return self._recovery_execution_claim == claim
-
-    def finish_recovery_seed(self) -> None:
-        """Close the mandatory seed-evaluation phase and activate one execution bound."""
-        with self._recovery_lock:
-            self._seed_marker_count += 1
-            if self._seed_marker_count > 1 and self._recovery_plan is None:
-                self._recovery_ineligible_reason = (
-                    "Multiple independent seed evaluators share this process; recover them as separate GEPA pairs."
-                )
-            self._seed_complete = True
-            if self._recovery_plan is not None:
-                self.runtime.finish_recovery_seed()
-
-    def checkpoint_recovery_plan(self, manifest: Mapping[str, Any], *, runtime: str) -> dict[str, Any]:
-        """Build a checkpoint-bound plan from observed calls and enforced sandbox limits.
-
-        Args:
-            manifest: Compatibility evidence for the exact state bytes being published.
-            runtime: Selected managed outer sandbox.
-
-        Returns:
-            Eligible or precisely ineligible recovery admission evidence.
-        """
-        with self._recovery_lock:
-            seed_bounds = [copy.deepcopy(value) for value in self._seed_bounds.values()]
-            execution_bounds = [copy.deepcopy(value) for value in self._execution_bounds.values()]
-            marker_seen = self._seed_marker_count == 1
-            reason = self._recovery_ineligible_reason
-        execution = None
-        if execution_bounds:
-            execution = {
-                "model_calls": execution_bounds,
-                "max_cents": str(max(Decimal(item["max_cents"]) for item in execution_bounds)),
-                "max_wallet_cents": str(max(Decimal(item["max_wallet_cents"]) for item in execution_bounds)),
-            }
-        return build_recovery_plan(
-            manifest,
-            runtime=runtime_bound(runtime, self._descriptor),
-            seed_bounds=seed_bounds,
-            execution_bound=execution,
-            seed_marker_seen=marker_seen,
-            ineligible_reason=reason,
-        )
-
-    def validate_recovery_runtime(self, runtime: str) -> None:
-        """Verify the selected current sandbox against the checkpoint's covered profile.
-
-        Args:
-            runtime: Selected managed execution runtime.
-
-        Raises:
-            RecoveryAdmissionError: When current resources or prices differ from the plan.
-        """
-        if self._recovery_plan is not None:
-            validate_recovery_runtime(self._recovery_plan, runtime_bound(runtime, self._descriptor))
-
     @property
     def url(self) -> str:
         """Return the loopback endpoint passed to the authorized optimizer child."""
         return f"http://127.0.0.1:{self._server.server_port}/v1"
 
     def register(
-        self, *, model: str, api_key: str, role: str, policy: ChargePolicy, batch: bool = False
+        self,
+        *,
+        model: str,
+        api_key: str,
+        role: str,
+        policy: ChargePolicy,
+        batch: bool = False,
+        embeddings: bool = False,
+        parent_only: bool = False,
     ) -> dict[str, str]:
         """Register one fixed role without exposing its provider credential.
 
@@ -534,6 +419,8 @@ class ModelGateway:
             role: Task, judge, or optimization usage attribution.
             policy: Approved conversion policy for this particular model source.
             batch: Send this role's chat calls through half-price OpenRouter batches.
+            embeddings: Serve only ``/embeddings`` for an embeddings model instead of chat.
+            parent_only: Only the parent calls this route, so readiness probes skip it.
 
         Returns:
             Scoped guest route containing no upstream credential.
@@ -549,14 +436,16 @@ class ModelGateway:
             role=role,
             policy=policy,
             client=self._client,
-            quote_observer=self._observe_model_quote,
             data_policy=data_policy,
             batch=(
                 BatchCollector(api_key=api_key, model=model, client=self._client, heartbeat=self._beat)
                 if batch
                 else None
             ),
+            embeddings=embeddings,
         )
+        if parent_only:
+            self._parent_only.add(token)
         return {"url": self.url, "token": token, "model": model, "role": role}
 
     def _beat(self) -> None:
@@ -566,9 +455,12 @@ class ModelGateway:
 
     def model_routes(self) -> list[dict[str, str]]:
         """Return only capabilities registered by this trusted parent for readiness probes."""
+        # Callers send chat requests to these routes; an embeddings route
+        # refuses them, which would fail every novelty run's setup.
         return [
             {"url": self.url, "token": token, "model": route.model, "role": route.role}
             for token, route in self._routes.items()
+            if not route.embeddings and token not in self._parent_only
         ]
 
     def bind_evaluator(self, evaluator: EvaluatorEndpoint) -> dict[str, str]:
@@ -611,6 +503,33 @@ class ModelGateway:
             **({"allowed_hosts": sorted(allowed_hosts)} if allowed_hosts else {}),
         }
 
+    def fund_parent_sandbox(self, allowed_hosts: tuple[str, ...]) -> None:
+        """Count one more parent-owned box reaching ``allowed_hosts`` in this run's recovery bound.
+
+        Args:
+            allowed_hosts: Hosts the parent's box may reach before it goes offline.
+
+        Raises:
+            ValueError: When no sandbox broker is bound yet.
+        """
+        if self._descriptor is None:
+            raise ValueError("This gateway has no sandbox broker to open a parent box with.")
+        self._descriptor[PARENT_HOSTS_KEY] = sorted(set(allowed_hosts))
+
+    def parent_sandbox_runtime(self) -> Any:
+        """Return the runtime the parent opens its own scoring box with.
+
+        Returns:
+            A runtime limited to the hosts :meth:`fund_parent_sandbox` recorded.
+
+        Raises:
+            ValueError: When the parent box was never funded.
+        """
+        hosts = (self._descriptor or {}).get(PARENT_HOSTS_KEY)
+        if self._sandbox is None or hosts is None:
+            raise ValueError("Fund the parent's box before opening it.")
+        return self._sandbox.parent_runtime(tuple(hosts))
+
     def dispatch_guest(
         self, token: str, path: str, body: Mapping[str, Any], headers: Mapping[str, str]
     ) -> ModelHTTPResult:
@@ -638,11 +557,6 @@ class ModelGateway:
             if path != "/v1/_packages":
                 raise ValueError("The package capability can only fetch its registered artifacts.")
             return self._packages.dispatch(body)
-        if path == "/v1/_budget/recovery-seed-complete":
-            if body:
-                raise ValueError("Recovery marker body must be empty.")
-            self.finish_recovery_seed()
-            return ModelHTTPResult(200, "application/json", b'{"ok":true}')
         if is_evaluator:
             if path != "/v1/_evaluator":
                 raise ValueError("The evaluator capability cannot dispatch models, tools, or sandbox commands.")
@@ -651,12 +565,43 @@ class ModelGateway:
             if path != "/v1/_mcp":
                 raise ValueError("The tool capability cannot dispatch models or sandbox commands.")
             return self._tools.dispatch(body)
-        return route.dispatch(
-            path.removeprefix("/v1"),
-            body,
-            operation_key=_model_attempt_key(headers),
-            protocol_headers=headers,
-        )
+        try:
+            response = route.dispatch(
+                path.removeprefix("/v1"),
+                body,
+                operation_key=_model_attempt_key(headers),
+                protocol_headers=headers,
+            )
+        except BudgetInsufficientError as error:
+            self.budget_refusal = error
+            raise
+        self._observe(route, body, response)
+        return response
+
+    def observe_role(self, role: str, observer: Callable[[Mapping[str, Any]], None]) -> None:
+        """Show every answered model call of one role to a parent-side observer.
+
+        Args:
+            role: The route role to watch, such as ``optimization``.
+            observer: Receives each answered request body; it must return quickly.
+        """
+        self._observers.setdefault(role, []).append(observer)
+
+    def _observe(self, route: OpenRouterDispatcher, body: Mapping[str, Any], response: ModelHTTPResult) -> None:
+        """Pass one answered model call to its role's observers.
+
+        Args:
+            route: The route that served the call.
+            body: The model request.
+            response: The reply the caller received.
+        """
+        if not 200 <= response.status < 300:
+            return
+        for observer in self._observers.get(route.role, ()):
+            try:
+                observer(body)
+            except Exception:  # isolation boundary: an observer must never fail the model call it watched
+                logger.warning("A model-call observer failed.", exc_info=True)
 
     def _budget_state(self) -> dict[str, Any]:
         """Expose only the owning run's state and mark replaced capabilities as fenced."""
@@ -738,7 +683,9 @@ class ModelGateway:
             source["mcp_url"] = "https://scoped-tools.invalid/mcp"
             result["_skynet_tools_route"] = {"url": self.url, "token": self._tool_token}
         if self._descriptor is not None:
-            result["_budget_gateway_descriptor"] = dict(self._descriptor)
+            result["_budget_gateway_descriptor"] = {
+                key: value for key, value in self._descriptor.items() if key != PARENT_HOSTS_KEY
+            }
         target = result.get("target")
         target_config = result.get("task_model_config") if isinstance(target, dict) else None
         target_route: dict[str, str] | None = None
@@ -800,9 +747,15 @@ class ModelGateway:
             result["_skynet_evaluator_route"] = {"url": self.url, "token": self._evaluator_token}
         elif isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
             models.append((scorer["model"], "judge"))
-        for key, role in (("generation_models", "task"), ("reflection_models", "optimization")):
+        for key, role in (
+            ("generation_models", "task"),
+            ("reflection_models", "optimization"),
+            ("extra_reflection_model_configs", "optimization"),
+        ):
             models.extend((config, role) for config in result.get(key, []) if isinstance(config, dict))
         economy = bool(result.get("economy_mode"))
+        shinka = result.get("shinka")
+        novelty = isinstance(shinka, dict) and bool(shinka.get("novelty"))
         for config, role in models:
             source = config.get("token_source") or result.get("token_source") or "managed"
             extra = config.get("extra") or {}
@@ -831,6 +784,17 @@ class ModelGateway:
             config.clear()
             config.update(cleaned)
             config["extra"] = dict(config.get("extra") or {})
+            if novelty and config is result.get("reflection_model_config"):
+                route = {
+                    **route,
+                    EMBEDDING_ROUTE_KEY: self.register(
+                        model=SHINKA_EMBEDDING_MODEL,
+                        api_key=str(key),
+                        role=role,
+                        policy=ChargePolicy("byok_model" if source == "byok" else "managed_model"),
+                        embeddings=True,
+                    ),
+                }
             config["extra"][ROUTE_KEY] = route
             if economy and source == "managed":
                 # A batch can outlast any per-call timeout; a guest that gave up
@@ -862,7 +826,6 @@ class ModelGateway:
             if self._sandbox is not None:
                 self._sandbox.close()
         finally:
-            self.runtime.release_recovery_headroom()
             self._client.close()
             self._routes.clear()
             self._tools = None

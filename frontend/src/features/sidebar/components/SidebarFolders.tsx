@@ -67,6 +67,7 @@ import {
   sortFolders,
   type RunView,
 } from "../lib/run-view";
+import { ROW_MOTION, rowTransition } from "../lib/row-motion";
 import { FolderShareDialog } from "./FolderShareDialog";
 
 /** A folder action the sidebar opens a dialog for. */
@@ -133,6 +134,15 @@ function viewRows(): ViewRow[] {
         { value: "run", label: msg("sidebar.filter.type.run") },
         { value: "grid_search", label: msg("sidebar.filter.type.grid") },
         { value: "blackbox", label: msg("sidebar.filter.type.blackbox") },
+      ],
+    },
+    {
+      key: "automation",
+      label: msg("sidebar.filter.automation"),
+      options: [
+        { value: "all", label: msg("sidebar.filter.all") },
+        { value: "automated", label: msg("sidebar.filter.automation.automated") },
+        { value: "manual", label: msg("sidebar.filter.automation.manual") },
       ],
     },
     {
@@ -224,7 +234,7 @@ export function SidebarFilterMenu({
               {filtered && (
                 <span
                   aria-hidden="true"
-                  className="absolute end-0.5 top-0.5 size-1.5 rounded-full bg-primary"
+                  className="absolute end-0.5 top-0.5 size-1.5 rounded-full bg-primary-fill"
                 />
               )}
             </Button>
@@ -233,9 +243,9 @@ export function SidebarFilterMenu({
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-60">
-        {rows.slice(0, 3).map(renderRow)}
+        {rows.slice(0, 4).map(renderRow)}
         <DropdownMenuSeparator />
-        {rows.slice(3).map(renderRow)}
+        {rows.slice(4).map(renderRow)}
         {(filtered || view.group !== "folder" || view.sort !== "recent") && (
           <>
             <DropdownMenuSeparator />
@@ -256,21 +266,17 @@ export function SidebarFilterMenu({
 export function NewFolderButton({ onClick }: { onClick: () => void }) {
   const label = msg("folders.new");
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={label}
-          onClick={onClick}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <FolderPlus className="size-3.5" aria-hidden="true" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      autoTooltip={false}
+      aria-label={label}
+      onClick={onClick}
+      className="text-muted-foreground hover:text-foreground"
+    >
+      <FolderPlus className="size-3.5" aria-hidden="true" />
+    </Button>
   );
 }
 
@@ -300,8 +306,15 @@ export function FolderTree({
 }) {
   return (
     <>
-      {sortFolders(folders, props.view.sort).map((folder) => (
-        <FolderNode key={folder.id} folder={folder} depth={depth} {...props} />
+      {sortFolders(folders, props.view.sort).map((folder, idx) => (
+        <motion.div
+          key={folder.id}
+          layout="position"
+          initial={false}
+          transition={rowTransition(idx)}
+        >
+          <FolderNode folder={folder} depth={depth} {...props} />
+        </motion.div>
       ))}
     </>
   );
@@ -474,9 +487,20 @@ function FolderNode({ folder, depth, ...props }: TreeProps & { folder: RunFolder
                   {msg("folders.loading")}
                 </div>
               ) : (
-                visibleRuns.map((job) => (
-                  <React.Fragment key={job.optimization_id}>{renderRun(job)}</React.Fragment>
-                ))
+                <AnimatePresence initial={false}>
+                  {visibleRuns.map((job, idx) => (
+                    <motion.div
+                      key={job.optimization_id}
+                      layout="position"
+                      initial={ROW_MOTION.initial}
+                      animate={ROW_MOTION.animate}
+                      exit={ROW_MOTION.exit}
+                      transition={rowTransition(idx)}
+                    >
+                      {renderRun(job)}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               )}
               {visibleRuns !== null && visibleRuns.length === 0 && subfolders.length === 0 && (
                 <p className="px-2 py-1.5 text-[0.625rem] text-muted-foreground/50">
@@ -767,11 +791,19 @@ function MoveDialog({
         onClick={() => setTarget(id)}
         className={cn(
           "flex min-h-[44px] w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-sm transition-colors lg:min-h-0",
-          selected ? "bg-primary/[0.08] text-foreground" : "text-foreground/80 hover:bg-accent/50",
+          selected
+            ? "bg-primary-fill text-primary-foreground"
+            : "text-foreground/80 hover:bg-accent/50",
         )}
         style={{ paddingInlineStart: `${0.5 + depth * 1}rem` }}
       >
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Icon
+          className={cn(
+            "size-4 shrink-0",
+            selected ? "text-primary-foreground" : "text-muted-foreground",
+          )}
+          aria-hidden="true"
+        />
         <span className="min-w-0 flex-1 truncate" dir="auto">
           {label}
         </span>
@@ -791,7 +823,7 @@ function MoveDialog({
               : msg("folders.move.runs_hint")}
           </DialogDescription>
         </DialogHeader>
-        <div role="radiogroup" className="max-h-[50vh] overflow-y-auto">
+        <div role="radiogroup" className="max-h-[50dvh] overflow-y-auto">
           {row(null, msg("folders.move.none"), 0, FolderOpen)}
           {options.map(({ folder, depth }) => row(folder.id, folder.name, depth))}
           {options.length === 0 && (

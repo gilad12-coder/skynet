@@ -16,18 +16,19 @@ class FakeMail:
         """Start with an empty call log."""
         self.calls: list[dict] = []
 
-    def send_mail(self, to: str, subject: str, html_body: str) -> bool:
+    def send_mail(self, to: str, subject: str, html_body: str, *, text_body: str | None = None) -> bool:
         """Record a ``send_mail`` invocation and pretend it succeeded.
 
         Args:
             to: Resolved recipient address.
             subject: Mail subject line.
             html_body: Rendered HTML body.
+            text_body: Plain-text alternative.
 
         Returns:
             Always ``True`` to mimic successful SMTP delivery.
         """
-        self.calls.append({"to": to, "subject": subject, "html": html_body})
+        self.calls.append({"to": to, "subject": subject, "html": html_body, "text": text_body})
         return True
 
     @property

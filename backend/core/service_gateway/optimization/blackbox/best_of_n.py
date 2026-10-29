@@ -11,8 +11,13 @@ from gepa.oa.engines.best_of_n import BestOfNEngine as UpstreamBestOfN
 from ....exceptions import ServiceError
 from ..budget_stop import BudgetReached
 from .feedback import emit_candidate
+from .native_runtime import run_native_engine
 from .protocol import EngineContext, EvalServer, Result, Task
 from .upstream import local_result, reflection_endpoint, upstream_server
+
+# Top train samples re-scored on the validation split; each costs one scorer
+# run per validation case, so the cap keeps sampling the bulk of the budget.
+_MAX_FINALISTS = 3
 
 
 class _SampleStream:
@@ -27,11 +32,11 @@ class _SampleStream:
         """Bind the stream to the cases upstream scores samples on.
 
         Args:
-            task: Optimization inputs; upstream uses the train set, else the val set.
+            task: Optimization inputs; each sample is scored on every case.
             server: Run accounting, for the scorer runs spent per sample.
             ctx: The job's progress sink.
         """
-        cases = task.train_set or task.val_set or []
+        cases = task.cases
         self._case_ids = {id(example): str(index) for index, example in enumerate(cases)}
         self._per_sample = max(1, len(cases))
         self._server = server
@@ -91,7 +96,13 @@ class BestOfNEngine:
         """
         if not task.str_mode:
             raise ServiceError("Best-of-N supports text starting points only.")
-        upstream = upstream_server(task, server, ctx, on_eval=_SampleStream(task, server, ctx))
+        if ctx.native_options is not None and ctx.native_options.repo is not None:
+            # A repository sample is a patch a coding agent writes in the native
+            # runtime's checkout; upstream's text sampler cannot edit a checkout.
+            return run_native_engine("best_of_n_repo", task, server, ctx)
+        finalists = _validation_finalists(task, server)
+        sampling = server.lane(server.remaining - finalists * len(task.valset))
+        upstream = upstream_server(task, sampling, ctx, on_eval=_SampleStream(task, sampling, ctx))
         result = None
         budget_stop = None
         try:
@@ -99,9 +110,9 @@ class BestOfNEngine:
                 engine = UpstreamBestOfN(
                     OptimizeAnythingConfig(
                         engine=self.name,
-                        max_evals=server.remaining,
+                        max_evals=sampling.remaining,
                         stop_at_score=ctx.stop_at_score,
-                        engine_config={"model": "openai/skynet-reflection", "lm_kwargs": connection},
+                        engine_config={"model": "openai/app-reflection", "lm_kwargs": connection},
                     )
                 )
                 result = engine.run(upstream.task, upstream)
@@ -129,4 +140,56 @@ class BestOfNEngine:
             if task.seed_candidate is None:
                 raise ServiceError("Best-of-N stopped before producing a fully evaluated candidate.")
             adapted.best_score = None
+            return adapted
+        if finalists:
+            return _select_on_validation(task, server, sampling, adapted, finalists)
         return adapted
+
+
+def _validation_finalists(task: Task, server: EvalServer) -> int:
+    """Return how many top samples to re-score on the validation cases.
+
+    Args:
+        task: Train cases and the validation split.
+        server: Run accounting.
+
+    Returns:
+        The number of finalists whose validation scoring the budget can
+        reserve while leaving room for at least two full train samples, or 0
+        when the task has no validation split.
+    """
+    if not task.valset:
+        return 0
+    per_sample = max(1, len(task.cases))
+    spare = server.remaining - 2 * per_sample
+    return max(0, min(_MAX_FINALISTS, spare // len(task.valset)))
+
+
+def _select_on_validation(task: Task, server: EvalServer, sampling: EvalServer, adapted: Result, finalists: int) -> Result:
+    """Pick the winner among the best train samples by their validation mean.
+
+    Args:
+        task: Train cases and the validation split.
+        server: Run accounting that still holds the reserved validation runs.
+        sampling: The lane upstream sampled in; its records are train-only.
+        adapted: Upstream's train-selected incumbent.
+        finalists: How many top train samples to validate.
+
+    Returns:
+        The incumbent with the highest validation mean, scored as that mean.
+    """
+    per_sample = max(1, len(task.cases))
+    complete = [record for record in sampling.history if record.count >= per_sample]
+    ranked = sorted(complete, key=lambda record: record.mean_score, reverse=True)[:finalists]
+    best: tuple[float, Any] | None = None
+    for record in ranked:
+        scores = [server.evaluate(record.candidate, case)[0] for case in task.valset]
+        mean = sum(scores) / len(scores)
+        if best is None or mean > best[0]:
+            best = (mean, record.candidate)
+    if best is None:
+        return adapted
+    adapted.best_candidate, adapted.best_score = best[1], best[0]
+    adapted.total_evals = server.used
+    adapted.metadata["selection_scope"] = "validation"
+    return adapted

@@ -79,11 +79,11 @@ export default function Counter() {
   );
 }`,
   ],
-  ["JSON", `{\n  "name": "skynet",\n  "version": 1,\n  "tags": ["a", "b"]\n}`],
+  ["JSON", `{\n  "name": "acme",\n  "version": 1,\n  "tags": ["a", "b"]\n}`],
   [
     "JSON",
     `{
-  "name": "skynet",
+  "name": "acme",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -94,18 +94,18 @@ export default function Counter() {
     "YAML",
     `services:
   api:
-    image: skynet/api:latest
+    image: acme/api:latest
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgres://db/skynet
+      DATABASE_URL: postgres://db/acme
   db:
     image: postgres:16`,
   ],
   [
     "TOML",
     `[package]
-name = "skynet"
+name = "acme"
 version = "0.1.0"
 
 [dependencies]
@@ -126,7 +126,7 @@ LIMIT 20;`,
     "HTML",
     `<!DOCTYPE html>
 <html lang="en">
-  <head><title>Skynet</title></head>
+  <head><title>Acme</title></head>
   <body>
     <main class="app"><h1>Hello</h1></main>
   </body>
@@ -321,7 +321,7 @@ Return only the rewritten description.`,
   ],
   [
     "a bulleted prompt without full stops",
-    `You are a support agent for Skynet
+    `You are a support agent for Acme
 Rules:
 - keep answers short
 - never promise refunds

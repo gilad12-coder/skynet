@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Generic, TypeVar
 
+from .budget_amounts import CENT_SCALE, ceil_cents
 from .budgets import (
     BudgetConflictError,
     BudgetFencedError,
@@ -17,15 +18,49 @@ from .budgets import (
     BudgetService,
     BudgetUnreconciledError,
     OperationSnapshot,
+    usd_text,
 )
 from .operation_pricing import ChargePolicy, OperationQuote, json_fingerprint
 from .signals import BudgetStopLatch
 
 T = TypeVar("T")
 
+_OPERATION_KEY_LIMIT = 128
+
+
+def generation_operation_key(operation_key: str, generation: int) -> str:
+    """Scope a logical operation key to one execution generation.
+
+    A recovered run repeats work such as opening its scorer box under the same
+    logical key; the ledger's uniqueness spans every generation, so an unscoped
+    key collides with the interrupted attempt's record. Generation 0 keeps the
+    bare key so existing records and prefix lookups stay valid.
+
+    Args:
+        operation_key: Logical identity retained across delivery retries.
+        generation: Execution epoch the operation is admitted under.
+
+    Returns:
+        The key recorded for this generation, within the ledger's length bound.
+    """
+    if generation <= 0:
+        return operation_key
+    suffix = f"#g{generation}"
+    if len(operation_key) + len(suffix) <= _OPERATION_KEY_LIMIT:
+        return operation_key + suffix
+    return json_fingerprint([operation_key])[: _OPERATION_KEY_LIMIT - len(suffix)] + suffix
+
 
 class UsagePendingError(RuntimeError):
     """Prevent replay while a dispatched operation's bill remains unconfirmed."""
+
+
+class ProviderFailedError(UsagePendingError):
+    """Report a response the provider failed after dispatch, while its coverage stays held.
+
+    The attempt itself is over, so the caller may retry with a fresh attempt; only
+    this attempt's bill is still unconfirmed.
+    """
 
 
 class OperationCompletedError(RuntimeError):
@@ -44,6 +79,8 @@ class PaidResult(Generic[T]):
     # A complete provider error that names no generation and reports no usage; its
     # coverage returns immediately because no receipt will ever confirm a charge.
     refused: bool = False
+    # The provider's own message for a response it failed after dispatch.
+    failure: str | None = None
 
 
 class BudgetRuntime:
@@ -59,8 +96,6 @@ class BudgetRuntime:
         phase: str,
         stop: BudgetStopLatch | None = None,
         wait_timeout: float = 600,
-        recovery_headroom_operation_id: str | None = None,
-        recovery_execution_headroom: tuple[Decimal, Decimal] | None = None,
     ) -> None:
         """Bind the spending context without passing database credentials to guest code.
 
@@ -72,8 +107,6 @@ class BudgetRuntime:
             phase: Setup or run attribution.
             stop: Optional shared stop latch for all concurrent optimizer lanes.
             wait_timeout: Maximum wait for covered work before reporting uncertainty.
-            recovery_headroom_operation_id: Pre-authorized recovery hold consumed by replayed physical work.
-            recovery_execution_headroom: Scope and wallet coverage retained for the first resumed operation.
         """
         self.service = service
         self.username = username
@@ -83,10 +116,53 @@ class BudgetRuntime:
         self.stop = stop or BudgetStopLatch()
         self.wait_timeout = wait_timeout
         self._changed = threading.Condition()
-        self._recovery_headroom_operation_id = recovery_headroom_operation_id
-        self._recovery_execution_headroom = recovery_execution_headroom
-        self._release_headroom_after_next = False
-        self._recovery_headroom_lock = threading.RLock()
+        self._pinned: dict[str, int] = {}
+
+    def pin(self, operation_id: str, units: int) -> None:
+        """Record sandbox coverage that stays held until the work that opened it ends.
+
+        Args:
+            operation_id: The sandbox's admitted operation.
+            units: Its current coverage in cent units.
+        """
+        with self._changed:
+            self._pinned[operation_id] = units
+
+    def unpin(self, operation_id: str) -> None:
+        """Forget a sandbox's coverage once it settled or was released.
+
+        Args:
+            operation_id: The sandbox's admitted operation.
+        """
+        with self._changed:
+            self._pinned.pop(operation_id, None)
+            self._changed.notify_all()
+
+    def _wait_cannot_help(self, error: BudgetInFlightError) -> BudgetInsufficientError | None:
+        """Refuse a setup operation that only this check's own open sandboxes keep out.
+
+        A setup check runs its samples one at a time inside sandboxes it opened
+        itself, and those stay open while it waits, so their coverage can never
+        make room. A run's lanes do release each other's coverage, so only the
+        setup phase gives up early.
+
+        Args:
+            error: The admission refusal, with its limit arithmetic when it has one.
+
+        Returns:
+            The refusal to raise instead of waiting, or None when waiting may help.
+        """
+        if self.phase != "setup" or error.scope_units is None or error.room_units is None:
+            return None
+        with self._changed:
+            pinned = sum(self._pinned.values())
+        if error.scope_units <= error.room_units - pinned:
+            return None
+        return BudgetInsufficientError(
+            f"The next operation needs up to {usd_text(ceil_cents(error.scope_units))}, but this check's "
+            f"sandboxes hold {usd_text(ceil_cents(pinned))} of the "
+            f"{usd_text(max(error.room_units, 0) // CENT_SCALE)} that remain."
+        )
 
     def check_admission(self) -> None:
         """Fence unpaid control calls against the same cancellation and recovery authority.
@@ -114,7 +190,6 @@ class BudgetRuntime:
         cost_kind: str,
         role: str | None = None,
         attempt: int = 0,
-        recovery_headroom: bool | None = None,
     ) -> OperationSnapshot:
         """Wait for in-flight coverage before declaring genuine budget exhaustion.
 
@@ -124,8 +199,6 @@ class BudgetRuntime:
             cost_kind: Model or sandbox cost attribution.
             role: Task, judge, optimization, or runtime role.
             attempt: Physical retry number with independent usage coverage.
-            recovery_headroom: Whether a model request claimed the bounded recovery
-                hold. None lets non-model restoration operations use the hold.
 
         Returns:
             The admitted physical attempt or its existing idempotent record.
@@ -138,33 +211,28 @@ class BudgetRuntime:
         while True:
             self.stop.check()
             try:
-                with self._recovery_headroom_lock:
-                    use_headroom = recovery_headroom is not False
-                    headroom_operation_id = self._recovery_headroom_operation_id if use_headroom else None
-                    release_after = self._release_headroom_after_next and use_headroom
-                    operation = self.service.reserve(
-                        self.budget_id,
-                        self.username,
-                        operation_key=operation_key,
-                        generation=self.generation,
-                        phase=self.phase,
-                        cost_kind=cost_kind,
-                        request_fingerprint=quote.request_fingerprint,
-                        price_snapshot=quote.price_snapshot,
-                        max_cents=quote.maximum.total,
-                        max_wallet_cents=quote.maximum.wallet,
-                        attempt=attempt,
-                        role=role,
-                        headroom_operation_id=headroom_operation_id,
-                    )
-                    if headroom_operation_id is not None and release_after:
-                        self.release_recovery_headroom()
-                return operation
+                return self.service.reserve(
+                    self.budget_id,
+                    self.username,
+                    operation_key=generation_operation_key(operation_key, self.generation),
+                    generation=self.generation,
+                    phase=self.phase,
+                    cost_kind=cost_kind,
+                    request_fingerprint=quote.request_fingerprint,
+                    price_snapshot=quote.price_snapshot,
+                    max_cents=quote.maximum.total,
+                    max_wallet_cents=quote.maximum.wallet,
+                    attempt=attempt,
+                    role=role,
+                )
             except BudgetUnreconciledError as error:
                 raise UsagePendingError(
                     "Previous work is awaiting confirmed usage; its coverage is retained."
                 ) from error
             except BudgetInFlightError as error:
+                refusal = self._wait_cannot_help(error)
+                if refusal is not None:
+                    raise refusal from error
                 if time.monotonic() >= deadline:
                     raise UsagePendingError(
                         "Covered work has not settled; no overlapping work was admitted."
@@ -177,30 +245,55 @@ class BudgetRuntime:
                 self.service.stop_admission(self.budget_id, self.username, reason="budget_reached")
                 raise self.stop.trip(str(error)) from error
 
-    def finish_recovery_seed(self) -> None:
-        """Retain only one proved operation after mandatory seed evaluation completes."""
-        with self._recovery_headroom_lock:
-            operation_id = self._recovery_headroom_operation_id
-            remaining = self._recovery_execution_headroom
-            if operation_id is None or remaining is None:
-                return
-            self.service.trim_recovery_headroom(
-                operation_id,
-                self.username,
-                max_cents=remaining[0],
-                max_wallet_cents=remaining[1],
-            )
-            if self._recovery_headroom_operation_id == operation_id:
-                self._release_headroom_after_next = True
+    def extend(
+        self,
+        operation_id: str,
+        quote: OperationQuote,
+        *,
+        evidence_key: str,
+        evidence: Mapping[str, Any],
+        deadline: float,
+    ) -> OperationSnapshot:
+        """Grow a running sandbox's coverage, waiting for in-flight work until ``deadline``.
 
-    def release_recovery_headroom(self) -> None:
-        """Release any recovery coverage not transferred into physical work."""
-        with self._recovery_headroom_lock:
-            operation_id = self._recovery_headroom_operation_id
-            self._recovery_headroom_operation_id = None
-            self._release_headroom_after_next = False
-        if operation_id is not None:
-            self.service.release(operation_id, self.username)
+        Args:
+            operation_id: Dispatched sandbox attempt.
+            quote: The sandbox's bound over its extended lifetime.
+            evidence_key: Immutable identity of this extension.
+            evidence: Audit record of the extended bound.
+            deadline: ``time.monotonic()`` instant after which waiting stops.
+
+        Returns:
+            The operation with its grown coverage.
+
+        Raises:
+            UsagePendingError: When covered work did not settle before ``deadline``.
+            BudgetReached: When the budget cannot pay for the extension.
+        """
+        while True:
+            self.stop.check()
+            try:
+                return self.service.extend_coverage(
+                    operation_id,
+                    self.username,
+                    evidence_key=evidence_key,
+                    max_cents=quote.maximum.total,
+                    max_wallet_cents=quote.maximum.wallet,
+                    evidence=evidence,
+                )
+            except BudgetInFlightError as error:
+                refusal = self._wait_cannot_help(error)
+                if refusal is not None:
+                    raise refusal from error
+                if time.monotonic() >= deadline:
+                    raise UsagePendingError("Covered work has not settled; the sandbox was not extended.") from error
+                with self._changed:
+                    self._changed.wait(timeout=min(1.0, max(0.0, deadline - time.monotonic())))
+            except BudgetInsufficientError as error:
+                if self.phase == "setup":
+                    raise
+                self.service.stop_admission(self.budget_id, self.username, reason="budget_reached")
+                raise self.stop.trip(str(error)) from error
 
     def execute(
         self,
@@ -212,7 +305,6 @@ class BudgetRuntime:
         cost_kind: str,
         role: str | None = None,
         attempt: int = 0,
-        recovery_headroom: bool | None = None,
     ) -> T:
         """Dispatch once under coverage and settle actual usage on every outcome.
 
@@ -224,14 +316,13 @@ class BudgetRuntime:
             cost_kind: Model or sandbox category.
             role: Optional model role attribution.
             attempt: Independent physical retry number.
-            recovery_headroom: Whether this model attempt owns the bounded
-                recovery hold. None is reserved for non-model restoration work.
 
         Returns:
             Provider result after evidence has been durably recorded.
 
         Raises:
             UsagePendingError: When dispatch may have incurred cost without final evidence.
+            ProviderFailedError: When the provider failed the response; a fresh attempt may follow.
             OperationCompletedError: When a completed attempt is replayed without its saved result.
         """
         if quote.price_snapshot.get("policy") != policy.snapshot():
@@ -242,7 +333,6 @@ class BudgetRuntime:
             cost_kind=cost_kind,
             role=role,
             attempt=attempt,
-            recovery_headroom=recovery_headroom,
         )
         if operation.state == "settled":
             raise OperationCompletedError("The operation already completed; retrieve its saved result.")
@@ -268,6 +358,8 @@ class BudgetRuntime:
                     evidence_key=json_fingerprint(dict(result.evidence)),
                     evidence=dict(result.evidence),
                 )
+                if result.failure is not None:
+                    raise ProviderFailedError(result.failure)
                 raise UsagePendingError("Provider usage is not yet confirmed; the reservation remains active.")
             charge = policy.convert(result.provider_usd)
             self.service.settle(

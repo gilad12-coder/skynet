@@ -1,15 +1,20 @@
 """In-sandbox runner for python scorers: ``input.json`` → user code → ``output.json``.
 
-This file is shipped verbatim into every scorer sandbox as ``skynet_runner.py``
+This file is shipped verbatim into every scorer sandbox as ``app_runner.py``
 and executed there by the box's own interpreter, so it depends on the standard
 library alone and stays valid Python 3.9 (the default sandbox image's
 version). The backend imports the same module for the pieces it shares with
 the box — score normalization, entry-point discovery, the image wrapper — so
 the two sides cannot drift apart.
 
-Contract: ``python3 skynet_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
+Contract: ``python3 app_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
 
-    {"code": "...", "candidate": ..., "case": ..., "gateway": {...} | null}
+    {"candidate": ..., "case": ..., "gateway": {...} | null}
+
+The scorer source is written once per box to ``app_scorer_code.txt`` next
+to the runner, never into a call's input, so the per-call files carry only
+candidates and cases. A legacy input that still holds ``"code"`` wins over
+that file.
 
 and writes ``<call_dir>/output.json``::
 
@@ -42,15 +47,24 @@ from pathlib import Path
 from typing import Any
 
 INPUT_FILE = "input.json"
+CODE_FILE = "app_scorer_code.txt"
 OUTPUT_FILE = "output.json"
 SCORER_FILENAME = "<scorer_code>"
 # Names the scorer namespace binds the model helper and the image wrapper to.
 LLM_HELPER_NAME = "llm"
 # The gateway key rides in the environment so it never touches the box filesystem.
-ENV_API_KEY = "SKYNET_API_KEY"
-ENV_BUDGET_RELAY_URL = "SKYNET_BUDGET_RELAY_URL"
+ENV_API_KEY = "APP_API_KEY"
+ENV_BUDGET_RELAY_URL = "APP_BUDGET_RELAY_URL"
+# This file runs alone in the box, without ``core.config``; boxes started by an
+# older control plane still carry only the pre-rename spellings.
+_LEGACY_ENV_PREFIX = "SKYNET_"
 IMAGE_HELPER_NAME = "Image"
+LOG_HELPER_NAME = "log"
+# Frames one ``log()`` event on stderr; the host turns each into a run-log line.
+EVENT_PREFIX = "APP_SCORER_EVENT "
+_EVENT_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # The module scorer code imports those helpers from: ``from skynet import llm, Image``.
+# Saved user scorers import it by this name, so it stays as it is.
 HELPER_MODULE_NAME = "skynet"
 # Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
 PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
@@ -60,6 +74,10 @@ _RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504})
 _ATTEMPTS = 3
 _BACKOFF_SECONDS = 1.0
 _ERROR_BODY_CHARS = 500
+# The budget relay prices each call from its output cap and refuses an uncapped
+# one, so llm() always sends a cap. Same floor the backend puts on its own
+# chat-style LMs (language_models._DEFAULT_REASONING_MAX_TOKENS).
+DEFAULT_MAX_TOKENS = 4000
 _MEDIA_TYPE_BY_EXTENSION = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -135,6 +153,18 @@ class Image:
         else:
             raise ScorerError("Image needs a url, a path or base64_data.")
         return {"type": "image_url", "image_url": {"url": url}}
+
+
+def env_value(name: str) -> str | None:
+    """Read an ``APP_*`` variable, falling back to its pre-rename ``SKYNET_*`` name.
+
+    Args:
+        name: Variable name starting with ``APP_``.
+
+    Returns:
+        The first non-empty value, or ``None`` when neither name is set.
+    """
+    return os.environ.get(name) or os.environ.get(_LEGACY_ENV_PREFIX + name[len("APP_") :]) or None
 
 
 def _data_url(data: bytes, media_type: str) -> str:
@@ -275,36 +305,149 @@ def side_info_json_default(value: Any) -> str:
     return str(value)
 
 
-def normalize_score(raw: Any) -> tuple[float, SideInfo]:
-    """Coerce a scorer's return value into ``(score, side_info)``.
+def _json_plain(value: Any) -> Any:
+    """Make a value strict-JSON safe: non-finite numbers become their text.
 
-    Accepted shapes: a number; ``(number, side_info)``; a mapping with a
-    ``score`` key (remaining keys become side info); an object with a
-    numeric ``score`` attribute.
+    Args:
+        value: Parsed JSON.
+
+    Returns:
+        The same structure with every NaN and infinity as a string.
+    """
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return str(value)
+    if isinstance(value, list):
+        return [_json_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_plain(item) for key, item in value.items()}
+    return value
+
+
+def log(event: str, message: Any = None, *, level: str = "INFO", **fields: Any) -> None:
+    """Send one named event to the run's log the moment it happens.
+
+    Scorer code calls it as ``from skynet import log`` then
+    ``log("judge.retry", attempt=2, reason="rate limited")``. The host shows
+    it live, tagged with the candidate and case being scored.
+
+    Args:
+        event: Event name, such as ``judge.retry``.
+        message: The line shown in the log; the event name when unset.
+        level: ``DEBUG``, ``INFO``, ``WARNING`` or ``ERROR``.
+        **fields: Details shown with the event; values that are not JSON become text.
+
+    Raises:
+        ValueError: When ``event`` is empty or ``level`` is not one of the four.
+    """
+    if not isinstance(event, str) or not event.strip():
+        raise ValueError("log() needs a non-empty event name, such as log('judge.retry').")
+    name = str(level).upper()
+    if name not in _EVENT_LEVELS:
+        raise ValueError(f"log() level must be one of {', '.join(_EVENT_LEVELS)}, not {level!r}.")
+    line = {
+        "level": name,
+        "logger": "scorer",
+        "message": event if message is None else str(message),
+        "event": event,
+        "fields": _json_plain(json.loads(json.dumps(fields, default=side_info_json_default))) if fields else None,
+    }
+    # The real stderr: a scorer that redirects sys.stderr must not swallow its own events.
+    stream = sys.__stderr__ or sys.stderr
+    stream.write(EVENT_PREFIX + json.dumps(line, allow_nan=False) + "\n")
+    stream.flush()
+
+
+FEEDBACK_REQUIRED = (
+    'The scorer must return feedback: return {"score": <number>, "feedback": "<why it scored that>"}, '
+    'optionally with "scores": {"<name>": {"score": <number>, "feedback": "<why>"}} for each thing you '
+    'measure, or a (score, "feedback") pair. The optimizer learns from the feedback, so say what was wrong '
+    "or missing."
+)
+
+
+def _feedback(value: Any, where: str) -> str:
+    """Return a non-empty feedback string or explain what is missing.
+
+    Args:
+        value: The feedback the scorer gave.
+        where: Names the score the feedback belongs to, for the error.
+
+    Returns:
+        The feedback text.
+
+    Raises:
+        ScorerError: When the feedback is absent, not text, or blank.
+    """
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ScorerError(f"{FEEDBACK_REQUIRED} ({where} has no feedback.)")
+
+
+def named_scores(raw: Any) -> dict[str, dict[str, Any]]:
+    """Validate the optional named scores into ``{name: {"score", "feedback"}}``.
+
+    Args:
+        raw: The scorer's ``scores`` value.
+
+    Returns:
+        Each named score with its float score and feedback.
+
+    Raises:
+        ScorerError: When ``scores`` is not a mapping, or a named score lacks a number or feedback.
+    """
+    if not isinstance(raw, dict):
+        raise ScorerError(f'{FEEDBACK_REQUIRED} ("scores" must map each name to a score and feedback.)')
+    named: dict[str, dict[str, Any]] = {}
+    for name, entry in raw.items():
+        if isinstance(entry, (tuple, list)) and len(entry) == 2:
+            entry = {"score": entry[0], "feedback": entry[1]}
+        value = entry.get("score") if isinstance(entry, dict) else None
+        if not isinstance(value, _NUMBER_TYPES):
+            raise ScorerError(f"{FEEDBACK_REQUIRED} (The named score {name!r} has no numeric score.)")
+        named[str(name)] = {
+            "score": float(value),
+            "feedback": _feedback(entry.get("feedback"), f"The named score {name!r}"),
+        }
+    return named
+
+
+def normalize_score(raw: Any) -> tuple[float, SideInfo]:
+    """Coerce a scorer's return value into ``(score, side_info)``, feedback included.
+
+    Accepted shapes: a mapping ``{"score", "feedback", "scores"?, ...}``
+    (other keys stay in the side info); a ``(score, feedback)`` pair whose
+    second item is the feedback text or a mapping holding it; an object
+    with numeric ``score`` and text ``feedback`` attributes. Every score
+    carries feedback, the top-level one and each named score, because the
+    engines' proposers learn from it.
 
     Args:
         raw: Whatever the scorer returned.
 
     Returns:
-        The float score and a side-info mapping (empty when none was given).
+        The float score and side info with ``feedback`` and, when given,
+        ``scores`` as ``{name: {"score": float, "feedback": str}}``.
 
     Raises:
-        ScorerError: When the value has none of the accepted shapes.
+        ScorerError: When the value has none of the accepted shapes or lacks feedback.
     """
-    if isinstance(raw, _NUMBER_TYPES):
-        return float(raw), {}
     if isinstance(raw, (tuple, list)) and len(raw) == 2 and isinstance(raw[0], _NUMBER_TYPES):
-        side = raw[1]
-        return float(raw[0]), dict(side) if isinstance(side, dict) else {"feedback": side}
-    if isinstance(raw, dict) and isinstance(raw.get("score"), _NUMBER_TYPES):
-        return float(raw["score"]), {key: value for key, value in raw.items() if key != "score"}
-    score_attr = getattr(raw, "score", None)
-    if isinstance(score_attr, _NUMBER_TYPES):
-        return float(score_attr), {}
-    raise ScorerError(
-        "scorer must return a number, a (number, side_info) pair, or a mapping with a 'score' key; "
-        f"got {type(raw).__name__}."
-    )
+        score, side = raw
+        side_info = dict(side) if isinstance(side, dict) else {"feedback": side}
+    elif isinstance(raw, dict) and isinstance(raw.get("score"), _NUMBER_TYPES):
+        score = raw["score"]
+        side_info = {key: value for key, value in raw.items() if key != "score"}
+    elif isinstance(getattr(raw, "score", None), _NUMBER_TYPES):
+        score = raw.score
+        side_info = {"feedback": getattr(raw, "feedback", None)}
+    elif isinstance(raw, _NUMBER_TYPES):
+        raise ScorerError(f"{FEEDBACK_REQUIRED} (It returned a bare number.)")
+    else:
+        raise ScorerError(f"{FEEDBACK_REQUIRED} (It returned {type(raw).__name__}.)")
+    side_info["feedback"] = _feedback(side_info.get("feedback"), "The score")
+    if "scores" in side_info:
+        side_info["scores"] = named_scores(side_info["scores"])
+    return float(score), side_info
 
 
 def helper_module(helpers: dict[str, Any]) -> types.ModuleType:
@@ -317,7 +460,8 @@ def helper_module(helpers: dict[str, Any]) -> types.ModuleType:
         A module exposing every helper as an attribute.
     """
     module = types.ModuleType(
-        HELPER_MODULE_NAME, "Helpers for scorer code: llm(prompt, input=None, images=None) and Image(...)."
+        HELPER_MODULE_NAME,
+        "Helpers for scorer code: llm(prompt, input=None, images=None), Image(...) and log(event, **fields).",
     )
     module.__dict__.update(helpers)
     return module
@@ -435,19 +579,20 @@ class GatewayClient:
             model: Model id as the gateway knows it.
             api_key: Bearer token, or ``None`` when the sandbox injects it.
             temperature: Sampling temperature, when the Scorer step set one.
-            max_tokens: Completion cap, when the Scorer step set one.
+            max_tokens: Completion cap, when the Scorer step set one;
+                :data:`DEFAULT_MAX_TOKENS` otherwise.
             reasoning_effort: Thinking level (``low``, ``high``, ...), when the Scorer step set one.
             timeout_seconds: Per-request timeout.
             protected: Whether the trusted parent owns dispatch and retry coverage.
         """
-        relay = os.environ.get(ENV_BUDGET_RELAY_URL)
+        relay = env_value(ENV_BUDGET_RELAY_URL)
         self._url = (relay or url).rstrip("/") + "/chat/completions"
         self._protected = protected or bool(relay)
         self.control: dict[str, str] | None = None
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
-        self._max_tokens = max_tokens
+        self._max_tokens = DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens
         self._reasoning_effort = reasoning_effort
         self._timeout_seconds = timeout_seconds
         self._ssl = _ssl_context()
@@ -487,11 +632,9 @@ class GatewayClient:
             messages = scorer_messages(prompt, input, images)
         elif not isinstance(messages, list):
             raise ScorerError("llm(messages=...) takes a list of chat messages.")
-        body: dict[str, Any] = {"model": self._model, "messages": messages}
+        body: dict[str, Any] = {"model": self._model, "messages": messages, "max_tokens": self._max_tokens}
         if self._temperature is not None:
             body["temperature"] = self._temperature
-        if self._max_tokens is not None:
-            body["max_tokens"] = self._max_tokens
         if self._reasoning_effort:
             body["reasoning_effort"] = self._reasoning_effort
         payload = self._post(json.dumps(body).encode("utf-8"))
@@ -584,14 +727,18 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
         llm = GatewayClient(
             str(gateway["url"]),
             str(gateway["model"]),
-            api_key=gateway.get("api_key") or os.environ.get(ENV_API_KEY),
+            api_key=gateway.get("api_key") or env_value(ENV_API_KEY),
             temperature=gateway.get("temperature"),
             max_tokens=gateway.get("max_tokens"),
             reasoning_effort=gateway.get("reasoning_effort"),
             timeout_seconds=float(gateway.get("timeout_seconds") or 120.0),
             protected=bool(gateway.get("protected")),
         )
-    helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
+    helpers = {
+        LLM_HELPER_NAME: llm if llm is not None else missing_llm,
+        IMAGE_HELPER_NAME: Image,
+        LOG_HELPER_NAME: log,
+    }
     result: dict[str, Any] = {"score": None, "side_info": {}, "error": None, "usage": []}
     try:
         fn = load_scorer_from_code(str(payload.get("code") or ""), helpers=helpers)
@@ -624,6 +771,8 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     """Run one scorer call from ``<call_dir>/input.json`` into ``<call_dir>/output.json``.
 
+    The scorer source comes from the box's code file unless the input carries it.
+
     Args:
         argv: Command-line arguments; ``sys.argv`` when unset.
 
@@ -632,10 +781,13 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
-        sys.stderr.write("usage: skynet_runner.py <call_dir>\n")
+        sys.stderr.write("usage: app_runner.py <call_dir>\n")
         return 2
     call_dir = Path(args[0])
     payload = json.loads((call_dir / INPUT_FILE).read_text(encoding="utf-8"))
+    if "code" not in payload:
+        code_path = Path(__file__).resolve().with_name(CODE_FILE)
+        payload["code"] = code_path.read_text(encoding="utf-8") if code_path.is_file() else ""
     result = run_call(payload)
     partial = call_dir / (OUTPUT_FILE + ".part")
     partial.write_text(json.dumps(result), encoding="utf-8")

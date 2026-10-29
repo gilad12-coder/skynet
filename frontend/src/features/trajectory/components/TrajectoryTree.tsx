@@ -17,6 +17,7 @@ import {
   TRAJECTORY_LAYOUT,
   type LayoutResult,
 } from "../lib/layout";
+import { usePinchZoom } from "../lib/pinch-zoom";
 import { displayCandidateId, type RejectedNode, type TrajectoryNode } from "../lib/types";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
@@ -27,29 +28,29 @@ import {
   CanvasControlGroup,
 } from "@/shared/ui/canvas-control-button";
 
-const EDGE_STROKE = "rgba(124, 99, 80, 0.42)";
-const EDGE_STROKE_MERGE = "rgba(124, 99, 80, 0.3)";
-const EDGE_STROKE_GHOST = "rgba(124, 99, 80, 0.28)";
-const NODE_CORE_FILL = "#fdfaf4";
-const NODE_CORE_STROKE = "rgba(28, 22, 18, 0.16)";
-const NODE_CORE_STROKE_HOVER = "rgba(28, 22, 18, 0.42)";
-const NODE_CORE_STROKE_SELECTED = "#1c1612";
-const DONUT_PASS_FILL = "#7C8B5A";
-const DONUT_FAIL_FILL = "#B26B4A";
+const EDGE_STROKE = "color-mix(in srgb, var(--muted-foreground) 42%, transparent)";
+const EDGE_STROKE_MERGE = "color-mix(in srgb, var(--muted-foreground) 30%, transparent)";
+const EDGE_STROKE_GHOST = "color-mix(in srgb, var(--muted-foreground) 28%, transparent)";
+const NODE_CORE_FILL = "var(--card)";
+const NODE_CORE_STROKE = "color-mix(in srgb, var(--foreground) 16%, transparent)";
+const NODE_CORE_STROKE_HOVER = "color-mix(in srgb, var(--foreground) 42%, transparent)";
+const NODE_CORE_STROKE_SELECTED = "var(--foreground)";
+const DONUT_PASS_FILL = "var(--tree-pass)";
+const DONUT_FAIL_FILL = "var(--tree-fail)";
 const DONUT_RING_THICKNESS = 8;
 // Track under the black-box score arc — same brown as the lineage edges.
-const SCORE_TRACK_STROKE = "rgba(124, 99, 80, 0.14)";
-const GHOST_FILL = "#E8E0D3";
-const GHOST_STROKE = "rgba(124, 99, 80, 0.5)";
-const GHOST_STROKE_HOVER = "rgba(124, 99, 80, 0.85)";
-const WINNER_INDICATOR = "#9C7A3F";
-const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
-const WINNER_FILL = "#F8EBC8";
-const WINNER_BADGE_FILL = "#9C7A3F";
-const WINNER_BADGE_INK = "#FBF4DF";
+const SCORE_TRACK_STROKE = "color-mix(in srgb, var(--muted-foreground) 14%, transparent)";
+const GHOST_FILL = "var(--tree-ghost-fill)";
+const GHOST_STROKE = "color-mix(in srgb, var(--muted-foreground) 50%, transparent)";
+const GHOST_STROKE_HOVER = "color-mix(in srgb, var(--muted-foreground) 85%, transparent)";
+const WINNER_INDICATOR = "var(--tree-winner)";
+const WINNER_HALO = "var(--tree-winner-halo)";
+const WINNER_FILL = "var(--tree-winner-fill)";
+const WINNER_BADGE_FILL = "var(--tree-winner)";
+const WINNER_BADGE_INK = "var(--tree-winner-badge-ink)";
 // Painted behind score labels (paint-order: stroke) so they stay legible
 // where a lineage edge or grid line passes underneath.
-const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
+const LABEL_HALO = "color-mix(in srgb, var(--background) 90%, transparent)";
 
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 6;
@@ -59,13 +60,10 @@ const ZOOM_BUTTON_OUT = 0.8;
 const DRAG_THRESHOLD_PX = 4;
 const FIT_PADDING_PX = 32;
 const CONTAINER_HEIGHT_PX = 560;
-// 44px grid step, oklch grid/axis colors, 48px padding from edges before the
-// axes start. Kept local rather than shared to avoid cross-feature coupling
-// for two tiny constants.
+// 44px grid step, 48px padding from edges before the axes start. Kept local
+// rather than shared to avoid cross-feature coupling for two tiny constants.
 const GRID_STEP = 44;
-const GRID_LINE_COLOR = "oklch(0.91 0.006 50)";
-const GRID_AXIS_COLOR = "oklch(0.94 0.005 50)";
-const AXIS_PADDING_PX = 48;
+const GRID_LINE_COLOR = "var(--tree-grid)";
 // Direct color values — using `hsl(var(--muted))` is invalid because the
 // CSS variables hold hex colors, not h s l components, so the gradient gets
 // silently dropped and the maximized overlay becomes transparent.
@@ -98,11 +96,6 @@ export interface TrajectoryTreeProps {
   newestId: string | null;
   onSelectCandidate: (id: string) => void;
   onSelectRejected: (rejectionId: string) => void;
-  // Optional viewport hint. When provided, the initial fit uses
-  // MAX(currentLayout, previewLayout) so the tree opens at the eventual
-  // extent — useful in scripted demos where the final size is known up
-  // front and we want viewers to see the full graph before nodes stream in.
-  previewLayout?: { width: number; height: number };
   // Black-box scorers grade each case on their own scale rather than
   // pass/fail, so those runs swap the per-example split for a single arc
   // that fills with the candidate's aggregate score.
@@ -284,7 +277,6 @@ export function TrajectoryTree({
   newestId,
   onSelectCandidate,
   onSelectRejected,
-  previewLayout,
   ringMode = "pass_fail",
 }: TrajectoryTreeProps) {
   const reduceMotion = useReducedMotion();
@@ -333,8 +325,6 @@ export function TrajectoryTree({
   // glide is running.
   const recenterFromRef = useRef<number | null>(null);
   const { nodes, ghosts, edges, width, height } = layout;
-  const fitWidth = Math.max(width, previewLayout?.width ?? 0);
-  const fitHeight = Math.max(height, previewLayout?.height ?? 0);
   const idIndex = useMemo(() => {
     const m = new Map<string, TrajectoryNode>();
     for (const n of nodes) m.set(n.candidate_id, n);
@@ -373,7 +363,7 @@ export function TrajectoryTree({
   useEffect(() => {
     if (size.w < 2 || size.h < 2) return;
     if (userInteractedRef.current) return;
-    const fit = fitView(size, fitWidth, fitHeight);
+    const fit = fitView(size, width, height);
     const from = recenterFromRef.current;
     if (from === null || from >= 1) {
       setView(fit);
@@ -388,7 +378,7 @@ export function TrajectoryTree({
       tx: v.tx + (fit.tx - v.tx) * step,
       ty: v.ty + (fit.ty - v.ty) * step,
     }));
-  }, [size, fitWidth, fitHeight, morphProgress]);
+  }, [size, width, height, morphProgress]);
 
   // Toggling maximize resizes the container; release the interaction lock so
   // the new viewport gets a fresh fit.
@@ -444,12 +434,19 @@ export function TrajectoryTree({
     // previous listener orphaned (same reason the ResizeObserver re-binds).
   }, [zoomAt, isMaximized]);
 
+  const { start: pinchStart, move: pinchMove, end: pinchEnd } = usePinchZoom(containerRef, zoomAt);
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       // Don't hijack pointers that land on the floating zoom controls.
       const target = e.target as Element | null;
       if (target?.closest("[data-trajectory-controls]")) return;
+      if (pinchStart(e)) {
+        if (panStateRef.current?.moved) setIsDragging(false);
+        panStateRef.current = null;
+        return;
+      }
       // Capturing on pointerdown would steal the synthesized click from child
       // nodes — defer until the user actually starts panning (see pointermove).
       panStateRef.current = {
@@ -461,35 +458,43 @@ export function TrajectoryTree({
         moved: false,
       };
     },
-    [view.tx, view.ty],
+    [view.tx, view.ty, pinchStart],
   );
 
-  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (!ps || ps.pointerId !== e.pointerId) return;
-    const dx = e.clientX - ps.startClientX;
-    const dy = e.clientY - ps.startClientY;
-    if (!ps.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
-      ps.moved = true;
-      userInteractedRef.current = true;
-      setIsDragging(true);
-      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-    }
-    if (ps.moved) {
-      setView((v) => ({ k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy }));
-    }
-  }, []);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (ps && ps.pointerId === e.pointerId) {
-      panStateRef.current = null;
-      if (ps.moved) {
-        (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-        setIsDragging(false);
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pinchMove(e)) return;
+      const ps = panStateRef.current;
+      if (!ps || ps.pointerId !== e.pointerId) return;
+      const dx = e.clientX - ps.startClientX;
+      const dy = e.clientY - ps.startClientY;
+      if (!ps.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+        ps.moved = true;
+        userInteractedRef.current = true;
+        setIsDragging(true);
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
       }
-    }
-  }, []);
+      if (ps.moved) {
+        setView((v) => ({ k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy }));
+      }
+    },
+    [pinchMove],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pinchEnd(e);
+      const ps = panStateRef.current;
+      if (ps && ps.pointerId === e.pointerId) {
+        panStateRef.current = null;
+        if (ps.moved) {
+          (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+          setIsDragging(false);
+        }
+      }
+    },
+    [pinchEnd],
+  );
 
   const handleNodeClick = useCallback(
     (id: string, e: React.MouseEvent) => {
@@ -517,28 +522,26 @@ export function TrajectoryTree({
   );
   const resetView = useCallback(() => {
     userInteractedRef.current = false;
-    setView(fitView(size, fitWidth, fitHeight));
-  }, [size, fitWidth, fitHeight]);
+    setView(fitView(size, width, height));
+  }, [size, width, height]);
   const isTransformed = useMemo(() => {
-    const baseline = fitView(size, fitWidth, fitHeight);
+    const baseline = fitView(size, width, height);
     return view.k !== baseline.k || view.tx !== baseline.tx || view.ty !== baseline.ty;
-  }, [view, size, fitWidth, fitHeight]);
+  }, [view, size, width, height]);
 
   if (nodes.length === 0) return null;
 
   const transform = `translate(${view.tx}, ${view.ty}) scale(${view.k})`;
 
   const gridScreenStep = GRID_STEP * view.k;
-  const axisCx = (size.w / 2) * view.k + view.tx;
-  const axisCy = (size.h / 2) * view.k + view.ty;
 
   const treeBody = (
     <div
       ref={containerRef}
       className={
         isMaximized
-          ? "fixed inset-0 z-50 w-screen h-screen overflow-hidden border-0"
-          : "relative w-full overflow-hidden rounded-xl border border-[#DDD4C8]/60"
+          ? "fixed inset-0 z-50 w-screen h-dvh overflow-hidden border-0"
+          : "relative w-full overflow-hidden rounded-xl border border-border/60"
       }
       style={
         isMaximized
@@ -584,22 +587,6 @@ export function TrajectoryTree({
               </pattern>
             </defs>
             <rect width={size.w} height={size.h} fill="url(#trajectory-grid)" />
-            <line
-              x1={axisCx}
-              y1={AXIS_PADDING_PX}
-              x2={axisCx}
-              y2={Math.max(size.h - AXIS_PADDING_PX, AXIS_PADDING_PX)}
-              stroke={GRID_AXIS_COLOR}
-              strokeWidth={1}
-            />
-            <line
-              x1={AXIS_PADDING_PX}
-              y1={axisCy}
-              x2={Math.max(size.w - AXIS_PADDING_PX, AXIS_PADDING_PX)}
-              y2={axisCy}
-              stroke={GRID_AXIS_COLOR}
-              strokeWidth={1}
-            />
           </>
         ) : null}
         <g transform={transform}>
@@ -628,7 +615,7 @@ export function TrajectoryTree({
       <CanvasControlGroup
         data-trajectory-controls
         className={
-          isMaximized ? "absolute top-4 start-4 z-20 shadow-md" : "absolute top-3 end-3 z-20"
+          isMaximized ? "absolute top-4 start-4 z-20 shadow-[var(--shadow-float)]" : "absolute top-3 end-3 z-20"
         }
       >
         <CanvasControlButton
@@ -659,7 +646,7 @@ export function TrajectoryTree({
       </CanvasControlGroup>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
-        <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-[#DDD4C8]/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
+        <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-border/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
           {ringMode === "pass_fail" ? (
             <>
               <LegendToggle
@@ -703,7 +690,7 @@ export function TrajectoryTree({
             onToggle={() => toggleLayer("winner")}
             swatch={
               <span
-                className="inline-flex items-center justify-center rounded-sm px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider"
+                className="inline-flex items-center justify-center rounded-sm px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider rtl:tracking-normal"
                 style={{
                   background: WINNER_BADGE_FILL,
                   color: WINNER_BADGE_INK,
@@ -745,7 +732,7 @@ export function TrajectoryTree({
             tree is portaled into a viewport-spanning overlay above. */}
         <div
           aria-hidden="true"
-          className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
+          className="w-full rounded-xl border border-border/60 opacity-40"
           style={{ height: CONTAINER_HEIGHT_PX, background: SURFACE_GRADIENT }}
         />
         {createPortal(treeBody, document.body)}
@@ -917,7 +904,7 @@ const TreeContent = memo(function TreeContent({
                 fontFamily="var(--font-mono, monospace)"
                 fontSize="10.5"
                 fontWeight={600}
-                fill="rgba(28, 22, 18, 0.6)"
+                fill="color-mix(in srgb, var(--foreground) 60%, transparent)"
                 stroke={LABEL_HALO}
                 strokeWidth={2.5}
                 strokeLinejoin="round"
@@ -1065,7 +1052,7 @@ const TreeContent = memo(function TreeContent({
                 fontFamily="var(--font-mono, monospace)"
                 fontSize="14"
                 fontWeight={700}
-                fill="#1c1612"
+                fill={winnerShown ? "var(--tree-winner-number)" : "var(--foreground)"}
                 pointerEvents="none"
               >
                 {displayCandidateId(node.candidate_id)}
@@ -1087,7 +1074,7 @@ const TreeContent = memo(function TreeContent({
                   fontFamily="var(--font-mono, monospace)"
                   fontSize="10.5"
                   fontWeight={600}
-                  fill="rgba(28, 22, 18, 0.72)"
+                  fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
                   stroke={LABEL_HALO}
                   strokeWidth={2.5}
                   strokeLinejoin="round"

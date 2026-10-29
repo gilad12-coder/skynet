@@ -21,42 +21,6 @@ def wizard_client() -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_optimizer_name_alias_accepted(wizard_client: TestClient) -> None:
-    """A registered alias like ``gepa`` resolves and is echoed back unchanged."""
-    resp = wizard_client.post("/wizard/update", json={"optimizer_name": "gepa"})
-
-    assert resp.status_code == 200
-    assert resp.json()["wizard_state"]["optimizer_name"] == "gepa"
-
-
-def test_optimizer_name_dotted_path_accepted(wizard_client: TestClient) -> None:
-    """A fully qualified ``dspy.*`` optimizer path is accepted."""
-    resp = wizard_client.post(
-        "/wizard/update", json={"optimizer_name": "dspy.teleprompt.GEPA"}
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["wizard_state"]["optimizer_name"] == "dspy.teleprompt.GEPA"
-
-
-def test_optimizer_name_unknown_rejected(wizard_client: TestClient) -> None:
-    """An unknown optimizer name produces 422 and surfaces the value in detail."""
-    resp = wizard_client.post(
-        "/wizard/update", json={"optimizer_name": "not_a_real_optimizer"}
-    )
-
-    assert resp.status_code == 422
-    assert "not_a_real_optimizer" in resp.json()["detail"]
-
-
-def test_module_name_alias_accepted(wizard_client: TestClient) -> None:
-    """A registered alias like ``predict`` resolves and is echoed back."""
-    resp = wizard_client.post("/wizard/update", json={"module_name": "predict"})
-
-    assert resp.status_code == 200
-    assert resp.json()["wizard_state"]["module_name"] == "predict"
-
-
 def test_is_private_accepted_and_echoed(wizard_client: TestClient) -> None:
     """The privacy toggle round-trips so the agent can make a run public."""
     resp = wizard_client.post("/wizard/update", json={"is_private": False})
@@ -65,21 +29,9 @@ def test_is_private_accepted_and_echoed(wizard_client: TestClient) -> None:
     assert resp.json()["wizard_state"]["is_private"] is False
 
 
-def test_module_name_unknown_rejected(wizard_client: TestClient) -> None:
-    """An unknown module name produces 422 and surfaces the value in detail."""
-    resp = wizard_client.post(
-        "/wizard/update", json={"module_name": "not_a_real_module"}
-    )
-
-    assert resp.status_code == 422
-    assert "not_a_real_module" in resp.json()["detail"]
-
-
 def test_model_config_missing_prefix_rejected(wizard_client: TestClient) -> None:
     """A bare model name with no provider prefix is rejected by the prefix guard."""
-    resp = wizard_client.post(
-        "/wizard/update", json={"model_config": {"name": "gpt-4o-mini"}}
-    )
+    resp = wizard_client.post("/wizard/update", json={"model_config": {"name": "gpt-4o-mini"}})
 
     assert resp.status_code == 422
     assert "gpt-4o-mini" in resp.json()["detail"]
@@ -88,9 +40,7 @@ def test_model_config_missing_prefix_rejected(wizard_client: TestClient) -> None
 
 def test_model_config_prefixed_accepted(wizard_client: TestClient) -> None:
     """A provider-prefixed model name is accepted and echoed back trimmed."""
-    resp = wizard_client.post(
-        "/wizard/update", json={"model_config": {"name": "  openai/gpt-4o-mini  "}}
-    )
+    resp = wizard_client.post("/wizard/update", json={"model_config": {"name": "  openai/gpt-4o-mini  "}})
 
     assert resp.status_code == 200
     patch = resp.json()["wizard_state"]
@@ -98,87 +48,144 @@ def test_model_config_prefixed_accepted(wizard_client: TestClient) -> None:
     assert patch["model_configured"] is True
 
 
-def test_optimizer_name_blank_rejected(wizard_client: TestClient) -> None:
-    """A blank ``optimizer_name`` falls through to the empty-string guard."""
-    resp = wizard_client.post("/wizard/update", json={"optimizer_name": "   "})
+@pytest.mark.parametrize("field", ["run_code", "metric_code"])
+def test_workspace_code_rejected(wizard_client: TestClient, field: str) -> None:
+    """Workspace code cannot be hand-patched — the Metric & run step's coding agent writes it."""
+    resp = wizard_client.post("/wizard/update", json={field: "def run(artifact, input):\n    return input"})
 
     assert resp.status_code == 422
+    assert field in resp.json()["detail"]
 
 
-def test_signature_code_rejected(wizard_client: TestClient) -> None:
-    """``signature_code`` cannot be hand-patched — it must go through the card."""
-    resp = wizard_client.post(
-        "/wizard/update",
-        json={"signature_code": "class S(dspy.Signature): ..."},
-    )
-
-    assert resp.status_code == 422
-    assert "request_code_authoring" in resp.json()["detail"]
-
-
-def test_metric_code_rejected(wizard_client: TestClient) -> None:
-    """``metric_code`` cannot be hand-patched — it must go through the card."""
-    resp = wizard_client.post(
-        "/wizard/update",
-        json={"metric_code": "def metric(example, pred, trace=None): return 1.0"},
-    )
-
-    assert resp.status_code == 422
-    assert "request_code_authoring" in resp.json()["detail"]
-
-
-def test_job_type_blackbox_accepted(wizard_client: TestClient) -> None:
-    """The agent can switch the submit page to the "anything" wizard."""
-    resp = wizard_client.post("/wizard/update", json={"job_type": "blackbox"})
-
-    assert resp.status_code == 200
-    assert resp.json()["wizard_state"]["job_type"] == "blackbox"
-
-
-def test_blackbox_task_fields_round_trip(wizard_client: TestClient) -> None:
-    """Objective, starting text and scorer source are echoed into the patch."""
+def test_task_fields_round_trip(wizard_client: TestClient) -> None:
+    """Objective, background, artifact kind and starting version land under their v2 keys."""
     body = {
-        "blackbox_objective": "Make it shorter",
-        "blackbox_seed": "You are a helpful bot.",
-        "blackbox_scorer_code": "def score(candidate, case=None):\n    return 1.0",
+        "task_objective": "  Make it shorter  ",
+        "task_background": "Support replies.",
+        "artifact_kind": "prompt",
+        "starting_version": "You are a helpful bot.",
     }
     resp = wizard_client.post("/wizard/update", json=body)
 
     assert resp.status_code == 200
     patch = resp.json()["wizard_state"]
-    for key, value in body.items():
-        assert patch[key] == value
+    assert patch["task_objective"] == "Make it shorter"
+    assert patch["task_background"] == "Support replies."
+    assert patch["artifact_kind"] == "prompt"
+    assert patch["starting_version"] == "You are a helpful bot."
 
 
-def test_blackbox_blank_objective_rejected(wizard_client: TestClient) -> None:
-    """A blank task field is refused like every other non-empty string field."""
-    resp = wizard_client.post("/wizard/update", json={"blackbox_objective": "   "})
+def test_multi_part_starting_version_round_trips(wizard_client: TestClient) -> None:
+    """A named-parts starting version is echoed as a dict."""
+    parts = {"system": "Be brief.", "user": "Answer: {q}"}
+    resp = wizard_client.post("/wizard/update", json={"starting_version": parts})
+
+    assert resp.status_code == 200
+    assert resp.json()["wizard_state"]["starting_version"] == parts
+
+
+def test_blank_objective_rejected(wizard_client: TestClient) -> None:
+    """A blank objective is refused like every other non-empty string field."""
+    resp = wizard_client.post("/wizard/update", json={"task_objective": "   "})
+
+    assert resp.status_code == 422
+
+
+def test_inputs_fields_round_trip(wizard_client: TestClient) -> None:
+    """Data mode, staged dataset and split land in the patch."""
+    resp = wizard_client.post(
+        "/wizard/update",
+        json={
+            "data_mode": "pairs",
+            "staged_dataset_id": "stage-1",
+            "split_fractions": {"train": 0.6, "val": 0.2, "test": 0.2},
+            "shuffle": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    patch = resp.json()["wizard_state"]
+    assert patch["data_mode"] == "pairs"
+    assert patch["staged_dataset_id"] == "stage-1"
+    assert patch["split_fractions"] == {"train": 0.6, "val": 0.2, "test": 0.2}
+    assert patch["shuffle"] is False
+
+
+def test_optimizer_choice_fitting_setup_accepted(wizard_client: TestClient) -> None:
+    """A DSPy optimizer fits a DSPy program with pairs."""
+    resp = wizard_client.post(
+        "/wizard/update",
+        json={"artifact_kind": "dspy_program", "data_mode": "pairs", "optimizer_choice": "dspy_miprov2"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["wizard_state"]["optimizer_choice"] == "dspy_miprov2"
+
+
+def test_optimizer_choice_outside_setup_rejected(wizard_client: TestClient) -> None:
+    """A black-box engine does not fit a DSPy program."""
+    resp = wizard_client.post(
+        "/wizard/update",
+        json={"artifact_kind": "dspy_program", "data_mode": "single", "optimizer_choice": "best_of_n"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_optimizer_choice_alone_is_echoed(wizard_client: TestClient) -> None:
+    """Without the artifact and mode in the same patch the choice is echoed as-is."""
+    resp = wizard_client.post("/wizard/update", json={"optimizer_choice": "gepa"})
+
+    assert resp.status_code == 200
+    assert resp.json()["wizard_state"]["optimizer_choice"] == "gepa"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"artifact_kind": "repo"},
+        {"data_mode": "many"},
+        {"optimizer_choice": "grid_search"},
+        {"spending_limit_usd": 0},
+        {"spending_limit_usd": -5},
+        {"split_fractions": {"train": 0.5, "val": 0.1, "test": 0.1}},
+    ],
+)
+def test_invalid_values_rejected(wizard_client: TestClient, body: dict) -> None:
+    """Unknown kinds, modes, optimizers, non-positive limits and bad splits are 422."""
+    resp = wizard_client.post("/wizard/update", json=body)
 
     assert resp.status_code == 422
 
 
 @pytest.mark.parametrize(
-    "react_config",
-    [
-        {"mcpUrl": "https://mcp.example/mcp", "toolFilter": ["search"]},
-        {"mcp_url": "https://mcp.example/mcp", "tool_filter": ["search"]},
-    ],
+    "legacy_key",
+    ["job_type", "module_name", "column_roles", "blackbox_objective", "signature_code", "generation_models"],
 )
-def test_react_config_accepts_both_spellings(wizard_client: TestClient, react_config: dict) -> None:
-    """Either spelling lands in the patch under the wizard's camelCase keys."""
-    resp = wizard_client.post("/wizard/update", json={"react_config": react_config})
+def test_retired_keys_are_not_echoed(wizard_client: TestClient, legacy_key: str) -> None:
+    """Keys of the retired wizards no longer reach the patch."""
+    resp = wizard_client.post("/wizard/update", json={legacy_key: "x"})
 
     assert resp.status_code == 200
-    echoed = resp.json()["wizard_state"]["react_config"]
-    assert echoed["mcpUrl"] == "https://mcp.example/mcp"
-    assert echoed["toolFilter"] == ["search"]
+    assert legacy_key not in resp.json()["wizard_state"]
 
 
-def test_target_score_is_a_percentage(wizard_client: TestClient) -> None:
-    """A percentage is echoed as a float; values outside 0-100 are refused."""
-    ok = wizard_client.post("/wizard/update", json={"target_score": 90})
-    too_high = wizard_client.post("/wizard/update", json={"target_score": 101})
+def test_spending_limit_converts_to_cents(wizard_client: TestClient) -> None:
+    """A dollar limit lands as ``max_cost_cents``, the submit payload's field."""
+    resp = wizard_client.post("/wizard/update", json={"spending_limit_usd": 12.5})
 
-    assert ok.status_code == 200
-    assert ok.json()["wizard_state"]["target_score"] == 90.0
-    assert too_high.status_code == 422
+    assert resp.status_code == 200
+    state = resp.json()["wizard_state"]
+    assert state["max_cost_cents"] == 1250
+    assert "spending_limit_usd" not in state
+
+
+def test_spending_limit_null_removes_the_limit(wizard_client: TestClient) -> None:
+    """An explicit null clears the limit; omitting the field leaves it alone."""
+    cleared = wizard_client.post("/wizard/update", json={"spending_limit_usd": None})
+    untouched = wizard_client.post("/wizard/update", json={"is_private": True})
+
+    assert cleared.status_code == 200
+    assert "max_cost_cents" in cleared.json()["wizard_state"]
+    assert cleared.json()["wizard_state"]["max_cost_cents"] is None
+    assert "max_cost_cents" not in untouched.json()["wizard_state"]

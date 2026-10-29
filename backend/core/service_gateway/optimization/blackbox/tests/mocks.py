@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -19,7 +20,7 @@ AGENT_OUTPUT_SCORER_CODE = """
 def score(candidate, case=None):
     output = (case or {}).get("output") or ""
     vowels = sum(ch in "aeiou" for ch in output)
-    return vowels / max(1, len(output)), {"vowels": vowels, "seen_case": (case or {}).get("case")}
+    return vowels / max(1, len(output)), {"feedback": f"{vowels} vowel(s)", "vowels": vowels, "seen_case": (case or {}).get("case")}
 """
 
 # Scorer source in the shape users submit; the in-process twin below keeps
@@ -28,7 +29,7 @@ VOWEL_SCORER_CODE = """
 def score(candidate, case=None):
     text = candidate if isinstance(candidate, str) else " ".join(candidate.values())
     vowels = sum(ch in "aeiou" for ch in text)
-    return vowels / max(1, len(text)), {"vowels": vowels}
+    return vowels / max(1, len(text)), {"feedback": f"{vowels} vowel(s)", "vowels": vowels}
 """
 
 
@@ -220,6 +221,9 @@ class FakeGateway:
         reply: The completion text, or a function of the request body that returns it.
         usage: ``(prompt_tokens, completion_tokens)`` reported with every success.
         statuses: HTTP error statuses to answer with, in order, before succeeding.
+        cost: The provider's ``usage.cost`` in USD, or a function of the
+            request body that returns it; ``None`` leaves the cost out.
+        delay_seconds: How long to wait before each answer.
     """
 
     def __init__(
@@ -228,12 +232,16 @@ class FakeGateway:
         *,
         usage: tuple[int, int] = (3, 1),
         statuses: list[int] | None = None,
+        cost: float | Callable[[dict[str, Any]], float | None] | None = None,
+        delay_seconds: float = 0.0,
     ) -> None:
         """Bind a server to a free localhost port without starting it."""
         self.requests: list[dict[str, Any]] = []
         self._reply = reply
         self._usage = usage
         self._statuses = list(statuses or [])
+        self._cost = cost
+        self._delay_seconds = delay_seconds
         self._lock = threading.Lock()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGatewayHandler)
         self._server.gateway = self  # type: ignore[attr-defined]
@@ -264,20 +272,23 @@ class FakeGateway:
         Returns:
             The HTTP status and JSON body.
         """
+        if self._delay_seconds:
+            time.sleep(self._delay_seconds)
         with self._lock:
             self.requests.append(request)
             if self._statuses:
                 return self._statuses.pop(0), {"error": "try again"}
         text = self._reply(request["body"]) if callable(self._reply) else self._reply
         prompt_tokens, completion_tokens = self._usage
-        return 200, {
-            "choices": [{"message": {"role": "assistant", "content": text}}],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
+        usage: dict[str, Any] = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
         }
+        cost = self._cost(request["body"]) if callable(self._cost) else self._cost
+        if cost is not None:
+            usage["cost"] = cost
+        return 200, {"choices": [{"message": {"role": "assistant", "content": text}}], "usage": usage}
 
 
 class _FakeGatewayHandler(BaseHTTPRequestHandler):

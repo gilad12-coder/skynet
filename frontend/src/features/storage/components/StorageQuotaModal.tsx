@@ -1,6 +1,5 @@
 "use client";
 
-import { ProgressBar, StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import Link from "next/link";
 import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
@@ -9,7 +8,9 @@ import { Button } from "@/shared/ui/primitives/button";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatStorageSize } from "@/shared/lib/formatters";
 import type { StorageUsageResponse } from "@/shared/lib/api";
-import { categoryLabel } from "../lib/categories";
+import { cn } from "@/shared/lib/utils";
+import { categoryLabel, categoryMeta } from "../lib/categories";
+import { StackedUsageBar } from "./StackedUsageBar";
 
 /** Inputs for the presentational quota modal; data is fetched by the host. */
 interface StorageQuotaModalProps {
@@ -27,13 +28,13 @@ interface StorageQuotaModalProps {
 export function StorageQuotaModal({ open, usage, loading, onClose }: StorageQuotaModalProps) {
   const usedBytes = usage?.used_bytes ?? 0;
   const quotaBytes = usage?.quota_bytes ?? 0;
-  const usagePct = quotaBytes > 0 ? Math.min(100, (usedBytes / quotaBytes) * 100) : 0;
 
   const rows = React.useMemo(() => {
-    if (!usage) return [] as Array<[string, number]>;
+    if (!usage) return [];
     return Object.entries(usage.breakdown)
       .filter(([, bytes]) => bytes > 0)
-      .sort((a, b) => b[1] - a[1]);
+      .map(([key, bytes]) => ({ key, bytes }))
+      .sort((a, b) => b.bytes - a.bytes);
   }, [usage]);
 
   return (
@@ -45,7 +46,7 @@ export function StorageQuotaModal({ open, usage, loading, onClose }: StorageQuot
         />
 
         <div>
-          <StorageUsageBar value={usagePct} over={quotaBytes > 0 && usedBytes > quotaBytes} />
+          <StackedUsageBar rows={rows} quota={quotaBytes} />
           <p className="mt-1.5 text-end text-xs text-muted-foreground tabular-nums">
             {formatMsg("storage.quota.usage", {
               used: formatStorageSize(usedBytes),
@@ -62,26 +63,24 @@ export function StorageQuotaModal({ open, usage, loading, onClose }: StorageQuot
             {loading ? (
               <p className="text-sm text-muted-foreground">{msg("storage.quota.loading")}</p>
             ) : (
-              <ul className="flex flex-col gap-2.5">
-                {rows.map(([key, bytes]) => {
-                  const pct = usedBytes > 0 ? Math.max(2, (bytes / usedBytes) * 100) : 0;
-                  return (
-                    <li key={key}>
-                      <div className="flex items-baseline justify-between text-sm">
-                        <span className="text-foreground">{categoryLabel(key)}</span>
-                        <span className="text-muted-foreground tabular-nums">
-                          {formatStorageSize(bytes)}
-                        </span>
-                      </div>
-                      <ProgressBar
-                        value={pct}
-                        size="sm"
-                        className="mt-1 bg-[#E5DDD4]/60"
-                        fillClassName="bg-[#3D2E22]/30"
-                      />
-                    </li>
-                  );
-                })}
+              <ul className="flex flex-col gap-2">
+                {rows.map(({ key, bytes }) => (
+                  <li key={key} className="flex items-center gap-2 text-sm">
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        categoryMeta(key)?.swatch ?? "bg-border",
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {categoryLabel(key)}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {formatStorageSize(bytes)}
+                    </span>
+                  </li>
+                ))}
               </ul>
             )}
           </div>

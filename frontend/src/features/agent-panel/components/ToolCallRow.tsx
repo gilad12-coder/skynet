@@ -1,13 +1,14 @@
 "use client";
 
-import { PingDot } from "@/shared/ui/ping-dot";
 import * as React from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowsClockwise, CaretDown, Warning, type Icon } from "@/shared/ui/icons";
+import dynamic from "next/dynamic";
+import { ArrowsClockwise, type Icon } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { CopyButton } from "@/shared/ui/copy-button";
+import { looksLikeMarkdown } from "@/shared/lib/markdown-hint";
 
 import { cn } from "@/shared/lib/utils";
+import { StepRow } from "@/shared/ui/agent/activity-steps";
 import type { AgentToolCall } from "@/shared/ui/agent/types";
 
 import { isPlainObject } from "../lib/entry-format";
@@ -15,30 +16,34 @@ import { getToolMeta, getToolTitle } from "../lib/tool-meta";
 
 import { EntryRow } from "./EntryRow";
 
+// The feature barrel (and with it this row) sits in the app shell's static
+// graph, so the markdown parser loads only once a result is opened.
+const MessageMarkdown = dynamic(
+  () => import("@/shared/ui/agent/message-markdown").then((m) => m.MessageMarkdown),
+  { ssr: false },
+);
+
 interface ToolCallRowProps {
   call: AgentToolCall;
   isRetry?: boolean;
-  /** Hebrew one-liner that replaces ``call.reason`` in the collapsed trigger. */
+  /** One-liner (verb and target) that replaces ``call.reason`` in the collapsed line. */
   summary?: string | null;
-  /** Override for the trigger title. Defaults to ``TOOL_META.title``. */
+  /** Override for the line's title. Defaults to ``TOOL_META.title``. */
   title?: string | null;
-  /** Override for the status-glyph icon (done state). Defaults to ``TOOL_META.icon``. */
+  /** Override for the line's icon. Defaults to ``TOOL_META.icon``. */
   icon?: Icon;
   /**
-   * Replaces the default args/result body. Caller renders whatever fits the
-   * tool — e.g. a diff view. Wrapped in the same container as the default
-   * body so vertical rhythm stays identical to the generalist tools.
+   * Replaces the default args/result body, e.g. a result table. Shown in the
+   * same indented area so every tool opens the same way.
    */
   customBody?: React.ReactNode;
 }
 
 /**
- * One tool invocation rendered as an expandable row inside the agent
- * bubble. While the call is running the row self-expands and shows a
- * pulse indicator with a live elapsed counter; once done it auto-collapses
- * into a compact chip. Errors keep the row expanded. A per-tool summary
- * string (provided by the renderer registry) replaces the raw LLM reason
- * in the collapsed view with a domain-specific Hebrew one-liner.
+ * One tool invocation as a quiet one-line step, as in Codex: the tool's icon
+ * and title in muted text, the per-tool summary after it, the running step
+ * shimmering and a failed one marked with a warning. Clicking opens the args
+ * and result as plain indented text, no frame.
  */
 export function ToolCallRow({
   call,
@@ -50,46 +55,6 @@ export function ToolCallRow({
 }: ToolCallRowProps) {
   const meta = getToolMeta(call.tool);
   const derivedTitle = title ?? getToolTitle(call.tool);
-  const Icon = icon ?? meta.icon;
-
-  const initiallyOpen = call.status !== "done";
-  const [open, setOpen] = React.useState(initiallyOpen);
-  const autoCollapsedRef = React.useRef(false);
-  const [nowTs, setNowTs] = React.useState(() => Date.now());
-
-  React.useEffect(() => {
-    if (call.status === "done" && !autoCollapsedRef.current) {
-      autoCollapsedRef.current = true;
-      setOpen(false);
-    }
-    if (call.status === "error" && !open) {
-      setOpen(true);
-    }
-  }, [call.status]);
-
-  React.useEffect(() => {
-    if (call.status !== "running") return;
-    // Skip ticks in background tabs and catch up on return (mirrors the
-    // visibility-gated ticking in LiveElapsed).
-    const tick = () => {
-      if (document.visibilityState === "visible") setNowTs(Date.now());
-    };
-    const id = setInterval(tick, 200);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [call.status]);
-
-  const elapsedMs =
-    call.status === "running" && call.startedAt
-      ? nowTs - call.startedAt
-      : call.endedAt && call.startedAt
-        ? call.endedAt - call.startedAt
-        : 0;
-  const elapsedLabel =
-    elapsedMs >= 100 || call.status === "running" ? formatElapsed(elapsedMs) : null;
 
   const payload = (call.payload ?? {}) as Record<string, unknown>;
   const args = isPlainObject(payload.arguments) ? payload.arguments : {};
@@ -101,178 +66,62 @@ export function ToolCallRow({
   const triggerText = summary ?? call.reason ?? null;
   const isError = call.status === "error";
   const showReasonInBody = call.reason && call.reason !== triggerText;
+  const hasBody =
+    customBody !== undefined || showReasonInBody || hasArgs || hasResult || call.status === "running";
 
   return (
-    <div className={cn("overflow-hidden rounded-md", isError && "bg-[#9B2C1F]/[0.04]")}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-1.5 text-start",
-          "transition-colors cursor-pointer",
-          "hover:bg-foreground/[0.04]",
-          isError && "hover:bg-[#9B2C1F]/[0.07]",
-        )}
-      >
-        <StatusGlyph status={call.status} Icon={Icon} isRetry={isRetry} />
-        <span
-          className={cn(
-            "text-[0.8125rem] font-medium leading-tight truncate shrink-0",
-            isError
-              ? "text-[#7A1E13]"
-              : call.status === "running"
-                ? "text-foreground"
-                : "text-foreground/80",
-          )}
-        >
-          {derivedTitle}
-        </span>
-        {triggerText && !open && (
-          <span
-            className="min-w-0 flex-1 truncate text-[0.75rem] text-muted-foreground/70"
-            title={triggerText}
-          >
-            · {triggerText}
-          </span>
-        )}
-        <span className="ms-auto flex items-center gap-1.5 shrink-0">
-          {elapsedLabel && (
-            <span
-              className={cn(
-                "font-mono tabular-nums text-[0.625rem]",
-                call.status === "running" ? "text-muted-foreground/80" : "text-muted-foreground/55",
-              )}
-            >
-              {elapsedLabel}
-            </span>
-          )}
-          <CaretDown
-            className={cn(
-              "size-3.5 text-muted-foreground/50 transition-transform duration-150",
-              open ? "rotate-0" : "rotate-90",
-            )}
-            aria-hidden="true"
+    <StepRow
+      icon={icon ?? meta.icon}
+      label={derivedTitle}
+      detail={triggerText && <span title={triggerText}>{triggerText}</span>}
+      status={call.status}
+      errorLabel={msg("auto.features.agent.panel.components.toolcallrow.literal.7")}
+      marks={
+        isRetry && (
+          <ArrowsClockwise
+            className="size-3 shrink-0 opacity-60"
+            aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.2")}
           />
-        </span>
-      </button>
-
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="px-3 pb-3 pt-1 space-y-2.5">
-              {isRetry && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className="inline-flex items-center gap-1 text-[0.625rem] text-muted-foreground/70"
-                    title={msg("auto.features.agent.panel.components.toolcallrow.literal.2")}
-                  >
-                    <ArrowsClockwise className="size-2.5" aria-hidden="true" />
-                    {msg("auto.features.agent.panel.components.toolcallrow.1")}
-                  </span>
-                </div>
-              )}
-              {showReasonInBody && (
-                <div className="text-[0.75rem] leading-snug text-muted-foreground/85">
-                  {call.reason}
-                </div>
-              )}
-              {customBody !== undefined ? (
-                customBody
-              ) : (
-                <>
-                  {hasArgs && (
-                    <Section
-                      label={msg("auto.features.agent.panel.components.toolcallrow.literal.3")}
-                    >
-                      <dl className="space-y-1.5">
-                        {argEntries.map(([k, v]) => (
-                          <EntryRow key={k} argKey={k} value={v} />
-                        ))}
-                      </dl>
-                    </Section>
-                  )}
-                  {hasResult && (
-                    <Section
-                      label={
-                        isError
-                          ? msg("auto.features.agent.panel.components.toolcallrow.literal.4")
-                          : msg("auto.features.agent.panel.components.toolcallrow.literal.5")
-                      }
-                    >
-                      <ResultBody result={result} isError={isError} />
-                    </Section>
-                  )}
-                  {!hasArgs && !hasResult && call.status === "running" && (
-                    <div className="text-[0.75rem] italic text-muted-foreground/75 leading-snug">
-                      {msg("auto.features.agent.panel.components.toolcallrow.2")}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function StatusGlyph({
-  status,
-  Icon,
-  isRetry,
-}: {
-  status: AgentToolCall["status"];
-  Icon: React.ComponentType<{
-    className?: string;
-    "aria-hidden"?: boolean;
-  }>;
-  isRetry: boolean;
-}) {
-  const retryRing = isRetry ? "ring-1 ring-[#A85A1A]/45" : "";
-  if (status === "running") {
-    return (
-      <span
-        className={cn(
-          "relative inline-flex size-4 items-center justify-center shrink-0 rounded-full",
-          retryRing,
-        )}
-        aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.6")}
-      >
-        <PingDot tone="agent" />
-      </span>
-    );
-  }
-  if (status === "error") {
-    return (
-      <span
-        className={cn(
-          "inline-flex size-4 items-center justify-center rounded-full bg-[#9B2C1F]/15 text-[#9B2C1F] shrink-0",
-          retryRing,
-        )}
-        aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.7")}
-      >
-        <Warning className="size-2.5" aria-hidden />
-      </span>
-    );
-  }
-  return (
-    <span
-      className={cn(
-        "inline-flex size-4 items-center justify-center rounded-full bg-[#3D2E22]/15 text-[#3D2E22] shrink-0",
-        retryRing,
-      )}
-      aria-label={msg("auto.features.agent.panel.components.toolcallrow.literal.8")}
+        )
+      }
     >
-      <Icon className="size-2.5" aria-hidden />
-    </span>
+      {hasBody && (
+        <>
+          {showReasonInBody && <div>{call.reason}</div>}
+          {customBody !== undefined ? (
+            customBody
+          ) : (
+            <>
+              {hasArgs && (
+                <Section label={msg("auto.features.agent.panel.components.toolcallrow.literal.3")}>
+                  <dl className="space-y-1.5">
+                    {argEntries.map(([k, v]) => (
+                      <EntryRow key={k} argKey={k} value={v} />
+                    ))}
+                  </dl>
+                </Section>
+              )}
+              {hasResult && (
+                <Section
+                  label={
+                    isError
+                      ? msg("auto.features.agent.panel.components.toolcallrow.literal.4")
+                      : msg("auto.features.agent.panel.components.toolcallrow.literal.5")
+                  }
+                >
+                  <ResultBody result={result} isError={isError} />
+                </Section>
+              )}
+              {!hasArgs && !hasResult && call.status === "running" && (
+                <div className="italic">
+                  {msg("auto.features.agent.panel.components.toolcallrow.2")}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </StepRow>
   );
 }
 
@@ -293,13 +142,20 @@ function ResultBody({ result, isError }: { result: unknown; isError: boolean }) 
     if (!trimmed) {
       return <EmptyPlaceholder />;
     }
+    if (!isError && looksLikeMarkdown(trimmed)) {
+      return (
+        <div className="max-h-52 overflow-y-auto rounded-md border border-border/40 bg-background/70 px-2.5 py-2 text-[0.75rem] leading-relaxed text-foreground/90">
+          <MessageMarkdown content={trimmed} />
+        </div>
+      );
+    }
     return (
       <div className="relative" dir="ltr">
         <pre
           className={cn(
             "whitespace-pre-wrap break-words font-mono text-[0.6875rem]/[1.55] max-h-52 overflow-y-auto rounded-md border p-2 pe-9",
             isError
-              ? "border-[#9B2C1F]/20 bg-[#FCEFEB]/60 text-[#7A1E13]"
+              ? "border-[#9B2C1F]/20 dark:border-[#ec7764]/20 bg-[#FCEFEB]/60 dark:bg-[#463833]/60 text-[#7A1E13] dark:text-[#ffb2a0]"
               : "border-border/40 bg-background/70 text-foreground/90",
           )}
         >
@@ -358,11 +214,4 @@ function ResultBody({ result, isError }: { result: unknown; isError: boolean }) 
 
 function EmptyPlaceholder() {
   return <div className="text-[0.6875rem]/[1.55] text-muted-foreground/60">—</div>;
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const sec = ms / 1000;
-  if (sec < 10) return `${sec.toFixed(1)}s`;
-  return `${Math.round(sec)}s`;
 }

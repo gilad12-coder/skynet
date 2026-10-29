@@ -15,7 +15,6 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/shared/ui/primitives/sheet";
 import { Input } from "@/shared/ui/primitives/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
   COMPACT_POPOVER_ICON_CLASS,
   COMPACT_POPOVER_ITEM_CLASS,
@@ -304,7 +303,7 @@ function ConversationRow({
               aria-label={msg(
                 "auto.features.agent.panel.components.conversationdrawer.unread_indicator",
               )}
-              className="size-1.5 rounded-full bg-primary shrink-0"
+              className="size-1.5 rounded-full bg-primary-fill shrink-0"
             />
           )
         )}
@@ -320,38 +319,30 @@ function ConversationRow({
           )}
         </div>
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                  className={cn(
-                    "text-muted-foreground hover:text-foreground",
-                    "opacity-100 md:opacity-0 md:group-hover:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:opacity-100",
-                  )}
-                  aria-label={msg(
-                    "auto.features.agent.panel.components.conversationdrawer.row_menu",
-                  )}
-                >
-                  <DotsThree
-                    className={cn(
-                      "size-3.5 transition-[transform,color] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none motion-reduce:transform-none",
-                      menuOpen && "rotate-90 scale-110 text-foreground",
-                    )}
-                    aria-hidden="true"
-                  />
-                </Button>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {msg("auto.features.agent.panel.components.conversationdrawer.row_menu")}
-            </TooltipContent>
-          </Tooltip>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+              className={cn(
+                "text-muted-foreground hover:text-foreground",
+                "opacity-100 md:opacity-0 md:group-hover:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:opacity-100",
+              )}
+              autoTooltip={false}
+              aria-label={msg("auto.features.agent.panel.components.conversationdrawer.row_menu")}
+            >
+              <DotsThree
+                className={cn(
+                  "size-3.5 transition-[transform,color] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none motion-reduce:transform-none",
+                  menuOpen && "rotate-90 scale-110 text-foreground",
+                )}
+                aria-hidden="true"
+              />
+            </Button>
+          </PopoverTrigger>
           <PopoverContent
             side="bottom"
             align="end"

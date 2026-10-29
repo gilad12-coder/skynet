@@ -89,7 +89,6 @@ def test_dependency_lock_survives_saved_preview_and_replay(
     """
     harness, state = previews
     state["pending"] = pending
-    scorer_adapter = protected_preview._run_scorer
     lock = {"artifacts": [{"name": "example", "version": "1.0"}]}
 
     def resolve(gateway, payload: dict[str, Any], identity: str, on_token) -> dict[str, Any]:
@@ -104,7 +103,7 @@ def test_dependency_lock_survives_saved_preview_and_replay(
         Returns:
             Successful package lock, independently of usage settlement.
         """
-        scorer_adapter(gateway, {**payload, "case": {}}, identity, on_token)
+        state["charge"](gateway.runtime, payload, "dependencies")
         return {"ok": True, "dependency_lock": lock}
 
     monkeypatch.setattr(protected_preview, "_run_dependencies", resolve)

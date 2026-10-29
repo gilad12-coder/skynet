@@ -44,7 +44,7 @@ export function TrustToggle({ mode, onCycle, className, plain }: TrustToggleProp
           className={cn(
             plain
               ? "inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 text-xs"
-              : "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.6875rem]",
+              : "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem]",
             "min-h-[44px] transition-all duration-150 hover:bg-accent/60 active:scale-[0.97] cursor-pointer md:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
             className,
           )}
@@ -52,9 +52,9 @@ export function TrustToggle({ mode, onCycle, className, plain }: TrustToggleProp
             plain
               ? { color: hue }
               : {
-                  borderColor: `${hue}30`,
+                  borderColor: `color-mix(in srgb, ${hue} 19%, transparent)`,
                   color: hue,
-                  backgroundColor: `${hue}0A`,
+                  backgroundColor: `color-mix(in srgb, ${hue} 4%, transparent)`,
                 }
           }
         >

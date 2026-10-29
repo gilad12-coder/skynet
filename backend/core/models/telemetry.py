@@ -28,3 +28,11 @@ class JobLogEntry(BaseModel):
     # without this field Pydantic strips it on serialization and the
     # per-pair log filter never matches.
     pair_index: int | None = None
+    # Structured run-log fields (core.run_log). ``id`` is the live stream's
+    # resume cursor; rows from before these existed are the host's.
+    id: int | None = None
+    source: str = "host"
+    event: str | None = None
+    fields: dict[str, Any] | None = None
+    candidate: str | None = None
+    case: str | None = None

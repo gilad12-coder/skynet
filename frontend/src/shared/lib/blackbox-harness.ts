@@ -6,16 +6,14 @@ import type { BlackboxHarness } from "@/shared/types/api";
 export const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = [
   "pi",
   "codex",
-  "claude_code",
   "opencode",
   "prime",
 ];
 
-// Claude Code stays listed so users can see it, but it runs only as the
-// proposer, on the user's own verified Anthropic key, where the deployment
-// allows it; saved drafts and clones still open on the default harness.
-export const UNAVAILABLE_HARNESSES: readonly BlackboxHarness[] = ["claude_code"];
-
-export function harnessLabel(harness: BlackboxHarness): string {
-  return msg(`submit.blackbox.start.harness.${harness}`);
+// Stored runs may name a harness Skynet no longer offers (claude_code); those
+// show their raw id instead of a catalog label.
+export function harnessLabel(harness: string): string {
+  return harness === "custom" || BLACKBOX_HARNESSES.includes(harness as BlackboxHarness)
+    ? msg(`submit.blackbox.start.harness.${harness as BlackboxHarness}`)
+    : harness;
 }

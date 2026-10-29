@@ -1,15 +1,13 @@
-# Managed-inference gateway image, used by docker-compose and registry/PaaS
-# deploys (e.g. Railway) alike.
+# Managed-inference gateway image, used by docker-compose and the AWS ECS
+# deploy alike.
 #
 # Built from the MIT-licensed litellm wheel rather than the upstream
 # ghcr.io/berriai/litellm image, which ships LiteLLM's proprietary enterprise/
 # code. requirements.txt explains why the proxy extra is spelled out.
 #
-# ``--host ::`` binds IPv6 (dual-stack on Linux, so IPv4 still works): required
-# for a private-network deploy where the only caller is the backend reaching it
-# at ``http://<service>.railway.internal:4000`` — Railway's private network is
-# IPv6-only. Harmless for the local compose / public setups, which also work
-# over the dual-stack socket.
+# ``--host 0.0.0.0`` binds IPv4. On ``::`` uvicorn sets IPV6_V6ONLY, so IPv4
+# callers (the ECS health check on 127.0.0.1 and the backend through Cloud Map)
+# are refused.
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -27,7 +25,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt \
 
 COPY config.yaml /app/config.yaml
 COPY custom_callbacks.py /app/custom_callbacks.py
+COPY start.py /app/start.py
 
 EXPOSE 4000
-ENTRYPOINT ["litellm"]
-CMD ["--config", "/app/config.yaml", "--port", "4000", "--host", "::"]
+# start.py runs litellm with these args and registers LITELLM_SEED_KEY once
+# the proxy is healthy (see the module docstring).
+ENTRYPOINT ["python", "/app/start.py"]
+CMD ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]

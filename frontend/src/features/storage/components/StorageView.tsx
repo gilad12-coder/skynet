@@ -1,16 +1,17 @@
 "use client";
 
-import { ProgressBar, StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
-import { CaretLeft, CaretRight, HardDrive } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, Database, HardDrive, WarningCircle } from "@/shared/ui/icons";
 import { getStorageUsage, type StorageUsageResponse } from "@/shared/lib/api";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { formatStorageSize } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { StorageCategoryDrawer } from "./StorageCategoryDrawer";
+import { StackedUsageBar } from "./StackedUsageBar";
 import { StorageSkeleton } from "./StorageSkeleton";
-import { categoryLabel } from "../lib/categories";
+import { CATEGORY_META, STORAGE_CATEGORY_ORDER } from "../lib/categories";
+import { cn } from "@/shared/lib/utils";
 
 /**
  * Top-level /storage page: the account-wide cleanup surface. A usage gauge over
@@ -52,11 +53,15 @@ export function StorageView() {
     };
   }, []);
 
-  const breakdown = React.useMemo(() => {
-    if (!usage) return [] as Array<[string, number]>;
-    return Object.entries(usage.breakdown)
-      .filter(([, bytes]) => bytes > 0)
-      .sort((a, b) => b[1] - a[1]);
+  // Every category is listed, so the user sees each kind of data the app keeps
+  // even before it holds anything; the biggest come first, empty ones last.
+  const rows = React.useMemo(() => {
+    if (!usage) return [];
+    return STORAGE_CATEGORY_ORDER.map((key) => ({
+      key,
+      bytes: usage.breakdown[key] ?? 0,
+      count: usage.counts?.[key],
+    })).sort((a, b) => b.bytes - a.bytes);
   }, [usage]);
 
   if (loading) return <StorageSkeleton />;
@@ -90,7 +95,13 @@ export function StorageView() {
             {formatMsg("storage.page.free", { free: formatStorageSize(free) })}
           </span>
         </div>
-        <StorageUsageBar value={usagePct} over={quota > 0 && used > quota} className="mt-3" />
+        <StackedUsageBar rows={rows} quota={quota} className="mt-3" />
+        {quota > 0 && used >= quota && (
+          <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-destructive">
+            <WarningCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {msg("storage.quota.full_warning")}
+          </p>
+        )}
         <p className="mt-2 text-xs tabular-nums text-muted-foreground">
           {formatMsg("storage.page.percent", {
             percent: used > 0 ? Math.max(1, Math.round(usagePct)) : 0,
@@ -99,50 +110,93 @@ export function StorageView() {
       </section>
 
       <section className="mt-10">
-        <h2 className="text-sm font-semibold text-foreground">{msg("storage.breakdown.title")}</h2>
-        {breakdown.length === 0 ? (
-          <EmptyState variant="list" title={msg("storage.breakdown.empty")} />
-        ) : (
-          <ul className="mt-3 flex flex-col gap-1.5">
-            {breakdown.map(([key, bytes]) => {
-              const label = categoryLabel(key);
-              const pct = used > 0 ? Math.max(2, (bytes / used) * 100) : 0;
-              const bar = (
-                <ProgressBar
-                  value={pct}
-                  size="sm"
-                  className="mt-1 bg-[#E5DDD4]/60"
-                  fillClassName="bg-[#3D2E22]/30"
-                />
-              );
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Database className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {msg("storage.breakdown.title")}
+        </h2>
+        <ul className="mt-3 flex flex-col divide-y divide-border-subtle/60">
+          {rows.map(({ key, bytes, count }) => {
+            const meta = CATEGORY_META[key];
+            const label = msg(meta.label);
+            const CategoryIcon = meta.icon;
+            const empty = bytes === 0 && !count;
+            const share = used > 0 ? Math.round((bytes / used) * 100) : 0;
+            const countText =
+              count == null
+                ? null
+                : count === 1
+                  ? msg("storage.category.count_one")
+                  : formatMsg("storage.category.count", { n: count });
 
-              return (
-                <li key={key}>
+            const body = (
+              <>
+                <span
+                  className={cn(
+                    "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                    empty ? "bg-muted/50 text-muted-foreground/60" : "bg-muted text-foreground",
+                  )}
+                >
+                  <CategoryIcon className="size-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        empty ? "bg-border" : meta.swatch,
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{label}</span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                    {msg(meta.description)}
+                  </span>
+                </span>
+                <span className="shrink-0 text-end">
+                  <span
+                    className={cn(
+                      "block text-sm tabular-nums",
+                      empty ? "text-muted-foreground" : "font-medium text-foreground",
+                    )}
+                  >
+                    {empty ? msg("storage.category.empty") : formatStorageSize(bytes)}
+                  </span>
+                  {!empty && (
+                    <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">
+                      {[countText, formatMsg("storage.category.share", { percent: share })]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  )}
+                </span>
+              </>
+            );
+
+            return (
+              <li key={key}>
+                {empty ? (
+                  <div className="flex min-h-14 items-center gap-3 px-2 py-2.5 opacity-70">
+                    {body}
+                  </div>
+                ) : (
                   <button
                     type="button"
                     onClick={() => setOpenCategory(key)}
                     aria-label={formatMsg("storage.category.open", { category: label })}
-                    className="group min-h-12 w-full cursor-pointer rounded-lg px-2 py-2 text-start transition-colors duration-150 hover:bg-muted/50"
+                    className="group flex min-h-14 w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-start transition-colors duration-150 hover:bg-muted/50"
                   >
-                    <div className="flex items-baseline justify-between gap-2 text-sm">
-                      <span className="flex items-center gap-1.5 text-foreground">
-                        {label}
-                        <OpenIcon
-                          className="size-3.5 text-muted-foreground/60 transition-transform duration-150 group-hover:-translate-x-0.5"
-                          aria-hidden="true"
-                        />
-                      </span>
-                      <span className="tabular-nums text-muted-foreground">
-                        {formatStorageSize(bytes)}
-                      </span>
-                    </div>
-                    {bar}
+                    {body}
+                    <OpenIcon
+                      className="size-4 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
+                      aria-hidden="true"
+                    />
                   </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                )}
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <StorageCategoryDrawer

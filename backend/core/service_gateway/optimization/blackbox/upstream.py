@@ -26,29 +26,34 @@ GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 GEPA_SOURCE = f"git+https://github.com/gepa-ai/gepa@{GEPA_REVISION}"
 AUTOSADDLER_REVISION = "9df6d2e3e1d3946057243690bca28e136fa81179"
 AUTOSADDLER_SOURCE = f"git+https://github.com/microsoft/AutoSaddler@{AUTOSADDLER_REVISION}"
+SHINKA_VERSION = "0.0.7"
+SHINKA_SOURCE = f"shinka-evolve=={SHINKA_VERSION}"
 META_HARNESS_SOURCE = f"https://github.com/stanford-iris-lab/meta-harness@{META_HARNESS_REVISION}"
-# AutoResearch is Skynet's own engine, so its provenance is a version, not an upstream pin.
+# AutoResearch is the app's own engine, so its provenance is a version, not an
+# upstream pin. The label is stored with each run's engine provenance, so it keeps
+# its pre-rename prefix.
 AUTORESEARCH_SOURCE = f"skynet:autoresearch@{AUTORESEARCH_VERSION}"
-AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
+AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve")
 
 
 def upstream_task(task: Task, name: str) -> UpstreamTask:
-    """Translate task data while keeping held-out examples outside the optimizer.
+    """Translate a Skynet task into the upstream task shape.
 
     Args:
-        task: Skynet's optimization-only task.
+        task: Skynet's optimization task.
         name: Artifact grouping name.
 
     Returns:
-        The equivalent upstream task, with no test set.
+        The equivalent upstream task; only the train cases go in, as its
+        train set, because upstream merges train and val into one pool and
+        the validation split must stay out of that pool for selection.
     """
     return UpstreamTask(
         name=name,
         seed_candidate=task.seed_candidate,
         objective=task.objective or "",
         background=task.background or "",
-        train_set=task.train_set or None,
-        val_set=task.val_set or None,
+        train_set=task.cases or None,
     )
 
 
@@ -180,10 +185,10 @@ def reflection_endpoint(ctx: EngineContext) -> Iterator[dict[str, Any]]:
                 if ctx.check_budget is not None:
                     ctx.check_budget()
                 response = {
-                    "id": "skynet-reflection",
+                    "id": "app-reflection",
                     "object": "chat.completion",
                     "created": 0,
-                    "model": "skynet-reflection",
+                    "model": "app-reflection",
                     "choices": [
                         {"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}
                     ],

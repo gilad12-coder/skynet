@@ -1,9 +1,10 @@
 """Python scorers behind the sandbox seam: one box per job, one runner call per evaluation.
 
 User scorer code never runs on the worker. :class:`SandboxPythonScorer`
-opens a sandbox lazily on the first evaluation, ships :mod:`.runner` into
-it once, and turns every ``(candidate, case)`` into a ``calls/NNNNNN/``
-directory the runner scores from ``input.json`` into ``output.json``. The
+opens a sandbox lazily on the first evaluation, ships :mod:`.runner` and the
+scorer source into it once, and turns every ``(candidate, case)`` into a
+``calls/NNNNNN/`` directory the runner scores from ``input.json`` into
+``output.json``. The per-call inputs never repeat the scorer source. The
 scorer's ``llm()`` calls leave the box for the gateway
 :func:`scorer_gateway` resolves; their token usage comes back with each
 result and lands in a :class:`ScorerUsage` ledger the run's cost ceiling
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shlex
 import sys
 import threading
@@ -33,11 +33,11 @@ from ....billing.model_gateway import ROUTE_KEY
 from ....billing.operation_pricing import UnpricedOperationError
 from ....billing.runtime import UsagePendingError
 from ....billing.signals import BudgetReached
-from ....config import Settings, settings
+from ....config import Settings, app_env, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
 from ...language_models import usage_by_model_from_history
-from . import package_setup, runner
+from . import check_terminal, package_setup, runner, sandbox_log
 from .agent_eval import gateway_from_settings
 from .harness import ENV_API_KEY
 from .heartbeat import heartbeat
@@ -53,7 +53,7 @@ from .sandbox import (
 
 logger = logging.getLogger(__name__)
 
-RUNNER_FILE = "skynet_runner.py"
+RUNNER_FILE = "app_runner.py"
 RUNNER_SOURCE = Path(runner.__file__).read_text(encoding="utf-8")
 CALLS_DIR = "calls"
 _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
@@ -61,7 +61,7 @@ _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
 _PROBE_LIFETIME_ALLOWANCE_SECONDS = 120.0
 # apt plus a few wheels finish in about a minute; a stalled mirror must not eat the box's lifetime.
 _INSTALL_TIMEOUT_SECONDS = 600.0
-DEPENDENCIES_DIR = ".skynet-dependencies"
+DEPENDENCIES_DIR = ".app-dependencies"
 _DEPENDENCIES_TIMEOUT_SECONDS = 300.0
 _STDERR_TAIL_CHARS = 2_000
 _OPENROUTER_PREFIX = "openrouter/"
@@ -256,7 +256,7 @@ def _sandbox_name(job_id: str | None) -> str | None:
     """
     if not job_id:
         return None
-    return unique_sandbox_name(f"skynet-scorer-{job_id}")
+    return unique_sandbox_name(f"app-scorer-{job_id}")
 
 
 def _raise_control(result: Mapping[str, Any]) -> None:
@@ -328,8 +328,8 @@ class SandboxPythonScorer:
             dict(dependency_route)
             if dependency_route is not None
             else {
-                "url": os.environ.get("SKYNET_BUDGET_RELAY_URL", ""),
-                "token": os.environ.get("SKYNET_PACKAGE_RELAY_TOKEN", ""),
+                "url": app_env("APP_BUDGET_RELAY_URL", ""),
+                "token": app_env("APP_PACKAGE_RELAY_TOKEN", ""),
             }
         )
         self._runtime = runtime
@@ -350,10 +350,14 @@ class SandboxPythonScorer:
             inject_headers=injected,
             network_disabled=self._protected,
             operation_key=f"scorer:{uuid.uuid4().hex}" if self._protected else None,
+            private=True,
         )
         self._session: SandboxSession | None = None
         self._calls = 0
         self._lock = threading.Lock()
+        # ``_lock`` serializes whole calls for the engines; the counter only
+        # needs uniqueness, so concurrent contract-check invokes use their own.
+        self._calls_lock = threading.Lock()
         self.usage: ScorerUsage | None = ScorerUsage(gateway.billing_model) if gateway is not None else None
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
@@ -390,7 +394,6 @@ class SandboxPythonScorer:
             ServiceError: When the box could not run the scorer at all.
         """
         payload = {
-            "code": self._code,
             "candidate": candidate,
             "case": case,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
@@ -438,7 +441,6 @@ class SandboxPythonScorer:
         """
         payload = {
             "mode": "readiness",
-            "code": self._code,
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
         }
         with self._lock:
@@ -467,24 +469,28 @@ class SandboxPythonScorer:
             ServiceError: When the runner produced no output.
         """
         session = self._open()
-        self._calls += 1
-        call_dir = f"{CALLS_DIR}/{self._calls:06d}"
+        with self._calls_lock:
+            self._calls += 1
+            call_dir = f"{CALLS_DIR}/{self._calls:06d}"
         started = time.perf_counter()
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}
         )
-        result = session.run(
-            f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
-            env={
-                **({ENV_API_KEY: self._env_key} if self._env_key else {}),
-                **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
-                # The protected image has no display or GPU; PyOpenGL-based renderers
-                # (pyrender and friends) would otherwise try to open an X display.
-                **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
-            }
-            or None,
-            timeout_seconds=self._timeout_seconds,
-        )
+        # A sink makes the session stream stderr live, which is where log() events travel.
+        with sandbox_log.event_scope(source="scorer"):
+            result = session.run(
+                f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
+                env={
+                    **({ENV_API_KEY: self._env_key} if self._env_key else {}),
+                    **({"PYTHONPATH": f"{DEPENDENCIES_DIR}/site"} if self._dependency_lock is not None else {}),
+                    # The protected image has no display or GPU; PyOpenGL-based renderers
+                    # (pyrender and friends) would otherwise try to open an X display.
+                    **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
+                }
+                or None,
+                timeout_seconds=self._timeout_seconds,
+                on_output=sandbox_log.ignore_output,
+            )
         logger.debug(
             "scorer call %d finished in %.1fs (exit %s)", self._calls, time.perf_counter() - started, result.exit_code
         )
@@ -510,10 +516,12 @@ class SandboxPythonScorer:
             name = _sandbox_name(self._job_id)
             logger.info("scorer sandbox: opening %s (lifetime %.0fs)", name or "a box", self._spec.lifetime_seconds)
             opened = time.perf_counter()
+            check_terminal.note("box_opening")
             session = self._runtime.open(replace(self._spec, name=name))
             logger.info("scorer sandbox: ready in %.1fs", time.perf_counter() - opened)
+            check_terminal.note("box_ready", seconds=round(time.perf_counter() - opened, 1))
             try:
-                session.write_files({RUNNER_FILE: RUNNER_SOURCE})
+                session.write_files({RUNNER_FILE: RUNNER_SOURCE, runner.CODE_FILE: self._code})
                 self._install(session)
             except BaseException:
                 session.close()
@@ -604,7 +612,7 @@ class SandboxPythonScorer:
         roots = {
             root
             for root in package_setup._candidate_roots(candidate)
-            if root not in sys.stdlib_module_names and root != "skynet"
+            if root not in sys.stdlib_module_names and root != runner.HELPER_MODULE_NAME
         } - self._covered
         if not roots:
             return None

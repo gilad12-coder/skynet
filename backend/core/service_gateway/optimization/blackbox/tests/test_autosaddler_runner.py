@@ -7,15 +7,17 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from .. import autosaddler_runner, native_runtime
+from .. import autosaddler_runner, native_runtime, repo_tree
 
 # The runner needs the pinned upstream package on Python 3.12, which the
 # backend venv does not carry; point this at an interpreter that has it.
-_PYTHON_ENV = "SKYNET_AUTOSADDLER_PYTHON"
+_PYTHON_ENV = "APP_AUTOSADDLER_PYTHON"
+_LEGACY_PYTHON_ENV = "SKYNET_AUTOSADDLER_PYTHON"
 
 _WRAPPER = '''
 import importlib.util, json, sys, traceback
@@ -42,7 +44,7 @@ class ScriptedProvider:
             assert ".autosaddler/training_evidence.json" in request.spec.workspace_files
             components = json.loads((request.workspace / "candidate.json").read_text())
             output = {
-                "schema_version": "skynet-autosaddler-diagnosis/v1",
+                "schema_version": "app-autosaddler-diagnosis/v1",
                 "intent": "add vowels",
                 "diagnosis": "too few vowels",
                 "expected_effect": "higher density",
@@ -50,13 +52,13 @@ class ScriptedProvider:
             }
         elif kind == "evolve":
             output = {
-                "schema_version": "skynet-autosaddler-evolution/v1",
+                "schema_version": "app-autosaddler-evolution/v1",
                 "parent_ids": [context["candidate_ids"][-1]],
                 "component_sources": {},
                 "rationale": "continue from the newest accepted candidate",
             }
         else:
-            output = {"schema_version": "skynet-autosaddler-reflection/v1", "lessons": []}
+            output = {"schema_version": "app-autosaddler-reflection/v1", "lessons": []}
         with Path("sessions.log").open("a") as log:
             log.write(kind + "\\n")
         usage = Usage(input_tokens=5, output_tokens=3, model=self.config.model)
@@ -94,7 +96,7 @@ def _upstream_python() -> str | None:
     Returns:
         The interpreter path, or ``None`` when no candidate carries AutoSaddler on Python 3.12+.
     """
-    for candidate in (os.environ.get(_PYTHON_ENV), sys.executable):
+    for candidate in (os.environ.get(_PYTHON_ENV), os.environ.get(_LEGACY_PYTHON_ENV), sys.executable):
         if not candidate:
             continue
         probe = subprocess.run(
@@ -165,9 +167,9 @@ def test_runner_climbs_with_upstream_engine_and_reports_usage(tmp_path: Path) ->
     progress: list[dict[str, Any]] = []
     try:
         for line in process.stdout:
-            if line.startswith("SKYNET_NATIVE_PROGRESS testnonce "):
+            if line.startswith("APP_NATIVE_PROGRESS testnonce "):
                 progress.append(json.loads(line.split(" ", 2)[2]))
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             scored.append((request["candidate"], request["example"]["id"]))
@@ -212,22 +214,22 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     agent = tmp_path / "agent.py"
     agent.write_text(
         "import json, os, pathlib\n"
-        "assert pathlib.Path('AGENTS.md').read_text() and pathlib.Path(os.environ['SKYNET_PROMPT_FILE']).read_text()\n"
+        "assert pathlib.Path('AGENTS.md').read_text() and pathlib.Path(os.environ['APP_PROMPT_FILE']).read_text()\n"
         "schema = pathlib.Path('.autosaddler/session_output_schema.json').read_text()\n"
         "context = json.loads(pathlib.Path('.autosaddler/session_context.json').read_text())\n"
         "if 'diagnosis' in schema:\n"
         "    kind = 'diagnose_patch'\n"
         "    components = json.loads(pathlib.Path('candidate.json').read_text())\n"
-        "    output = {'schema_version': 'skynet-autosaddler-diagnosis/v1', 'intent': 'add vowels',"
+        "    output = {'schema_version': 'app-autosaddler-diagnosis/v1', 'intent': 'add vowels',"
         " 'diagnosis': 'too few vowels', 'expected_effect': 'higher density',"
         " 'updates': {name: text + 'aaa' for name, text in components.items()}}\n"
         "elif 'evolution' in schema:\n"
         "    kind = 'evolve'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        "    output = {'schema_version': 'app-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
         " 'component_sources': {}, 'rationale': 'continue'}\n"
         "else:\n"
         "    kind = 'reflect'\n"
-        "    output = {'schema_version': 'skynet-autosaddler-reflection/v1', 'lessons': []}\n"
+        "    output = {'schema_version': 'app-autosaddler-reflection/v1', 'lessons': []}\n"
         "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
         "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
         "print('done')\n"
@@ -278,7 +280,7 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     )
     try:
         for line in process.stdout:
-            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
             response = {"score": _vowel_fraction(request["candidate"]), "info": {"feedback": "counted"}}
@@ -297,4 +299,199 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     assert "type: custom" in (tmp_path / "autosaddler-run" / "resolved_config.yaml").read_text()
     sessions = (tmp_path / "sessions.log").read_text().split()
     assert sessions.count("diagnose_patch") == 2
-    assert list((tmp_path / ".skynet-bridge").iterdir())
+    assert list((tmp_path / ".app-bridge").iterdir())
+
+
+def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path) -> None:
+    """Each version is a real checkout the agent edits; the parent scores its patch and the best comes back."""
+    python = _upstream_python()
+    if python is None:
+        pytest.skip(f"set {_PYTHON_ENV} to a Python 3.12 interpreter with the pinned autosaddler package")
+    (tmp_path / "rpc").mkdir()
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src" / "app.py").write_text("x = 1\n")
+    (source / "README.md").write_text("hi\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(str(tmp_path / f"tree.{index}.b64"))
+        Path(chunks[-1]).write_text(chunk)
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "import json, pathlib\n"
+        "schema = pathlib.Path('.autosaddler/session_output_schema.json').read_text()\n"
+        "context = json.loads(pathlib.Path('.autosaddler/session_context.json').read_text())\n"
+        "if 'diagnosis' in schema:\n"
+        "    kind = 'diagnose_patch'\n"
+        "    assert context['mutation_scope'] == ['src'] and context['readonly_paths'] == []\n"
+        "    assert pathlib.Path('README.md').read_text() == 'hi\\n'\n"
+        "    app = pathlib.Path('src/app.py')\n"
+        "    app.write_text(app.read_text() + 'better\\n')\n"
+        "    output = {'schema_version': 'app-autosaddler-diagnosis/v1', 'intent': 'improve',"
+        " 'diagnosis': 'not better yet', 'expected_effect': 'higher score', 'changed_paths': ['src/app.py']}\n"
+        "elif 'evolution' in schema:\n"
+        "    kind = 'evolve'\n"
+        "    output = {'schema_version': 'app-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        " 'component_sources': {}, 'rationale': 'continue'}\n"
+        "else:\n"
+        "    kind = 'reflect'\n"
+        "    output = {'schema_version': 'app-autosaddler-reflection/v1', 'lessons': []}\n"
+        "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
+        "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
+        "print('done')\n"
+    )
+    payload = {
+        "nonce": "testnonce",
+        "engine_id": "autosaddler",
+        "model": "claude-test",
+        "sandbox": False,
+        "max_token_cost": 0.05,
+        "max_evals": 12,
+        "max_concurrency": 1,
+        "max_iterations": 2,
+        "timeout_seconds": 60,
+        "source": native_runtime.AUTOSADDLER_REVISION,
+        "proposer": {
+            "harness": "custom",
+            "run_command": f'"{python}" "{agent}"',
+            "instructions_file": "GUIDE.md",
+            "output_format": "plain",
+            "files": {"harness.json": "__APP_API_KEY__"},
+            "env": {},
+            "model": "claude-test",
+            "price": {"input": 0.0, "output": 0.0},
+        },
+        "repo": {"chunks": chunks, "editable_paths": ["."], "readonly_paths": []},
+        "task": {
+            "name": "test",
+            "seed_candidate": "",
+            "objective": "make it better",
+            "train_set": [{"id": "a"}, {"id": "b"}],
+            "val_set": [{"id": "c"}],
+        },
+    }
+    payload["repo"]["editable_paths"] = ["src"]
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    for name, text in native_runtime._runner_files("autosaddler").items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "PYTHONUNBUFFERED": "1",
+        "APP_PROPOSER_API_KEY": "sk-secret-test",
+    }
+    process = subprocess.Popen(
+        [python, "autosaddler_runner.py", "input.json"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    scored: list[str] = []
+    try:
+        for line in process.stdout:
+            if not line.startswith("APP_NATIVE_RPC testnonce "):
+                continue
+            request = json.loads(line.split(" ", 2)[2])
+            scored.append(request["candidate"])
+            response = {"score": min(1.0, request["candidate"].count("+better") / 2), "info": {"feedback": "ok"}}
+            (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
+        stderr = process.stderr.read()
+        result_file = tmp_path / "native_result.json"
+        assert process.wait(timeout=60) == 0, (result_file.read_text() if result_file.exists() else "") + stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    result = json.loads((tmp_path / "native_result.json").read_text())
+    assert "error" not in result, result
+    assert scored[0] == ""
+    assert all(repo_tree.patch_paths(patch) in ([], ["src/app.py"]) for patch in scored)
+    assert result["best_candidate"].count("+better") == 2
+    assert repo_tree.patch_paths(result["best_candidate"]) == ["src/app.py"]
+    assert result["best_score"] == 1.0
+    assert result["metadata"]["iterations"] == 2
+    assert (tmp_path / "sessions.log").read_text().split().count("diagnose_patch") == 2
+
+
+@pytest.mark.parametrize(
+    ("cases", "expected"),
+    [(None, [None]), ([], [None]), ([{"q": 1}], [{"q": 1}]), ([{"q": 1}, {"q": 2}], [{"q": 1}, {"q": 2}])],
+)
+def test_visible_examples_need_no_cases(cases: list[Any] | None, expected: list[Any]) -> None:
+    """Zero cases score the candidate once; one or many are diagnosed and confirmed on the same examples.
+
+    Args:
+        cases: The run's cases, if any.
+        expected: The examples both upstream splits score.
+    """
+    assert autosaddler_runner.visible_examples(cases) == expected
+
+
+def test_a_blank_seed_is_a_valid_starting_component() -> None:
+    """A run without a starting point starts AutoSaddler from an empty text instead of crashing."""
+    assert autosaddler_runner.baseline_components("") == {autosaddler_runner._SINGLE_COMPONENT: ""}
+    with pytest.raises(ValueError, match="seed candidate"):
+        autosaddler_runner.baseline_components(None)
+
+
+def _verify_readme_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, on_block: Any) -> tuple[bool, str, str]:
+    """Run the repository verifier on a checkout whose agent changed ``README.md``.
+
+    Args:
+        tmp_path: Scratch folder.
+        monkeypatch: Replaces upstream's verdict type, absent from this interpreter.
+        on_block: The verifier's block callback, or ``None``.
+
+    Returns:
+        The verdict's acceptance, check name and reason.
+    """
+    monkeypatch.setattr(autosaddler_runner, "GitVerificationVerdict", lambda *fields: fields)
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src" / "app.py").write_text("x = 1\n")
+    (source / "README.md").write_text("hi\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(tmp_path / f"tree.{index}.b64")
+        chunks[-1].write_text(chunk)
+    checkout = repo_tree.unpack_tree(chunks, tmp_path / "checkout")
+    base = subprocess.run(
+        ["git", "rev-parse", repo_tree.BASE_REF], cwd=checkout, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (checkout / "README.md").write_text("changed\n")
+    verify = autosaddler_runner.repo_verifier(base, ["src"], [], on_block=on_block)
+    accepted, check, reason, _ = verify(SimpleNamespace(workspace=checkout, changed_paths=["README.md"]))
+    return accepted, check, reason
+
+
+def test_a_constrained_repository_block_gives_the_illegal_action_message_and_a_run_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Under a constraints file, a path block reads the fixed message and reaches the run log as ``rule.block``."""
+    blocker = autosaddler_runner.rule_blocker(autosaddler_runner.EvaluatorMailbox("testnonce", 1.0))
+    accepted, check, reason = _verify_readme_edit(tmp_path, monkeypatch, blocker)
+    assert (accepted, check, reason) == (False, "repository-rules", repo_tree.ILLEGAL_ACTION_MESSAGE)
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("APP_NATIVE_LOG testnonce ")]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split(" ", 2)[2])
+    assert record["event"] == repo_tree.RULE_BLOCK_EVENT
+    assert record["source"] == "engine"
+    assert record["fields"]["rule"] == repo_tree.PATH_RULE
+    assert "README.md" in record["fields"]["reason"]
+
+
+def test_an_unconstrained_repository_block_keeps_naming_the_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without a constraints file, the verifier names the refused path and logs no rule event."""
+    accepted, check, reason = _verify_readme_edit(tmp_path, monkeypatch, None)
+    assert (accepted, check) == (False, "repository-rules")
+    assert "README.md" in reason
+    assert "APP_NATIVE_LOG" not in capsys.readouterr().out

@@ -1,15 +1,21 @@
-"""Tests for the ``/models`` and ``/models/discover`` endpoints."""
+"""Tests for the ``/models``, ``/models/discover`` and ``/models/call-holds`` endpoints."""
 
 from __future__ import annotations
 
 import urllib.error
+from decimal import Decimal
 from email.message import Message
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from ...billing.operation_pricing import ChargePolicy
+from ...billing.vercel_usage import sandbox_hold_cents
+from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
+from ...service_gateway.optimization.blackbox.sandbox import COVERAGE_SLICE_SECONDS
 from ..model_catalog import CatalogModel, CatalogProvider, ModelCatalogResponse
 from ..routers.models import _validate_discover_url, create_models_router
 from .conftest import bypass_auth
@@ -82,7 +88,7 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
             value="openai/gpt-4o",
             label="gpt-4o",
             provider="openai",
-            data_center="On-prem gateway",
+            data_center="EU",
         ),
     ]
     providers = [
@@ -95,8 +101,8 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
         CatalogProvider(
             slug="openai",
             label="OpenAI",
-            data_center="On-prem gateway",
-            default_base_url="https://llm.internal/v1",
+            data_center="EU",
+            default_base_url="https://eu.api.openai.com/v1",
             has_env_key=True,
         ),
     ]
@@ -108,10 +114,10 @@ def test_list_models_serializes_per_data_center_entries(models_client: TestClien
     assert resp.status_code == 200
     body = resp.json()
     dcs = sorted((p.get("data_center") or "") for p in body["providers"] if p["slug"] == "openai")
-    assert dcs == ["", "On-prem gateway"]
-    on_prem = next(p for p in body["providers"] if p["slug"] == "openai" and p.get("data_center") == "On-prem gateway")
-    assert on_prem["default_base_url"] == "https://llm.internal/v1"
-    assert any(m.get("data_center") == "On-prem gateway" for m in body["models"])
+    assert dcs == ["", "EU"]
+    regional = next(p for p in body["providers"] if p["slug"] == "openai" and p.get("data_center") == "EU")
+    assert regional["default_base_url"] == "https://eu.api.openai.com/v1"
+    assert any(m.get("data_center") == "EU" for m in body["models"])
 
 
 def test_list_models_empty_catalog_returns_empty_lists(models_client: TestClient) -> None:
@@ -204,3 +210,93 @@ def test_validate_discover_url_blocks_metadata_ip() -> None:
     _, pinned_ip, error = _validate_discover_url("http://169.254.169.254/latest")
     assert pinned_ip is None
     assert error is not None
+
+
+_PRICED_MODEL = "openai/gpt-test"
+_ENDPOINTS = {
+    "data": {
+        "id": _PRICED_MODEL,
+        "endpoints": [
+            {
+                "tag": "openai",
+                "provider_name": "OpenAI",
+                "context_length": 1000,
+                "pricing": {"prompt": "0.000001", "completion": "0.000002", "input_cache_write_1h": "0.000003"},
+            }
+        ],
+    }
+}
+
+
+def _holds_client(seen: list[str]) -> TestClient:
+    """Build a models router whose OpenRouter reads hit a mock catalog.
+
+    Args:
+        seen: Collects each requested catalog path.
+
+    Returns:
+        A ``TestClient`` over the models router with auth bypassed.
+    """
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        """Serve the one priced model and refuse the rest."""
+        seen.append(request.url.path)
+        if request.url.path == f"/api/v1/models/{_PRICED_MODEL}/endpoints":
+            return httpx.Response(200, json=_ENDPOINTS)
+        return httpx.Response(404, json={"error": "not found"})
+
+    app = FastAPI()
+    app.include_router(create_models_router(http_client=lambda: httpx.Client(transport=httpx.MockTransport(provider))))
+    bypass_auth(app)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_call_holds_price_one_call_like_the_gateway_reservation() -> None:
+    """The hold covers the stand-in body's byte bound at the base input rate plus the llm() output cap."""
+    client = _holds_client([])
+    resp = client.post(
+        "/models/call-holds",
+        json={
+            "models": [
+                {"name": f"openrouter/{_PRICED_MODEL}", "token_source": "managed"},
+                {"name": _PRICED_MODEL, "token_source": "byok"},
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    # The stand-in body plus the 2,048-token wrapper allowance outgrows the 1,000-token window, and
+    # no breakpoint asks for the one-hour cache, so the window prices at the base prompt rate.
+    provider_usd = (1000 * Decimal("0.000001") + DEFAULT_MAX_TOKENS * Decimal("0.000002")) * Decimal("1.05")
+    managed, byok = resp.json()["holds"]
+    assert managed["cents"] == float(ChargePolicy("managed_model").convert(provider_usd).total)
+    assert byok["cents"] == float(ChargePolicy("byok_model").convert(provider_usd).total)
+    assert managed["cents"] > byok["cents"] > 0
+
+
+def test_call_holds_leave_an_unpriced_model_unknown() -> None:
+    """A model the catalog cannot price reports no hold instead of failing the request."""
+    resp = _holds_client([]).post("/models/call-holds", json={"models": [{"name": "acme/missing"}]})
+
+    assert resp.status_code == 200
+    assert resp.json()["holds"] == [{"name": "acme/missing", "token_source": "managed", "cents": None}]
+
+
+def test_call_holds_reuse_a_recent_price() -> None:
+    """Asking again for the same model does not re-read the provider catalog."""
+    seen: list[str] = []
+    client = _holds_client(seen)
+    for _ in range(2):
+        client.post("/models/call-holds", json={"models": [{"name": _PRICED_MODEL}]})
+
+    assert seen == [f"/api/v1/models/{_PRICED_MODEL}/endpoints"]
+
+
+def test_call_holds_report_the_boxes_open_before_the_first_call() -> None:
+    """The boxes' hold is two deny-all boxes, each funded for its first coverage slice."""
+    resp = _holds_client([]).post("/models/call-holds", json={"models": []})
+
+    assert resp.status_code == 200
+    slice_cents = sandbox_hold_cents(lifetime_ms=COVERAGE_SLICE_SECONDS * 1000, vcpus=2)
+    assert resp.json()["box_hold_cents"] == float(2 * slice_cents)
+    assert resp.json()["box_hold_cents"] > 0

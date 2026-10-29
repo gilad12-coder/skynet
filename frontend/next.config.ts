@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  // CI's `npm run typecheck` is the type gate; repeating it inside `next build`
+  // added about 90 seconds to every deploy.
+  typescript: { ignoreBuildErrors: true },
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],
@@ -19,8 +22,8 @@ const nextConfig: NextConfig = {
         { key: "X-Frame-Options", value: "DENY" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         // HSTS: after the first HTTPS response, browsers refuse plain HTTP for
-        // two years. All skynetml.com hosts (apex + www) terminate TLS on
-        // Railway; the API runs on a separate *.up.railway.app host, so
+        // two years. Every skynetml.com host (apex, www, api and the staging
+        // hosts) terminates TLS on the AWS load balancer, so
         // includeSubDomains stays safe. No `preload` — that opts into the
         // browser preload list, which is slow to reverse.
         {
@@ -68,11 +71,13 @@ const nextConfig: NextConfig = {
   },
 };
 
+// Source maps are not generated or uploaded (SKY-193). The image build gets no
+// Sentry auth token, so the plugin also creates no Sentry release. `release`
+// keeps its default on purpose: `create: false` would also stop the plugin from
+// baking the detected release name (the commit SHA) into the bundle.
 export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
+  sourcemaps: { disable: true },
   webpack: { treeshake: { removeDebugLogging: true } },
   telemetry: false,
 });

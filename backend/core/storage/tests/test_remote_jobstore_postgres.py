@@ -2,13 +2,13 @@
 
 These tests verify that ``FOR UPDATE SKIP LOCKED`` actually serializes
 concurrent claimers — something SQLite cannot exercise because it lacks
-row-level locking. They are gated on ``SKYNET_TEST_DB_URL`` — a dedicated
+row-level locking. They are gated on ``APP_TEST_DB_URL`` — a dedicated
 opt-in, **never** ``REMOTE_DB_URL``, because setup can drop a legacy schema
 and the tests mutate job rows, while ``tests/conftest.py`` loads
 ``backend/.env`` into the environment: a developer's ordinary config must
 not point these tests at their local database. Use a throwaway::
 
-    SKYNET_TEST_DB_URL=postgresql://skynet:skynet@localhost:5432/testdb \
+    APP_TEST_DB_URL=postgresql://skynet:skynet@localhost:5432/testdb \
         pytest backend/core/storage/tests/test_remote_jobstore_postgres.py
 
 Without that env var the entire module is skipped, so unit-test CI is
@@ -17,7 +17,6 @@ unaffected.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from collections.abc import Iterator
@@ -29,14 +28,15 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from alembic import command
+from core.config import app_env
 from core.storage.remote import RemoteDBJobStore
 
-TEST_DB_URL = os.environ.get("SKYNET_TEST_DB_URL")
+TEST_DB_URL = app_env("APP_TEST_DB_URL")
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 pytestmark = pytest.mark.skipif(
     not TEST_DB_URL or not TEST_DB_URL.startswith("postgresql"),
-    reason="SKYNET_TEST_DB_URL not set to a postgresql:// URL — skipping live-DB tests.",
+    reason="APP_TEST_DB_URL not set to a postgresql:// URL — skipping live-DB tests.",
 )
 
 

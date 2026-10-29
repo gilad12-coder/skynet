@@ -1,4 +1,4 @@
-const LOCALE_RESET_PREFIX = "skynet.tagger.interview.locale-reset:";
+const LOCALE_RESET_PREFIX = "app.tagger.interview.locale-reset:";
 
 function resetKey(sessionId: string): string {
   return `${LOCALE_RESET_PREFIX}${sessionId}`;

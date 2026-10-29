@@ -117,7 +117,7 @@ from ._helpers import (
 )
 from .constants import TERMINAL_STATUSES
 from .optimizations._local import remap_test_indices
-from .serve import _artifact_prompt_fields, _column_mapping_fields
+from .serve import ServeInferenceEvent, _artifact_prompt_fields, _column_mapping_fields
 
 logger = logging.getLogger(__name__)
 
@@ -1282,74 +1282,83 @@ def create_share_router(*, job_store) -> APIRouter:
                 raise DomainError("share.inference_forbidden", status=403)
             link = get_link_by_token(session, token)
             optimization_id = link.optimization_id
-        key = (idempotency_key or "").strip()
-        if not key:
-            raise DomainError("budget.idempotency_required", status=400)
+        # Tracking starts once the link resolves: an unknown token names no
+        # program to credit.
+        with ServeInferenceEvent(
+            job_store,
+            username=current_user.username,
+            optimization_id=optimization_id,
+            channel="share_link",
+            route="serve",
+        ):
+            key = (idempotency_key or "").strip()
+            if not key:
+                raise DomainError("budget.idempotency_required", status=400)
 
-        try:
-            job_data = job_store.get_job(optimization_id)
-        except KeyError:
-            raise DomainError("share.not_found", status=404) from None
-        owner = job_owner(job_data)
-        if owner is None:
-            raise DomainError("share.not_found", status=404)
+            try:
+                job_data = job_store.get_job(optimization_id)
+            except KeyError:
+                raise DomainError("share.not_found", status=404) from None
+            owner = job_owner(job_data)
+            if owner is None:
+                raise DomainError("share.not_found", status=404)
 
-        owner_user = AuthenticatedUser(username=owner, role="user", groups=())
-        artifact, overview, _model_name = load_program_metadata(job_store, optimization_id, owner_user)
-        model_config = _owner_model_config(job_data, overview)
-        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
-        workflow = workflow_spec_from_overview(overview)
-        if workflow is not None:
-            input_fields = workflow.input_field_names()
-            output_fields = workflow.output_field_names()
-        if not input_fields:
-            input_fields, output_fields = _column_mapping_fields(overview)
-        if not input_fields:
-            raise DomainError("serve.no_declared_inputs", status=400)
-        missing = [f for f in input_fields if f not in req.inputs]
-        if missing:
-            raise DomainError("serve.missing_inputs", status=400, missing=missing, input_fields=input_fields)
-        filtered_inputs = {f: req.inputs[f] for f in input_fields}
-        stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
-        effective_overview = {
-            **overview,
-            PAYLOAD_OVERVIEW_SIGNATURE_CODE: (
-                overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
-            ),
-            PAYLOAD_OVERVIEW_MODULE_NAME: (overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or stored.get("module_name")),
-            PAYLOAD_OVERVIEW_MODULE_KWARGS: (
-                overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS) or stored.get("module_kwargs", {})
-            ),
-        }
-        tool_source = stored.get("tool_source") or overview.get(PAYLOAD_OVERVIEW_TOOL_SOURCE)
-        interaction_payload = {
-            "model_config": model_config.model_dump(mode="json"),
-            "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
-            "program_artifact": (artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact),
-            "payload_overview": effective_overview,
-            "inputs": filtered_inputs,
-            "_interaction": {
-                "kind": "serve",
-                "optimization_id": optimization_id,
-                "input_fields": input_fields,
-                "output_fields": output_fields,
-                "stream": False,
-            },
-        }
-        if tool_source is not None:
-            interaction_payload["tool_source"] = tool_source
-        result = run_protected_interaction(
-            interaction_payload,
-            kind="shared_serve",
-            max_cost_cents=req.max_cost_cents,
-            idempotency_key=key,
-            user=current_user,
-            job_store=job_store,
-            credential_owner=owner,
-            credential_binding_id=job_data.get("execution_budget_id") or stored.get("execution_budget_id"),
-        )
-        if result.get("error"):
-            raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])
-        return ServeResponse.model_validate(result)
+            owner_user = AuthenticatedUser(username=owner, role="user", groups=())
+            artifact, overview, _model_name = load_program_metadata(job_store, optimization_id, owner_user)
+            model_config = _owner_model_config(job_data, overview)
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+            workflow = workflow_spec_from_overview(overview)
+            if workflow is not None:
+                input_fields = workflow.input_field_names()
+                output_fields = workflow.output_field_names()
+            if not input_fields:
+                input_fields, output_fields = _column_mapping_fields(overview)
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            missing = [f for f in input_fields if f not in req.inputs]
+            if missing:
+                raise DomainError("serve.missing_inputs", status=400, missing=missing, input_fields=input_fields)
+            filtered_inputs = {f: req.inputs[f] for f in input_fields}
+            stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+            effective_overview = {
+                **overview,
+                PAYLOAD_OVERVIEW_SIGNATURE_CODE: (
+                    overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
+                ),
+                PAYLOAD_OVERVIEW_MODULE_NAME: (overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or stored.get("module_name")),
+                PAYLOAD_OVERVIEW_MODULE_KWARGS: (
+                    overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS) or stored.get("module_kwargs", {})
+                ),
+            }
+            tool_source = stored.get("tool_source") or overview.get(PAYLOAD_OVERVIEW_TOOL_SOURCE)
+            interaction_payload = {
+                "model_config": model_config.model_dump(mode="json"),
+                "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
+                "program_artifact": (artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact),
+                "payload_overview": effective_overview,
+                "inputs": filtered_inputs,
+                "_interaction": {
+                    "kind": "serve",
+                    "optimization_id": optimization_id,
+                    "input_fields": input_fields,
+                    "output_fields": output_fields,
+                    "stream": False,
+                },
+            }
+            if tool_source is not None:
+                interaction_payload["tool_source"] = tool_source
+            result = run_protected_interaction(
+                interaction_payload,
+                kind="shared_serve",
+                max_cost_cents=req.max_cost_cents,
+                idempotency_key=key,
+                user=current_user,
+                job_store=job_store,
+                credential_owner=owner,
+                credential_binding_id=job_data.get("execution_budget_id") or stored.get("execution_budget_id"),
+            )
+            if result.get("error"):
+                raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])
+            return ServeResponse.model_validate(result)
 
     return router

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { SideImage } from "@/shared/lib/candidate-render";
 
 // Wire shape for trajectory events. Matches CandidateEvent.to_metrics() and
@@ -64,6 +65,8 @@ export interface MinibatchEntry {
   // null when the event predates iteration plumbing or fires outside a
   // propose() call (baseline / full-valset evaluation).
   iteration: number | null;
+  // Version the note scored, set by engines without proposal iterations.
+  candidate_id: string | null;
   // Renders the scorer attached, whole. They ride on the event outside the
   // feedback text cap; older events only had them inside the text.
   images: SideImage[];
@@ -107,6 +110,15 @@ export interface BlackboxTrajectoryContext {
   // Scorer-attached renders keyed by candidate (see blackboxCandidateKey),
   // from the run's version history — present once the run has finished.
   rendersByText: ReadonlyMap<string, ReadonlyArray<{ key: string; src: string }>>;
+  // A repository run's candidate is a patch, browsed as files; the run page
+  // supplies the browser so the drawer shows the same one as the Versions tab.
+  renderRepoVersion?: (
+    prompt: Record<string, string>,
+    parentPrompt: Record<string, string>,
+  ) => ReactNode;
+  // The scorer feedback the run saved on a version, for engines that never
+  // stream per-case notes; null when that version has none.
+  renderVersionFeedback?: (prompt: Record<string, string>) => ReactNode;
 }
 
 // GEPA stores a plain-string black-box candidate under this one synthetic key.

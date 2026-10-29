@@ -11,6 +11,7 @@ license files in their `*.dist-info/` directories inside the image.
 | --- | --- | --- | --- |
 | Meta-Harness proposer skill | `core/service_gateway/optimization/blackbox/upstream_prompts/meta_harness/` | stanford-iris-lab/meta-harness@0cbc31e9, Copyright (c) 2026 Yoonho Lee | MIT, `LICENSE` beside it |
 | AutoSaddler plugin and prompt-pack wiring | `core/service_gateway/optimization/blackbox/autosaddler_plugin/`, `autosaddler_runner.py` | microsoft/AutoSaddler@9df6d2e3 | MIT, `LICENSE` beside it |
+| ShinkaEvolve runner wiring (EVOLVE-BLOCK program layout, evaluation contract, SEARCH/REPLACE edit format) | `core/service_gateway/optimization/blackbox/shinka_runner.py`, `shinka_bundle.py` | SakanaAI/ShinkaEvolve, `shinka-evolve==0.0.7` on PyPI | Apache-2.0 |
 | Meta-Harness loop structure | `core/service_gateway/optimization/blackbox/native_engines.py` | as above | MIT |
 | GEPA sources sent to sandboxes | archived at run time with `gepa/LICENSE` | gepa-ai/gepa@0632cdb5, Copyright (c) 2025 Lakshya A Agrawal | MIT |
 | Scalar API reference bundle | `core/api/static/scalar/` | scalar/scalar, Copyright (c) 2023-present Scalar | MIT, `LICENSE` beside it |
@@ -30,9 +31,19 @@ license files in their `*.dist-info/` directories inside the image.
 | Prime Agent kernel Python packages | see `sandbox-runtime/prime-agent-kernel.txt` | MIT, BSD, Apache-2.0; certifi is MPL-2.0 | license texts in their `dist-info` folders |
 | OpenCode | see `sandbox-runtime/package-lock.json` | MIT | `LICENSE` inside the package |
 
-Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
-is installed only in images Skynet runs itself; images delivered to third
-parties are built with `INCLUDE_CLAUDE_CODE=false` and do not contain it.
+ShinkaEvolve (`shinka-evolve==0.0.7`, Apache-2.0, Copyright Sakana AI) is
+installed unmodified from PyPI, with the pinned dependencies in
+`core/service_gateway/optimization/blackbox/shinka_requirements.txt`, into its
+own virtual environment at `/opt/shinka/venv` only in sandbox images built with
+`--build-arg INCLUDE_SHINKA_EVOLVE=1` (off by default, so backend/worker
+images do not contain it); outside such an image, a run installs it into
+a private virtual environment inside the run's sandbox.
+When bundled, each package's license text is in its `dist-info` folder. Most are MIT, BSD or
+Apache-2.0; certifi and tqdm are MPL-2.0, `Levenshtein` and
+`python-Levenshtein` 0.27.5 are GPL-2.0-or-later
+(https://github.com/rapidfuzz/Levenshtein/tree/v0.27.5), and `imageio-ffmpeg`
+0.6.0 (BSD-2-Clause) carries a static FFmpeg 7.0.2 executable built as GPL-3.0-or-later
+(https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0, FFmpeg source: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz).
 
 ## LGPL Python dependencies
 

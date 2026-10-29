@@ -52,7 +52,7 @@ export function WizardStepper({
                 >
                   <motion.div
                     className="h-full rounded-full opacity-40"
-                    style={{ background: "linear-gradient(90deg, #c8a882, #a68b6b, #d4b896)" }}
+                    style={{ background: "var(--gradient-progress)" }}
                     initial={{ width: 0 }}
                     animate={{ width: segmentDone ? "100%" : "0%" }}
                     transition={{ duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }}
@@ -70,9 +70,9 @@ export function WizardStepper({
                   locked ? "cursor-default" : "cursor-pointer",
                   "size-[44px] text-sm font-semibold",
                   active
-                    ? "bg-primary text-primary-foreground shadow-[0_0_16px_rgba(124,99,80,0.4)] scale-110"
+                    ? "bg-primary-fill text-primary-foreground scale-110"
                     : completed
-                      ? "bg-primary/15 text-primary hover:bg-primary/25"
+                      ? "bg-primary-fill/15 text-primary hover:bg-primary-fill/25"
                       : reachable
                         ? "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                         : "bg-muted/50 text-muted-foreground/30 cursor-not-allowed",
@@ -82,7 +82,7 @@ export function WizardStepper({
                 {active && (
                   <motion.span
                     layoutId={`${ringId}-step-ring`}
-                    className="absolute inset-0 rounded-full border-2 border-primary"
+                    className="absolute inset-0 rounded-full border-2 border-primary-fill"
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Engine, Text, cast, func, literal, select
@@ -38,6 +38,7 @@ from .models import (
     JobModel,
     LogEntryModel,
     ProgressEventModel,
+    TaggingSessionModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ _CONVERSATION_EMBEDDING_ROW_BYTES = _VECTOR_BYTES
 STORAGE_CATEGORIES = (
     "optimizations",
     "datasets",
+    "tagging_sessions",
     "agent_chats",
     "staged_uploads",
 )
@@ -68,18 +70,20 @@ class StorageUsage:
     """A user's total stored bytes and the per-category breakdown behind it.
 
     ``breakdown`` is keyed by :data:`STORAGE_CATEGORIES`; ``total`` is their sum.
+    ``counts`` holds how many deletable items each category contains.
     """
 
     total: int
     breakdown: dict[str, int]
+    counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class StorageItem:
     """One owned object ranked by its individual storage footprint.
 
-    ``type`` is one of ``"optimization"``, ``"dataset"``, ``"chat"`` or
-    ``"staged_upload"`` and ``id`` is that object's primary key, so the cleanup
+    ``type`` is one of ``"optimization"``, ``"dataset"``, ``"tagging_session"``,
+    ``"chat"`` or ``"staged_upload"`` and ``id`` is that object's primary key, so the cleanup
     UI can deep-link to it and route its delete. ``bytes`` is the object's full
     footprint — for an optimization or chat it includes the byproducts folded
     into it (logs, progress events, embeddings) — so the per-item sizes sum back
@@ -126,6 +130,36 @@ def _byte_size(column: object, dialect_name: str):
     return func.coalesce(length_fn(as_text), 0)
 
 
+def _log_entry_bytes(dialect_name: str):
+    """Return a SQL expression for one run-log row's footprint: its message plus event fields.
+
+    Args:
+        dialect_name: ``engine.dialect.name``, see :func:`_byte_size`.
+
+    Returns:
+        A SQLAlchemy expression yielding the row's byte count.
+    """
+    return _byte_size(LogEntryModel.message, dialect_name) + _byte_size(LogEntryModel.fields, dialect_name)
+
+
+def _tagging_session_bytes(dialect_name: str):
+    """Return a SQL expression for one labeling session's footprint: its rows, labels and AI-assist state.
+
+    Args:
+        dialect_name: ``engine.dialect.name``, see :func:`_byte_size`.
+
+    Returns:
+        A SQLAlchemy expression yielding the row's byte count.
+    """
+    return (
+        _byte_size(TaggingSessionModel.data, dialect_name)
+        + _byte_size(TaggingSessionModel.annotations, dialect_name)
+        + _byte_size(TaggingSessionModel.assist, dialect_name)
+        + _byte_size(TaggingSessionModel.config, dialect_name)
+        + _byte_size(TaggingSessionModel.columns, dialect_name)
+    )
+
+
 def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
     """Sum every byte the user owns across the database into one budget figure.
 
@@ -139,7 +173,11 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
         empty/blank username yields an all-zero usage rather than scanning.
     """
     normalized = (username or "").strip().lower()
-    empty = StorageUsage(total=0, breakdown=dict.fromkeys(STORAGE_CATEGORIES, 0))
+    empty = StorageUsage(
+        total=0,
+        breakdown=dict.fromkeys(STORAGE_CATEGORIES, 0),
+        counts=dict.fromkeys(STORAGE_CATEGORIES, 0),
+    )
     if not normalized:
         return empty
 
@@ -159,7 +197,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
             select(func.coalesce(func.sum(DatasetModel.byte_size), 0)).where(DatasetModel.owner_username == normalized)
         )
         logs = scalar(
-            select(func.coalesce(func.sum(_byte_size(LogEntryModel.message, dialect)), 0)).where(
+            select(func.coalesce(func.sum(_log_entry_bytes(dialect)), 0)).where(
                 LogEntryModel.optimization_id.in_(user_job_ids)
             )
         )
@@ -199,6 +237,22 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
                 AgentStagedDatasetModel.username == normalized
             )
         )
+        tagging_sessions = scalar(
+            select(func.coalesce(func.sum(_tagging_session_bytes(dialect)), 0)).where(
+                TaggingSessionModel.username == normalized
+            )
+        )
+        counts = {
+            "optimizations": scalar(select(func.count()).where(JobModel.username == normalized)),
+            "datasets": scalar(select(func.count()).where(DatasetModel.owner_username == normalized)),
+            "tagging_sessions": scalar(select(func.count()).where(TaggingSessionModel.username == normalized)),
+            "agent_chats": scalar(
+                select(func.count(func.distinct(AgentMessageModel.conversation_id))).where(
+                    AgentMessageModel.conversation_id.in_(user_conversation_ids)
+                )
+            ),
+            "staged_uploads": scalar(select(func.count()).where(AgentStagedDatasetModel.username == normalized)),
+        }
         # job_embeddings / conversation_embeddings only exist on the semantic
         # backend; on SEARCH_BACKEND=lexical the tables are never created, so
         # there is nothing to count and the query would hit a missing relation.
@@ -228,10 +282,11 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
         + agent_runs
         + optimization_embeddings,
         "datasets": datasets,
+        "tagging_sessions": tagging_sessions,
         "agent_chats": agent_chats + chat_embeddings,
         "staged_uploads": staged_uploads,
     }
-    return StorageUsage(total=sum(breakdown.values()), breakdown=breakdown)
+    return StorageUsage(total=sum(breakdown.values()), breakdown=breakdown, counts=counts)
 
 
 def purge_expired_staged_datasets(engine: Engine, *, max_age_seconds: int) -> int:
@@ -266,10 +321,10 @@ def purge_expired_staged_datasets(engine: Engine, *, max_age_seconds: int) -> in
 
 
 def compute_user_storage_items(engine: Engine, username: str, limit: int = 20) -> list[StorageItem]:
-    """Rank a user's largest individual items across optimizations, datasets and chats.
+    """Rank a user's largest individual items across optimizations, datasets, labeling sessions and chats.
 
     Backs the "biggest items" cleanup list on the storage page: each category is
-    queried for its top ``limit`` rows by footprint, the three lists are merged,
+    queried for its top ``limit`` rows by footprint, the lists are merged,
     and the overall largest ``limit`` are returned. Per-row byte figures mirror
     exactly what :func:`compute_user_storage` counts for the same category, so a
     listed item never reports a size the meter does not also attribute to it.
@@ -316,6 +371,8 @@ def compute_user_storage_items(engine: Engine, username: str, limit: int = 20) -
         for dataset_id, name, byte_size in dataset_rows:
             items.append(StorageItem(id=dataset_id, type="dataset", name=name, bytes=int(byte_size or 0)))
 
+        items.extend(_tagging_session_items(session, normalized, dialect, limit))
+
         chat_bytes = func.sum(
             _byte_size(AgentMessageModel.content, dialect) + _byte_size(AgentMessageModel.tool_calls, dialect)
         )
@@ -335,6 +392,32 @@ def compute_user_storage_items(engine: Engine, username: str, limit: int = 20) -
 
     items.sort(key=lambda item: item.bytes, reverse=True)
     return items[:limit]
+
+
+def _tagging_session_items(session: Session, username: str, dialect_name: str, limit: int) -> list[StorageItem]:
+    """List a user's labeling sessions by footprint, largest first.
+
+    Args:
+        session: Open ORM session to query on.
+        username: Normalized owner username.
+        dialect_name: ``engine.dialect.name``, see :func:`_byte_size`.
+        limit: Maximum number of sessions to return.
+
+    Returns:
+        :class:`StorageItem` rows of type ``"tagging_session"``; empty sessions are skipped.
+    """
+    footprint = _tagging_session_bytes(dialect_name).label("session_size")
+    rows = session.execute(
+        select(TaggingSessionModel.id, TaggingSessionModel.name, footprint)
+        .where(TaggingSessionModel.username == username)
+        .order_by(footprint.desc())
+        .limit(limit)
+    ).all()
+    return [
+        StorageItem(id=session_id, type="tagging_session", name=name or session_id, bytes=int(size or 0))
+        for session_id, name, size in rows
+        if int(size or 0) > 0
+    ]
 
 
 def compute_user_storage_category_items(
@@ -371,7 +454,7 @@ def compute_user_storage_category_items(
     with Session(engine) as session:
         if category == "optimizations":
             logs_bytes = (
-                select(func.coalesce(func.sum(_byte_size(LogEntryModel.message, dialect)), 0))
+                select(func.coalesce(func.sum(_log_entry_bytes(dialect)), 0))
                 .where(LogEntryModel.optimization_id == JobModel.optimization_id)
                 .scalar_subquery()
             )
@@ -461,6 +544,8 @@ def compute_user_storage_category_items(
                 if size <= 0:
                     continue
                 items.append(StorageItem(id=conversation_id, type="chat", name=title or conversation_id, bytes=size))
+        elif category == "tagging_sessions":
+            items.extend(_tagging_session_items(session, normalized, dialect, limit))
         else:  # staged_uploads
             staged_bytes = _byte_size(AgentStagedDatasetModel.rows, dialect)
             staged_rows = session.execute(

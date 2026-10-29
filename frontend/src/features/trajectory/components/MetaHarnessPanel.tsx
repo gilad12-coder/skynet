@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
-import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
   extractMinibatch,
@@ -29,9 +28,9 @@ import {
   type AgentRunSummary,
 } from "../lib/meta-harness";
 import { displayCandidateId, type BlackboxTrajectoryContext } from "../lib/types";
+import { rememberTrajectoryView } from "../lib/climb-view-hint";
 import { AgentRunViewer } from "./AgentRunViewer";
 import { MetaHarnessClimb } from "./MetaHarnessClimb";
-import { MetaHarnessOutline } from "./MetaHarnessOutline";
 import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
@@ -59,12 +58,13 @@ function isLive(job: OptimizationStatusResponse): boolean {
 const ENGINE_EXPLAINERS: Record<string, MessageKey> = {
   autoresearch: "meta_harness.explainer.autoresearch",
   autosaddler: "meta_harness.explainer.autosaddler",
+  shinka_evolve: "meta_harness.explainer.shinka_evolve",
 };
 
 export interface MetaHarnessPanelProps {
   job: OptimizationStatusResponse;
   // The hill-climbing engine that produced the versions: meta_harness,
-  // autoresearch or autosaddler.
+  // autoresearch, autosaddler or shinka_evolve.
   engine: string;
   // Run configuration of the black-box run, forwarded to the drawer so it
   // names versions by kind and shows per-case scores only when cases exist.
@@ -72,7 +72,8 @@ export interface MetaHarnessPanelProps {
 }
 
 /**
- * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler).
+ * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler,
+ * ShinkaEvolve).
  * The engine rewrites the best version so far and scores every candidate on
  * all cases, so the run is a climb rather than a tree: the chart lays versions out in scoring order
  * with the best so far as a staircase, and a version's drawer shows how it did
@@ -80,7 +81,8 @@ export interface MetaHarnessPanelProps {
  */
 export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProps) {
   const live = isLive(job);
-  const lite = useLiteMode();
+  const optimizationId = job.optimization_id;
+
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
   const { candidates, caseScores, valsetRows, minibatch, valsetOutputs, agentRuns } =
     useMemo(() => {
@@ -219,7 +221,12 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
     [fullModel, runsByCell, selectedId, pendingId],
   );
 
-  if (fullModel.versions.length === 0 && (!live || fullModel.pending === null)) return null;
+  const hidden = fullModel.versions.length === 0 && (!live || fullModel.pending === null);
+  useEffect(() => {
+    rememberTrajectoryView(optimizationId, hidden ? "none" : "climb");
+  }, [optimizationId, hidden]);
+
+  if (hidden) return null;
 
   const versionCount = formatMsg("meta_harness.header.versions", {
     n: fullModel.versions.length,
@@ -227,12 +234,9 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
 
   return (
     <FadeIn delay={0.12}>
-      <Card
-        className="relative overflow-hidden shadow-[0_1px_3px_rgba(28,22,18,0.04),inset_0_1px_0_rgba(255,255,255,0.5)]"
-        data-tutorial="trajectory-panel"
-      >
+      <Card className="relative overflow-hidden">
         <div
-          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-[#C8A882]/40 to-transparent"
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary-fill/40 to-transparent"
           aria-hidden="true"
         />
         <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -248,13 +252,13 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 shadow-xs backdrop-blur"
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground/80 backdrop-blur"
             >
               <PingDot size="sm" />
               <span className="tabular-nums">{versionCount}</span>
             </motion.div>
           ) : (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground tabular-nums">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider rtl:tracking-normal text-muted-foreground tabular-nums">
               {versionCount}
             </span>
           )}
@@ -272,23 +276,13 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
               tickText={versionTick}
             />
           ) : null}
-          {lite ? (
-            <MetaHarnessOutline
-              model={model}
-              live={live}
-              selectedId={selectedId}
-              newestId={newestId}
-              onSelect={handleSelect}
-            />
-          ) : (
-            <MetaHarnessClimb
-              model={model}
-              live={live}
-              selectedId={selectedId}
-              newestId={newestId}
-              onSelect={handleSelect}
-            />
-          )}
+          <MetaHarnessClimb
+            model={model}
+            live={live}
+            selectedId={selectedId}
+            newestId={newestId}
+            onSelect={handleSelect}
+          />
           <AgentRunViewer
             optimizationId={job.optimization_id}
             run={openRun}

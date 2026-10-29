@@ -88,6 +88,16 @@ def test_budget_api_hides_another_accounts_budget(client: TestClient) -> None:
     )
 
 
+def test_budget_api_checks_ownership_before_the_wallet(client: TestClient) -> None:
+    """Answer 404, not 402, when an account with no wallet asks for someone else's budget."""
+    created = client.post("/execution-budgets", json={"total_cents": 20}, headers={"Idempotency-Key": "draft"}).json()
+    client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("walletless", "user", ())
+    for budget_id in (created["id"], "00000000-0000-0000-0000-000000000000"):
+        assert client.get(f"/execution-budgets/{budget_id}").status_code == 404
+        patched = client.patch(f"/execution-budgets/{budget_id}", json={"total_cents": 30, "expected_revision": 1})
+        assert patched.status_code == 404
+
+
 def test_budget_api_requires_idempotency_and_does_not_promise_wallet_funding(client: TestClient) -> None:
     """Validate the chosen total while showing actual account funding separately."""
     assert client.post("/execution-budgets", json={"total_cents": 20}).status_code == 422

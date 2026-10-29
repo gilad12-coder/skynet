@@ -23,9 +23,12 @@ type ProfileKind = "categorical" | "numeric" | "freeform";
 export interface ModelConfig {
   name: string;
   /** Billing/auth source for this model only. Older saved configs default to managed. */
-  token_source?: "managed" | "byok";
+  token_source?: "managed" | "byok" | "subscription";
   /** Vault provider slug when a BYOK model comes from a custom connection. */
   byok_provider?: string | null;
+  // The CLI whose subscription runs the model; required when token_source is
+  // "subscription" (local desktop build only).
+  cli_provider?: "codex" | "claude" | null;
   base_url?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
@@ -47,7 +50,7 @@ export interface SplitFractions {
 }
 
 // React (ReAct-agent) optimization configuration. Mirrors the backend
-// `ToolSource` model on `RunRequest`. React is a generic GEPA module that
+// `ToolSource` model on legacy DSPy run payloads. React is a generic GEPA module that
 // carries a live tool roster; it is otherwise identical to predict/cot, scored
 // by the same standard `metric_code`. Only sent when `module_name === "react"`.
 export interface ToolSource {
@@ -183,82 +186,6 @@ export interface RuntimeCostProfile {
   vcpus: number | null;
 }
 
-interface OptimizationRequestBase {
-  execution_budget_id?: string;
-  execution_budget_revision?: number;
-  preflight_id?: string;
-  preflight_fingerprint?: string;
-
-  execution_runtime?: ExecutionRuntime;
-  name?: string | null;
-  description?: string | null;
-  username: string;
-  module_name: string;
-  module_kwargs?: Record<string, unknown>;
-  // Required for every module except "workflow", whose per-node signatures
-  // live inside the workflow spec instead.
-  signature_code?: string;
-  // Workflow graph spec — required iff `module_name === "workflow"`.
-  workflow?: WorkflowSpec;
-  // Optional at the base level (grid-search shares this shape); the run path
-  // requires it, react included — react is scored by the same standard metric.
-  metric_code?: string;
-  optimizer_name: string;
-  optimizer_kwargs?: Record<string, unknown>;
-  compile_kwargs?: Record<string, unknown>;
-  // Optional because a submit can carry rows by reference instead: when
-  // `source_dataset_id` is set the server inlines the saved library rows and
-  // `dataset` is omitted. Exactly one of the two is sent.
-  dataset?: Array<Record<string, unknown>>;
-  dataset_filename?: string | null;
-  // Id of a saved library dataset to run by reference (consumer path); mutually
-  // exclusive with inline `dataset`.
-  source_dataset_id?: string | null;
-  column_mapping: ColumnMapping;
-  // Dataset columns in the order the user arranged them at submit time. An
-  // array (not object keys) so it survives JSONB storage and a clone can
-  // restore the original column order.
-  column_order?: string[];
-  split_fractions?: SplitFractions;
-  shuffle?: boolean;
-  seed?: number | null;
-  is_private?: boolean;
-  // How the run's tokens are billed: "managed" (the Skynet balance) or "byok" (the
-  // user's own key — not billed). Threaded from the wizard's token-source toggle
-  // so billing mode is enforced server-side, not advisory. Defaults to "managed".
-  token_source?: "managed" | "byok";
-  // User-set Max Cost Ceiling in cents [FG-1]. A DSPy job's token use isn't
-  // linear, so the wizard shows a projected bracket instead of a tight estimate
-  // and lets the user cap the run here; the backend hard-stops the job once spend
-  // exceeds the budget this cap buys. Omitted when no ceiling is set.
-  max_cost_cents?: number;
-  // Optional GEPA validation target, expressed as a percentage (0–100). The
-  // optimizer stops searching when its best validation candidate reaches it.
-  target_score?: number;
-  // Route managed model calls through the provider's Batch API: half price,
-  // but each round of calls can take minutes to hours. BYOK calls run normally.
-  economy_mode?: boolean;
-  // Projected cost bracket the wizard showed at submit [FG-1], persisted with
-  // the billing stamp so the estimate can be reconciled against the actual
-  // charge. Carries the chargeable bracket for the run's token source
-  // (managed: full per-model cost; byok: platform fee). Omitted when unestimated.
-  estimated_cents_low?: number;
-  estimated_cents_high?: number;
-}
-
-export interface RunRequest extends OptimizationRequestBase {
-  model_config: ModelConfig;
-  reflection_model_config?: ModelConfig;
-  task_model_config?: ModelConfig;
-  // React-agent tool roster — only populated when `module_name === "react"`.
-  tool_source?: ToolSource;
-}
-
-export interface GridSearchRequest extends OptimizationRequestBase {
-  generation_models: ModelConfig[];
-  reflection_models: ModelConfig[];
-}
-
 export interface OptimizationSubmissionResponse {
   optimization_id: string;
   optimization_type: OptimizationType;
@@ -376,12 +303,23 @@ export interface PaginatedJobsResponse {
   offset: number;
 }
 
+/** Where a run-log line came from; sandbox sources are attributed by the host. */
+export type LogSource = "host" | "engine" | "proposer" | "scorer" | "sandbox";
+
 export interface OptimizationLogEntry {
+  /** Row id: the live stream's resume cursor. Absent on demo data. */
+  id?: number | null;
   timestamp: string;
   level: LogLevel | (string & {});
   logger: string;
   message: string;
   pair_index?: number | null;
+  source?: LogSource | (string & {});
+  /** Typed event name, such as `candidate.scored`, or a scorer's own name. */
+  event?: string | null;
+  fields?: Record<string, unknown> | null;
+  candidate?: string | null;
+  case?: string | null;
 }
 
 export interface ProgressEvent {
@@ -567,8 +505,9 @@ export type BlackboxEngineId =
   | "best_of_n"
   | "autoresearch"
   | "meta_harness"
-  | "autosaddler";
-export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
+  | "autosaddler"
+  | "shinka_evolve";
+export type BlackboxHarness = "pi" | "codex" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
 export interface ScorerDependencyLock {
@@ -644,18 +583,57 @@ export interface BlackboxStrategy {
   engine?: BlackboxEngineId | null;
 }
 
-export type BlackboxProposerEffort = "low" | "medium" | "high" | "max";
-
 /** The coding agent that drives a harness-based engine's optimization loop. */
 export interface BlackboxProposer {
   harness: BlackboxHarness;
   install_command?: string | null;
   run_command?: string | null;
-  effort?: BlackboxProposerEffort | null;
-  max_thinking_tokens?: number | null;
   max_candidates_per_iter?: number | null;
   ralph?: boolean;
   max_no_eval_seconds?: number | null;
+  // Caps tool calls per candidate for every coding-agent proposer, and for
+  // ShinkaEvolve's agent editor.
+  max_tool_calls?: number | null;
+  // Local desktop build only: run the proposer as this signed-in CLI on the
+  // host, confined to the run workspace unless the user grants full access.
+  host_cli?: "codex" | "claude" | null;
+  host_permission?: "workspace_only" | "full_access";
+}
+
+export type BlackboxShinkaParentSelection = "weighted" | "power_law" | "beam_search";
+
+/** How ShinkaEvolve writes a version: one model call, or the Pi coding agent with file tools. */
+export type BlackboxShinkaEditor = "single_call" | "agent";
+
+/** ShinkaEvolve's search settings; a request without the block runs every default. */
+export interface BlackboxShinkaSettings {
+  editor: BlackboxShinkaEditor;
+  num_islands: number;
+  migration_interval: number;
+  migration_rate: number;
+  parent_selection: BlackboxShinkaParentSelection;
+  parent_selection_lambda: number;
+  exploitation_alpha: number;
+  exploitation_ratio: number;
+  num_beams: number;
+  patch_diff: number;
+  patch_full: number;
+  patch_cross: number;
+  max_patch_attempts: number;
+  max_patch_resamples: number;
+  archive_size: number;
+  num_archive_inspirations: number;
+  num_top_k_inspirations: number;
+  elite_selection_ratio: number;
+  use_text_feedback: boolean;
+  novelty: boolean;
+  code_embed_sim_threshold: number;
+  max_novelty_attempts: number;
+  meta_notes: boolean;
+  meta_rec_interval: number;
+  meta_max_recommendations: number;
+  max_parallel_evaluations: number;
+  max_parallel_proposals: number;
 }
 
 export interface BlackboxRunRequest {
@@ -674,8 +652,6 @@ export interface BlackboxRunRequest {
   seed_candidate?: BlackboxCandidate | null;
   scorer: BlackboxScorer;
   cases?: Array<Record<string, unknown>> | null;
-  split_fractions?: SplitFractions;
-  shuffle?: boolean;
   seed?: number | null;
   budget: BlackboxBudget;
   strategy: BlackboxStrategy;
@@ -684,7 +660,11 @@ export interface BlackboxRunRequest {
   target: BlackboxTarget;
   task_model_config?: ModelConfig | null;
   reflection_model_config: ModelConfig;
-  token_source?: "managed" | "byok";
+  // More optimization models for ShinkaEvolve, which learns which one
+  // improves scores most; every other engine ignores them.
+  extra_reflection_model_configs?: ModelConfig[];
+  shinka?: BlackboxShinkaSettings | null;
+  token_source?: "managed" | "byok" | "subscription";
   is_private?: boolean;
   // Batch managed chat model calls at half price; coding-agent proposer calls
   // and BYOK calls run normally.
@@ -753,14 +733,67 @@ interface BlackboxCandidateNode {
   discovery_evals: number;
 }
 
+/** One named score a scorer returned, with its own feedback. */
+export interface BlackboxNamedScore {
+  score: number;
+  feedback: string;
+}
+
+/** One case of the final run: the starting version and the winner, scored afresh. */
+export interface BlackboxCaseResult {
+  index: number;
+  baseline_score?: number | null;
+  best_score?: number | null;
+  baseline_feedback?: string | null;
+  best_feedback?: string | null;
+  /** The trusted measurement of each version's run on the case (time, model
+   *  attempts, metered service cost); absent where nothing measured it. */
+  baseline_observation?: BlackboxObservation | null;
+  best_observation?: BlackboxObservation | null;
+}
+
+/** One response's trusted observation; see `workspace_harness.build_observation`. */
+export interface BlackboxObservation {
+  timing?: { task_ms?: number | null; [key: string]: unknown } | null;
+  cost?: {
+    usd?: number | null;
+    status?: string | null;
+    reason?: string | null;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+}
+
 export interface BlackboxRunResult {
   optimizer_name: string;
   strategy_mode: "auto" | "single";
   engine_used: BlackboxEngineId;
-  split_counts: Record<string, number>;
+  /** Fresh final-run score of the starting version. */
+  baseline_score?: number | null;
+  /** Fresh final-run score of the winner. */
+  best_score?: number | null;
+  metric_improvement?: number | null;
+  /** The final run's top-level feedback; null when there are cases (see `case_results`). */
+  baseline_feedback?: string | null;
+  best_feedback?: string | null;
+  /** Named scores from the final run, averaged over cases; absent on older runs. */
+  baseline_named_scores?: Record<string, BlackboxNamedScore>;
+  best_named_scores?: Record<string, BlackboxNamedScore>;
+  /** One row per case of the final run; empty without cases. */
+  case_results?: BlackboxCaseResult[];
+  case_count?: number;
+  /** Fresh scorer runs spent on the final run, outside `max_scorer_runs`. */
+  final_scorer_runs?: number;
+  /** Runs recorded before the final run existed. Unified runs store a
+   *  `UnifiedSplitCounts` object here instead. */
+  split_counts?: Record<string, number>;
+  /** Unified runs: selection scores on `split_counts.selection_split`. */
+  baseline_val_score?: number | null;
+  best_val_score?: number | null;
+  /** Unified runs: the optimizer Auto resolved to. */
+  optimizer_resolved?: string | null;
   baseline_test_metric?: number | null;
   optimized_test_metric?: number | null;
-  metric_improvement?: number | null;
   seed_candidate?: BlackboxCandidate | null;
   best_candidate: BlackboxCandidate;
   regression_guard_applied: boolean;
@@ -778,6 +811,35 @@ export interface BlackboxRunResult {
   lm_activity?: LMActivity | null;
   optimization_metadata: Record<string, unknown>;
   details: Record<string, unknown>;
+  /** Unified runs on a DSPy optimizer: the compiled program. */
+  program_artifact?: ProgramArtifact | null;
+}
+
+export interface RepositoryTreeEntry {
+  path: string;
+  type: "file" | "dir";
+  size: number | null;
+}
+
+/** A repository run's tree at its pinned commit. */
+export interface RepositoryTreeResponse {
+  repository: string;
+  commit: string;
+  entries: RepositoryTreeEntry[];
+  /** True when the listing stops short of the whole tree. */
+  truncated: boolean;
+}
+
+/** One file of a repository run at its pinned commit. */
+export interface RepositoryFileResponse {
+  path: string;
+  /** Null when the file is binary, too large, or missing. */
+  content: string | null;
+  binary: boolean;
+  too_large: boolean;
+  /** Not in the pinned commit — normal for a file a version adds. */
+  missing: boolean;
+  size: number | null;
 }
 
 export interface BlackboxEngineInfo {
@@ -802,7 +864,6 @@ export interface BlackboxEngineCatalogResponse {
   auto_unavailable_reason: string | null;
   auto_checkpoint_recovery_supported: boolean;
   auto_checkpoint_recovery_reason: string | null;
-  claude_code_proposer_available: boolean;
   upstream_revision: string;
   run_recovery_eligibility: string;
   proposer_runtimes: Array<{
@@ -855,8 +916,6 @@ export interface OptimizationStatusResponse extends OptimizationSummaryResponse 
   result?: RunResult | null;
   grid_result?: GridSearchResult | null;
   blackbox_result?: BlackboxRunResult | null;
-  /** Grid pair indices with a saved checkpoint: a failed pair here offers Resume, one not here offers Restart. */
-  grid_resumable_pairs?: number[];
   /** Caller's share role when reached via a member grant; null for the owner's own view. */
   effective_role?: "viewer" | "editor" | "owner" | null;
 }
@@ -953,13 +1012,37 @@ export interface CatalogModel {
   featured?: boolean;
   // The best-value default thinker that the composer's Auto mode runs.
   is_default?: boolean;
+  // The fast, cheap model every agent interview runs when the user picks
+  // nothing; at most one model carries it.
+  is_interview_default?: boolean;
+  // The featured default thinker with the highest intelligence index; the
+  // reflection model's Automatic runs it. At most one model carries it.
+  is_strongest?: boolean;
+  // OpenRouter's human name without the vendor prefix ("Claude Haiku 5.5");
+  // null for models OpenRouter does not list.
+  display_name?: string | null;
   supports_vision: boolean;
+  // Best-value rank of the model's lab: 0 top labs (Anthropic, OpenAI,
+  // Google), 1 others, 2 Chinese labs. Absent reads as 1.
+  lab_tier?: number;
   available: boolean;
   max_input_tokens?: number | null;
   // Provider per-token costs (USD) from LiteLLM; null/absent when unpriced, so
   // the estimate falls back to a default rate rather than treating it as free.
   input_cost_per_token?: number | null;
   output_cost_per_token?: number | null;
+  // Artificial Analysis intelligence index (a new release may carry its
+  // predecessor's); null when unrated.
+  intelligence_index?: number | null;
+  // The model's Artificial Analysis page, only once the backend has fetched it
+  // and confirmed it names this model; null otherwise (no link shown).
+  artificial_analysis_url?: string | null;
+  // Live OpenRouter output tokens/s of the fastest healthy endpoint; null when unmeasured.
+  throughput_tps?: number | null;
+  // Median ms to the first token on that endpoint; null when unmeasured.
+  ttft_ms?: number | null;
+  // Estimated ms to a complete 150-token reply on that endpoint; null when unmeasured.
+  latency_ms?: number | null;
   // At least one OpenRouter endpoint serves this model with zero data retention.
   zero_retention?: boolean;
 }

@@ -16,8 +16,13 @@ HEBREW_CHARS = {chr(c) for c in range(0x0590, 0x05FF + 1)}
 # docstring) whose few-shot examples are written in Hebrew so the model answers
 # Hebrew users in kind — that is prompt content fed to the model, not
 # user-facing copy rendered via the i18n catalog, so it is exempt from the
-# centralization guard.
-_EXEMPT_MODULES = {Path("i18n.py"), Path("service_gateway/agents/generalist.py")}
+# centralization guard. ``conduct.py`` is likewise prompt content: its Hebrew
+# example shows the model a gender-neutral way to address the user.
+_EXEMPT_MODULES = {
+    Path("i18n.py"),
+    Path("service_gateway/agents/generalist.py"),
+    Path("service_gateway/agents/conduct.py"),
+}
 
 
 def test_backend_hebrew_copy_is_centralized_in_i18n_catalog() -> None:

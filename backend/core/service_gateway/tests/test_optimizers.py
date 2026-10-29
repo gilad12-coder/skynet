@@ -13,7 +13,6 @@ from gepa.strategies.proposal_sampling import PxNSampling
 from core.config import settings
 from core.exceptions import ServiceError
 from core.models import ModelConfig
-from core.service_gateway.language_models import GepaRecoverySeedBoundary
 from core.service_gateway.optimization.data import DatasetSplits
 from core.service_gateway.optimization.optimizers import (
     TargetScoreStopper,
@@ -21,6 +20,7 @@ from core.service_gateway.optimization.optimizers import (
     _compile_accepts_valset,
     _extract_factory_targets,
     compile_program,
+    compile_selection_scope,
     evaluate_on_test,
     instantiate_optimizer,
     optimizer_requires_metric,
@@ -195,6 +195,36 @@ def test_compile_program_does_not_inject_valset_when_optimizer_does_not_accept_i
     )
 
     assert "valset" not in received.get("extra", {})
+
+
+def test_compile_program_omits_empty_valset_so_gepa_cannot_silently_use_train() -> None:
+    """No ``valset`` reaches compile() when the validation split is empty."""
+    received: dict = {}
+
+    class _RecordingOpt:
+        def compile(self, program: Any, *, trainset: Any, **kwargs: Any) -> Any:
+            """Record every extra compilation argument."""
+            received.update(kwargs)
+            return program
+
+    optimizer = _RecordingOpt()
+    splits = _splits(train=[1, 2])
+    compile_program(optimizer=optimizer, program=object(), splits=splits, metric=None, compile_kwargs={"valset": []})
+
+    assert "valset" not in received
+    assert compile_selection_scope(optimizer, splits, {"valset": []}) == "training"
+
+
+def test_compile_selection_scope_is_validation_when_valset_reaches_compile() -> None:
+    """The recorded scope is validation exactly when a valset is passed."""
+
+    class _Opt:
+        def compile(self, program: Any, *, trainset: Any, valset: Any = None) -> Any:
+            """Accept a validation set."""
+            return program
+
+    assert compile_selection_scope(_Opt(), _splits(train=[1], val=[2])) == "validation"
+    assert compile_selection_scope(_Opt(), _splits(train=[1])) == "training"
 
 
 def test_compile_program_honours_pre_set_trainset_in_compile_kwargs() -> None:
@@ -579,41 +609,6 @@ def test_instantiate_optimizer_gepa_injects_target_score_stopper() -> None:
     assert isinstance(stopper, TargetScoreStopper)
     assert stopper.threshold == pytest.approx(0.85)
     assert state["target_score_stopper"] is stopper
-
-
-def test_instantiate_optimizer_gepa_binds_recovery_to_seed_event_and_stopper() -> None:
-    """Use one boundary as both the seed observer and fail-closed stopper."""
-    captured: dict[str, Any] = {}
-    observer = object()
-
-    def stopper(_state: object) -> bool:
-        """Keep the configured test optimizer running."""
-        return False
-
-    class _GepaFactory:
-        def __init__(self, **kw: Any) -> None:
-            """Capture the keyword arguments supplied to the factory."""
-            captured.update(kw)
-
-        def compile(self, *a: Any, **kw: Any) -> None:
-            """Provide a no-op optimizer compilation."""
-            return
-
-    instantiate_optimizer(
-        factory=_GepaFactory,
-        optimizer_name="gepa",
-        optimizer_kwargs={"gepa_kwargs": {"callbacks": [observer], "stop_callbacks": [stopper]}},
-        metric=_dummy_metric,
-        reflection_model=None,
-        reflection_lm=object(),
-        recovery_seed_model=object(),
-    )
-
-    gepa_kwargs = captured["gepa_kwargs"]
-    boundary = gepa_kwargs["callbacks"][0]
-    assert isinstance(boundary, GepaRecoverySeedBoundary)
-    assert gepa_kwargs["callbacks"] == [boundary, observer]
-    assert gepa_kwargs["stop_callbacks"] == [boundary, stopper]
 
 
 def test_instantiate_optimizer_gepa_no_sampling_strategy_by_default() -> None:

@@ -18,7 +18,7 @@ const SIZE_CLASS = { sm: "size-1.5", md: "size-2" } as const;
 
 const TONE_CLASS = {
   warning: { halo: "bg-[var(--warning)]/60", dot: "bg-[var(--warning)]" },
-  agent: { halo: "bg-primary/40", dot: "bg-primary" },
+  agent: { halo: "bg-primary-fill/40", dot: "bg-primary-fill" },
 } as const;
 
 /**

@@ -11,9 +11,9 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents } from "@/shared/lib/sse";
 import { dispatchGeneralistEvent } from "./stream-events";
-import { fetchWithAuthRetry } from "@/shared/lib/api";
+import { announceWalletChange, fetchWithAuthRetry } from "@/shared/lib/api";
 
-// Resolve lazily — a module-load const races the injected window.__SKYNET_ENV__
+// Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
 
@@ -29,6 +29,9 @@ export interface GeneralistAgentRequest {
   model?: string;
   /** Reasoning-effort level for the chosen model; absent = its default. */
   reasoning_effort?: string;
+  /** Client-generated id of this turn; `/agent-steer` messages posted with
+   *  it are delivered into the running turn. */
+  steer_key?: string;
 }
 
 interface ConversationMetaPayload {
@@ -38,6 +41,10 @@ interface ConversationMetaPayload {
 
 export interface GeneralistAgentHandlers {
   onReasoningPatch?: (chunk: string) => void;
+  /** A one- or two-sentence label for the turn's `index`-th stretch of reasoning. */
+  onThinkingSummary?: (ev: { index: number; text: string }) => void;
+  /** What the agent said it will do this turn. */
+  onPlan?: (text: string) => void;
   onToolStart?: (ev: ToolStartPayload) => void;
   onToolEnd?: (ev: ToolEndPayload) => void;
   onPendingApproval?: (ev: PendingApprovalPayload) => void;
@@ -46,6 +53,8 @@ export interface GeneralistAgentHandlers {
   /** The reply streamed so far prefaced a tool call and is not the reply. */
   onMessageReset?: () => void;
   onConversationMeta?: (ev: ConversationMetaPayload) => void;
+  /** The agent read these steered messages at a step boundary; `text` joins them. */
+  onSteerApplied?: (ev: { ids: string[]; text: string }) => void;
   onDone: (result: {
     assistant_message: string;
     model: string | null;
@@ -53,6 +62,8 @@ export interface GeneralistAgentHandlers {
     /** Raw `stats` block; read it with `parseTurnStats`. */
     stats: unknown;
   }) => void;
+  /** The turn's final `stats`, sent after `done` when later model calls changed its cost. */
+  onTurnStats?: (stats: unknown) => void;
   onError: (message: string, code?: string) => void;
   signal?: AbortSignal;
 }
@@ -81,14 +92,18 @@ export async function streamGeneralistAgent(
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
     let detail: string | undefined;
+    let code: string | undefined;
     try {
-      const raw = JSON.parse(text).detail;
+      const body = JSON.parse(text);
+      const raw = body.detail;
       detail = typeof raw === "string" ? raw : raw != null ? JSON.stringify(raw) : undefined;
+      code = typeof body.code === "string" ? body.code : undefined;
     } catch {
       /* not json */
     }
     handlers.onError(
       detail ?? formatMsg("auto.features.agent.panel.lib.stream.template.1", { p1: res.status }),
+      code,
     );
     return;
   }
@@ -104,6 +119,9 @@ export async function streamGeneralistAgent(
         err instanceof Error ? err.message : msg("auto.features.agent.panel.lib.stream.literal.3"),
       );
     }
+  } finally {
+    // The turn is debited as its stream closes on the server.
+    announceWalletChange();
   }
 }
 

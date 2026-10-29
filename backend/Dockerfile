@@ -1,32 +1,19 @@
-# Air-gap operators: see AIRGAP.html for REGISTRY_PREFIX / DEBIAN_MIRROR /
-# PIP_INDEX_URL / PIP_TRUSTED_HOST / GEPA_GIT_MIRROR build-args, plus
-# DENO_DOWNLOAD_BASE / NPM_CONFIG_REGISTRY for Deno and the optimizer CLI.
-# With those set nothing in this file fetches from public mirrors.
-ARG REGISTRY_PREFIX=docker.io
-FROM ${REGISTRY_PREFIX}/node:22.22.0-bookworm-slim AS node-runtime
+FROM docker.io/node:22.22.0-bookworm-slim AS node-runtime
 
 FROM node-runtime AS harness-deps
 
-ARG NPM_CONFIG_REGISTRY
-# Claude Code is proprietary Anthropic software that may not be redistributed.
-# Images delivered to a third party (air-gap bundles, customer registries) must
-# build with INCLUDE_CLAUDE_CODE=false; only our own hosted deployment keeps it.
-ARG INCLUDE_CLAUDE_CODE=true
-# Prime Agent's tarballs come from its own release host, which
-# NPM_CONFIG_REGISTRY cannot redirect. Air-gap builds point this at a mirror of
-# <host>/releases; the lockfile integrity hashes still pin the content.
-ARG PRIME_AGENT_RELEASE_MIRROR
+# npm installs only the opencode binary packages that match the build CPU, so
+# the package names depend on the target architecture (ECS runs arm64).
+ARG TARGETARCH
 COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
-RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
-        sed -i "s|https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases|${PRIME_AGENT_RELEASE_MIRROR%/}|g" \
-            /usr/local/lib/skynet-harnesses/package.json /usr/local/lib/skynet-harnesses/package-lock.json; \
-    fi \
+RUN case "$TARGETARCH" in \
+        amd64) OPENCODE_PKGS="opencode-linux-x64 opencode-linux-x64-baseline" ;; \
+        arm64) OPENCODE_PKGS="opencode-linux-arm64" ;; \
+        *) echo "unsupported arch for opencode: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
     && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
-        ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
     && rm -rf \
-        /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai/claude-code-linux-x64-musl \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-musl \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline-musl \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-*-musl \
     && mkdir -p \
         /opt/skynet-harness-layers/anthropic \
         /opt/skynet-harness-layers/codex \
@@ -46,34 +33,24 @@ RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
         /opt/skynet-harness-layers/prime/@earendil-works/ \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@earendil-works \
         /opt/skynet-harness-layers/pi/ \
-    && mv \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64 \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline \
+    && mv /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
         /opt/skynet-harness-layers/opencode/ \
-    && if [ "$INCLUDE_CLAUDE_CODE" != "true" ]; then \
-        rm -rf /opt/skynet-harness-layers/anthropic/@anthropic-ai \
-            /usr/local/lib/skynet-harnesses/node_modules/.bin/claude; \
-    fi
+    && for PKG in $OPENCODE_PKGS; do \
+        mv "/usr/local/lib/skynet-harnesses/node_modules/$PKG" /opt/skynet-harness-layers/opencode/ || exit 1; \
+    done
 
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
 # fewer copy-on-write pages. Full test suite verified green on 3.12.
-FROM ${REGISTRY_PREFIX}/python:3.12-slim
+FROM docker.io/python:3.12-slim
 
 WORKDIR /app
 
-ARG DEBIAN_MIRROR
-ARG NPM_CONFIG_REGISTRY
 # OSMesa gives PyOpenGL renderers (pyrender, trimesh viewers) a software GL
 # context in the headless sandbox; the scorer runs with PYOPENGL_PLATFORM=osmesa.
-RUN if [ -n "$DEBIAN_MIRROR" ]; then \
-        find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec \
-            sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
-    fi \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git git-lfs \
-        libosmesa6 libgl1 libglu1-mesa \
+        libosmesa6 libgl1 libglu1-mesa tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).
@@ -84,7 +61,7 @@ RUN groupadd -g 1001 appuser 2>/dev/null || true \
     && chown 1001:0 /app \
     && chmod 0775 /app
 
-# Claude Code 2.1.259 requires Node >=22; Debian's nodejs may be older.
+# The pinned harness CLIs require Node >=22; Debian's nodejs may be older.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
@@ -98,27 +75,14 @@ COPY --from=harness-deps /opt/skynet-harness-layers/codex/ /usr/local/lib/skynet
 COPY --from=harness-deps /opt/skynet-harness-layers/opencode/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/pi/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/prime/ /usr/local/lib/skynet-harnesses/node_modules/
-RUN for CLI in claude pi codex opencode prime-agent; do \
+RUN for CLI in pi codex opencode prime-agent; do \
         if [ -e "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" ]; then \
             ln -s "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" "/usr/local/bin/$CLI"; \
         fi; \
     done
 
-# Deployment builds may COPY integrity-pinned custom wheels into this path in
-# a derived image. Runtime installs stay offline and can only read this cache.
-RUN install -d -m 0755 /opt/skynet/wheels
-
-# PIP_INDEX_URL cannot redirect a VCS dependency. Mirroring the repository
-# preserves the approved commit while keeping air-gap builds off GitHub.
-ARG GEPA_GIT_MIRROR
-RUN if [ -n "$GEPA_GIT_MIRROR" ]; then \
-        git config --global "url.${GEPA_GIT_MIRROR}.insteadOf" https://github.com/gepa-ai/gepa; \
-    fi
-
 COPY pyproject.toml uv.lock requirements.txt ./
 
-ARG PIP_INDEX_URL
-ARG PIP_TRUSTED_HOST
 # Dependency installer toggle. PKG_MANAGER=uv (default) installs the exact
 # uv.lock wheel set via uv. PKG_MANAGER=pip installs requirements.txt, the
 # same set exported from uv.lock, for hosts without uv:
@@ -135,19 +99,11 @@ ARG PIP_TRUSTED_HOST
 ARG PKG_MANAGER=uv
 RUN if [ "$PKG_MANAGER" = "pip" ]; then \
         umask 0002; \
-        pip install --no-cache-dir --no-deps \
-            ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
-            ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
-            -r requirements.txt; \
+        pip install --no-cache-dir --no-deps -r requirements.txt; \
     else \
         umask 0002; \
-        pip install --no-cache-dir \
-            ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
-            ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
-            uv \
-        && UV_INDEX_URL=${PIP_INDEX_URL:-} \
-           UV_PYTHON_DOWNLOADS=never \
-           uv sync --frozen --no-install-project; \
+        pip install --no-cache-dir uv \
+        && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-install-project; \
     fi
 
 # Prime Agent runs model code in a Python kernel it normally bootstraps on
@@ -157,11 +113,26 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 COPY sandbox-runtime/prime-agent-kernel.txt /opt/prime-agent/requirements.txt
 RUN python -m venv /opt/prime-agent/kernel-venv \
     && /opt/prime-agent/kernel-venv/bin/python -m pip install --no-cache-dir --no-deps \
-        ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
-        ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
         -r /opt/prime-agent/requirements.txt \
         /usr/local/lib/skynet-harnesses/node_modules/prime-agent/dist/prime-agent-runtime \
     && /opt/prime-agent/kernel-venv/bin/python -c "import rlm, dill, yaml, dotenv, pandas, scipy, bs4, lxml, pydantic, tyro"
+
+# ShinkaEvolve pins its own closure (openai, anthropic, numpy, pandas, ...) that
+# conflicts with the backend's, so it gets its own venv instead of /app/.venv.
+# Protected sandboxes have no network to build it at run time; the native
+# runtime uses this interpreter when present (native_runtime.SHINKA_IMAGE_PYTHON)
+# and the readiness probe reports shinka_ready from it.
+# Off by default: the layer is ~700 MB and carries GPL packages (Levenshtein,
+# imageio-ffmpeg's FFmpeg), so only the sandbox image build opts in with
+# --build-arg INCLUDE_SHINKA_EVOLVE=1; API/worker images stay without it.
+ARG INCLUDE_SHINKA_EVOLVE=false
+COPY core/service_gateway/optimization/blackbox/shinka_requirements.txt /opt/shinka/requirements.txt
+RUN if [ "$INCLUDE_SHINKA_EVOLVE" = "1" ] || [ "$INCLUDE_SHINKA_EVOLVE" = "true" ]; then \
+        python -m venv /opt/shinka/venv \
+        && /opt/shinka/venv/bin/python -m pip install --no-cache-dir --no-deps \
+            -r /opt/shinka/requirements.txt \
+        && /opt/shinka/venv/bin/python -c "import shinka.core.async_runner"; \
+    fi
 
 # dspy.Flex serve-time dependency. An optimized Flex program ALWAYS executes
 # its generated Python in a Deno/Pyodide WASM sandbox (dspy.PythonInterpreter
@@ -170,11 +141,8 @@ RUN python -m venv /opt/prime-agent/kernel-venv \
 # npm:pyodide cache (~40MB binary + ~14MB pyodide).
 # DENO_DIR must match at build and run time so the runtime sandbox hits the
 # cache primed here; it lives under /app so the chgrp/chmod below makes it
-# group-0 writable for the runtime v8 code cache. Air-gap: point
-# DENO_DOWNLOAD_BASE (binary) and NPM_CONFIG_REGISTRY (pyodide wheel) inside
-# and `deno cache` fetches nothing public.
+# group-0 writable for the runtime v8 code cache.
 ARG DENO_VERSION=2.6.6
-ARG DENO_DOWNLOAD_BASE=https://github.com/denoland/deno/releases/download
 ENV DENO_DIR=/app/.deno
 RUN umask 0002; \
         case "$(dpkg --print-architecture)" in \
@@ -183,13 +151,13 @@ RUN umask 0002; \
             *) echo "unsupported arch for Deno: $(dpkg --print-architecture)" >&2; exit 1 ;; \
         esac \
         && curl -fsSL --retry 10 --retry-all-errors --retry-delay 2 --continue-at - \
-            "$DENO_DOWNLOAD_BASE/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
+            "https://github.com/denoland/deno/releases/download/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
         && unzip -o /tmp/deno.zip -d /usr/local/bin \
         && rm /tmp/deno.zip \
         && chmod +x /usr/local/bin/deno \
         && if [ "$PKG_MANAGER" = "uv" ]; then PY=/app/.venv/bin/python; else PY=python; fi \
         && RUNNER_JS=$("$PY" -c 'import os, dspy.primitives.python_interpreter as m; print(os.path.join(os.path.dirname(m.__file__), "runner.js"))') \
-        && ${NPM_CONFIG_REGISTRY:+NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY} deno cache "$RUNNER_JS"
+        && deno cache "$RUNNER_JS"
 
 COPY --chown=1001:0 . .
 
@@ -198,10 +166,7 @@ COPY --chown=1001:0 . .
 # project source is in place.
 RUN if [ "$PKG_MANAGER" = "pip" ]; then \
         umask 0002; \
-        pip install --no-cache-dir --no-deps \
-            ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
-            ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
-            -e .; \
+        pip install --no-cache-dir --no-deps -e .; \
     else \
         umask 0002; \
         UV_PYTHON_DOWNLOADS=never uv sync --frozen; \
@@ -223,7 +188,7 @@ ENV LOG_LEVEL=INFO
 # Containerized runs default to structured logs; override to "text" only
 # when running the image interactively for debugging.
 ENV LOG_FORMAT=json
-# air-gap — litellm uses its bundled cost map instead of fetching model_prices_and_context_window.json from GitHub on import.
+# litellm uses its bundled cost map instead of fetching model_prices_and_context_window.json from GitHub on import.
 ENV LITELLM_LOCAL_MODEL_COST_MAP=True
 # Recommendation embeddings are served by an internal OpenAI-compatible API;
 # no model weights are loaded inside the backend container.
@@ -233,11 +198,14 @@ ENV LITELLM_LOCAL_MODEL_COST_MAP=True
 EXPOSE 8000
 
 # One image, two roles: the API (default) and the standalone job worker
-# (SERVICE_ROLE=worker, no HTTP). Railway deploys both services from this
+# (SERVICE_ROLE=worker, no HTTP). Both services deploy from this
 # same Dockerfile; the env var picks the entrypoint so neither service needs
 # a dashboard-only custom start command.
-# Bind the platform-provided PORT when present (Railway/Heroku-style runtimes
-# inject it and route edge traffic to it) so the bound port always matches
+# Bind the platform-provided PORT when present (PaaS runtimes inject it and
+# route edge traffic to it) so the bound port always matches
 # settings.port and the generalist agent's derived MCP self-dial URL. The
 # sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# Uvicorn trusts X-Forwarded-For/-Proto only from FORWARDED_ALLOW_IPS; behind a
+# load balancer, set it to the balancer's subnet CIDRs. Unset keeps uvicorn's
+# own default (127.0.0.1).
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\"; fi"]
