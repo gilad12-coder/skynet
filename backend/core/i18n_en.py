@@ -242,9 +242,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "transcription.budget_exhausted": "Dictation is paused for the rest of the month. Type your message instead.",
     "transcription.failed": "Transcription failed on every configured provider.",
     "transcription.too_large": "Audio clip exceeds the {max_mb}MB transcription limit.",
-    "transcription.unconfigured": (
-        "No transcription provider configured. Set SONIOX_API_KEY, ELEVENLABS_API_KEY, or OPENAI_API_KEY."
-    ),
+    "transcription.unconfigured": "No transcription provider configured. Set TRANSCRIPTION_API_KEY.",
     "user.storage.quota_exceeded": "Storage quota exceeded ({used_mb}MB of {quota_mb}MB used). Free up space and try again.",
     "wizard.column_roles_not_object": "column_roles must be an object.",
     "wizard.field_must_be_list": "{field} must be a list.",

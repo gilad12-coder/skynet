@@ -130,11 +130,11 @@ class Settings(BaseSettings):
         default=None,
         description=("Base URL of the OpenAI-compatible LLM gateway (LiteLLM reads the same env var for serving)."),
     )
-    groq_api_key: SecretStr | None = Field(
+    transcription_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "Groq API key for dictation speech-to-text (Whisper large-v3-turbo "
-            "on Groq LPUs) — the platform's sole STT provider. Unset disables "
+            "OpenRouter API key for dictation speech-to-text (Whisper large-v3-turbo "
+            "through OpenRouter) — the platform's sole STT provider. Unset disables "
             "dictation with a typed 503."
         ),
     )
@@ -1236,15 +1236,15 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Per-account cap on dictation clips per hour, enforced across replicas via Redis. "
-            "Dictation runs on the platform's Groq key and is not billed to user balances. 0 disables the cap."
+            "Dictation runs on the platform's transcription key and is not billed to user balances. 0 disables the cap."
         ),
     )
-    groq_monthly_budget_usd: float = Field(
+    transcription_monthly_budget_usd: float = Field(
         default=10.0,
         ge=0,
         description=(
-            "Platform-wide monthly cap on Groq dictation spend in dollars, counted in Redis from each "
-            "clip's billed duration. Dictation answers a typed 503 once it is reached. 0 disables the cap."
+            "Platform-wide monthly cap on dictation spend in dollars, counted in Redis from the "
+            "cost OpenRouter reports for each clip. Dictation answers a typed 503 once it is reached. 0 disables the cap."
         ),
     )
     embeddings_monthly_token_cap: int = Field(
@@ -1269,7 +1269,7 @@ class Settings(BaseSettings):
         ge=0,
         le=1,
         description=(
-            "Share of each platform budget (Groq dictation, embeddings, per-account embeddings) a single "
+            "Share of each platform budget (dictation, embeddings, per-account embeddings) a single "
             "process may spend per month when Redis is unset or unreachable, counted in memory. 0 refuses "
             "every budgeted call without Redis."
         ),
