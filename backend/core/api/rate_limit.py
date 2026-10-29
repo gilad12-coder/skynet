@@ -18,8 +18,8 @@ cost/abuse guardrail — a brief window of unthrottled traffic is cheaper than
 refusing every legitimate user because the limiter's backing store blipped.
 
 The window primitive is a fixed-window counter (``INCR`` + ``EXPIRE NX``), which
-needs Redis 7.0+ for the ``NX`` flag — the version Railway and every current
-managed provider ship.
+needs Redis 7.0+ for the ``NX`` flag — the version ElastiCache Valkey and every
+current managed provider ship.
 """
 
 from __future__ import annotations

@@ -3,8 +3,8 @@
 A PR environment copies ``staging``'s variables but gets a fresh proxy
 database, so the virtual key the backend presents (``LITELLM_PROXY_API_KEY``)
 is unknown there and every managed call fails with
-``Invalid proxy server token``. When ``LITELLM_SEED_KEY`` is set (on Railway, a
-reference to ``${{backend.LITELLM_PROXY_API_KEY}}``), this registers that exact
+``Invalid proxy server token``. When ``LITELLM_SEED_KEY`` is set (it must equal the
+backend's ``LITELLM_PROXY_API_KEY``), this registers that exact
 key once the proxy is healthy. It is idempotent: an existing key is left alone.
 """
 

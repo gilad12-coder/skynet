@@ -747,28 +747,18 @@ _PLATFORM_ENV_CASES = (
 def test_platform_setting_reads_the_neutral_name(
     monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
 ) -> None:
-    """A host other than Railway sets only the neutral ``APP_*`` name."""
+    """The ECS task definitions set the neutral ``APP_*`` name."""
     monkeypatch.setenv(neutral, "from-neutral")
     assert getattr(Settings(_env_file=None), field) == "from-neutral"
 
 
 @pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
-def test_platform_setting_falls_back_to_the_railway_name(
+def test_platform_setting_ignores_the_railway_name(
     monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
 ) -> None:
-    """Railway sets only its own name until cut-over, and that still works."""
+    """Railway is gone, so its old variable name no longer feeds the setting."""
     monkeypatch.setenv(railway, "from-railway")
-    assert getattr(Settings(_env_file=None), field) == "from-railway"
-
-
-@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
-def test_platform_setting_prefers_the_neutral_name(
-    monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
-) -> None:
-    """With both names set, the neutral name wins."""
-    monkeypatch.setenv(railway, "from-railway")
-    monkeypatch.setenv(neutral, "from-neutral")
-    assert getattr(Settings(_env_file=None), field) == "from-neutral"
+    assert getattr(Settings(_env_file=None), field) == ""
 
 
 @pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
@@ -781,16 +771,16 @@ def test_platform_setting_defaults_to_empty(field: str, neutral: str, railway: s
     ("environment", "railway", "expected"),
     [
         ("skynet-pr-161", None, True),
-        (None, "skynet-pr-161", True),
+        (None, "skynet-pr-161", False),
         ("staging", None, False),
         ("production", "skynet-pr-161", False),
         (None, None, False),
     ],
 )
-def test_preview_detection_reads_either_environment_name(
+def test_preview_detection_reads_only_app_environment(
     monkeypatch: pytest.MonkeyPatch, environment: str | None, railway: str | None, expected: bool
 ) -> None:
-    """A ``-pr-<n>`` environment name marks a preview under either variable name."""
+    """Only a ``-pr-<n>`` ``APP_ENVIRONMENT`` marks a preview; the Railway name is ignored."""
     if environment is not None:
         monkeypatch.setenv("APP_ENVIRONMENT", environment)
     if railway is not None:

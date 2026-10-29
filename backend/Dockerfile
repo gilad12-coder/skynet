@@ -124,7 +124,7 @@ RUN python -m venv /opt/prime-agent/kernel-venv \
 # and the readiness probe reports shinka_ready from it.
 # Off by default: the layer is ~700 MB and carries GPL packages (Levenshtein,
 # imageio-ffmpeg's FFmpeg), so only the sandbox image build opts in with
-# --build-arg INCLUDE_SHINKA_EVOLVE=1; Railway API/worker images stay without it.
+# --build-arg INCLUDE_SHINKA_EVOLVE=1; API/worker images stay without it.
 ARG INCLUDE_SHINKA_EVOLVE=false
 COPY core/service_gateway/optimization/blackbox/shinka_requirements.txt /opt/shinka/requirements.txt
 RUN if [ "$INCLUDE_SHINKA_EVOLVE" = "1" ] || [ "$INCLUDE_SHINKA_EVOLVE" = "true" ]; then \
@@ -198,11 +198,11 @@ ENV LITELLM_LOCAL_MODEL_COST_MAP=True
 EXPOSE 8000
 
 # One image, two roles: the API (default) and the standalone job worker
-# (SERVICE_ROLE=worker, no HTTP). Railway deploys both services from this
+# (SERVICE_ROLE=worker, no HTTP). Both services deploy from this
 # same Dockerfile; the env var picks the entrypoint so neither service needs
 # a dashboard-only custom start command.
-# Bind the platform-provided PORT when present (Railway/Heroku-style runtimes
-# inject it and route edge traffic to it) so the bound port always matches
+# Bind the platform-provided PORT when present (PaaS runtimes inject it and
+# route edge traffic to it) so the bound port always matches
 # settings.port and the generalist agent's derived MCP self-dial URL. The
 # sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
 # Uvicorn trusts X-Forwarded-For/-Proto only from FORWARDED_ALLOW_IPS; behind a

@@ -1,6 +1,6 @@
 ---
 name: reel-skynet
-description: Skynet-specific extension of the reel skill. Helpers that drive a Skynet PR preview in a reel flow (wait for the deploy, confirm its commit, sign up a throwaway account, build a Manual task, wait for the inline IDE, full screen, drive the coding agent) and the rules for the Skynet review page. Use when verifying or filming a Skynet PR.
+description: Skynet-specific extension of the reel skill. Helpers that drive Skynet (AWS staging or local dev) in a reel flow (confirm the deployed commit, sign up a throwaway account, build a Manual task, wait for the inline IDE, full screen, drive the coding agent) and the rules for the Skynet review page. Use when verifying or filming a Skynet PR.
 ---
 
 # reel-skynet
@@ -15,17 +15,17 @@ cd <this repo checkout>
 PR=715 node ~/.agents/skills/reel/bin/reel.mjs run tools/reel-skynet/examples/ide-smoke.mjs --out <scratchpad>/pr715
 ```
 
-Copy `examples/ide-smoke.mjs` to your scratchpad, change the import path to this
+The example runs against local dev (`APP_URL`, default `http://localhost:3000`, with SMTP unset),
+because `signup()` cannot pass the staging email code. Copy `examples/ide-smoke.mjs` to your scratchpad, change the import path to this
 file's absolute path, and replace the part after setup with what the PR must prove.
 
 ## Helpers (`tools/reel-skynet/skynet.mjs`)
 
 | Helper | Does |
 | --- | --- |
-| `previewUrl(pr)` | `https://frontend-skynet-pr-NNN.up.railway.app` |
-| `waitForPreview(pr)` | Polls `railway deployment list -e skynet-pr-NNN -s backend\|worker\|frontend` (read-only) until the latest of each is SUCCESS; throws on FAILED/CRASHED. Returns `{ service: commitSha }`. |
+| `STAGING_URL` | `https://staging.skynetml.com`. AWS builds no PR previews yet (SKY-164), so film on staging or local dev. |
 | `deployedSha(page)` | Opens `/login` and reads the "Source code" link (`.../tree/<sha>`): the commit the frontend was built from. Compare it to the PR head before filming. |
-| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. Every new account starts with $10 credit. |
+| `signup(page, { tag: "rec715" })` | Registers `rec715-<random>@example.com`, signs in, sets English, skips the intake. Works only on local dev with SMTP unset. Staging sends a real email code, so an `@example.com` account cannot sign in there: on staging, sign in with your own test account from its access file. New accounts start with $0 credit; only `-pr-N` environments give the signup grant. |
 | `newManualTask(page, { prompt, csvPath })` | Wizard: Manual, objective, Prompt artifact, uploads the CSV (default `fixtures/tickets.csv`, 12 tickets). Ends on Inputs. |
 | `toMetricAndRun(page)` | Continues to Metric & run and waits for the inline IDE's explorer to list run.py. Returns boot ms. |
 | `ide(page)` / `ideToolbar(page)` | The IDE (inline section, or the full-screen dialog) / its header: the Check and Full screen icon buttons. Found through the `[data-ide-host]` workbench host. |
@@ -41,21 +41,17 @@ Useful raw selectors: `.monaco-workbench .part.sidebar` (explorer, ~190px),
 strip sits under the header (`ide(page).getByText("No problems")`), and a hand
 edit dims it with "Code or setup changed — re-check".
 
-`waitForPreview` shells out to `railway`, so run the flow from a directory linked
-to the Skynet Railway project (this repo checkout), not from the scratchpad.
-
 The page must be on the app before a helper runs: start with
-`startReel({ url: previewUrl(pr) + "/login" })`. Against local dev use
+`startReel({ url: STAGING_URL + "/login" })`. Against local dev use
 `http://localhost:3000/login` (backend :8000).
 
 ## Rules
 
-- Always run `waitForPreview` and `deployedSha` first; a clip of the wrong commit is
-  worthless. Railway deploys a preview a few minutes after each push.
-- Use a fresh `signup` per run. Other agents may test the same preview at the same
+- Always run `deployedSha` first; a clip of the wrong commit is worthless.
+- Use a fresh `signup` per run. Other agents may test the same environment at the same
   time with their own accounts; never reuse or touch theirs.
-- Never buy credit or open checkout. $10 covers a few runs; if a flow needs more,
-  stop and report.
+- Never buy credit or open checkout. A new staging account has $0, so a paid run
+  stops for lack of balance; if a flow needs credit, stop and report.
 - Prefer role, label and placeholder selectors (as the helpers do); the wizard's
   English strings live in `i18n/locales/ui/en.json`.
 

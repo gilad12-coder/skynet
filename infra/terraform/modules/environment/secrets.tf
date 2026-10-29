@@ -161,7 +161,7 @@ resource "aws_secretsmanager_secret_version" "app_generated" {
   secret_string = jsonencode({
     REMOTE_DB_URL = "postgresql://${local.app_db_user}:${random_password.db_app.result}@${local.db_endpoint}:5432/${aws_db_instance.this.db_name}?sslmode=require"
     REDIS_URL     = "rediss://:${random_password.valkey_auth.result}@${local.redis_endpoint}:6379/0"
-    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
+    # Read only by the dbadmin task (create-db-roles.sh).
     APP_DB_PASSWORD = random_password.db_app.result
   })
 }
@@ -177,7 +177,7 @@ resource "aws_secretsmanager_secret_version" "litellm_generated" {
   secret_string = jsonencode({
     LITELLM_DATABASE_URL = "postgresql://litellm:${random_password.db_litellm.result}@${local.db_endpoint}:5432/litellm?sslmode=require"
     REDIS_PASSWORD       = random_password.valkey_auth.result
-    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
+    # Read only by the dbadmin task (create-db-roles.sh).
     LITELLM_DB_PASSWORD = random_password.db_litellm.result
   })
 }

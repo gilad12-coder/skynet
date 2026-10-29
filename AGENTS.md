@@ -33,8 +33,9 @@ run `/scope`.
 
 ## Merge policy (MANDATORY)
 
-Feature PRs target `staging`, never `main`. Every PR gets its own Railway PR
-environment, a full copy of staging with an empty database.
+Feature PRs target `staging`, never `main`. A PR environment is a full copy of
+staging with an empty database. AWS does not build PR environments yet
+(SKY-164); until it does, run the acceptance checks on AWS staging.
 
 **Backend PRs** (no file under `frontend/`) merge themselves into `staging`
 only when **all** of these gates pass:
@@ -75,20 +76,15 @@ locally, check them again, and then push them together in one push.
 
 ### PR preview environments: keep them able to run an optimization
 
-The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Six things broke that once; keep them true:
+The merger has to sign up and finish a real run in each `*-pr-<n>`
+environment. Five things broke that once; keep them true:
 
-- **No watch paths on `staging` services.** PR environments copy `staging`,
-  and Railway skips a service whose watch paths the PR doesn't touch. A skipped
-  `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
-  `Litellm_proxyException - Connection error`. Never add watch paths to
-  `litellm`, `backend` or `frontend` on `staging`.
 - **The proxy knows the backend's key.** A PR environment gets a fresh
   `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
   there and every managed call (the assistant included) fails with
   `Invalid proxy server token`. `deploy/litellm/start.py` registers
-  `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
-  `${{backend.LITELLM_PROXY_API_KEY}}`.
+  `LITELLM_SEED_KEY` at boot; on `staging` it must equal the backend's
+  `LITELLM_PROXY_API_KEY`.
 - **Preview accounts verify email and get credit.** In a `*-pr-<n>`
   environment, sign-up sends a real confirmation code, exactly like `staging`
   (the test-account helper reads it from the owned inbox), and a new account gets
@@ -113,8 +109,8 @@ environment. Six things broke that once; keep them true:
   its model proxy. `Sandbox.run` caps `kill_after` at
   `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
-  deployment in the PR environment (`railway status --json`). A service with
-  no deployment can be started with Railway's `serviceInstanceDeployV2`.
+  deployment and its events (`aws ecs describe-services --cluster
+  skynet-<env> --services backend worker frontend litellm`).
 
 ## Product and runtime model
 
@@ -144,8 +140,9 @@ environment. Six things broke that once; keep them true:
 - **Dependency management**: `uv` is authoritative for backend development and
   CI; compiled `requirements*.txt` files support the pip/Docker paths. The
   frontend uses npm and a committed lockfile.
-- **Deployment**: Railway backend/worker/frontend containers, a LiteLLM
-  gateway, and a pinned Vercel Container Registry sandbox image.
+- **Deployment**: AWS ECS Fargate backend/worker/frontend containers and a
+  LiteLLM gateway (`infra/terraform`), and a pinned Vercel Container Registry
+  sandbox image.
 
 ## Project layout
 
