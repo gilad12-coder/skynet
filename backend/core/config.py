@@ -561,32 +561,6 @@ class Settings(BaseSettings):
         alias="SENTRY_TRACES_SAMPLE_RATE",
         description="Fraction of backend performance traces exported to Sentry.",
     )
-    sentry_api_token: SecretStr | None = Field(
-        default=None,
-        alias="SENTRY_API_TOKEN",
-        description=(
-            "Sentry auth token with read access to issues, for the admin dashboard's error feed. "
-            "Unset hides the feed behind an empty state."
-        ),
-    )
-    sentry_org: str | None = Field(
-        default=None,
-        alias="SENTRY_ORG",
-        description="Sentry organization slug whose unresolved issues the admin dashboard lists.",
-    )
-    sentry_project: str | None = Field(
-        default=None,
-        alias="SENTRY_PROJECT",
-        description="Sentry project slug the admin dashboard's issue list is narrowed to. Unset lists every project.",
-    )
-    sentry_base_url: str | None = Field(
-        default=None,
-        alias="SENTRY_BASE_URL",
-        description=(
-            "Sentry API origin for the organization's data region, e.g. https://us.sentry.io. "
-            "Unset derives it from SENTRY_DSN."
-        ),
-    )
     event_loop_lag_threshold_ms: float = Field(
         default=100.0,
         ge=10.0,
