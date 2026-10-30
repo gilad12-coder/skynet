@@ -102,12 +102,23 @@ ecr_uri() {
 # Succeeds when the image exists and is fresh. An image older than 11 days is
 # deleted (the repositories are immutable), so build pushes it again: the ECR
 # rule expires PR images 14 days after the push, and a preview may run up to
-# 48 hours after its last deploy. Args: repository tag
+# 48 hours after its last deploy. The tag is deleted before the rebuild, so a
+# failed rebuild leaves the preview unable to replace tasks until the next good
+# build or the cleanup. Args: repository tag
 image_is_fresh() {
-  local pushed
-  pushed="$(aws ecr describe-images --repository-name "$1" --image-ids "imageTag=$2" \
-    --query 'imageDetails[0].imagePushedAt' --output text 2>/dev/null)" || return 1
-  if (($(date +%s) - $(date -d "$pushed" +%s) < 11 * 86400)); then
+  local pushed pushed_at err
+  err="$(mktemp)"
+  # stderr goes to a file, so stdout holds only the timestamp.
+  if ! pushed="$(aws ecr describe-images --repository-name "$1" --image-ids "imageTag=$2" \
+    --query 'imageDetails[0].imagePushedAt' --output text 2>"$err")"; then
+    pushed="$(cat "$err")"
+    rm -f "$err"
+    [[ "$pushed" == *ImageNotFoundException* ]] && return 1
+    die "describe-images $1:$2: $pushed"
+  fi
+  rm -f "$err"
+  pushed_at="$(date -d "$pushed" +%s)" || die "cannot parse imagePushedAt: $pushed"
+  if (($(date +%s) - pushed_at < 11 * 86400)); then
     return 0
   fi
   echo "deleting $1:$2: pushed at $pushed"
