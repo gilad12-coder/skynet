@@ -178,5 +178,7 @@
   "shared.agent.pasted_text_lines": "{n} linhas",
   "shared.agent.pasted_text_remove": "Remover texto colado",
   "shared.agent.pasted_text_restore": "Mostrar no campo de texto",
-  "shared.agent.pasted_text_open": "Abrir texto colado"
+  "shared.agent.pasted_text_open": "Abrir texto colado",
+  "submit.v2.optimizer.source.paper_aria": "Ler o artigo: {p1} (abre em uma nova aba)",
+  "submit.v2.optimizer.source.code_aria": "Ver o código original: {p1} (abre em uma nova aba)"
 }

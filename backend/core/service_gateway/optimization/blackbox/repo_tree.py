@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 # Payload key naming the packed tree. The parent sets it to a file on its own
 # disk; the sandbox supervisor uploads that file and rewrites the key into
@@ -21,6 +22,35 @@ REPO_SNAPSHOT_KEY = "_repo_snapshot"
 # Uploads are text and capped at 16 MiB per request: 9 MiB of bytes is 12 MiB of base64.
 ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
 _GIT_IDENTITY = ["-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false"]
+
+# A run with a constraints file answers every refused action with this fixed
+# text, both in the sandbox and in the parent, and logs the reason as a
+# ``rule.block`` run event instead. ``rule_judge`` and its tests use these.
+ILLEGAL_ACTION_MESSAGE = (
+    "Illegal action. Read the constraints file. You cannot do this action. Do not repeat it, because it wastes time."
+)
+RULE_BLOCK_EVENT = "rule.block"
+PATH_RULE = "optimize.toml [paths]"
+
+
+def rule_block_record(reason: str) -> dict[str, Any]:
+    """Build the structured run-log record a sandboxed engine sends for one path-rule block.
+
+    Args:
+        reason: Why the path rules refused the action.
+
+    Returns:
+        The record the parent forwards to the run log as a ``rule.block`` event.
+    """
+    return {
+        "level": "WARNING",
+        "logger": "app.engine",
+        "message": f"Illegal action blocked: {PATH_RULE}. {reason}",
+        "source": "engine",
+        "event": RULE_BLOCK_EVENT,
+        "fields": {"rule": PATH_RULE, "reason": reason},
+    }
+
 
 # The shipped tree's commit. Versions diff against this ref rather than HEAD,
 # so an agent that commits in its checkout cannot hide those edits.

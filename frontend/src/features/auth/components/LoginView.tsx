@@ -24,6 +24,7 @@ import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { BackLink } from "@/shared/ui/back-link";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import {
   getPasskeyRegistrationOptions,
   getSecurityStatus,
@@ -162,6 +163,7 @@ export function LoginView() {
   const [verify, setVerify] = useState<{ email: string } | null>(null);
   const [verifyCode, setVerifyCode] = useState("");
   const [verifyLoading, setVerifyLoading] = useState(false);
+  const [localSignIn, setLocalSignIn] = useState(false);
 
   useEffect(() => {
     setPasskeySupported(browserSupportsWebAuthn());
@@ -206,7 +208,19 @@ export function LoginView() {
     // route), fall back to the credential form instead of hanging on the spinner.
     const loadProviders = () =>
       getProviders()
-        .then((providers) => {
+        .then(async (providers) => {
+          // The local desktop build has a single account, so the spinner
+          // stays up while it signs in, and the form shows only on failure.
+          if (isLocalMode() && providers?.local) {
+            setLocalSignIn(true);
+            const result = await signIn("local", { redirect: false }).catch(() => null);
+            if (result && !result.error) {
+              finishLogin();
+              return;
+            }
+            setLocalSignIn(false);
+            setError(msg("local_auth.failed"));
+          }
           setOauth({ google: !!providers?.google, github: !!providers?.github });
           setMode("ready");
         })
@@ -798,7 +812,7 @@ export function LoginView() {
             <LoginHeader />
             <div className="mt-9 flex items-center gap-2 text-sm text-muted-foreground">
               <CircleNotch className="size-4 animate-spin" />
-              <span>{msg("auth.login.loading")}</span>
+              <span>{msg(localSignIn ? "local_auth.signing_in" : "auth.login.loading")}</span>
             </div>
           </div>
         ) : (

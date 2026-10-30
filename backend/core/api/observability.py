@@ -56,7 +56,6 @@ from ..storage.usage import purge_expired_staged_datasets
 from ..telemetry import record_server_event
 from ..telemetry.run_outcome import failed_properties
 from .alerts import install_alert_log_handler
-from .log_shipping import build_log_ship_handler
 from .routers.agent_history import purge_stale_conversations
 
 # python-json-logger ships its formatter under two different names depending
@@ -233,9 +232,7 @@ def configure_logging() -> None:
     time) are removed so log output has a single, predictable shape. When
     ``ALERT_WEBHOOK_URL`` is set, an :class:`~core.api.alerts.AlertLogHandler`
     is also attached so records at or above ``ALERT_MIN_LEVEL`` are forwarded
-    to the chat webhook. When ``LOG_SHIP_URL`` is set, a
-    :class:`~core.api.log_shipping.LogShipHandler` ships a JSON copy of every
-    admitted record to that endpoint.
+    to the chat webhook.
     """
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -249,10 +246,6 @@ def configure_logging() -> None:
     root.addHandler(handler)
     root.setLevel(level)
     install_alert_log_handler(root)
-    shipper = build_log_ship_handler()
-    if shipper is not None:
-        shipper.addFilter(_ContextFilter())
-        root.addHandler(shipper)
 
 
 def install_metrics(app: FastAPI) -> None:

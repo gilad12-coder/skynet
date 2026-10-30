@@ -25,7 +25,13 @@ import { SubmitSplashOverlay, SUBMIT_SPLASH_HOLD_MS } from "@/shared/ui/submit-s
 import { cn } from "@/shared/lib/utils";
 import { formatMsg } from "@/shared/lib/messages";
 
-import { parseAgentPreferencePatch, useSettingsModal, useUserPrefs } from "@/features/settings";
+import { useLocalAgentMenuModels } from "@/features/local-runtime";
+import {
+  agentSubscriptionFor,
+  parseAgentPreferencePatch,
+  useSettingsModal,
+  useUserPrefs,
+} from "@/features/settings";
 import { I18N_KEY } from "@/shared/lib/i18n";
 
 import { useConversationStore } from "../hooks/use-conversation-store";
@@ -278,6 +284,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
   );
 
   const { openTo: openSettingsTo } = useSettingsModal();
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("generalist"));
   const agent = useGeneralistAgent({
     wizardState: effectiveWizard,
     trustMode,
@@ -905,6 +912,7 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             onChange={agent.setModel}
             effort={agent.reasoningEffort}
             onEffortChange={agent.setReasoningEffort}
+            models={localMenuModels}
           />
         }
         leadingControls={

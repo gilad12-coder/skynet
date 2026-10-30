@@ -19,6 +19,8 @@ import { TEXTAREA_SURFACE_CLASS } from "@/shared/ui/primitives/textarea";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { Segmented } from "@/shared/ui/segmented";
 import { msg } from "@/shared/lib/messages";
+import { useLocalAgentMenuModels } from "@/features/local-runtime";
+import { agentSubscriptionFor } from "@/features/settings";
 import { cn } from "@/shared/lib/utils";
 
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
@@ -230,6 +232,7 @@ function TaskInterviewPanel({
 
   // Answers typed while the interviewer is replying wait for it to finish.
   const { midTurn } = useSteerQueue({ busy: interview.busy, send: interview.send });
+  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("interview"));
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
@@ -272,7 +275,7 @@ function TaskInterviewPanel({
         <div className="flex items-center justify-between gap-3 border-t border-border/40 px-4 py-2.5">
           <p role={interview.error ? "alert" : undefined} className="text-xs text-destructive">
             {interview.error
-              ? msg("submit.code.interview.error")
+              ? (interview.errorMessage ?? msg("submit.code.interview.error"))
               : t("submit.v2.task.chat.stopped")}
           </p>
           <RetryIconButton label={msg("submit.code.interview.retry")} onClick={interview.retry} />
@@ -312,6 +315,7 @@ function TaskInterviewPanel({
             effort={interview.reasoningEffort}
             onEffortChange={interview.setReasoningEffort}
             defaultFlag="is_interview_default"
+            models={localMenuModels}
           />
         }
       />

@@ -24,6 +24,7 @@ import time
 import httpx
 
 from .auth import auth_headers
+from .db import ensure_test_accounts
 from .payloads import (
     CANONICAL_COLUMN_MAPPING,
     CANONICAL_METRIC_CODE,
@@ -67,6 +68,7 @@ async def warm_validation_cache(api_base_url: str) -> dict[str, float | int]:
         behaviour is visible in the suite log.
     """
     body = _warmup_payload()
+    ensure_test_accounts([WARMUP_USERNAME])
     headers = auth_headers(WARMUP_USERNAME)
     latencies_ms: list[float] = []
     failures = 0

@@ -10,14 +10,15 @@ import secrets
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Header, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..storage.models import ApiTokenModel
+from ..storage.models import ApiTokenModel, UserModel
 from .errors import DomainError
 from .monthly_active_users import enforce_monthly_active_user_limit
 
@@ -35,6 +36,10 @@ _EXPECTED_ISSUERS = frozenset({"app-frontend", "skynet-frontend"})
 # shown to the user exactly once at creation.
 API_TOKEN_PREFIX = "skyd_"
 _API_TOKEN_SECRET_BYTES = 32
+# A PAT stops working one year after it is generated (SKY-150), so a leaked or
+# forgotten token cannot live forever. Generating a new one starts a new year.
+# The age comes from ``created_at``, so no schema change is needed.
+API_TOKEN_MAX_AGE = timedelta(days=365)
 
 
 @dataclass(frozen=True)
@@ -178,6 +183,73 @@ def token_last4(token: str) -> str:
     return token[-4:]
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Return ``value`` as an aware UTC datetime.
+
+    SQLite hands back naive datetimes for ``DateTime(timezone=True)``
+    columns; PostgreSQL hands back aware ones.
+
+    Args:
+        value: Stored timestamp.
+
+    Returns:
+        The same instant with UTC tzinfo.
+    """
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def api_token_expired(created_at: datetime, now: datetime) -> bool:
+    """Return whether a PAT generated at ``created_at`` is past :data:`API_TOKEN_MAX_AGE`.
+
+    Args:
+        created_at: The token row's stored generation time.
+        now: Current aware UTC time.
+
+    Returns:
+        ``True`` when the token no longer authenticates.
+    """
+    return _as_utc(created_at) + API_TOKEN_MAX_AGE <= now
+
+
+def _account_exists(session: Session, username: str) -> bool:
+    """Return whether a ``users`` row exists for ``username``.
+
+    Args:
+        session: Open ORM session.
+        username: Lowercased account identity (the email).
+
+    Returns:
+        True when the account row exists.
+    """
+    return session.scalar(select(UserModel.email).where(UserModel.email == username)) is not None
+
+
+def _require_account(request: Request, username: str) -> None:
+    """Refuse a session JWT whose account no longer exists.
+
+    Session JWTs are stateless: the frontend keeps minting them for a browser
+    that signed in before the account was deleted. Checking the ``users`` row
+    here, in the one shared auth dependency, makes every authenticated route
+    refuse a deleted account (SKY-150).
+
+    Args:
+        request: Incoming request, used to reach ``app.state.job_store``.
+        username: Identity from the verified JWT.
+
+    Raises:
+        DomainError: 500 when the store is unavailable; 401
+            ``auth.account_not_found`` when the account row is gone, so the
+            web app can sign the browser out instead of retrying forever.
+    """
+    job_store = getattr(getattr(getattr(request, "app", None), "state", None), "job_store", None)
+    engine = getattr(job_store, "engine", None)
+    if engine is None:
+        raise DomainError("auth.not_configured", status=500)
+    with Session(engine) as session:
+        if not _account_exists(session, username):
+            raise DomainError("auth.account_not_found", status=401)
+
+
 def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
     """Resolve the user behind a personal access token.
 
@@ -195,30 +267,32 @@ def _authenticate_api_token(request: Request, token: str) -> AuthenticatedUser:
 
     Raises:
         DomainError: 500 when the store is unavailable; 401 when the token
-            matches no active row.
+            matches no active row, is older than :data:`API_TOKEN_MAX_AGE`, or
+            belongs to an account that no longer exists.
     """
     job_store = getattr(request.app.state, "job_store", None)
     if job_store is None:
         raise DomainError("auth.not_configured", status=500)
     token_hash = hash_api_token(token)
+    now = datetime.now(UTC)
     with Session(job_store.engine) as session:
-        row = (
-            session.query(ApiTokenModel)
-            .filter(ApiTokenModel.token_hash == token_hash)
-            .one_or_none()
-        )
-        if row is None:
+        row = session.query(ApiTokenModel).filter(ApiTokenModel.token_hash == token_hash).one_or_none()
+        if row is None or api_token_expired(row.created_at, now):
             raise DomainError("auth.invalid_token", status=401)
         username = str(row.username)
-        row.last_used_at = datetime.now(UTC)
+        # Token creation and account deletion lock the users row, so no new
+        # token outlives a deletion; this refuses a token row left by any older
+        # path. No created_at comparison: OAuth accounts got their first row only
+        # at a sign-in after 2026-08-28, later than PATs they already held.
+        if not _account_exists(session, username):
+            raise DomainError("auth.invalid_token", status=401)
+        row.last_used_at = now
         session.commit()
     role = "admin" if username in settings.admin_usernames_set else "user"
     return AuthenticatedUser(username=username, role=role, groups=())
 
 
-def get_authenticated_user(
-    request: Request, authorization: str | None = Header(default=None)
-) -> AuthenticatedUser:
+def get_authenticated_user(request: Request, authorization: str | None = Header(default=None)) -> AuthenticatedUser:
     """Verify the bearer credential and return the authenticated user.
 
     Accepts two credential types on ``Authorization: Bearer``: a long-lived
@@ -254,6 +328,7 @@ def get_authenticated_user(
         username = str(payload.get("name") or payload.get("email") or payload.get("sub") or "").strip().lower()
         if not username:
             raise DomainError("auth.invalid_token", status=401)
+        _require_account(request, username)
         role = str(payload.get("role") or "user").strip().lower()
         user = AuthenticatedUser(
             username=username,
