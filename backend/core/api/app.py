@@ -107,6 +107,7 @@ from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
+from .routers.desktop_link import create_desktop_link_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.experience import create_experience_router
@@ -1325,6 +1326,7 @@ def create_app(
     app.include_router(create_generalist_agent_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_desktop_link_router(job_store=job_store), tags=["Desktop link"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_runtimes_router(), tags=["Wizard"])
