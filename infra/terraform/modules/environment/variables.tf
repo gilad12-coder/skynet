@@ -78,6 +78,17 @@ variable "api_domain" {
   type        = string
 }
 
+variable "preview_domain" {
+  description = <<-EOT
+    Parent domain of the PR preview hosts (pr-<n>.<domain> and
+    api-pr-<n>.<domain>). Set it to add a wildcard certificate to the HTTPS
+    listener, a log group and the SSM parameter /skynet/<env>/preview that
+    scripts/preview.sh reads. Empty: no previews in this environment.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "enable_https" {
   description = <<-EOT
     Create the HTTPS listener. Keep false on the first apply: the ACM
