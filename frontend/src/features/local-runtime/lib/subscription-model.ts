@@ -7,7 +7,7 @@
  * through the test's `@/` hook.
  */
 import type { CliProvider } from "@/features/billing";
-import { isCliProvider } from "@/shared/lib/cli-providers";
+import { CLI_PROVIDERS, isCliProvider } from "@/shared/lib/cli-providers";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import type { RunUsageRow } from "@/shared/types/run-usage";
 
