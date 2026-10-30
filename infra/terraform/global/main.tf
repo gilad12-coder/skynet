@@ -149,7 +149,8 @@ resource "aws_ecr_repository" "preview" {
 
 # scripts/preview.sh deletes a PR's images when it deletes the preview. These
 # rules remove what a failed delete leaves. A live preview is redeployed at
-# least every 48 hours or deleted, so 14 days never removes a running image.
+# least every 48 hours or deleted, and a redeploy pushes an image again when
+# it is older than 11 days, so 14 days never removes a running image.
 resource "aws_ecr_lifecycle_policy" "preview" {
   for_each   = aws_ecr_repository.preview
   repository = each.value.name

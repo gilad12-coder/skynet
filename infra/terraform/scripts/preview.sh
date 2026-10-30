@@ -99,6 +99,22 @@ ecr_uri() {
     --query 'repositories[0].repositoryUri' --output text
 }
 
+# Succeeds when the image exists and is fresh. An image older than 11 days is
+# deleted (the repositories are immutable), so build pushes it again: the ECR
+# rule expires PR images 14 days after the push, and a preview may run up to
+# 48 hours after its last deploy. Args: repository tag
+image_is_fresh() {
+  local pushed
+  pushed="$(aws ecr describe-images --repository-name "$1" --image-ids "imageTag=$2" \
+    --query 'imageDetails[0].imagePushedAt' --output text 2>/dev/null)" || return 1
+  if (($(date +%s) - $(date -d "$pushed" +%s) < 11 * 86400)); then
+    return 0
+  fi
+  echo "deleting $1:$2: pushed at $pushed"
+  aws ecr batch-delete-image --repository-name "$1" --image-ids "imageTag=$2" >/dev/null
+  return 1
+}
+
 build() {
   check_pr
   check_sha
@@ -111,7 +127,7 @@ build() {
   frontend="$(ecr_uri frontend)"
   aws ecr get-login-password | docker login --username AWS --password-stdin "${backend%%/*}" >/dev/null
 
-  if aws ecr describe-images --repository-name skynet/preview-backend --image-ids "imageTag=$tag" >/dev/null 2>&1; then
+  if image_is_fresh skynet/preview-backend "$tag"; then
     echo "skip: $backend:$tag exists"
   else
     docker buildx build --platform linux/arm64 --provenance=false \
@@ -119,7 +135,7 @@ build() {
   fi
 
   # Next.js bakes NEXT_PUBLIC_* into the bundle, so each PR gets its own build.
-  if aws ecr describe-images --repository-name skynet/preview-frontend --image-ids "imageTag=$tag" >/dev/null 2>&1; then
+  if image_is_fresh skynet/preview-frontend "$tag"; then
     echo "skip: $frontend:$tag exists"
   else
     docker buildx build --platform linux/arm64 --provenance=false \
