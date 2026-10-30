@@ -195,11 +195,13 @@ jobs:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     steps:
-      # The base branch's scripts: the head branch is often deleted with the
-      # merge, and a merged PR's scripts are on the base branch anyway.
+      # The PR head commit, the same scripts that deployed the preview. The
+      # base branch can lack them (the PR that adds them, or a base branch
+      # that does not have them yet). GitHub keeps the commit in
+      # refs/pull/<n>/head after the head branch is deleted.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

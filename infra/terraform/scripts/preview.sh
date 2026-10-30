@@ -122,7 +122,8 @@ image_is_fresh() {
     return 0
   fi
   echo "deleting $1:$2: pushed at $pushed"
-  aws ecr batch-delete-image --repository-name "$1" --image-ids "imageTag=$2" >/dev/null
+  aws ecr batch-delete-image --repository-name "$1" --image-ids "imageTag=$2" >/dev/null ||
+    die "cannot delete $1:$2"
   return 1
 }
 
