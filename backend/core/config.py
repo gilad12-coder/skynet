@@ -1447,15 +1447,15 @@ class Settings(BaseSettings):
             The settings instance, unchanged.
 
         Raises:
-            ValueError: When local mode is on and the process runs on Railway,
-                in a PR preview, or binds a non-loopback API_HOST.
+            ValueError: When local mode is on and the process runs in a deployed
+                environment (staging, production or a PR preview), or binds a
+                non-loopback API_HOST.
         """
         if not self.local_mode:
             return self
-        if self.railway_environment_name:
-            raise ValueError("APP_LOCAL_MODE is not allowed on a Railway deployment")
-        if self.is_preview_environment:
-            raise ValueError("APP_LOCAL_MODE is not allowed in a preview environment")
+        # Every deployed service sets APP_ENVIRONMENT; a PR preview is one too.
+        if self.app_environment:
+            raise ValueError("APP_LOCAL_MODE is not allowed in a deployed environment")
         if self.api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
             raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {self.api_host!r}")
         return self
