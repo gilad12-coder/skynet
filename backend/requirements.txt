@@ -182,7 +182,6 @@ importlib-metadata==8.5.0
     # via
     #   keyring
     #   litellm
-    #   opentelemetry-api
 jaraco-classes==3.4.0
     # via keyring
 jaraco-context==6.1.2
