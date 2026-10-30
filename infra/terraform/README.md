@@ -59,7 +59,7 @@ There is no DynamoDB table.
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
   targets, backend latency, ECS CPU and memory, no running tasks in 3 of 5
-  minutes, running tasks below desired for 5 minutes, RDS CPU, memory,
+  minutes, running tasks below desired for 10 minutes, RDS CPU, memory,
   free storage and connections, Valkey CPU and memory, error lines in the logs,
   RDS failure events, and no finished automated RDS backup in 30 hours. The
   topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
