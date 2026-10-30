@@ -186,8 +186,9 @@ Terraform state; the state bucket is private and encrypted.
 ### Change one key
 
 `set` changes one key and keeps every other key. It reads the value from a
-hidden prompt, so the value is never on a command line, in a file or on the
-screen. It prints the key name only.
+hidden prompt, so the value is never on a command line or on the screen. It
+prints the key name only. The new JSON goes through a private temporary file
+(mode 600) that the script deletes on exit.
 
 ```bash
 scripts/secrets.sh set staging app OPENROUTER_API_KEY   # prompts for the value
@@ -211,7 +212,8 @@ scripts/secrets.sh set dev app OPENROUTER_API_KEY
 `scripts/dev-env.sh` (from the repository root, after `just setup`) copies
 the non-empty keys into the worktree's git-ignored `backend/.env`,
 `frontend/.env.local` and `deploy/litellm/.env`. It changes only those keys,
-skips a missing file, and prints key names only. Agents run it instead of
+skips a missing file, and prints key names only. It skips a value that
+contains a newline, `'`, `$` or `\` and names the key; add that key by hand. Agents run it instead of
 reading staging or production secrets.
 
 ### Secret-change alarm
@@ -224,7 +226,9 @@ change on a `skynet/*` secret sends an email through the SNS topic
 and the time, never a value. Set the receiver with
 `export TF_VAR_alert_email=<address>` before every global plan or apply, then
 confirm the subscription email once. A global apply without it deletes the
-subscription (the plan warns: `alert_email is empty`).
+subscription (the plan warns: `alert_email is empty`). The CI plan runs
+without it, so after the first apply each PR plan shows the email
+subscription as `1 to destroy`. That is expected; CI never applies.
 
 ### Secret scan
 

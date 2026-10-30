@@ -21,8 +21,9 @@ root="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 
 # Reads the secret JSON on stdin and writes the keys into the file in argv[1]
 # (argv[2] is its name for messages).
-# Values that a .env parser could misread are single-quoted; a value with a
-# newline or a single quote is skipped (its name is printed).
+# Values with spaces or # are single-quoted. A value with a newline, ', $ or
+# \ is skipped (its name is printed): Next.js expands $ even inside single
+# quotes, and python-dotenv decodes \ there.
 read -r -d '' merge_py <<'PY' || true
 import json, os, re, sys, tempfile
 
@@ -44,7 +45,7 @@ for key in sorted(data):
     value = data[key]
     if not isinstance(value, str) or value == "" or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
         continue
-    if "\n" in value or "\r" in value or "'" in value:
+    if any(c in value for c in "\n\r'$\\"):
         skipped.append(key)
         continue
     line = f"{key}={render(value)}\n"
@@ -64,7 +65,7 @@ os.replace(tmp, path)
 
 print(f"{label}: set {len(done)} keys: {' '.join(done) or '-'}")
 if skipped:
-    print(f"{label}: skipped (newline or ' in the value, edit by hand): {' '.join(skipped)}")
+    print(f"{label}: skipped (newline, ', $ or \\ in the value, edit by hand): {' '.join(skipped)}")
 PY
 
 pull() {
