@@ -115,7 +115,7 @@ def test_stream_logs_an_unexpected_failure(monkeypatch: pytest.MonkeyPatch, capl
             json={
                 "workflow": "anything",
                 "scope": "evaluation",
-                "payload": {},
+                "payload": {"scorer": {"metric_code": "def metric(output): return 1.0"}},
                 "execution_budget_id": "draft",
                 "execution_budget_revision": 1,
             },
