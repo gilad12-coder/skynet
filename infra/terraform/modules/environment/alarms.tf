@@ -165,9 +165,11 @@ resource "aws_cloudwatch_metric_alarm" "service_memory" {
 
 # Fires when a service runs fewer tasks than desired, or none at all (crash
 # loop, failed start, image pull failure, scale to 0). "running - desired"
-# alone misses a scale to 0: desired falls too. The floor of 1 catches it,
-# and Container Insights (enabled) sends no data while a service has no
-# tasks, so missing data breaches. Desired is the live ECS value, not the
+# alone misses a scale to 0: desired falls too. The floor of 1 catches it.
+# Container Insights (enabled) sends no data while a service has no tasks.
+# FILL turns each missing minute into a breaching point: treat_missing_data
+# alone keeps using older real points while the look-back range has enough
+# of them, which delays the alarm. Desired is the live ECS value, not the
 # tfvars count: the service ignores desired_count changes after create.
 # Deploys keep running at or above desired (minimum healthy percent 100).
 # 3 of 5 one-minute points: ALARM about 3 to 5 minutes after the outage.
@@ -186,7 +188,7 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
 
   metric_query {
     id          = "gap"
-    expression  = "MIN([running - desired, running - 1])"
+    expression  = "FILL(MIN([running - desired, running - 1]), -1)"
     label       = "running minus max(desired, 1)"
     return_data = true
   }
