@@ -388,19 +388,20 @@ resource "aws_iam_role_policy" "github_deploy" {
 # GitHub environment aws-preview must allow every branch, so anyone who can
 # push a branch can run code with this role. It reaches only the preview
 # pieces in the staging cluster:
-#   - task definition families skynet-pr-<n>-*, tagged Environment=preview,
+#   - new revisions of the task definition families skynet-pr-*, tagged
+#     Environment=preview (it cannot deregister or delete any revision),
 #   - services pr-<n>-* and the migrate task of a preview family,
-#   - target groups skynet-pr-*, and listener rules it created (tag
-#     Environment=preview, set only at create),
+#   - the slot listener rules that Terraform made (tag Environment=preview,
+#     modules/environment/preview.tf); it cannot create, delete or tag rules
+#     or target groups,
 #   - the skynet/preview-* image repositories and the slot parameters.
 # It passes the staging backend, worker, frontend and migrate roles, so a
 # preview reads the staging secrets. dbadmin and litellm roles stay out.
-# Known limits: ecs:DeregisterTaskDefinition has no resource-level scope, and
-# elasticloadbalancing:CreateRule cannot limit the host or priority of a new
-# rule on the staging listener. ecs:RegisterTaskDefinition cannot limit the
-# family either, so this role can add a revision tagged Environment=preview to
-# a staging family; deploy.sh and preview.sh start only from revisions tagged
-# with their own environment.
+# Known limits: ModifyRule cannot limit the host or the action, so this role
+# can point a slot rule at any host or staging target group (rules at 102-109
+# match after the staging rules at 10 and 20). CreateService and UpdateService
+# cannot limit the target group either, so a pr-* service can register its
+# tasks in a staging target group.
 
 locals {
   preview_env     = "staging"
@@ -467,33 +468,21 @@ data "aws_iam_policy_document" "github_preview" {
   }
 
   statement {
-    sid = "EcsTaskDefinitionsUnscoped"
-    # No resource-level permissions for these actions. Deregistering is
-    # needed before DeleteTaskDefinitions, which is scoped below.
-    actions = [
-      "ecs:DeregisterTaskDefinition",
-      "ecs:DescribeTaskDefinition",
-      "ecs:ListTaskDefinitions",
-    ]
+    sid       = "EcsTaskDefinitionsRead"
+    actions   = ["ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
     resources = ["*"]
   }
 
   statement {
     sid       = "EcsRegisterTaskDefinitions"
     actions   = ["ecs:RegisterTaskDefinition"]
-    resources = ["*"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*:*"]
 
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/Environment"
       values   = ["preview"]
     }
-  }
-
-  statement {
-    sid       = "EcsDeleteTaskDefinitions"
-    actions   = ["ecs:DeleteTaskDefinitions"]
-    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*"]
   }
 
   # A preview service may run only a preview revision: without this, a
@@ -568,48 +557,8 @@ data "aws_iam_policy_document" "github_preview" {
   }
 
   statement {
-    sid     = "ElbCreate"
-    actions = ["elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:CreateRule"]
-    resources = [
-      "arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:targetgroup/skynet-pr-*/*",
-      "arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:listener/app/skynet-${local.preview_env}/*",
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/Environment"
-      values   = ["preview"]
-    }
-  }
-
-  # Only at create: a later AddTags could mark a staging rule as a preview.
-  statement {
-    sid     = "ElbTagOnCreate"
-    actions = ["elasticloadbalancing:AddTags"]
-    resources = [
-      "arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:targetgroup/skynet-pr-*/*",
-      "arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:listener-rule/app/skynet-${local.preview_env}/*",
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "elasticloadbalancing:CreateAction"
-      values   = ["CreateTargetGroup", "CreateRule"]
-    }
-  }
-
-  statement {
-    sid = "ElbTargetGroups"
-    actions = [
-      "elasticloadbalancing:DeleteTargetGroup",
-      "elasticloadbalancing:ModifyTargetGroupAttributes",
-    ]
-    resources = ["arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:targetgroup/skynet-pr-*/*"]
-  }
-
-  statement {
     sid       = "ElbPreviewRules"
-    actions   = ["elasticloadbalancing:DeleteRule", "elasticloadbalancing:ModifyRule"]
+    actions   = ["elasticloadbalancing:ModifyRule"]
     resources = ["arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:listener-rule/app/skynet-${local.preview_env}/*"]
 
     condition {
@@ -651,6 +600,79 @@ resource "aws_iam_role_policy" "github_preview" {
   name   = "preview"
   role   = aws_iam_role.github_preview[0].id
   policy = data.aws_iam_policy_document.github_preview.json
+}
+
+# Preview cleanup role: the prune job of .github/workflows/preview-cleanup.yml
+# deletes the task definitions of deleted previews. It trusts only workflow
+# runs on main without a GitHub environment, because
+# ecs:DeregisterTaskDefinition has no resource-level scope: this role could
+# deregister any revision, so only reviewed code may assume it.
+# DeleteTaskDefinitions is limited to the skynet-pr-* families.
+
+data "aws_iam_policy_document" "github_preview_cleanup_trust" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_preview_cleanup" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name                 = "skynet-github-preview-cleanup"
+  description          = "Assumed by GitHub Actions (OIDC, main only) to delete the task definitions of deleted PR previews."
+  assume_role_policy   = data.aws_iam_policy_document.github_preview_cleanup_trust[0].json
+  max_session_duration = 3600
+}
+
+data "aws_iam_policy_document" "github_preview_cleanup" {
+  statement {
+    sid = "EcsTaskDefinitionsUnscoped"
+    actions = [
+      "ecs:DeregisterTaskDefinition",
+      "ecs:ListTaskDefinitionFamilies",
+      "ecs:ListTaskDefinitions",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "EcsDeleteTaskDefinitions"
+    actions   = ["ecs:DeleteTaskDefinitions"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*:*"]
+  }
+
+  statement {
+    sid       = "ReadPreviewSlots"
+    actions   = ["ssm:GetParameters"]
+    resources = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/skynet/preview/slots/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_preview_cleanup" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name   = "preview-cleanup"
+  role   = aws_iam_role.github_preview_cleanup[0].id
+  policy = data.aws_iam_policy_document.github_preview_cleanup.json
 }
 
 # ---------------------------------------------------------------- terraform roles
@@ -831,6 +853,11 @@ output "github_deploy_role_arns" {
 output "github_preview_role_arn" {
   description = "PR preview role ARN. Set it as the AWS_DEPLOY_ROLE_ARN variable of the GitHub environment aws-preview (empty while enable_github_oidc is false)."
   value       = one(aws_iam_role.github_preview[*].arn)
+}
+
+output "github_preview_cleanup_role_arn" {
+  description = "PR preview cleanup role ARN. Set it as the repository variable AWS_PREVIEW_CLEANUP_ROLE_ARN (empty while enable_github_oidc is false)."
+  value       = one(aws_iam_role.github_preview_cleanup[*].arn)
 }
 
 output "github_plan_role_arn" {

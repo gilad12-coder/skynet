@@ -5,21 +5,29 @@
 #   preview.sh claim <pr> <sha>    take a slot (exit 3 when all are taken)
 #   preview.sh build <pr> <sha>    build and push the preview images
 #   preview.sh deploy <pr> <sha>   migrate, then create or update the services
-#   preview.sh delete <pr>         delete everything the preview owns
+#   preview.sh delete <pr>         delete the preview (not its task definitions)
 #   preview.sh list                print "<pr> <sha> <last-push-epoch>" per slot
+#   preview.sh revision-prs        print the PRs that have preview task definitions
+#   preview.sh prune <pr>          delete the task definitions of a PR without a slot
 #   preview.sh setup-db            once, as an operator (skynet profile)
 #
 # A preview runs in the staging cluster with the staging secrets, task roles
 # and security groups. It shares the staging ALB, RDS, Valkey and LiteLLM:
-#   https://pr-<n>.<domain>      frontend   (target group skynet-pr-<n>-frontend)
-#   https://api-pr-<n>.<domain>  backend    (target group skynet-pr-<n>-backend)
+#   https://pr-<n>.<domain>      frontend   (the slot's frontend target group)
+#   https://api-pr-<n>.<domain>  backend    (the slot's backend target group)
 #   services pr-<n>-backend, pr-<n>-worker, pr-<n>-frontend (on-demand FARGATE)
 #   database skynet_pr_<n> (copied from skynet_preview_template), Redis DB <slot>
 #
 # Slots: SSM parameters /skynet/preview/slots/1..4. A PR claims a free slot
 # with PutParameter without overwrite, so two PRs never get the same slot.
-# The slot picks the Redis DB index and the listener rule priorities, and it
-# holds the PR's last push time for the 48-hour cleanup.
+# The slot picks the Redis DB index and the target groups and listener rules
+# that Terraform made for it (modules/environment/preview.tf), and it holds
+# the PR's last push time for the 48-hour cleanup. deploy points the slot's
+# rules at the PR's hosts; delete points them back at a placeholder host.
+#
+# delete leaves the task definitions ACTIVE: the preview role cannot
+# deregister revisions. prune runs from the scheduled cleanup on main, with
+# its own role, and removes them.
 #
 # The tasks get the staging REMOTE_DB_URL and REDIS_URL. A wrapper command
 # points them at the preview database and Redis DB before the app starts, so
@@ -196,12 +204,12 @@ account() {
 
 # Prints the newest ACTIVE staging revision of a family whose roles are the
 # staging roles for that family and whose tag is Environment=staging (the
-# same rule as deploy.sh).
+# same rule as deploy.sh). The CLI pages through every ACTIVE revision.
 staging_revision() {
   local key="$1" family="$2" acct="$3" arn roles want
   want="arn:aws:iam::$acct:role/skynet-$env-$key-exec"$'\t'"arn:aws:iam::$acct:role/skynet-$env-$key-task"$'\t'"$env"
   for arn in $(aws ecs list-task-definitions --family-prefix "$family" --status ACTIVE \
-    --sort DESC --max-items 20 --query 'taskDefinitionArns[]' --output text); do
+    --sort DESC --query 'taskDefinitionArns[]' --output text); do
     [[ "${arn##*/}" == "$family:"* ]] || continue
     roles="$(aws ecs describe-task-definition --task-definition "$arn" --include TAGS \
       --query "[taskDefinition.executionRoleArn, taskDefinition.taskRoleArn, tags[?key=='Environment'].value | [0]]" --output text)"
@@ -210,7 +218,7 @@ staging_revision() {
       return 0
     fi
   done
-  die "no revision of $family with the $env roles and tag in the 20 newest"
+  die "no ACTIVE revision of $family has the $env roles and tag"
 }
 
 # Registers skynet-pr-<n>-<key> from the staging revision and prints its ARN.
@@ -283,40 +291,23 @@ run_migrate_task() {
   wait_task "$cluster" "$arn"
 }
 
-# Prints the target group ARN, creating the group when it is missing.
-target_group() {
-  local cfg="$1" key="$2" path="$3" arn
-  arn="$(aws elbv2 create-target-group --name "skynet-pr-$pr-$key" --protocol HTTP \
-    --port "$(jq -r --arg k "$key" '.ports[$k]' <<<"$cfg")" --target-type ip \
-    --vpc-id "$(jq -r .vpc_id <<<"$cfg")" --health-check-path "$path" --matcher HttpCode=200 \
-    --health-check-interval-seconds 15 --health-check-timeout-seconds 10 \
-    --healthy-threshold-count 2 --unhealthy-threshold-count 4 \
-    --tags Key=Environment,Value=preview Key=Project,Value=skynet Key=ManagedBy,Value=preview.sh \
-    --query 'TargetGroups[0].TargetGroupArn' --output text)"
-  aws elbv2 modify-target-group-attributes --target-group-arn "$arn" \
-    --attributes Key=deregistration_delay.timeout_seconds,Value=30 >/dev/null
-  echo "$arn"
+# Prints a field of the slot's target group and rule for a service.
+# Args: cfg slot key field (target_group, rule or placeholder)
+slot_field() {
+  jq -er --arg s "$2" --arg k "$3" --arg f "$4" '.slots[$s][$k][$f]' <<<"$1"
 }
 
-# Prints the ARN of the listener rule for a host, or nothing.
-rule_for() {
-  local listener="$1" host="$2"
-  aws elbv2 describe-rules --listener-arn "$listener" --output json |
-    jq -r --arg h "$host" '.Rules[] | select(any(.Conditions[]?; .Field == "host-header" and (.Values // [] | index($h)))) | .RuleArn' |
-    sed -n 1p
-}
-
+# Points a slot rule at a host. The rule always forwards to the slot's group.
+# Args: rule-arn host target-group-arn
 route() {
-  local listener="$1" host="$2" tg="$3" priority="$4" arn
-  arn="$(rule_for "$listener" "$host")"
-  if [[ -n "$arn" ]]; then
-    aws elbv2 modify-rule --rule-arn "$arn" --actions "Type=forward,TargetGroupArn=$tg" >/dev/null
-  else
-    aws elbv2 create-rule --listener-arn "$listener" --priority "$priority" \
-      --conditions "Field=host-header,Values=$host" --actions "Type=forward,TargetGroupArn=$tg" \
-      --tags Key=Environment,Value=preview Key=Project,Value=skynet Key=ManagedBy,Value=preview.sh >/dev/null
-  fi
-  echo "routing $host"
+  aws elbv2 modify-rule --rule-arn "$1" --conditions "Field=host-header,Values=$2" \
+    --actions "Type=forward,TargetGroupArn=$3" >/dev/null
+  echo "routing $2"
+}
+
+rule_host() {
+  aws elbv2 describe-rules --rule-arns "$1" \
+    --query "Rules[0].Conditions[?Field=='host-header'] | [0].Values[0]" --output text
 }
 
 service_active() {
@@ -368,7 +359,7 @@ deploy() {
   check_pr
   check_sha
   local cfg slot acct domain app api tag backend_img frontend_img app_env backend_env frontend_env
-  local migrate_td listener cluster tg_backend tg_frontend
+  local migrate_td cluster tg_backend tg_frontend
   slot="$(slot_of "$pr")"
   [[ -n "$slot" ]] || die "PR $pr holds no preview slot; run claim first"
   cfg="$(preview_config)"
@@ -394,12 +385,11 @@ deploy() {
   run_migrate_task "$cfg" "$migrate_td"
   echo "migration ok"
 
-  listener="$(jq -r .listener_arn <<<"$cfg")"
   cluster="$(jq -r .cluster <<<"$cfg")"
-  tg_backend="$(target_group "$cfg" backend /health)"
-  tg_frontend="$(target_group "$cfg" frontend /api/version)"
-  route "$listener" "$api" "$tg_backend" $((100 + 2 * slot))
-  route "$listener" "$app" "$tg_frontend" $((101 + 2 * slot))
+  tg_backend="$(slot_field "$cfg" "$slot" backend target_group)"
+  tg_frontend="$(slot_field "$cfg" "$slot" frontend target_group)"
+  route "$(slot_field "$cfg" "$slot" backend rule)" "$api" "$tg_backend"
+  route "$(slot_field "$cfg" "$slot" frontend rule)" "$app" "$tg_frontend"
 
   upsert_service "$cfg" backend \
     "$(register backend "$backend_img" "$(jq -c --arg app "$app" '. + {WEBAUTHN_RP_ID: $app, WEBAUTHN_ORIGINS: .ALLOWED_ORIGINS}' <<<"$backend_env")" "$slot" "$cfg" "$acct")" \
@@ -415,11 +405,13 @@ deploy() {
 
 delete() {
   check_pr
-  local cfg cluster listener slot s arn names=() fam tds batch repo tags migrate_td host
+  local cfg cluster domain slot version s key host rule names=() migrate_td repo tags
   cfg="$(preview_config)"
   cluster="$(jq -r .cluster <<<"$cfg")"
-  listener="$(jq -r .listener_arn <<<"$cfg")"
+  domain="$(jq -r .domain <<<"$cfg")"
   slot="$(slot_of "$pr")"
+  # The slot is released at the end only if nothing wrote it in between.
+  [[ -z "$slot" ]] || version="$(aws ssm get-parameter --name "$slot_prefix/$slot" --query Parameter.Version --output text)"
 
   for s in backend worker frontend; do
     if service_active "$cluster" "pr-$pr-$s"; then
@@ -432,32 +424,65 @@ delete() {
     aws ecs wait services-inactive --cluster "$cluster" --services "${names[@]}"
   fi
 
-  for host in "api-pr-$pr" "pr-$pr"; do
-    arn="$(rule_for "$listener" "$host.$(jq -r .domain <<<"$cfg")")"
-    if [[ -n "$arn" ]]; then
-      aws elbv2 delete-rule --rule-arn "$arn"
-      echo "deleted the rule for $host"
-    fi
-  done
-
-  for s in backend frontend; do
-    arn="$(aws elbv2 describe-target-groups --names "skynet-pr-$pr-$s" \
-      --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
-    if [[ "$arn" == arn:* ]]; then
-      aws elbv2 delete-target-group --target-group-arn "$arn"
-      echo "deleted target group skynet-pr-$pr-$s"
-    fi
-  done
+  if [[ -n "$slot" ]]; then
+    for key in backend frontend; do
+      rule="$(slot_field "$cfg" "$slot" "$key" rule)"
+      host="pr-$pr.$domain"
+      [[ "$key" == frontend ]] || host="api-$host"
+      if [[ "$(rule_host "$rule")" == "$host" ]]; then
+        route "$rule" "$(slot_field "$cfg" "$slot" "$key" placeholder)" "$(slot_field "$cfg" "$slot" "$key" target_group)"
+      fi
+    done
+  fi
 
   # The newest migrate revision carries the database name and Redis DB.
   migrate_td="$(aws ecs list-task-definitions --family-prefix "skynet-pr-$pr-migrate" --status ACTIVE \
     --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)"
-  if [[ "$migrate_td" == arn:* ]]; then
+  if [[ "$migrate_td" == */skynet-pr-$pr-migrate:* ]]; then
     echo "dropping database skynet_pr_$pr"
     run_migrate_task "$cfg" "$migrate_td" \
       "$(jq -cn --arg s "$drop_db" '{containerOverrides: [{name: "migrate", command: ["sh", "-c", $s]}]}')"
   fi
 
+  for repo in skynet/preview-backend skynet/preview-frontend; do
+    tags="$(aws ecr list-images --repository-name "$repo" --filter tagStatus=TAGGED --output json |
+      jq -c --arg sfx "-pr-$pr" '[.imageIds[] | select(.imageTag | endswith($sfx)) | {imageTag}]')"
+    while [[ "$(jq length <<<"$tags")" -gt 0 ]]; do
+      aws ecr batch-delete-image --repository-name "$repo" --image-ids "$(jq -c '.[:100]' <<<"$tags")" >/dev/null
+      tags="$(jq -c '.[100:]' <<<"$tags")"
+    done
+  done
+  echo "deleted the images"
+
+  # Last, so a failed delete keeps the slot and the next run retries.
+  if [[ -n "$slot" ]]; then
+    if [[ "$(aws ssm get-parameter --name "$slot_prefix/$slot" --query Parameter.Version --output text)" == "$version" ]]; then
+      aws ssm delete-parameter --name "$slot_prefix/$slot"
+      echo "released slot $slot"
+    else
+      echo "slot $slot changed during the delete; it stays held"
+    fi
+  fi
+  echo "preview of PR $pr deleted"
+}
+
+list() {
+  slots | jq -r '"\(.pr) \(.sha) \(.at)"'
+}
+
+revision_prs() {
+  aws ecs list-task-definition-families --family-prefix skynet-pr- --status ALL \
+    --query 'families[]' --output text | tr '\t' '\n' |
+    sed -nE 's/^skynet-pr-([1-9][0-9]*)-(backend|worker|frontend|migrate)$/\1/p' | sort -un
+}
+
+# Deregisters and deletes every revision of the PR's families. Runs with the
+# cleanup role (main only). It checks the slot itself, right before, so a PR
+# that took a slot again keeps its revisions.
+prune() {
+  check_pr
+  local fam arn tds batch
+  [[ -z "$(slot_of "$pr")" ]] || { echo "PR $pr holds a slot; keeping its task definitions"; return 0; }
   for fam in backend worker frontend migrate; do
     for arn in $(aws ecs list-task-definitions --family-prefix "skynet-pr-$pr-$fam" --status ACTIVE \
       --query 'taskDefinitionArns[]' --output text); do
@@ -472,28 +497,7 @@ delete() {
       tds="$(jq -c '.[10:]' <<<"$tds")"
     done
   done
-  echo "deleted the task definitions"
-
-  for repo in skynet/preview-backend skynet/preview-frontend; do
-    tags="$(aws ecr list-images --repository-name "$repo" --filter tagStatus=TAGGED --output json |
-      jq -c --arg sfx "-pr-$pr" '[.imageIds[] | select(.imageTag | endswith($sfx)) | {imageTag}]')"
-    while [[ "$(jq length <<<"$tags")" -gt 0 ]]; do
-      aws ecr batch-delete-image --repository-name "$repo" --image-ids "$(jq -c '.[:100]' <<<"$tags")" >/dev/null
-      tags="$(jq -c '.[100:]' <<<"$tags")"
-    done
-  done
-  echo "deleted the images"
-
-  # Last, so a failed delete keeps the slot and the next run retries.
-  if [[ -n "$slot" ]]; then
-    aws ssm delete-parameter --name "$slot_prefix/$slot"
-    echo "released slot $slot"
-  fi
-  echo "preview of PR $pr deleted"
-}
-
-list() {
-  slots | jq -r '"\(.pr) \(.sha) \(.at)"'
+  echo "deleted the task definitions of PR $pr"
 }
 
 # Once per environment, as an operator: lets skynet_app create the preview
@@ -525,6 +529,8 @@ case "$cmd" in
   deploy) deploy ;;
   delete) delete ;;
   list) list ;;
+  revision-prs) revision_prs ;;
+  prune) prune ;;
   setup-db) setup_db ;;
-  *) die "usage: preview.sh claim|build|deploy <pr> <sha> | delete <pr> | list | setup-db" ;;
+  *) die "usage: preview.sh claim|build|deploy <pr> <sha> | delete|prune <pr> | list | revision-prs | setup-db" ;;
 esac

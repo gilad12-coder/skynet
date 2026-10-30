@@ -16,8 +16,8 @@
 # (skynet-<env>-<family>-exec/-task). The other environment's deploy role
 # cannot pass these roles, so it cannot plant a revision this script uses.
 # The revision must also carry the tag Environment=<env>: the PR preview role
-# can pass the staging roles, but it can only register revisions tagged
-# Environment=preview.
+# can pass the staging roles, but it can only register revisions of the
+# skynet-pr-* families, tagged Environment=preview.
 # New revisions carry the tag Environment=<env>; the deploy role must send it.
 
 source "$(dirname "$0")/lib.sh"
@@ -49,14 +49,15 @@ done
 account="$(aws sts get-caller-identity --query Account --output text)"
 
 # Prints the newest ACTIVE revision of a family whose roles are this
-# environment's roles for that family. Looks at the 20 newest revisions.
+# environment's roles for that family. The CLI pages through every ACTIVE
+# revision.
 trusted_revision() {
   local family_key="$1" family want_exec want_task arn roles
   family="$(jq -r --arg f "$family_key" '.families[$f]' <<<"$cfg")"
   want_exec="arn:aws:iam::$account:role/skynet-$env-$family_key-exec"
   want_task="arn:aws:iam::$account:role/skynet-$env-$family_key-task"
   for arn in $(aws ecs list-task-definitions --family-prefix "$family" --status ACTIVE \
-    --sort DESC --max-items 20 --query 'taskDefinitionArns[]' --output text); do
+    --sort DESC --query 'taskDefinitionArns[]' --output text); do
     [[ "${arn##*/}" == "$family:"* ]] || continue
     roles="$(aws ecs describe-task-definition --task-definition "$arn" --include TAGS \
       --query "[taskDefinition.executionRoleArn, taskDefinition.taskRoleArn, tags[?key=='Environment'].value | [0]]" --output text)"
@@ -66,7 +67,7 @@ trusted_revision() {
     fi
     echo "skipping $arn: its roles are not skynet-$env-$family_key-exec/-task or its tag is not Environment=$env" >&2
   done
-  die "no revision of $family with the $env roles in the 20 newest; run terraform apply for $env"
+  die "no ACTIVE revision of $family has the $env roles and tag; run terraform apply for $env"
 }
 
 # Prints the new task definition ARN. (No associative arrays: macOS bash 3.2.)
