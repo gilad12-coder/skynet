@@ -15,6 +15,9 @@
 # the family whose execution and task roles are this environment's own roles
 # (skynet-<env>-<family>-exec/-task). The other environment's deploy role
 # cannot pass these roles, so it cannot plant a revision this script uses.
+# The revision must also carry the tag Environment=<env>: the PR preview role
+# can pass the staging roles, but it can only register revisions tagged
+# Environment=preview.
 # New revisions carry the tag Environment=<env>; the deploy role must send it.
 
 source "$(dirname "$0")/lib.sh"
@@ -55,13 +58,13 @@ trusted_revision() {
   for arn in $(aws ecs list-task-definitions --family-prefix "$family" --status ACTIVE \
     --sort DESC --max-items 20 --query 'taskDefinitionArns[]' --output text); do
     [[ "${arn##*/}" == "$family:"* ]] || continue
-    roles="$(aws ecs describe-task-definition --task-definition "$arn" \
-      --query '[taskDefinition.executionRoleArn, taskDefinition.taskRoleArn]' --output text)"
-    if [[ "$roles" == "$want_exec"$'\t'"$want_task" ]]; then
+    roles="$(aws ecs describe-task-definition --task-definition "$arn" --include TAGS \
+      --query "[taskDefinition.executionRoleArn, taskDefinition.taskRoleArn, tags[?key=='Environment'].value | [0]]" --output text)"
+    if [[ "$roles" == "$want_exec"$'\t'"$want_task"$'\t'"$env" ]]; then
       echo "$arn"
       return 0
     fi
-    echo "skipping $arn: its roles are not skynet-$env-$family_key-exec/-task" >&2
+    echo "skipping $arn: its roles are not skynet-$env-$family_key-exec/-task or its tag is not Environment=$env" >&2
   done
   die "no revision of $family with the $env roles in the 20 newest; run terraform apply for $env"
 }

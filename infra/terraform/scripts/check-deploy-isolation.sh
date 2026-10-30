@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Proves that each GitHub deploy role cannot change the other environment.
+# Proves that each GitHub deploy role cannot change the other environment, and
+# that the PR preview role reaches only preview resources.
 # It reads the rendered deploy policies from a global plan and tests them with
 # the IAM policy simulator (read-only; it creates and changes nothing).
 #
@@ -17,8 +18,9 @@ account="$(aws sts get-caller-identity --query Account --output text)"
 region="$AWS_REGION"
 fails=0
 
+# Arg: the address of a policy document data source in the global stack.
 policy_for() {
-  jq -er --arg a "data.aws_iam_policy_document.github_deploy[\"$1\"]" '
+  jq -er --arg a "$1" '
     [.prior_state.values.root_module.resources[]? | select(.address == $a) | .values.json][0]
     // error("no rendered policy for " + $a)' "$plan"
 }
@@ -54,7 +56,7 @@ fi
 for env in staging production; do
   other=production
   [[ "$env" == production ]] && other=staging
-  policy="$(policy_for "$env")"
+  policy="$(policy_for "data.aws_iam_policy_document.github_deploy[\"$env\"]")"
   td="arn:aws:ecs:$region:$account:task-definition"
   echo "-- deploy role for $env"
   expect "$policy" allowed "register a revision tagged $env" ecs:RegisterTaskDefinition "*" --context-entries "$(tag "$env")"
@@ -71,6 +73,47 @@ for env in staging production; do
   expect "$policy" denied "run the $other migrate task" ecs:RunTask "$td/skynet-$other-migrate:999" --context-entries "$(cluster "$other")"
   expect "$policy" denied "read the $other deploy parameter" ssm:GetParameter "arn:aws:ssm:$region:$account:parameter/skynet/$other/deploy"
 done
+
+policy="$(policy_for data.aws_iam_policy_document.github_preview)"
+td="arn:aws:ecs:$region:$account:task-definition"
+svc="arn:aws:ecs:$region:$account:service"
+listener="arn:aws:elasticloadbalancing:$region:$account:listener/app/skynet-staging/0/0"
+rule="arn:aws:elasticloadbalancing:$region:$account:listener-rule/app/skynet-staging/0/0/0"
+task_def() { echo "ContextKeyName=ecs:task-definition,ContextKeyValues=$1,ContextKeyType=string"; }
+resource_tag() { echo "ContextKeyName=aws:ResourceTag/Environment,ContextKeyValues=$1,ContextKeyType=string"; }
+echo "-- preview role"
+expect "$policy" allowed "register a revision tagged preview" ecs:RegisterTaskDefinition "*" --context-entries "$(tag preview)"
+for env in staging production; do
+  expect "$policy" denied "register a revision tagged $env" ecs:RegisterTaskDefinition "*" --context-entries "$(tag "$env")"
+  expect "$policy" denied "tag a $env backend revision" ecs:TagResource "$td/skynet-$env-backend:999"
+  expect "$policy" denied "delete a $env backend revision" ecs:DeleteTaskDefinitions "$td/skynet-$env-backend:999"
+  expect "$policy" denied "pass the $env litellm task role" iam:PassRole "arn:aws:iam::$account:role/skynet-$env-litellm-task" --context-entries "$pass_ecs"
+  expect "$policy" denied "pass the $env dbadmin exec role" iam:PassRole "arn:aws:iam::$account:role/skynet-$env-dbadmin-exec" --context-entries "$pass_ecs"
+  expect "$policy" denied "update the $env backend service" ecs:UpdateService "$svc/skynet-$env/skynet-$env-backend"
+  expect "$policy" denied "run the $env migrate task" ecs:RunTask "$td/skynet-$env-migrate:999" --context-entries "$(cluster "$env")"
+  expect "$policy" denied "read the $env deploy parameter" ssm:GetParameter "arn:aws:ssm:$region:$account:parameter/skynet/$env/deploy"
+done
+expect "$policy" denied "register a revision without tags" ecs:RegisterTaskDefinition "*"
+expect "$policy" allowed "tag a preview revision" ecs:TagResource "$td/skynet-pr-1-backend:999"
+expect "$policy" allowed "delete a preview revision" ecs:DeleteTaskDefinitions "$td/skynet-pr-1-backend:999"
+expect "$policy" allowed "pass the staging backend exec role" iam:PassRole "arn:aws:iam::$account:role/skynet-staging-backend-exec" --context-entries "$pass_ecs"
+expect "$policy" denied "pass the production backend task role" iam:PassRole "arn:aws:iam::$account:role/skynet-production-backend-task" --context-entries "$pass_ecs"
+expect "$policy" allowed "update a preview service" ecs:UpdateService "$svc/skynet-staging/pr-1-backend" --context-entries "$(task_def "$td/skynet-pr-1-backend:999")"
+expect "$policy" denied "run the staging dbadmin revision in a preview service" ecs:UpdateService "$svc/skynet-staging/pr-1-backend" --context-entries "$(task_def "$td/skynet-staging-dbadmin:999")"
+expect "$policy" allowed "delete a preview service" ecs:DeleteService "$svc/skynet-staging/pr-1-backend"
+expect "$policy" denied "delete a preview-named service in production" ecs:DeleteService "$svc/skynet-production/pr-1-backend"
+expect "$policy" allowed "run a preview migrate task" ecs:RunTask "$td/skynet-pr-1-migrate:999" --context-entries "$(cluster staging)"
+expect "$policy" denied "run a preview migrate task in production" ecs:RunTask "$td/skynet-pr-1-migrate:999" --context-entries "$(cluster production)"
+expect "$policy" allowed "create a preview rule" elasticloadbalancing:CreateRule "$listener" --context-entries "$(tag preview)"
+expect "$policy" denied "create an untagged rule" elasticloadbalancing:CreateRule "$listener"
+expect "$policy" allowed "delete a preview rule" elasticloadbalancing:DeleteRule "$rule" --context-entries "$(resource_tag preview)"
+expect "$policy" denied "delete a staging rule" elasticloadbalancing:DeleteRule "$rule" --context-entries "$(resource_tag staging)"
+expect "$policy" denied "modify a staging rule" elasticloadbalancing:ModifyRule "$rule" --context-entries "$(resource_tag staging)"
+expect "$policy" denied "delete the staging backend target group" elasticloadbalancing:DeleteTargetGroup "arn:aws:elasticloadbalancing:$region:$account:targetgroup/skynet-staging-backend/0"
+expect "$policy" allowed "push a preview image" ecr:PutImage "arn:aws:ecr:$region:$account:repository/skynet/preview-backend"
+expect "$policy" denied "push a staging image" ecr:PutImage "arn:aws:ecr:$region:$account:repository/skynet/backend"
+expect "$policy" allowed "take a preview slot" ssm:PutParameter "arn:aws:ssm:$region:$account:parameter/skynet/preview/slots/1"
+expect "$policy" denied "write a staging parameter" ssm:PutParameter "arn:aws:ssm:$region:$account:parameter/skynet/staging/deploy"
 
 if ((fails > 0)); then
   die "$fails isolation checks failed"

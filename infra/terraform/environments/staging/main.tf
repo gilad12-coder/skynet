@@ -19,6 +19,10 @@ module "env" {
   api_domain       = "api-staging.skynetml.com"
   enable_https     = var.enable_https
 
+  # PR previews (SKY-164): pr-<n>.staging.skynetml.com and
+  # api-pr-<n>.staging.skynetml.com. Cloudflare: *.staging CNAME to the ALB.
+  preview_domain = "staging.skynetml.com"
+
   db_instance_class        = var.db_instance_class
   db_multi_az              = var.db_multi_az
   db_backup_retention_days = 3

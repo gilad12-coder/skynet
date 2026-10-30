@@ -1,0 +1,72 @@
+# Deletes PR previews (SKY-164) whose PR is no longer open, or that got no
+# push for 48 hours. A push or the label "preview" brings a preview back.
+# GitHub runs schedules only from the default branch, so this runs once the
+# file is on main.
+name: preview cleanup
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: preview-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    environment: aws-preview
+    env:
+      AWS_REGION: us-east-2
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Delete stale previews
+        run: |
+          now=$(date +%s)
+          infra/terraform/scripts/preview.sh list > slots.txt
+          if [ ! -s slots.txt ]; then
+            echo "0 previews running"
+            exit 0
+          fi
+          failed=0
+          # fd 3, so the commands in the loop cannot read the list from stdin.
+          while read -r pr sha at <&3; do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .state) || state=unknown
+            age=$(( (now - at) / 3600 ))
+            if [ "$state" = open ] && [ "$age" -lt 48 ]; then
+              echo "PR $pr: keep (${sha:0:8}, ${age} h since the last push)"
+              continue
+            fi
+            if [ "$state" = unknown ]; then
+              echo "PR $pr: cannot read the PR state; keep"
+              continue
+            fi
+            echo "PR $pr: delete ($state, ${age} h since the last push)"
+            # One failed delete must not stop the others; it keeps its slot,
+            # so the next run tries again.
+            if ! infra/terraform/scripts/preview.sh delete "$pr"; then
+              echo "::error::Could not delete the preview of PR $pr"
+              failed=1
+              continue
+            fi
+            if [ "$state" = open ]; then
+              infra/terraform/scripts/preview-comment.sh "$pr" "**Preview deleted** after 48 hours without a push. Push a commit, or add the label \`preview\` (remove it first if it is there), to bring it back."
+            else
+              infra/terraform/scripts/preview-comment.sh "$pr" "**Preview deleted** (the PR closed)." --update-only
+            fi
+          done 3< slots.txt
+          exit "$failed"
