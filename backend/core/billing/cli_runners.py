@@ -5,6 +5,9 @@ so the CLI bills the signed-in subscription and never a key a developer left
 in the shell. :func:`core.local.cli_isolation.isolated_cli` also keeps the
 user's own instructions, memory and MCP servers out of each call. Each CLI runs as a plain completion: its host tools (shell, file
 reads, web) are turned off, so a prompt cannot make it read the user's files.
+Each CLI also gets :data:`SYSTEM_PROMPT` in place of its own agent prompt, and
+no working directory, OS or sandbox details, so the model sees what a hosted
+model call sends: the fixed prompt and the caller's messages.
 Each CLI runs in its own process group, and a timeout stops the whole group,
 including any child a wrapper script started.
 """
@@ -40,6 +43,11 @@ _CLOCK_RESET = re.compile(
     re.IGNORECASE,
 )
 _KILL_GRACE_SECONDS = 2.0
+SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer the user's message directly. "
+    "Do not run code or use tools, except a tool that returns your final answer in a required format."
+)
+"""The system prompt each CLI gets in place of its own coding-agent prompt."""
 # Codex features that give the model a host tool. With them off, codex answers
 # from the prompt alone; the read-only sandbox would still let a shell read files.
 _CODEX_DISABLED_FEATURES = (
@@ -56,6 +64,22 @@ _CODEX_DISABLED_FEATURES = (
     "view_image",
     "hooks",
     "skill_search",
+    "goals",
+    "sleep_tool",
+    "tool_suggest",
+)
+# Codex config that keeps its own context out of the request: no sandbox,
+# apps or environment (cwd, shell, date) messages, no plan or question tools,
+# and no tools nested in the code-mode ``exec`` tool. The models' catalog
+# entry still declares ``exec`` and ``wait``; with ``code_mode_host`` off,
+# ``exec`` refuses every call.
+_CODEX_CONFIG = (
+    "include_permissions_instructions=false",
+    "include_apps_instructions=false",
+    "include_environment_context=false",
+    "tools.update_plan.enabled=false",
+    "tools.experimental_request_user_input.enabled=false",
+    'features.code_mode.excluded_tool_namespaces=["functions"]',
 )
 _TRANSIENT_TEXT = re.compile(
     r"overloaded|timed? ?out|temporar|connection|network|econnreset|503|502|500|529", re.IGNORECASE
@@ -329,7 +353,7 @@ def run_claude(
 
     Raises:
         SubscriptionRateLimitedError: When the subscription is capped.
-        CliRunError: When the call fails.
+        CliRunError: When the call fails, or gives no structured output for a schema.
     """
     # Without the isolation flags a large personal setup overflows the context.
     with cli_isolation.isolated_cli("claude") as isolation:
@@ -340,6 +364,8 @@ def run_claude(
             "json",
             "--tools",
             "",
+            "--system-prompt",
+            SYSTEM_PROMPT,
             *isolation.args,
             "--model",
             model_arg,
@@ -351,6 +377,10 @@ def run_claude(
     if raw.get("is_error"):
         raise _failure("claude", str(raw.get("result") or stderr))
     structured = raw.get("structured_output")
+    if json_schema is not None and structured is None:
+        # Claude Code asks once more for the StructuredOutput tool, then exits
+        # with success and free text; that text does not match the schema.
+        raise CliRunError("claude", "claude returned no structured output for the JSON schema", transient=True)
     text = json.dumps(structured) if structured is not None else str(raw.get("result") or "")
     usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
     prompt_tokens = (
@@ -371,7 +401,7 @@ def run_claude(
 def run_codex(
     model_arg: str, prompt: str, json_schema: Mapping[str, Any] | None, settings: Settings, cwd: Path
 ) -> CliCompletion:
-    """Answer one prompt with ``codex exec`` in a read-only sandbox, with its host tools off.
+    """Answer one prompt with ``codex exec`` in a read-only sandbox, with its host tools and agent prompt off.
 
     Args:
         model_arg: The CLI's ``--model`` value.
@@ -391,6 +421,8 @@ def run_codex(
         tempfile.TemporaryDirectory(prefix="skynet-codex-") as scratch,
         cli_isolation.isolated_cli("codex") as isolation,
     ):
+        instructions = Path(scratch) / "instructions.md"
+        instructions.write_text(SYSTEM_PROMPT, encoding="utf-8")
         argv = [
             cli_probe.cli_binary("codex", settings),
             "exec",
@@ -402,6 +434,9 @@ def run_codex(
             "-c",
             'web_search="disabled"',
             *(arg for feature in _CODEX_DISABLED_FEATURES for arg in ("--disable", feature)),
+            "-c",
+            f"model_instructions_file={json.dumps(str(instructions))}",
+            *(arg for setting in _CODEX_CONFIG for arg in ("-c", setting)),
             "--model",
             model_arg,
         ]
