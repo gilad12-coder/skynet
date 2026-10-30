@@ -22,6 +22,7 @@ locals {
 # certificate for var.preview_domain itself, so no new record is needed when
 # var.preview_domain is one of var.frontend_domains.
 resource "aws_acm_certificate" "preview" {
+  #checkov:skip=CKV2_AWS_71:Each PR preview gets its own host under var.preview_domain; one wildcard covers them all.
   count = local.preview_enabled ? 1 : 0
 
   domain_name       = "*.${var.preview_domain}"
