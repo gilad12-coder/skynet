@@ -130,11 +130,11 @@ class Settings(BaseSettings):
         default=None,
         description=("Base URL of the OpenAI-compatible LLM gateway (LiteLLM reads the same env var for serving)."),
     )
-    groq_api_key: SecretStr | None = Field(
+    transcription_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "Groq API key for dictation speech-to-text (Whisper large-v3-turbo "
-            "on Groq LPUs) — the platform's sole STT provider. Unset disables "
+            "OpenRouter API key for dictation speech-to-text (Whisper large-v3-turbo "
+            "through OpenRouter) — the platform's sole STT provider. Unset disables "
             "dictation with a typed 503."
         ),
     )
@@ -171,10 +171,15 @@ class Settings(BaseSettings):
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
     )
-    railway_environment_name: str = Field(
+    app_environment: str = Field(
         default="",
-        alias="RAILWAY_ENVIRONMENT_NAME",
-        description="Set by Railway. A name ending in -pr-<number> marks a PR preview environment.",
+        alias="APP_ENVIRONMENT",
+        description="Deployment environment name. A name ending in -pr-<number> marks a PR preview environment.",
+    )
+    app_git_sha: str = Field(
+        default="",
+        alias="APP_GIT_SHA",
+        description="Commit the deployed image was built from.",
     )
     preview_grant_cents: int = Field(
         default=0,
@@ -544,19 +549,6 @@ class Settings(BaseSettings):
         ),
         alias="TELEMETRY_ENABLED",
     )
-    posthog_project_api_key: SecretStr | None = Field(
-        default=None,
-        alias="POSTHOG_PROJECT_API_KEY",
-        description=(
-            "PostHog project key for privacy-preserving export of accepted first-party telemetry. "
-            "Unset keeps analytics entirely in Postgres."
-        ),
-    )
-    posthog_host: str = Field(
-        default="https://eu.i.posthog.com",
-        alias="POSTHOG_HOST",
-        description="PostHog event-ingestion origin; defaults to the EU cloud endpoint.",
-    )
     sentry_dsn: SecretStr | None = Field(
         default=None,
         alias="SENTRY_DSN",
@@ -573,32 +565,6 @@ class Settings(BaseSettings):
         le=1.0,
         alias="SENTRY_TRACES_SAMPLE_RATE",
         description="Fraction of backend performance traces exported to Sentry.",
-    )
-    sentry_api_token: SecretStr | None = Field(
-        default=None,
-        alias="SENTRY_API_TOKEN",
-        description=(
-            "Sentry auth token with read access to issues, for the admin dashboard's error feed. "
-            "Unset hides the feed behind an empty state."
-        ),
-    )
-    sentry_org: str | None = Field(
-        default=None,
-        alias="SENTRY_ORG",
-        description="Sentry organization slug whose unresolved issues the admin dashboard lists.",
-    )
-    sentry_project: str | None = Field(
-        default=None,
-        alias="SENTRY_PROJECT",
-        description="Sentry project slug the admin dashboard's issue list is narrowed to. Unset lists every project.",
-    )
-    sentry_base_url: str | None = Field(
-        default=None,
-        alias="SENTRY_BASE_URL",
-        description=(
-            "Sentry API origin for the organization's data region, e.g. https://us.sentry.io. "
-            "Unset derives it from SENTRY_DSN."
-        ),
     )
     event_loop_lag_threshold_ms: float = Field(
         default=100.0,
@@ -923,25 +889,6 @@ class Settings(BaseSettings):
         ),
     )
 
-    log_ship_url: str = Field(
-        default="",
-        alias="LOG_SHIP_URL",
-        description=(
-            "HTTP ingest endpoint that receives a JSON copy of every log record "
-            "the root logger admits (e.g. Better Stack's https://in.logs.betterstack.com "
-            "or a Vector http_server source), so logs outlive the platform's own "
-            "retention. Unset (the default) disables shipping; logs still go to stdout."
-        ),
-    )
-    log_ship_token: SecretStr | None = Field(
-        default=None,
-        alias="LOG_SHIP_TOKEN",
-        description=(
-            "Bearer token sent with each LOG_SHIP_URL batch (Better Stack source "
-            "token). Unset sends no Authorization header."
-        ),
-    )
-
     @field_validator("alert_min_level")
     @classmethod
     def _validate_alert_min_level(cls, v: str) -> str:
@@ -999,6 +946,23 @@ class Settings(BaseSettings):
             "LiteLLM model id every agent interview runs when the user picks "
             "none (onboarding, code interview, tagger dataset interview). Empty "
             "follows the catalog's measured fastest small featured model."
+        ),
+    )
+
+    rule_watch_model: str = Field(
+        default="",
+        description=(
+            "Model id of the fast judge that watches a repository run's recent "
+            "actions against its plain-language rules. Empty follows the model "
+            "catalog's best-value default."
+        ),
+    )
+    rule_judge_model: str = Field(
+        default="",
+        description=(
+            "Model id of the judge that reads each repository version's full diff "
+            "against its plain-language rules before it is scored. Empty follows "
+            "the model catalog's strongest model."
         ),
     )
 
@@ -1251,15 +1215,15 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Per-account cap on dictation clips per hour, enforced across replicas via Redis. "
-            "Dictation runs on the platform's Groq key and is not billed to user balances. 0 disables the cap."
+            "Dictation runs on the platform's transcription key and is not billed to user balances. 0 disables the cap."
         ),
     )
-    groq_monthly_budget_usd: float = Field(
+    transcription_monthly_budget_usd: float = Field(
         default=10.0,
         ge=0,
         description=(
-            "Platform-wide monthly cap on Groq dictation spend in dollars, counted in Redis from each "
-            "clip's billed duration. Dictation answers a typed 503 once it is reached. 0 disables the cap."
+            "Platform-wide monthly cap on dictation spend in dollars, counted in Redis from the "
+            "cost OpenRouter reports for each clip. Dictation answers a typed 503 once it is reached. 0 disables the cap."
         ),
     )
     embeddings_monthly_token_cap: int = Field(
@@ -1284,7 +1248,7 @@ class Settings(BaseSettings):
         ge=0,
         le=1,
         description=(
-            "Share of each platform budget (Groq dictation, embeddings, per-account embeddings) a single "
+            "Share of each platform budget (dictation, embeddings, per-account embeddings) a single "
             "process may spend per month when Redis is unset or unreachable, counted in memory. 0 refuses "
             "every budgeted call without Redis."
         ),
@@ -1368,7 +1332,7 @@ class Settings(BaseSettings):
         error instead of a config diagnostic. Deriving the default keeps the
         agent pointed at this app's own ``/mcp`` mount; a bind-all ``0.0.0.0``
         host is dialled as ``127.0.0.1`` — the IPv4 literal, not ``localhost``,
-        because some container runtimes (e.g. Railway) resolve ``localhost`` to
+        because some container runtimes resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
         a raw ``ConnectError``.
 
@@ -1397,8 +1361,8 @@ class Settings(BaseSettings):
 
     @property
     def is_preview_environment(self) -> bool:
-        """Return whether this deployment is a Railway PR preview environment."""
-        return re.search(r"-pr-\d+$", self.railway_environment_name) is not None
+        """Return whether this deployment is a PR preview environment."""
+        return re.search(r"-pr-\d+$", self.app_environment) is not None
 
     @property
     def is_stripe_configured(self) -> bool:

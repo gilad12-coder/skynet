@@ -1,12 +1,13 @@
 # Confirms that a push to the staging branch actually reached the staging
-# environment. Railway deploys staging on its own; this run waits until the
-# staging backend and frontend serve a commit that includes every change to
-# their folders, then writes the links into the run summary. A red run means
-# staging did not come up with your change, so look at the Railway logs.
+# environment. The "aws deploy" workflow deploys staging to AWS ECS; this run
+# waits until the staging backend and frontend serve a commit that includes
+# every change to their folders, then writes the links into the run summary.
+# A red run means staging did not come up with your change, so look at the
+# "aws deploy" run and the ECS service events.
 #
 # Optional configuration (Settings > Secrets and variables > Actions):
-#   vars.STAGING_APP_URL   default https://frontend-staging-102e.up.railway.app
-#   vars.STAGING_API_URL   default https://backend-staging-6295.up.railway.app
+#   vars.STAGING_APP_URL   default https://staging.skynetml.com
+#   vars.STAGING_API_URL   default https://api-staging.skynetml.com
 name: staging deploy
 
 on:
@@ -20,26 +21,68 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The aws deploy run of this commit can wait behind the previous one, and
+    # each run may take up to 90 minutes.
+    timeout-minutes: 150
     env:
-      APP_URL: ${{ vars.STAGING_APP_URL || 'https://frontend-staging-102e.up.railway.app' }}
-      API_URL: ${{ vars.STAGING_API_URL || 'https://backend-staging-6295.up.railway.app' }}
+      APP_URL: ${{ vars.STAGING_APP_URL || 'https://staging.skynetml.com' }}
+      API_URL: ${{ vars.STAGING_API_URL || 'https://api-staging.skynetml.com' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           filter: blob:none
+      - name: Wait for the aws deploy run of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Poll the served commit only after its deploy finished, so a deploy
+          # that waits in the aws deploy queue does not use up the poll time.
+          deadline=$(( $(date +%s) + 110 * 60 ))
+          while :; do
+            # The runs API, not `gh run list --workflow`: that looks the
+            # workflow up on main, which does not have aws-deploy.yml.
+            # Push and manual runs count: a manual staging deploy can cancel
+            # the queued push run of this commit and deploy it instead.
+            # shellcheck disable=SC2016 # $r is a jq variable.
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&branch=staging&per_page=100" \
+              --jq '[.workflow_runs[] | select(.path == ".github/workflows/aws-deploy.yml")] as $r
+                | if any($r[]; .conclusion == "success") then {status: "success", url: (first($r[] | select(.conclusion == "success")) | .html_url)}
+                  elif any($r[]; .status != "completed") then {status: (first($r[] | select(.status != "completed")) | .status)}
+                  elif ($r | length) == 0 then {}
+                  else ($r | map(select(.conclusion != "cancelled")) + $r)[0] | {status: .conclusion, url: .html_url} end') || run=
+            status=$(jq -r '.status // empty' <<<"$run")
+            url=$(jq -r '.url // empty' <<<"$run")
+            if [ "$status" = "success" ]; then
+              echo "aws deploy succeeded: $url"
+              break
+            fi
+            case "$status" in
+              "" | queued | in_progress | waiting | requested | pending) ;;
+              *)
+                echo "::error::The aws deploy runs of ${GITHUB_SHA:0:8} ended with $status: $url"
+                exit 1
+                ;;
+            esac
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::The aws deploy run of ${GITHUB_SHA:0:8} did not finish in 110 minutes (status: ${status:-not found})."
+              exit 1
+            fi
+            echo "Waiting for aws deploy: ${status:-not started}"
+            sleep 30
+          done
       - name: Wait for staging to serve this push
         run: |
           fetch() { curl -sS -L --max-time 20 "$@" 2>/dev/null; }
 
-          # Railway only rebuilds a service when its own folder changed, so a
-          # service is current once no change to its folder sits after the
-          # commit it serves.
+          # A service is current once no change to its folder sits after the
+          # commit it serves, so a push that leaves a folder alone does not
+          # wait for that service.
           current() {
             local commit=$1 dir=$2
             [ -n "$commit" ] && git cat-file -e "$commit^{commit}" 2>/dev/null \
@@ -56,7 +99,7 @@ jobs:
               break
             fi
             if [ "$(date +%s)" -gt "$deadline" ]; then
-              echo "::error::Staging did not pick up ${GITHUB_SHA:0:8} in 35 minutes. Backend serves ${backend:-nothing}, frontend serves ${frontend:-nothing}. Check the staging deploy logs on Railway."
+              echo "::error::Staging did not pick up ${GITHUB_SHA:0:8} in 35 minutes. Backend serves ${backend:-nothing}, frontend serves ${frontend:-nothing}. Check the aws deploy run and the ECS service events."
               exit 1
             fi
             echo "Waiting: backend ${backend:0:8}, frontend ${frontend:0:8}"

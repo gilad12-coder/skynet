@@ -51,6 +51,10 @@ _SETTINGS_ENV_VARS = (
     "RATE_LIMIT_ACCOUNT_REQUESTS_PER_HOUR",
     "ADMIN_USERNAMES",
     "QUOTA_OVERRIDES",
+    "APP_ENVIRONMENT",
+    "RAILWAY_ENVIRONMENT_NAME",
+    "APP_GIT_SHA",
+    "RAILWAY_GIT_COMMIT_SHA",
 )
 
 
@@ -731,3 +735,54 @@ def test_settings_cost_guardrails_disable_values(monkeypatch: pytest.MonkeyPatch
     assert s.max_monthly_active_users == 0
     assert s.max_concurrent_jobs_per_user == 0
     assert s.generalist_agent_model == ""
+
+
+_PLATFORM_ENV_CASES = (
+    ("app_environment", "APP_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME"),
+    ("app_git_sha", "APP_GIT_SHA", "RAILWAY_GIT_COMMIT_SHA"),
+)
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_reads_the_neutral_name(
+    monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
+) -> None:
+    """The ECS task definitions set the neutral ``APP_*`` name."""
+    monkeypatch.setenv(neutral, "from-neutral")
+    assert getattr(Settings(_env_file=None), field) == "from-neutral"
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_ignores_the_railway_name(
+    monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
+) -> None:
+    """Railway is gone, so its old variable name no longer feeds the setting."""
+    monkeypatch.setenv(railway, "from-railway")
+    assert getattr(Settings(_env_file=None), field) == ""
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_defaults_to_empty(field: str, neutral: str, railway: str) -> None:
+    """A developer machine sets neither name."""
+    assert getattr(Settings(_env_file=None), field) == ""
+
+
+@pytest.mark.parametrize(
+    ("environment", "railway", "expected"),
+    [
+        ("skynet-pr-161", None, True),
+        (None, "skynet-pr-161", False),
+        ("staging", None, False),
+        ("production", "skynet-pr-161", False),
+        (None, None, False),
+    ],
+)
+def test_preview_detection_reads_only_app_environment(
+    monkeypatch: pytest.MonkeyPatch, environment: str | None, railway: str | None, expected: bool
+) -> None:
+    """Only a ``-pr-<n>`` ``APP_ENVIRONMENT`` marks a preview; the Railway name is ignored."""
+    if environment is not None:
+        monkeypatch.setenv("APP_ENVIRONMENT", environment)
+    if railway is not None:
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", railway)
+    assert Settings(_env_file=None).is_preview_environment is expected
