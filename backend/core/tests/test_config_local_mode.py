@@ -324,7 +324,7 @@ def test_dockerfile_binds_the_settings_port(env: dict[str, str], port: str) -> N
     """The image binds the platform PORT and hands the same port to Settings.
 
     docker compose passes backend/.env (with API_PORT) into the container, and
-    Railway sets PORT. The image keeps its old bind in both cases and exports
+    a PaaS runtime may set PORT. The image keeps its old bind in both cases and exports
     it as API_PORT, so Settings and the MCP URL see the port uvicorn binds.
 
     Args:
