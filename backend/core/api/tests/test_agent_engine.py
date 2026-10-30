@@ -27,7 +27,7 @@ from ...local.cli_catalog import CLI_MODELS
 from ...local.cli_probe import CliStatus
 from ...service_gateway import language_models
 from ...service_gateway.language_models import build_language_model
-from ...storage.models import AgentEnginePreferenceModel, Base
+from ...storage.models import AgentEnginePreferenceModel, Base, UserModel
 from .. import agent_engine, model_router
 from .. import auth as auth_mod
 from ..account_data_service import delete_account, export_account
@@ -335,6 +335,7 @@ def test_local_chat_turn_with_no_model_runs_on_codex_with_no_remote_call(
     engine = _engine()
     _fund(engine)
     with Session(engine) as session:
+        session.add(UserModel(email=_USER, name=_USER, password_hash="x"))
         session.add(AgentEnginePreferenceModel(username=_USER, engine="codex"))
         session.commit()
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
