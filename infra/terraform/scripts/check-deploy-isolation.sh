@@ -65,6 +65,8 @@ for env in staging production; do
   expect "$policy" denied "register a revision without tags" ecs:RegisterTaskDefinition "*"
   expect "$policy" allowed "tag a $env backend revision" ecs:TagResource "$td/skynet-$env-backend:999"
   expect "$policy" denied "tag a $other backend revision" ecs:TagResource "$td/skynet-$other-backend:999"
+  expect "$policy" allowed "read the tags of a $env backend revision" ecs:ListTagsForResource "$td/skynet-$env-backend:999"
+  expect "$policy" denied "read the tags of a $other backend revision" ecs:ListTagsForResource "$td/skynet-$other-backend:999"
   expect "$policy" allowed "pass the $env backend exec role" iam:PassRole "arn:aws:iam::$account:role/skynet-$env-backend-exec" --context-entries "$pass_ecs"
   expect "$policy" denied "pass the $other backend exec role" iam:PassRole "arn:aws:iam::$account:role/skynet-$other-backend-exec" --context-entries "$pass_ecs"
   expect "$policy" denied "pass the $other backend task role" iam:PassRole "arn:aws:iam::$account:role/skynet-$other-backend-task" --context-entries "$pass_ecs"

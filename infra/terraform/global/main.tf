@@ -296,6 +296,14 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = ["*"]
   }
 
+  # deploy.sh reads the Environment tag with describe-task-definition
+  # --include TAGS, which may need this action.
+  statement {
+    sid       = "EcsReadTaskDefinitionTags"
+    actions   = ["ecs:ListTagsForResource"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-${each.key}-*:*"]
+  }
+
   statement {
     sid       = "EcsRegisterTaskDefinitions"
     actions   = ["ecs:RegisterTaskDefinition"]
@@ -472,6 +480,14 @@ data "aws_iam_policy_document" "github_preview" {
     sid       = "EcsTaskDefinitionsRead"
     actions   = ["ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
     resources = ["*"]
+  }
+
+  # preview.sh reads the Environment tag of the staging revisions with
+  # describe-task-definition --include TAGS, which may need this action.
+  statement {
+    sid       = "EcsReadTaskDefinitionTags"
+    actions   = ["ecs:ListTagsForResource"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-${local.preview_env}-*:*"]
   }
 
   statement {

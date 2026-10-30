@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   pull-requests: write
@@ -47,11 +48,22 @@ jobs:
           now=$(date +%s)
           infra/terraform/scripts/preview.sh list > slots.txt
           stale='[]'
+          # GitHub keeps one pending job per concurrency group, so a delete
+          # queued behind a preview.yml run of the same PR would cancel that
+          # run's pending deploy or delete. Those PRs wait for the next hour.
+          # Previews run only for branches of this repository, whose runs
+          # list the PR in pull_requests.
+          for s in requested queued waiting pending in_progress; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/preview.yml/runs?status=$s&per_page=100" \
+              --jq '.workflow_runs[].pull_requests[].number'
+          done > busy.txt
           # fd 3, so the commands in the loop cannot read the list from stdin.
           while read -r pr sha at <&3; do
             state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .state) || state=unknown
             age=$(( (now - at) / 3600 ))
-            if [ "$state" = unknown ]; then
+            if grep -qx "$pr" busy.txt; then
+              echo "PR $pr: a preview run is queued or running; keep"
+            elif [ "$state" = unknown ]; then
               echo "PR $pr: cannot read the PR state; keep"
             elif [ "$state" = open ] && [ "$age" -lt 48 ]; then
               echo "PR $pr: keep (${sha:0:8}, ${age} h since the last push)"

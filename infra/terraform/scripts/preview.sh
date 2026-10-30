@@ -405,7 +405,7 @@ deploy() {
 
 delete() {
   check_pr
-  local cfg cluster domain slot version s key host rule names=() migrate_td repo tags
+  local cfg cluster domain slot version s key host rule names=() migrate_td
   cfg="$(preview_config)"
   cluster="$(jq -r .cluster <<<"$cfg")"
   domain="$(jq -r .domain <<<"$cfg")"
@@ -450,6 +450,24 @@ delete() {
     fi
   fi
 
+  # A failed delete keeps the slot and the next run retries. The images go
+  # only after the release: a retry runs the drop task on them, and a slot
+  # that changed belongs to a newer deploy. Images that stay behind expire
+  # under the ECR lifecycle rule.
+  if [[ -n "$slot" ]]; then
+    if [[ "$(aws ssm get-parameter --name "$slot_prefix/$slot" --query Parameter.Version --output text)" != "$version" ]]; then
+      echo "slot $slot changed during the delete; it stays held, and so do the images"
+      return 0
+    fi
+    aws ssm delete-parameter --name "$slot_prefix/$slot"
+    echo "released slot $slot"
+  fi
+  delete_images
+  echo "preview of PR $pr deleted"
+}
+
+delete_images() {
+  local repo tags
   for repo in skynet/preview-backend skynet/preview-frontend; do
     tags="$(aws ecr list-images --repository-name "$repo" --filter tagStatus=TAGGED --output json |
       jq -c --arg sfx "-pr-$pr" '[.imageIds[] | select(.imageTag | endswith($sfx)) | {imageTag}]')"
@@ -459,17 +477,6 @@ delete() {
     done
   done
   echo "deleted the images"
-
-  # Last, so a failed delete keeps the slot and the next run retries.
-  if [[ -n "$slot" ]]; then
-    if [[ "$(aws ssm get-parameter --name "$slot_prefix/$slot" --query Parameter.Version --output text)" == "$version" ]]; then
-      aws ssm delete-parameter --name "$slot_prefix/$slot"
-      echo "released slot $slot"
-    else
-      echo "slot $slot changed during the delete; it stays held"
-    fi
-  fi
-  echo "preview of PR $pr deleted"
 }
 
 list() {
