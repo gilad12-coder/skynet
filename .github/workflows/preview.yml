@@ -65,6 +65,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCED: ${{ contains(github.event.pull_request.labels.*.name, 'preview') }}
         run: |
+          # A PR branched before the preview scripts reached its base has no
+          # scripts at its head. The base scripts would deploy the wrong code.
+          if ! err=$(gh api "repos/$GITHUB_REPOSITORY/contents/infra/terraform/scripts/preview.sh?ref=$SHA" --silent 2>&1); then
+            case "$err" in
+              *"HTTP 404"*)
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "::notice::The PR head has no infra/terraform/scripts/preview.sh. Rebase onto staging to get a preview."
+                exit 0 ;;
+              *) echo "$err" >&2; exit 1 ;;
+            esac
+          fi
           if [ "$FORCED" = true ]; then
             echo "The label preview asks for a preview."
             exit 0
@@ -195,11 +206,17 @@ jobs:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     steps:
-      # The PR head commit, the same scripts that deployed the preview. The
-      # base branch can lack them (the PR that adds them, or a base branch
-      # that does not have them yet). GitHub keeps the commit in
-      # refs/pull/<n>/head after the head branch is deleted.
+      # The base branch scripts: they are the newest, so they delete every
+      # resource a preview can have. The base branch can lack them (the PR
+      # that adds them); then the PR head scripts delete the preview. GitHub
+      # keeps the head commit in refs/pull/<n>/head after the head branch is
+      # deleted.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - uses: actions/checkout@v4
+        if: hashFiles('infra/terraform/scripts/preview.sh') == ''
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
