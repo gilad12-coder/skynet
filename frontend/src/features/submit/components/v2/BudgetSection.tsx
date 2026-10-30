@@ -7,6 +7,7 @@ import { NumberInput } from "@/shared/ui/number-input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { tip } from "@/shared/lib/tooltips";
 
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
@@ -95,22 +96,25 @@ export function BudgetSection({ kind, choice }: { kind: ArtifactKind; choice: Op
         )}
       </div>
 
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="v2-economy-mode" className="cursor-pointer text-sm font-semibold">
-            <HelpTip text={tip("submit.economy")}>{msg("submit.economy.label")}</HelpTip>
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            {msg("submit.economy.hint")}
-            {usesNativeProposer(choice, kind) && ` ${msg("submit.blackbox.economy.native_hint")}`}
-          </p>
+      {/* Economy runs on the providers' batch APIs, which the local build does not use. */}
+      {!isLocalMode() && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="v2-economy-mode" className="cursor-pointer text-sm font-semibold">
+              <HelpTip text={tip("submit.economy")}>{msg("submit.economy.label")}</HelpTip>
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {msg("submit.economy.hint")}
+              {usesNativeProposer(choice, kind) && ` ${msg("submit.blackbox.economy.native_hint")}`}
+            </p>
+          </div>
+          <Switch
+            id="v2-economy-mode"
+            checked={state.meta.economyMode}
+            onCheckedChange={(economyMode) => patchMeta({ economyMode })}
+          />
         </div>
-        <Switch
-          id="v2-economy-mode"
-          checked={state.meta.economyMode}
-          onCheckedChange={(economyMode) => patchMeta({ economyMode })}
-        />
-      </div>
+      )}
 
       <TotalBudgetCard w={ctx} mode={aggregateTokenSource(models)} />
     </StepCard>

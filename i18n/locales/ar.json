@@ -198,6 +198,7 @@
     "agent.status.tool_start": "الوكيل يستدعي الأداة…",
     "agent.turn.not_found": "لم يتم العثور على جولة الوكيل أو انتهت صلاحيتها.",
     "analytics.other_bucket": "أخرى",
+    "auth.account_not_found": "هذا الحساب لم يعد موجودًا. سجّل الدخول مرة أخرى.",
     "auth.invalid_token": "رمز المصادقة غير صالح أو منتهي الصلاحية.",
     "auth.missing_token": "رمز المصادقة مطلوب.",
     "auth.not_configured": "لم تُهيّأ مصادقة الواجهة الخلفية.",

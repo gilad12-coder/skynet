@@ -133,6 +133,35 @@ def count_job_statuses(usernames: list[str]) -> dict[str, int]:
         return {str(row["status"]): int(row["n"]) for row in cur.fetchall()}
 
 
+def ensure_test_accounts(usernames: list[str]) -> int:
+    """Create a ``users`` row for each synthetic load-test identity.
+
+    The backend refuses a session JWT whose account row does not exist
+    (SKY-150), so every identity the harness mints a token for needs one.
+    Rows carry an empty password hash that can never verify and are flagged
+    internal so product metrics skip them.
+
+    Args:
+        usernames: Synthetic identities in the dedicated test database.
+
+    Returns:
+        Number of account rows inserted; existing rows are left unchanged.
+    """
+    if not usernames:
+        return 0
+    with cursor() as cur:
+        cur.execute(
+            "INSERT INTO users "
+            "(email, name, password_hash, created_at, email_verified, email_2fa_enabled, is_internal) "
+            "SELECT username, username, '', NOW(), TRUE, FALSE, TRUE "
+            "FROM unnest(%s::text[]) AS username "
+            "ON CONFLICT (email) DO NOTHING",
+            (usernames,),
+        )
+        cur.connection.commit()
+        return cur.rowcount or 0
+
+
 def fund_test_users(usernames: list[str], cents: int = 100_000) -> int:
     """Give synthetic load-test users isolated, non-Stripe balances.
 
@@ -141,15 +170,18 @@ def fund_test_users(usernames: list[str], cents: int = 100_000) -> int:
     the request traverse the same billing gate; no Stripe or provider account is
     touched.
 
+    Each identity also gets its ``users`` row (see :func:`ensure_test_accounts`).
+
     Args:
         usernames: Synthetic identities to fund in the dedicated test database.
         cents: Paid balance, in cents, assigned to each identity.
 
     Returns:
-        Number of user rows inserted or updated.
+        Number of billing rows inserted or updated.
     """
     if not usernames:
         return 0
+    ensure_test_accounts(usernames)
     with cursor() as cur:
         cur.execute(
             "INSERT INTO billing_customers "

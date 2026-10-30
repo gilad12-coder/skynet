@@ -3,11 +3,13 @@
 import {
   SessionProvider as NextAuthSessionProvider,
   getSession,
+  signOut,
   useSession,
 } from "next-auth/react";
 import type { ComponentProps } from "react";
 import * as React from "react";
 import { setApiAuthToken, setApiAuthTokenRefresher } from "@/shared/lib/api";
+import { ACCOUNT_MISSING_EVENT, signOutOnce } from "@/shared/lib/account-missing";
 
 type SessionProviderProps = ComponentProps<typeof NextAuthSessionProvider>;
 
@@ -49,6 +51,15 @@ function ApiAuthTokenBridge() {
     });
     return () => setApiAuthTokenRefresher(undefined);
   }, [session?.backendAccessToken]);
+
+  // The backend says this browser's account no longer exists (deleted, or
+  // never provisioned). No token refresh can fix that, so end the session and
+  // send the user to sign in rather than leaving every request failing.
+  React.useEffect(() => {
+    const onAccountMissing = signOutOnce(() => signOut({ callbackUrl: "/login" }));
+    window.addEventListener(ACCOUNT_MISSING_EVENT, onAccountMissing);
+    return () => window.removeEventListener(ACCOUNT_MISSING_EVENT, onAccountMissing);
+  }, []);
 
   return null;
 }

@@ -47,7 +47,7 @@ def test_stream_preserves_phase_order_and_returns_one_result(monkeypatch: pytest
             json={
                 "workflow": "anything",
                 "scope": "evaluation",
-                "payload": {},
+                "payload": {"scorer": {"kind": "python", "metric_code": "def score(p):\n    return 1\n"}},
                 "execution_budget_id": "draft",
                 "execution_budget_revision": 1,
             },

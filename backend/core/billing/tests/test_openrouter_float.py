@@ -497,17 +497,17 @@ def _key_response(limit: float | None) -> Mock:
 def test_local_key_limit_problem_flags_uncapped_keys(
     monkeypatch: pytest.MonkeyPatch, limit: float | None, warns: bool
 ) -> None:
-    """Off Railway, a key with no limit or a large one draws a warning."""
-    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    """On a developer machine, a key with no limit or a large one draws a warning."""
+    monkeypatch.setattr(openrouter_float.settings, "app_environment", "")
     monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
     with patch.object(openrouter_float.httpx, "get", return_value=_key_response(limit)):
         problem = openrouter_float.local_key_limit_problem()
     assert (problem is not None) is warns
 
 
-def test_local_key_limit_problem_is_silent_on_railway(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_local_key_limit_problem_is_silent_when_deployed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A deployed service uses the production key on purpose and never reads it here."""
-    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.setattr(openrouter_float.settings, "app_environment", "production")
     monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
     with patch.object(openrouter_float.httpx, "get") as get:
         assert openrouter_float.local_key_limit_problem() is None
@@ -516,7 +516,7 @@ def test_local_key_limit_problem_is_silent_on_railway(monkeypatch: pytest.Monkey
 
 def test_local_key_limit_problem_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unreachable key endpoint yields no warning and no exception."""
-    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(openrouter_float.settings, "app_environment", "")
     monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
     with patch.object(openrouter_float.httpx, "get", side_effect=httpx.ConnectError("down")):
         assert openrouter_float.local_key_limit_problem() is None

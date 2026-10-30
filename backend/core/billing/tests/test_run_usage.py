@@ -13,11 +13,15 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
 from core.api.routers.optimizations.usage import run_usage
+from core.billing import pricing
 from core.billing.budget_amounts import cent_units
+from core.billing.openrouter_prices import TokenPrices
+from core.billing.pricing import ModelUsage, known_token_prices, usage_cost_usd
 from core.billing.run_usage import (
     BILLING_BYOK,
     BILLING_DIRECT,
     BILLING_SKYNET,
+    BILLING_SUBSCRIPTION,
     ROLE_PROPOSER,
     ROLE_REFLECTION,
     ROLE_ROUNDING,
@@ -37,6 +41,7 @@ from core.storage.models import Base, ExecutionBudgetModel, ExecutionOperationMo
 
 _MANAGED = {"kind": "managed_model", "byok_fee_fraction": "0.05"}
 _BYOK = {"kind": "byok_model", "byok_fee_fraction": "0.05"}
+_SUBSCRIPTION = {"kind": "subscription_model"}
 
 
 def _op(
@@ -130,6 +135,88 @@ def test_byok_calls_report_the_provider_charge_behind_the_fee() -> None:
     assert row.provider_cents == Decimal(10)
 
 
+def test_subscription_calls_show_their_api_rate_without_a_charge() -> None:
+    """Price subscription tokens at the model's API rate, apart from any charge or provider spend."""
+    evidence = {**_call(), "provider": "subscription", "cli": "codex"}
+    rows = aggregate(
+        [
+            _op(policy=_SUBSCRIPTION, cents="0", evidence=evidence),
+            _op(policy=_SUBSCRIPTION, cents="0", evidence=evidence),
+        ],
+        proposer=False,
+    )
+    (row,) = rows
+    assert (row.billing, row.calls, row.charged_units, row.provider_cents) == (BILLING_SUBSCRIPTION, 2, 0, None)
+    expected = Decimal(str(usage_cost_usd(ModelUsage("openai/gpt-4o-mini", 100, 20)))) / Decimal("0.01")
+    assert row.api_rate_cents == 2 * expected
+    assert row.api_rate_cents > 0
+    assert row.unpriced_calls == 0
+    assert with_rounding(rows, 0) == rows
+
+
+def test_subscription_call_on_a_model_without_an_api_price_gets_no_amount() -> None:
+    """Show no API-rate amount, and not the fallback rate, for a model no price table knows."""
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_call("acme/no-such-model-xyz"))], proposer=False)
+    assert (row.billing, row.calls, row.api_rate_cents, row.unpriced_calls) == (BILLING_SUBSCRIPTION, 1, None, 0)
+
+
+def _subscription_call(model: str = "openai/gpt-4o-mini", cost: Any = None) -> dict[str, Any]:
+    """Build subscription call evidence whose usage block carries the cost recorded at call time."""
+    evidence = {**_call(model), "provider": "subscription", "cli": "codex"}
+    evidence["usage"] = {**evidence["usage"], "cost": cost}
+    return evidence
+
+
+def test_subscription_call_uses_the_cost_recorded_at_call_time() -> None:
+    """Prefer the cost the CLI dispatcher recorded over today's price table."""
+    table = Decimal(str(usage_cost_usd(ModelUsage("openai/gpt-4o-mini", 100, 20)))) / Decimal("0.01")
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_subscription_call(cost=0.5))], proposer=False)
+    assert row.api_rate_cents == Decimal(50)
+    assert row.api_rate_cents != table
+
+
+def test_recorded_cost_prices_a_model_no_price_table_knows() -> None:
+    """Show the recorded cost even when no price table knows the model today."""
+    evidence = _subscription_call("acme/no-such-model-xyz", cost=0.02)
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=evidence)], proposer=False)
+    assert row.api_rate_cents == Decimal(2)
+
+
+@pytest.mark.parametrize("cost", [None, True, -1, "0.5"])
+def test_missing_or_invalid_recorded_cost_falls_back_to_the_price_table(cost: Any) -> None:
+    """Use the current price table when the recorded cost is missing, a bool, negative or not a number."""
+    expected = Decimal(str(usage_cost_usd(ModelUsage("openai/gpt-4o-mini", 100, 20)))) / Decimal("0.01")
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_subscription_call(cost=cost))], proposer=False)
+    assert row.api_rate_cents == expected
+
+
+def test_fallback_prices_a_call_with_one_price_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Price with the one lookup that decided the model is priced, even if a second lookup would miss."""
+    answers = iter([TokenPrices(prompt=1e-6, completion=2e-6)])
+    monkeypatch.setattr(pricing, "live_prices", lambda _model: next(answers, None))
+    evidence = _subscription_call("acme/no-such-model-xyz")
+    (row,) = aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=evidence)], proposer=False)
+    assert row.api_rate_cents == (Decimal(100) * Decimal("1e-6") + Decimal(20) * Decimal("2e-6")) / Decimal("0.01")
+
+
+def test_usage_cost_uses_the_given_prices_without_a_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip the price lookup when the caller passes the prices."""
+
+    def fail(_model: str) -> None:
+        """Fail if a lookup happens."""
+        raise AssertionError("unexpected price lookup")
+
+    monkeypatch.setattr(pricing, "live_prices", fail)
+    prices = TokenPrices(prompt=1e-6, completion=2e-6)
+    assert usage_cost_usd(ModelUsage("acme/no-such-model-xyz", 100, 20), prices=prices) == pytest.approx(1.4e-4)
+
+
+def test_only_subscription_calls_get_an_api_rate() -> None:
+    """Leave managed and BYOK rows without an API-rate amount."""
+    rows = aggregate([_op(evidence=_call()), _op(policy=_BYOK, cents="0.5", evidence=_call())], proposer=False)
+    assert [row.api_rate_cents for row in rows] == [None, None]
+
+
 def test_unsettled_and_undispatched_calls() -> None:
     """Count in-flight calls as pending, and never count a reservation that sent nothing as a call."""
     (row,) = aggregate(
@@ -192,7 +279,12 @@ def test_serialize_renders_cents() -> None:
     (document,) = serialize(aggregate([_op(cents="1.23456789", evidence=_call())], proposer=False))
     assert document["charged_cents"] == 1.2346
     assert document["provider_cents"] is None
+    assert document["api_rate_cents"] is None
     assert document["billing"] == BILLING_SKYNET
+    (subscription,) = serialize(aggregate([_op(policy=_SUBSCRIPTION, cents="0", evidence=_call())], proposer=False))
+    assert subscription["charged_cents"] == 0
+    assert isinstance(subscription["api_rate_cents"], float)
+    assert subscription["api_rate_cents"] > 0
 
 
 _LEGACY_RESULT: dict[str, Any] = {
@@ -346,3 +438,9 @@ def test_load_records_merges_evidence_per_operation(engine: Engine) -> None:
     assert record.wallet_units == cent_units(2)
     assert record.evidence["tags"] == {"stage": "training"}
     assert "generation" in record.evidence
+
+
+def test_known_token_prices_skips_the_fallback_rate() -> None:
+    """Return a priced model's rates, and ``None`` where pricing would fall back to the default."""
+    assert known_token_prices("openai/gpt-4o-mini") is not None
+    assert known_token_prices("acme/no-such-model-xyz") is None

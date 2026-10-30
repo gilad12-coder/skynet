@@ -54,6 +54,11 @@ interface ModelPickerProps {
    */
   byokMode?: boolean;
   byokProviders?: string[];
+  /**
+   * Lists exactly these models instead of a catalog, e.g. the ones a local
+   * subscription CLI can run.
+   */
+  modelsOverride?: CatalogModel[];
 }
 
 const RANKINGS: ModelRanking[] = ["best_value", "smartest", "fastest"];
@@ -212,6 +217,7 @@ export function ModelPicker({
   providerFilter,
   byokMode = false,
   byokProviders,
+  modelsOverride,
 }: ModelPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -232,7 +238,7 @@ export function ModelPicker({
 
   // Re-read on every open so a change made in Settings shows without a reload.
   React.useEffect(() => {
-    if (!open || byokMode) return;
+    if (!open || byokMode || modelsOverride) return;
     let cancelled = false;
     getModelPrivacy()
       .then((p) => {
@@ -242,8 +248,8 @@ export function ModelPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, byokMode]);
-  const showRetention = !byokMode && dataPolicy !== null;
+  }, [open, byokMode, modelsOverride]);
+  const showRetention = !byokMode && !modelsOverride && dataPolicy !== null;
 
   // If cache wasn't ready at mount time, await it once
   React.useEffect(() => {
@@ -280,6 +286,7 @@ export function ModelPicker({
   const byokProviderSet = React.useMemo(() => new Set(byokProviders ?? []), [byokProviders]);
 
   const allModels: CatalogModel[] = React.useMemo(() => {
+    if (modelsOverride) return modelsOverride;
     let staticModels = activeCatalog?.models ?? [];
     // In BYOK mode, only surface models the user's saved keys can route to.
     // The server already scopes the catalog per account; this guards a stale
@@ -293,7 +300,7 @@ export function ModelPicker({
     return providerFilter
       ? staticModels.filter((m) => m.provider === providerFilter)
       : staticModels;
-  }, [activeCatalog, byokMode, byokProviderSet, providerFilter]);
+  }, [activeCatalog, byokMode, byokProviderSet, providerFilter, modelsOverride]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();

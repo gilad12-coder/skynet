@@ -152,9 +152,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(auth_mod.settings, "admin_usernames", "")
     monkeypatch.setattr(auth_mod.settings, "admin_groups", "skynet-admins")
     engine = _users_engine()
+    with Session(engine) as session:
+        session.add(UserModel(email="admin@example.com", name="Admin", password_hash="x"))
+        session.commit()
+    store = _FakeQuotaStore(engine)
     app = FastAPI()
     app.state.users_engine = engine
-    app.include_router(create_admin_router(job_store=_FakeQuotaStore(engine)))
+    app.state.job_store = store
+    app.include_router(create_admin_router(job_store=store))
     return TestClient(app)
 
 

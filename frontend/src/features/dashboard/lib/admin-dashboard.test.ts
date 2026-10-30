@@ -6,8 +6,6 @@ import {
   growthSeries,
   programRows,
   runSeries,
-  sentryRows,
-  sentryView,
   successRate,
 } from "./admin-dashboard.ts";
 
@@ -75,37 +73,4 @@ test("program rows fall back to a short id and compute an error rate", () => {
   assert.equal(row?.name, "abcdef12");
   assert.equal(row?.owner, "");
   assert.equal(row?.error_rate, 25);
-});
-
-test("sentry view distinguishes not connected, unreachable and ready", () => {
-  assert.deepEqual(sentryView({ configured: false, available: false, issues: [] }), {
-    kind: "not_connected",
-  });
-  assert.deepEqual(sentryView({ configured: true, available: false, issues: [] }), {
-    kind: "unavailable",
-  });
-  assert.deepEqual(sentryView({ configured: true, available: true, issues: [] }), {
-    kind: "ready",
-    issues: [],
-  });
-});
-
-test("sentry rows prefer the short id and keep missing fields empty", () => {
-  const [row] = sentryRows([
-    {
-      id: "42",
-      short_id: null,
-      title: "ValueError",
-      culprit: null,
-      level: null,
-      project: null,
-      count: 5,
-      users: 1,
-      last_seen: null,
-      permalink: null,
-    },
-  ]);
-  assert.equal(row?.issue, "42");
-  assert.equal(row?.level, "");
-  assert.equal(row?.last_seen, "");
 });

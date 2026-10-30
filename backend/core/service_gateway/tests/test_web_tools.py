@@ -146,7 +146,7 @@ def test_fetch_rejects_non_http_url() -> None:
         "http://192.168.1.1/",
         "http://169.254.169.254/latest/meta-data/",
         "http://[::1]/",
-        "http://backend.railway.internal/",
+        "http://backend.staging.skynet.internal/",
         "http://printer.local/",
         "http:///no-host",
     ],

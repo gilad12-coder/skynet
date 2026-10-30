@@ -1586,6 +1586,22 @@ def catalog_snapshot() -> ModelCatalogResponse | None:
     return _cached_response
 
 
+def lowest_effort_from_low(entry: CatalogModel) -> str | None:
+    """Return the lowest effort from ``low`` up on a catalog model's effort ladder.
+
+    Args:
+        entry: The model's catalog row.
+
+    Returns:
+        That effort, or ``None`` when the row lists no effort from ``low`` up.
+    """
+    floor = REASONING_EFFORTS.index("low")
+    return next(
+        (e for e in entry.reasoning_efforts or [] if e in REASONING_EFFORTS and REASONING_EFFORTS.index(e) >= floor),
+        None,
+    )
+
+
 def unpicked_effort(entry: CatalogModel) -> str | None:
     """Return the effort to send a catalog model when the caller picked none.
 
@@ -1604,8 +1620,7 @@ def unpicked_effort(entry: CatalogModel) -> str | None:
     """
     if entry.reasoning_default_enabled:
         return entry.default_reasoning_effort
-    floor = REASONING_EFFORTS.index("low")
-    return next((e for e in entry.reasoning_efforts or [] if REASONING_EFFORTS.index(e) >= floor), None)
+    return lowest_effort_from_low(entry)
 
 
 def default_effort_for(model: str | None) -> str | None:
@@ -1648,6 +1663,26 @@ def agent_model_id(configured: str = "") -> str:
     snapshot = _cached_response
     default = next((m.value for m in snapshot.models if m.is_default), None) if snapshot else None
     return default or DEFAULT_AGENT_MODEL_ID
+
+
+def strongest_model_id(configured: str = "") -> str:
+    """Return the model a server-side job runs when it needs the most careful reading.
+
+    Reads only the already-built catalog, like :func:`agent_model_id`.
+
+    Args:
+        configured: An operator-set model id (e.g. ``RULE_JUDGE_MODEL``);
+            it wins whenever non-empty.
+
+    Returns:
+        The configured id, else the catalog's flagged strongest model, else
+        :func:`agent_model_id`.
+    """
+    if configured.strip():
+        return configured.strip()
+    snapshot = _cached_response
+    strongest = next((m.value for m in snapshot.models if m.is_strongest), None) if snapshot else None
+    return strongest or agent_model_id()
 
 
 def _refresh_catalog_in_background() -> None:

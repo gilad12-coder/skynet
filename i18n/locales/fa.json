@@ -198,6 +198,7 @@
     "agent.status.tool_start": "عامل در حال فراخوانی ابزار…",
     "agent.turn.not_found": "نوبت عامل پیدا نشد یا منقضی شده است.",
     "analytics.other_bucket": "سایر",
+    "auth.account_not_found": "این حساب دیگر وجود ندارد. دوباره وارد شوید.",
     "auth.invalid_token": "توکن احراز هویت نامعتبر یا منقضی شده است.",
     "auth.missing_token": "توکن احراز هویت الزامی است.",
     "auth.not_configured": "احراز هویت بک‌اند پیکربندی نشده است.",

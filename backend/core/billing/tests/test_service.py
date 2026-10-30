@@ -168,7 +168,7 @@ def test_new_account_grant_only_in_preview_environments(
 ) -> None:
     """A new account is seeded with ``PREVIEW_GRANT_CENTS`` only in a PR preview environment."""
     monkeypatch.setattr(settings, "preview_grant_cents", 1000)
-    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    monkeypatch.setattr(settings, "app_environment", environment_name)
     _seed_customer(engine, "u@x.com")
     service = StripeBillingService(engine=engine)
     assert service.spendable_cents("u@x.com") == expected
@@ -849,7 +849,6 @@ def test_webhook_records_purchase_milestone(
 ) -> None:
     """A credited top-up leaves one ``purchase_completed`` telemetry row, and only one."""
     monkeypatch.setattr(settings, "telemetry_enabled", True)
-    monkeypatch.setattr(settings, "posthog_project_api_key", None)
     _seed_customer(engine, "u@x.com")
     service = StripeBillingService(engine=engine)
     event = _checkout_event("evt_tel", "u@x.com", 500, pack_id="pack_small")

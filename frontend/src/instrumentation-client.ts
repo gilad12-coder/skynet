@@ -10,7 +10,6 @@ Sentry.init({
   dsn,
   enabled: Boolean(dsn),
   environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? "development",
-  release: process.env.NEXT_PUBLIC_APP_VERSION,
   sendDefaultPii: false,
   tracesSampleRate: sentryTraceSampleRate(process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE),
   // Replay only around errors, fully masked: it shows *what* the user did

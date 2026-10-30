@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from ...i18n import request_locale, t, t_locale
-from ...models import BlackboxRunRequest
+from ...models import BlackboxRunRequest, BlackboxScorer
 from ...models.unified import (
     ContractCheckItem,
     ContractCheckRequest,
@@ -307,6 +307,16 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 _default_unified_seed(typed)
                 spec = typed
             payload = typed.model_dump(mode="json", by_alias=True)
+        else:
+            # The evaluation check skips the full run request, but the sandbox
+            # still reads every scorer field, so it gets the run's defaults and limits.
+            try:
+                scorer = BlackboxScorer.model_validate(payload.get("scorer") or {})
+            except ValidationError as error:
+                raise RequestValidationError(
+                    [{**detail, "loc": ("scorer", *detail["loc"])} for detail in error.errors()]
+                ) from error
+            payload["scorer"] = scorer.model_dump(mode="json", by_alias=True)
         return run_preflight(request.model_copy(update={"payload": payload}), user, job_store), spec
 
     @router.post("/wizard/preflight/stream", include_in_schema=False)

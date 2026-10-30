@@ -17,14 +17,16 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ...storage.models import ApiTokenModel
+from ...storage.models import ApiTokenModel, UserModel
 from ..auth import (
     AuthenticatedUser,
+    api_token_expired,
     generate_api_token,
     get_authenticated_user,
     hash_api_token,
     token_last4,
 )
+from ..errors import DomainError
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -70,11 +72,12 @@ def create_api_tokens_router(*, job_store) -> APIRouter:
 
         Returns:
             The token metadata (never the secret), or ``None`` when the caller
-            has no active token.
+            has no active token. An expired token counts as none, so Settings
+            offers a new one instead of showing a token every call refuses.
         """
         with Session(job_store.engine) as session:
             row = session.get(ApiTokenModel, user.username)
-            if row is None:
+            if row is None or api_token_expired(row.created_at, datetime.now(UTC)):
                 return None
             return ApiTokenInfo(
                 last4=row.last4, created_at=row.created_at, last_used_at=row.last_used_at
@@ -98,10 +101,20 @@ def create_api_tokens_router(*, job_store) -> APIRouter:
 
         Returns:
             The newly created token, including its one-time plaintext value.
+
+        Raises:
+            DomainError: 401 ``auth.account_not_found`` when the account was
+                deleted after the caller authenticated.
         """
         token = generate_api_token()
         now = datetime.now(UTC)
         with Session(job_store.engine) as session:
+            # Account deletion holds this row locked until it commits. The share
+            # lock waits for it, so a token is never added after the deletion's
+            # token sweep and left behind for a later sign-up to revive (SKY-150).
+            account = session.get(UserModel, user.username, with_for_update={"read": True})
+            if account is None:
+                raise DomainError("auth.account_not_found", status=401)
             existing = session.get(ApiTokenModel, user.username)
             if existing is not None:
                 session.delete(existing)

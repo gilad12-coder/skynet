@@ -127,6 +127,11 @@
   "share.general_access.restricted_desc": "Apenas o proprietário e as pessoas convidadas podem acessar.",
   "share.invite_placeholder": "Adicionar pessoas por nome de usuário",
   "share.loading": "Carregando…",
+  "share.local.title": "Entre em uma conta hospedada para compartilhar",
+  "share.local.body": "Os links de compartilhamento vêm de uma conta {term.appName} hospedada. Os itens deste app ficam neste computador, então outras pessoas não conseguem abrir um link para eles.",
+  "share.local.sign_in": "Entrar na web",
+  "share.visibility.load_failed": "Não foi possível carregar a configuração de visibilidade pública.",
+  "share.visibility.retry": "Tentar novamente",
   "share.member_added": "Usuário adicionado",
   "share.member_removed": "Usuário removido",
   "share.no_results": "Nenhum usuário correspondente encontrado.",
@@ -173,5 +178,7 @@
   "shared.agent.pasted_text_lines": "{n} linhas",
   "shared.agent.pasted_text_remove": "Remover texto colado",
   "shared.agent.pasted_text_restore": "Mostrar no campo de texto",
-  "shared.agent.pasted_text_open": "Abrir texto colado"
+  "shared.agent.pasted_text_open": "Abrir texto colado",
+  "submit.v2.optimizer.source.paper_aria": "Ler o artigo: {p1} (abre em uma nova aba)",
+  "submit.v2.optimizer.source.code_aria": "Ver o código original: {p1} (abre em uma nova aba)"
 }
