@@ -50,6 +50,9 @@ data "aws_iam_policy_document" "audit_key" {
   }
 
   # EventBridge must encrypt the message for the KMS-encrypted SNS topic.
+  # No aws:SourceAccount/SourceArn condition: SNS does not support them here
+  # for EventBridge, and publishes would fail with no error. The topic policy
+  # limits publish to the rule ARN.
   statement {
     sid       = "EventBridgeToSns"
     actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
@@ -57,11 +60,6 @@ data "aws_iam_policy_document" "audit_key" {
     principals {
       type        = "Service"
       identifiers = ["events.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [local.account_id]
     }
   }
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Blocks a commit that adds a secret. `just setup` (scripts/agent/init.sh)
 # turns the repo hooks on with: git config core.hooksPath .githooks
-# Needs gitleaks 8.19 or later (brew install gitleaks).
+# Needs gitleaks 8.25 or later for the [[allowlists]] table in .gitleaks.toml
+# (brew install gitleaks).
 # The CI job .github/workflows/gitleaks.yml is the enforced control; this
 # hook stops a secret before it leaves the machine.
 set -euo pipefail
