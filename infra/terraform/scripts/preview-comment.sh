@@ -20,12 +20,20 @@ marker="<!-- skynet-preview -->"
   exit 1
 }
 
+# The cla workflow locks a PR when it closes, so the delete job often finds
+# the PR locked. A locked PR takes no comment; that is not a failure.
+write() {
+  gh api "$@" >/dev/null && return
+  [[ "$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr" --jq .locked)" == true ]] || return 1
+  echo "::notice::PR #$pr is locked; the preview comment is not written."
+}
+
 id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr/comments" \
   --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" |
   sed -n 1p)"
 
 if [[ -n "$id" ]]; then
-  gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$marker"$'\n'"$body" >/dev/null
+  write --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$marker"$'\n'"$body"
 elif [[ "$update_only" != "--update-only" ]]; then
-  gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -f body="$marker"$'\n'"$body" >/dev/null
+  write --method POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -f body="$marker"$'\n'"$body"
 fi
