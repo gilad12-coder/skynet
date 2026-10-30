@@ -29,7 +29,6 @@ locals {
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "GOOGLE_OAUTH_REDIRECT_URI",
     "GOOGLE_PICKER_API_KEY",
-    "GROQ_API_KEY",
     "HF_OAUTH_CLIENT_ID",
     "HF_OAUTH_REDIRECT_URI",
     "MICROSOFT_OAUTH_CLIENT_ID",
@@ -39,14 +38,11 @@ locals {
     "NOTION_OAUTH_CLIENT_SECRET",
     "NOTION_OAUTH_REDIRECT_URI",
     "OPENROUTER_BALANCE_FLOOR_CREDITS",
-    "SENTRY_API_TOKEN",
-    "SENTRY_BASE_URL",
-    "SENTRY_ORG",
-    "SENTRY_PROJECT",
     "STRIPE_PRICE_PRO_MONTHLY",
     "SUPABASE_OAUTH_CLIENT_ID",
     "SUPABASE_OAUTH_CLIENT_SECRET",
     "SUPABASE_OAUTH_REDIRECT_URI",
+    "TRANSCRIPTION_API_KEY",
   ]
 
   # Names that backend and worker both read.
@@ -63,11 +59,8 @@ locals {
     "GENERALIST_AGENT_MCP_URL",
     "GLOBAL_DAILY_SPEND_CEILING_CREDITS",
     "LITELLM_PROXY_API_KEY",
-    "LOG_SHIP_TOKEN",
-    "LOG_SHIP_URL",
     "MAX_MONTHLY_ACTIVE_USERS",
     "MAX_TOTAL_USERS",
-    "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "OPENROUTER_PROVISIONING_KEY",
     "SEARCH_BACKEND",
@@ -112,8 +105,6 @@ locals {
 
   app_secret_keys = sort(distinct(concat(local.backend_secret_keys, local.worker_secret_keys)))
 
-  # SENTRY_AUTH_TOKEN is a build-time value only (BuildKit secret), so the
-  # running frontend does not get it.
   frontend_secret_keys = [
     "AUTH_GITHUB_ID",
     "AUTH_GITHUB_SECRET",
@@ -126,8 +117,6 @@ locals {
     "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
     "SENTRY_DSN",
     "SENTRY_ENVIRONMENT",
-    "SENTRY_ORG",
-    "SENTRY_PROJECT",
     "SENTRY_TRACES_SAMPLE_RATE",
   ]
 
@@ -172,7 +161,7 @@ resource "aws_secretsmanager_secret_version" "app_generated" {
   secret_string = jsonencode({
     REMOTE_DB_URL = "postgresql://${local.app_db_user}:${random_password.db_app.result}@${local.db_endpoint}:5432/${aws_db_instance.this.db_name}?sslmode=require"
     REDIS_URL     = "rediss://:${random_password.valkey_auth.result}@${local.redis_endpoint}:6379/0"
-    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
+    # Read only by the dbadmin task (create-db-roles.sh).
     APP_DB_PASSWORD = random_password.db_app.result
   })
 }
@@ -188,7 +177,7 @@ resource "aws_secretsmanager_secret_version" "litellm_generated" {
   secret_string = jsonencode({
     LITELLM_DATABASE_URL = "postgresql://litellm:${random_password.db_litellm.result}@${local.db_endpoint}:5432/litellm?sslmode=require"
     REDIS_PASSWORD       = random_password.valkey_auth.result
-    # Read only by the dbadmin task (create-db-roles.sh) and restore-railway.sh.
+    # Read only by the dbadmin task (create-db-roles.sh).
     LITELLM_DB_PASSWORD = random_password.db_litellm.result
   })
 }

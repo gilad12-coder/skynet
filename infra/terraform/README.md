@@ -17,7 +17,7 @@ The environment stacks follow "First apply (staging, then production)" below.
   and returns an empty list. `global` creates the GitHub Actions OIDC provider
   and the GitHub roles (`enable_github_oidc` defaults to `true`).
 - Spend limit: the plan is $460 per month for both environments. The lean
-  variants (about $373) fit. The full variants (about $671) do not; raise the
+  variants (about $419) fit. The full variants (about $671) do not; raise the
   limit before you apply `full.tfvars` in both environments.
 
 ## Layout
@@ -29,7 +29,7 @@ The environment stacks follow "First apply (staging, then production)" below.
 | `environments/staging/` | `staging/terraform.tfstate` | One environment from `modules/environment`. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `environments/production/` | `production/terraform.tfstate` | The same module. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `modules/environment/` | module | VPC, ALB, ACM, ECS cluster, services, task definitions, RDS, Valkey, secrets, logs, alarms. |
-| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel, Railway restore. |
+| `scripts/` | shell | Build and push, deploy (migrate first), secrets, database roles, DB tunnel. |
 | `.checkov.yaml` | config | checkov skips, each with its reason. |
 
 Remote state uses the S3 backend with native S3 locking (`use_lockfile = true`).
@@ -41,13 +41,13 @@ There is no DynamoDB table.
   subnets (RDS, Valkey, no internet route). S3 gateway endpoint. VPC flow logs.
   With `egress_mode = "public_ip"` the tasks run in the public subnets instead
   and there is no NAT gateway.
-- ALB: HTTP redirects to HTTPS. Idle timeout 120 s (Railway SSE streams need >= 60 s).
+- ALB: HTTP redirects to HTTPS. Idle timeout 120 s (SSE streams need >= 60 s).
   The API host goes to the backend. Every other host goes to the frontend.
 - ECS services: `backend` (8080), `worker`, `frontend` (3001), `litellm` (4000).
   The backend and the worker reach litellm at `litellm.<env>.skynet.internal:4000`
   (Cloud Map). ECS Exec is on. Deployment circuit breaker with rollback is on.
 - One-off task families: `migrate` (`python manage.py migrate`) and `dbadmin`
-  (psql tools, for the database roles, the tunnel and the restore). The dbadmin
+  (psql tools, for the database roles and the tunnel). The dbadmin
   image is `postgres:18-alpine` pinned by digest.
 - RDS PostgreSQL 18.6 (`rds.force_ssl=1`, gp3, encrypted, Performance Insights).
   pgvector is an RDS extension; `create-db-roles.sh` enables it.
@@ -59,11 +59,14 @@ There is no DynamoDB table.
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
   targets, backend latency, ECS CPU, memory and running < desired, RDS CPU, memory,
-  free storage and connections, Valkey CPU and memory, error lines in the logs.
+  free storage and connections, Valkey CPU and memory, error lines in the logs,
+  RDS failure events, and no finished automated RDS backup in 30 hours. The
+  topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
+  under the AWS managed SNS key.
 
 ### Choices
 
-- **PostgreSQL 18.6, not 16.** The Railway source runs 18.6 (all four backup
+- **PostgreSQL 18.6, not 16.** The Railway source ran 18.6 (all four backup
   `info.json` files say `18.6 (Debian 18.6-1.pgdg13+2)`). `pg_restore` cannot
   load an 18 archive into an older server, and a downgrade adds a dump format
   risk for no gain. RDS supports 18.6, so the target matches the source.
@@ -98,10 +101,10 @@ file changes.
 | `egress_mode` | `public_ip` (no NAT) | `nat_single` | `nat_single` | `nat_per_az` |
 | `db_instance_class` / `db_multi_az` | db.t4g.small / false | db.t4g.small / false | db.t4g.small / false | db.t4g.medium / true |
 | `cache_node_count` | 1 | 1 | 1 | 2 (failover) |
-| backend | 1 x 0.5 vCPU / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
-| worker | 1 x 0.5 / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
-| frontend | 1 x 0.25 / 0.5 GB, Spot | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 1 GB | 2 x 0.5 / 1 GB |
-| litellm | 1 x 0.5 / 3 GB, Spot | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 0.5 / 2 GB |
+| backend | 1 x 0.5 vCPU / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
+| worker | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 1 / 2 GB |
+| frontend | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 0.5 GB | 1 x 0.25 / 1 GB | 2 x 0.5 / 1 GB |
+| litellm | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 1 x 0.5 / 3 GB | 2 x 0.5 / 2 GB |
 
 Railway ran backend 3, worker 3, frontend 2 and litellm 2 replicas in
 production. Their summed memory was backend 1.6 GB, worker 1.3 GB, litellm
@@ -120,10 +123,12 @@ What each lean cut costs in availability:
 | 1 Valkey node (production) | ~$9 | A node failure loses the cache and stops Valkey for minutes until ElastiCache replaces the node. App sessions and rate limits in Valkey reset. |
 | 1 NAT gateway (production) | ~$37 | All egress goes through one AZ. If that AZ fails, tasks in the other AZ lose internet access (LLM providers, Stripe, OAuth). |
 | No NAT, public task IPs (staging) | ~$22 net | No availability loss. Tasks have public IPv4 addresses; security groups still accept inbound traffic only from the ALB. Egress IPs change per task, so no third party can allowlist them. |
-| Fargate Spot (staging) | ~$46 | AWS may stop a task with a 2-minute warning. A one-task service is down until Spot capacity returns. An interrupted worker job goes through orphan recovery. |
 
 Options that the lean variant does not use:
 
+- `spot = true` on staging saves about $46 per month. Staging used it until
+  2026-10-29, when Spot had no capacity for hours and one-task services stayed
+  down. AWS may also stop a Spot task with a 2-minute warning.
 - `spot = true` on the production worker saves about $14 per month. A Spot stop
   interrupts running optimization jobs; orphan recovery then retries or fails
   them, and the user waits. Not worth $14 for paid customer jobs.
@@ -158,9 +163,6 @@ definitions read single JSON keys by ARN (`<arn>:<KEY>::`).
 | `skynet/<env>/litellm-generated` | Terraform: `LITELLM_DATABASE_URL` (as `litellm`), `REDIS_PASSWORD`, `LITELLM_DB_PASSWORD` | litellm (the URL and Redis password); dbadmin (`LITELLM_DB_PASSWORD`) |
 | `skynet/<env>/db-admin` | Terraform: the RDS master `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | dbadmin |
 
-`restore-railway.sh` also reads `app-generated` and `litellm-generated` on your
-laptop to restore each dump as its owner role.
-
 The key names come from the Railway export (SKY-155). ECS does not start a task
 when a referenced key is missing. An empty string is allowed.
 
@@ -191,8 +193,8 @@ infra/terraform/scripts/build-push.sh staging <git-sha>
 The script runs `docker buildx build --platform linux/arm64 --push` for
 `backend` (`backend/`), `frontend` (`frontend/`) and `litellm` (`deploy/litellm/`). ECR tags are
 immutable; the script skips a tag that exists. Frontend build values
-(`NEXT_PUBLIC_SENTRY_DSN` and others) come from the shell. `SENTRY_AUTH_TOKEN`
-goes in as a BuildKit secret, not a build argument.
+(`NEXT_PUBLIC_SENTRY_DSN` and others) come from the shell. The frontend build
+does not generate or upload Sentry source maps.
 
 Manual equivalent for one image:
 
@@ -206,7 +208,7 @@ docker buildx build --platform linux/arm64 -t "$REG/skynet/backend:<sha>" --push
 
 Prerequisites: Terraform >= 1.11, AWS CLI v2, Docker with buildx, `jq`,
 the Session Manager plugin (`brew install --cask session-manager-plugin`) and
-`postgresql@18` for `pg_restore`.
+`postgresql@18` for `psql` through the DB tunnel.
 
 ```bash
 aws login --profile skynet
@@ -245,7 +247,7 @@ scripts/secrets.sh put staging litellm  ~/skynet-secrets/staging-litellm.json
 scripts/secrets.sh check staging
 scripts/create-db-roles.sh staging
 
-# 7. Restore the Railway data (see "Restore"). Then migrate.
+# 7. Migrate (creates the schema in the empty databases).
 scripts/deploy.sh staging "$SHA" --migrate-only
 
 # 8. Environment, pass 2: services on, HTTPS on (after ACM shows ISSUED).
@@ -264,7 +266,10 @@ For production, repeat steps 3 to 9 with `production` (step 8 edits
 `environments/production/terraform.tfvars`). Build the production
 frontend image separately: `scripts/build-push.sh production "$SHA"`.
 Optional: `alert_email = "<address>"` in `terraform.tfvars` subscribes an email
-to the alarms.
+to the alarms. The repository is public, so you can instead subscribe once
+outside Terraform, which later applies leave alone:
+`aws sns subscribe --topic-arn <alarm topic ARN> --protocol email --notification-endpoint <address>`.
+Click the confirmation link in the email from AWS; until then nothing is sent.
 
 ## Deploys after the first apply
 
@@ -286,8 +291,10 @@ change to a task definition (for example a new secret key) takes effect at the
 next `deploy.sh` run.
 
 `.github/workflows/aws-deploy.yml` does the same with the OIDC role of the
-chosen environment. It runs on `workflow_dispatch` only. See "GitHub roles" for
-the setup.
+chosen environment. A push to `staging` deploys staging. Production runs only
+from `workflow_dispatch`. The GitHub environment `aws-production` is protected
+(`main` branch only, Gilad's approval required) and has no variables yet. See
+"GitHub roles" for the setup.
 
 ## GitHub roles and CI
 
@@ -347,29 +354,13 @@ Risk to know: the plan role can read the state, and the state holds the
 generated database and cache passwords. Any same-repository PR branch can use
 the plan role. Only people with write access can push such a branch.
 
-## Restore the Railway backups
+## Restore
 
-The pg_dump files (custom format, from PostgreSQL 18.6) are in
-`~/Library/Application Support/Skynet Backups/railway-2026-10-21/`.
-The script expects `<env>-Postgres.dump` (app) and `<env>-Postgres-ZPeG.dump`
-(litellm). Restore into empty databases, before the first migration and before
-the services start.
-
-```bash
-brew install postgresql@18
-export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
-
-# Terminal 1: tunnel localhost:15432 to RDS through a dbadmin task.
-infra/terraform/scripts/db-tunnel.sh staging
-
-# Terminal 2:
-infra/terraform/scripts/restore-railway.sh staging
-```
-
-The script restores with `--no-owner --no-acl` as the owner role of each
-database (`skynet_app` for the app dump, `litellm` for the litellm dump), so
-the app's migrations can alter every object. It then runs a row count check. After the restore, run
-`deploy.sh <env> <sha> --migrate-only`; it applies only newer migrations.
+The October 2026 cutover restored the Railway pg_dump files into RDS once.
+Railway is deleted (SKY-185), so its restore script is gone (SKY-194). A new environment
+starts with empty databases, and `deploy.sh <env> <sha> --migrate-only` creates
+the schema. To recover data, restore an RDS automated backup (point-in-time
+restore) into a new instance.
 
 ## DNS cutover
 
@@ -397,7 +388,7 @@ not in the Price List API; the estimate assumes 70% off (AWS: "up to 70%").
 
 | Item | Staging lean | Staging full | Production lean | Production full |
 |------|--------------|--------------|-----------------|-----------------|
-| Fargate ARM64 tasks | ~$20 (4 Spot tasks) | ~$66 (4 tasks) | ~$67 (4 tasks, 1.75 vCPU) | ~$178 (8 tasks, 6 vCPU) |
+| Fargate ARM64 tasks | ~$66 (4 tasks) | ~$66 (4 tasks) | ~$67 (4 tasks, 1.75 vCPU) | ~$178 (8 tasks, 6 vCPU) |
 | RDS PostgreSQL, 20 GB gp3 | ~$26 (small, single-AZ) | ~$26 | ~$26 (small, single-AZ) | ~$99 (medium, Multi-AZ) |
 | ElastiCache Valkey | ~$9 (1 node) | ~$9 | ~$9 (1 node) | ~$19 (2 nodes) |
 | ALB (hours + LCU) | ~$20 | ~$20 | ~$25 | ~$25 |
@@ -405,9 +396,9 @@ not in the Price List API; the estimate assumes 70% off (AWS: "up to 70%").
 | Public IPv4 | ~$22 (2 ALB + 4 tasks) | ~$11 (3) | ~$11 (3) | ~$15 (4) |
 | CloudWatch (Container Insights about $40, logs, alarms, monitoring) | ~$45 | ~$45 | ~$50 | ~$50 |
 | Secrets Manager, S3, ECR storage | ~$5 | ~$5 | ~$5 | ~$5 |
-| **Total** | **~$147** | **~$215** | **~$226** | **~$456** |
+| **Total** | **~$193** | **~$215** | **~$226** | **~$456** |
 
-Lean total: about $373 per month, below the $460 spend limit. Full total:
+Lean total: about $419 per month, below the $460 spend limit. Full total:
 about $671 per month, above the $460 spend limit. Production full alone
 (about $456) uses almost all of it.
 
@@ -421,9 +412,8 @@ Not included: data transfer out, NAT data processing ($0.045 per GB), LLM provid
 costs, RDS CPU credits beyond the baseline, WAF (off by default; about $10 per
 month plus requests when on). Autoscaled tasks add about $20 (backend) or $9
 (frontend) per task-month, plus $3.65 per public IP in `public_ip` mode.
-If Spot is only 50% off, staging lean costs about $160. The 35-day production
-backups add a few dollars of backup storage beyond the free allowance (the
-database size). The ECR repos and the
+The 35-day production backups add a few dollars of backup storage beyond the
+free allowance (the database size). The ECR repos and the
 state bucket are shared and cost a few dollars per month. A Compute Savings
 Plan cuts on-demand Fargate by about 20% to 50%.
 

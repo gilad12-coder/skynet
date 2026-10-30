@@ -116,7 +116,7 @@ def test_parallel_first_budgets_of_a_new_account_share_one_wallet(
 ) -> None:
     """Fund every first budget of a new preview account when they race to create its wallet."""
     monkeypatch.setattr(settings, "preview_grant_cents", 1000)
-    monkeypatch.setattr(settings, "railway_environment_name", "skynet-pr-87")
+    monkeypatch.setattr(settings, "app_environment", "skynet-pr-87")
     service = BudgetService(engine=database)
     barrier = Barrier(8)
 

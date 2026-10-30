@@ -656,6 +656,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "base": repo_tree.BASE_REF,
             "editable_paths": list(repo["editable_paths"]),
             "readonly_paths": list(repo["readonly_paths"]),
+            "constrained": bool(repo.get("constrained")),
             "tools": str(Path(__file__).resolve().parent),
         }
     if payload["engine_id"] == "meta_harness" and payload.get("max_iterations") is not None:

@@ -1,10 +1,43 @@
 # Basic alarms. All go to one SNS topic per environment.
 
-# The AWS-managed SNS key is enough for alarm text and costs nothing.
-#trivy:ignore:AWS-0136
+# CloudWatch and RDS cannot publish to a topic under the AWS managed SNS key
+# (its policy cannot grant them the key), so the topic uses its own key.
+resource "aws_kms_key" "alarms" {
+  description             = "${local.name} alarm topic"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${local.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid    = "AlarmPublishers"
+        Effect = "Allow"
+        Principal = {
+          Service = ["cloudwatch.amazonaws.com", "events.rds.amazonaws.com"]
+        }
+        Action   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_kms_alias" "alarms" {
+  name          = "alias/${local.name}-alarms"
+  target_key_id = aws_kms_key.alarms.key_id
+}
+
 resource "aws_sns_topic" "alarms" {
   name              = "${local.name}-alarms"
-  kms_master_key_id = "alias/aws/sns"
+  kms_master_key_id = aws_kms_key.alarms.arn
 }
 
 resource "aws_sns_topic_subscription" "email" {
@@ -294,4 +327,82 @@ resource "aws_cloudwatch_metric_alarm" "log_errors" {
   comparison_operator = "GreaterThanThreshold"
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
+}
+
+# ---------------------------------------------------------------- backups
+# RDS sends no "backup failed" event, so the check is freshness: every
+# automated backup ends with RDS-EVENT-0002, and no such event for 30 hours
+# (backups run daily at 08:00 UTC) raises the alarm.
+resource "aws_db_event_subscription" "rds_failure" {
+  name             = "${local.name}-rds-failure"
+  sns_topic        = aws_sns_topic.alarms.arn
+  source_type      = "db-instance"
+  source_ids       = [aws_db_instance.this.identifier]
+  event_categories = ["failure"]
+}
+
+resource "aws_cloudwatch_event_rule" "rds_backup_done" {
+  name        = "${local.name}-rds-backup-done"
+  description = "Automated RDS backup finished."
+
+  event_pattern = jsonencode({
+    source        = ["aws.rds"]
+    "detail-type" = ["RDS DB Instance Event"]
+    detail = {
+      EventID          = ["RDS-EVENT-0002"]
+      SourceIdentifier = [aws_db_instance.this.identifier]
+    }
+  })
+}
+
+# The log keeps a record of each backup. The alarm reads the rule's own
+# MatchedEvents metric, so it does not depend on log delivery.
+resource "aws_cloudwatch_log_group" "rds_backups" {
+  name              = "/aws/events/${local.name}-rds-backups"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_resource_policy" "rds_backups" {
+  policy_name = "${local.name}-rds-backups"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = ["events.amazonaws.com", "delivery.logs.amazonaws.com"] }
+      Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource  = "${aws_cloudwatch_log_group.rds_backups.arn}:*"
+      Condition = {
+        ArnEquals = { "aws:SourceArn" = aws_cloudwatch_event_rule.rds_backup_done.arn }
+      }
+    }]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "rds_backup_done" {
+  rule = aws_cloudwatch_event_rule.rds_backup_done.name
+  arn  = aws_cloudwatch_log_group.rds_backups.arn
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_backup_missing" {
+  alarm_name          = "${local.name}-rds-backup-missing"
+  alarm_description   = "No automated RDS backup finished in 30 hours. Check RDS events and the automated backups of ${aws_db_instance.this.identifier}."
+  namespace           = "AWS/Events"
+  metric_name         = "MatchedEvents"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 30
+  datapoints_to_alarm = 30
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+  dimensions          = { RuleName = aws_cloudwatch_event_rule.rds_backup_done.name }
+
+  # A new rule has no data yet. Without a warm-up the alarm fires right after
+  # create; with it, evaluation starts at the first backup (or after 2 days).
+  warm_up_configuration {
+    warm_up_period_duration_in_minutes = 2880
+  }
 }

@@ -231,6 +231,75 @@ def test_materializing_a_bundle_yields_the_runs_patch(bundle: RepoBundle, tmp_pa
         bundle.materialize({"README.md": "x\n"})
 
 
+def _blocked_bundle(tmp_path: Path, constrained: bool) -> tuple[RepoBundle, list[str]]:
+    """Unpack the test repository with a recorder for path-rule blocks.
+
+    Args:
+        tmp_path: Scratch folder.
+        constrained: Whether a constraints file governs the run.
+
+    Returns:
+        The bundle rules and the list each block's reason goes to.
+    """
+    blocks: list[str] = []
+    repo = {
+        "chunks": _chunks(tmp_path, _FILES),
+        "editable_paths": ["src", "vendor"],
+        "readonly_paths": ["vendor"],
+        "constrained": constrained,
+    }
+    return RepoBundle.prepare(repo, "", tmp_path / "checkout", on_block=blocks.append), blocks
+
+
+@pytest.mark.parametrize(
+    ("path", "rule"), [("README.md", "outside the editable paths"), ("vendor/lib.py", "read-only")]
+)
+def test_a_constrained_path_block_gives_the_illegal_action_message_and_logs_the_reason(
+    tmp_path: Path, path: str, rule: str
+) -> None:
+    """Under a constraints file, a path-rule refusal reads the fixed message; the reason goes to the block log.
+
+    Args:
+        tmp_path: Scratch folder.
+        path: Path the model tries to change.
+        rule: Expected part of the logged reason.
+    """
+    bundle, blocks = _blocked_bundle(tmp_path, constrained=True)
+
+    files, applied, error = bundle.apply({}, f'<FILE path="{path}">x</FILE>')
+
+    assert (files, applied, error) == (None, 0, repo_tree.ILLEGAL_ACTION_MESSAGE)
+    assert len(blocks) == 1
+    assert path in blocks[0]
+    assert rule in blocks[0]
+    with pytest.raises(ValueError) as refused:
+        bundle.materialize({path: "x\n"})
+    assert str(refused.value) == repo_tree.ILLEGAL_ACTION_MESSAGE
+    assert len(blocks) == 2
+
+
+def test_a_constrained_bundle_keeps_other_refusals_as_they_were(tmp_path: Path) -> None:
+    """Refuse a binary file with its own message: only path rules are illegal actions."""
+    bundle, blocks = _blocked_bundle(tmp_path, constrained=True)
+
+    _, _, error = bundle.apply({}, '<FILE path="src/logo.png">x</FILE>')
+
+    assert "binary or larger" in str(error)
+    assert blocks == []
+
+
+def test_an_unconstrained_path_block_keeps_naming_the_path(tmp_path: Path) -> None:
+    """Without a constraints file, the refusal names the path and logs no block."""
+    bundle, blocks = _blocked_bundle(tmp_path, constrained=False)
+
+    _, _, error = bundle.apply({}, '<FILE path="README.md">x</FILE>')
+
+    assert error == "Cannot change 'README.md': it is outside the editable paths."
+    with pytest.raises(ValueError, match="outside the editable paths"):
+        bundle.materialize({"README.md": "x\n"})
+    assert blocks == []
+
+
 def test_a_seed_patch_becomes_the_starting_commit(tmp_path: Path) -> None:
     """Commit the seed version first, so bundles hold only changes beyond it and patches still include it."""
     chunks = _chunks(tmp_path, {"src/app.py": "A = 1\n"})

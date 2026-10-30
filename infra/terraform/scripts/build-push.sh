@@ -9,8 +9,7 @@
 #
 # Frontend build values come from the environment of this shell:
 #   NEXT_PUBLIC_SENTRY_DSN, NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
-#   NEXT_PUBLIC_FEATURE_GENERALIST_AGENT, SENTRY_ORG, SENTRY_PROJECT (optional)
-#   SENTRY_AUTH_TOKEN (optional; passed as a BuildKit secret, never an ARG)
+#   NEXT_PUBLIC_FEATURE_GENERALIST_AGENT (optional)
 
 source "$(dirname "$0")/lib.sh"
 need aws docker git jq
@@ -52,24 +51,13 @@ build() {
 build backend "$sha" "$repo_root/backend" --build-arg "GIT_SHA=$sha"
 build litellm "$sha" "$repo_root/deploy/litellm"
 
-secret_args=()
-if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-  secret_args=(--secret "id=sentry_auth_token,env=SENTRY_AUTH_TOKEN")
-fi
-
-# RAILWAY_* args keep the Dockerfile working before PR #788 (APP_*) lands.
 build frontend "$sha-$env" "$repo_root/frontend" \
   --build-arg "NEXT_PUBLIC_SITE_URL=$site_url" \
   --build-arg "NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}" \
   --build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=$env" \
   --build-arg "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}" \
   --build-arg "NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=${NEXT_PUBLIC_FEATURE_GENERALIST_AGENT:-}" \
-  --build-arg "SENTRY_ORG=${SENTRY_ORG:-}" \
-  --build-arg "SENTRY_PROJECT=${SENTRY_PROJECT:-}" \
   --build-arg "APP_GIT_SHA=$sha" \
-  --build-arg "APP_ENVIRONMENT=$env" \
-  --build-arg "RAILWAY_GIT_COMMIT_SHA=$sha" \
-  --build-arg "RAILWAY_ENVIRONMENT_NAME=$env" \
-  ${secret_args[@]+"${secret_args[@]}"}
+  --build-arg "APP_ENVIRONMENT=$env"
 
 echo "pushed: backend:$sha litellm:$sha frontend:$sha-$env"

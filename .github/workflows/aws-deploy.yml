@@ -1,6 +1,7 @@
 # Builds the arm64 images and deploys one commit to AWS ECS (SKY-156; it also
 # covers the deploy part of SKY-162).
-# Manual only (workflow_dispatch) until the AWS stack is live and approved.
+# A push to staging deploys that commit to staging. A push never deploys
+# production; production runs only from workflow_dispatch.
 # Needs the global stack applied first (it creates the OIDC provider and the
 # roles).
 # Auth: GitHub OIDC -> one role per environment (infra/terraform/global). No
@@ -12,12 +13,13 @@
 #
 # Configuration (Settings > Environments > aws-<env> > variables and secrets):
 #   vars.AWS_DEPLOY_ROLE_ARN                     github_deploy_role_arns[<env>]
-#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
-#   vars.SENTRY_ORG, vars.SENTRY_PROJECT         (optional)
-#   secrets.SENTRY_AUTH_TOKEN                    (optional)
+#   vars.NEXT_PUBLIC_SENTRY_DSN, vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+#                                                (optional)
 name: aws deploy
 
 on:
+  push:
+    branches: [staging]
   workflow_dispatch:
     inputs:
       environment:
@@ -26,8 +28,10 @@ on:
         options: [staging, production]
         default: staging
 
+# On push, inputs is empty, so the target is staging. A newer push waits for
+# the running deploy and replaces any older push that still waits.
 concurrency:
-  group: aws-deploy-${{ inputs.environment }}
+  group: aws-deploy-${{ inputs.environment || 'staging' }}
   cancel-in-progress: false
 
 permissions:
@@ -39,9 +43,10 @@ jobs:
     # Native arm64 runner: the images run on Graviton Fargate tasks.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
-    environment: aws-${{ inputs.environment }}
+    environment: aws-${{ inputs.environment || 'staging' }}
     env:
       AWS_REGION: us-east-2
+      DEPLOY_ENV: ${{ inputs.environment || 'staging' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,10 +61,14 @@ jobs:
         env:
           NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
           NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: infra/terraform/scripts/build-push.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+        run: infra/terraform/scripts/build-push.sh "$DEPLOY_ENV" "$GITHUB_SHA"
+
+      # The deploy role allows one-hour sessions. A cold build can use most of
+      # that hour, so get fresh credentials before the migration and the wait.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
 
       - name: Migrate and deploy
-        run: infra/terraform/scripts/deploy.sh "${{ inputs.environment }}" "$GITHUB_SHA"
+        run: infra/terraform/scripts/deploy.sh "$DEPLOY_ENV" "$GITHUB_SHA"
