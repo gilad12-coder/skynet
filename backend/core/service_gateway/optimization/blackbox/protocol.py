@@ -109,7 +109,7 @@ class Result:
 
 @dataclass
 class CandidateRecord:
-    """One distinct version an eval server scored: its running mean and latest side info."""
+    """One distinct version an eval server scored: its running mean, latest side info and crash flag."""
 
     candidate: Candidate
     total: float
@@ -118,6 +118,9 @@ class CandidateRecord:
     # versions can be laid out in the order they appeared.
     first_eval: int
     side_info: SideInfo
+    # Kept apart from ``side_info``, which holds only the latest case, so a
+    # crash on an earlier case still marks the version.
+    crashed: bool = False
 
     @property
     def mean_score(self) -> float:
@@ -350,12 +353,14 @@ class EvalServer:
         """
         key = candidate_key(candidate)
         record = self._records.get(key)
+        crashed = "error" in side_info
         if record is None:
-            self._records[key] = CandidateRecord(candidate, score, 1, self._root.used, side_info)
+            self._records[key] = CandidateRecord(candidate, score, 1, self._root.used, side_info, crashed)
             return
         record.total += score
         record.count += 1
         record.side_info = side_info
+        record.crashed = record.crashed or crashed
 
     @property
     def history(self) -> list[CandidateRecord]:

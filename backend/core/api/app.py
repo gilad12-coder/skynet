@@ -1038,7 +1038,7 @@ def create_app(
             A :class:`JSONResponse` with media type ``application/problem+json``.
         """
         body: dict[str, Any] = {
-            "type": f"https://errors.skynet.app/{code}" if code else "about:blank",
+            "type": f"https://api.skynetml.com/errors/{code}" if code else "about:blank",
             "title": title
             or (
                 code.replace("_", " ").replace(".", " ").capitalize()
@@ -1242,7 +1242,7 @@ def create_app(
             status=HEALTH_STATUS_OK,
             registered_assets=snapshot,
             vector_search_enabled=getattr(job_store, "vector_search_enabled", None),
-            commit=os.getenv("RAILWAY_GIT_COMMIT_SHA") or None,
+            commit=settings.app_git_sha or None,
         )
 
     app.add_middleware(CacheControlMiddleware)

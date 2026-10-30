@@ -925,9 +925,7 @@ class TelemetryEventModel(Base):
 
     One row per captured interaction (a page view, a labelled click, a named
     flow event). The browser SDK batches events to ``POST /telemetry/events``
-    and they land here, queryable beside the rest of the product data. An
-    operator may additionally export accepted events to PostHog with a one-way
-    account hash and without creating a person profile.
+    and they land here, queryable beside the rest of the product data.
 
     Identity is split deliberately. ``username`` is the *server-trusted* caller
     derived from the request's auth token (never from the request body), so it

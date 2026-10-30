@@ -94,6 +94,7 @@
     "admin.quota_save_failed": "לא ניתן לשמור את מגבלת המשתמש.",
     "admin.user_not_found": "לא נמצא חשבון עבור '{email}'.",
     "analytics.other_bucket": "אחר",
+    "auth.account_not_found": "החשבון הזה כבר לא קיים. התחבר/י שוב.",
     "auth.invalid_token": "תוקף ההתחברות פג או שהאסימון לא תקין.",
     "auth.missing_token": "התחבר/י כדי לבצע את הפעולה הזו.",
     "auth.not_configured": "אימות מול השרת עדיין לא הוגדר.",

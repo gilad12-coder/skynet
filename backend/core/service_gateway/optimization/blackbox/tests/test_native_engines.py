@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -576,6 +577,119 @@ def test_meta_harness_proposes_repository_patches(tmp_path: Path, fake_home: Pat
     output = tmp_path / "out"
     engine.process_result(result, output)
     assert (output / "meta_harness" / "best_candidate.patch").read_text() == result.best_candidate
+
+
+def _rule_blocks(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    """Return the fields of every ``rule.block`` run event the engine logged.
+
+    Args:
+        caplog: Captured log records.
+
+    Returns:
+        Each block's ``rule`` and ``reason``.
+    """
+    events = [getattr(record, native_engines.RUN_LOG_ATTR, None) for record in caplog.records]
+    return [event["fields"] for event in events if event and event["event"] == repo_tree.RULE_BLOCK_EVENT]
+
+
+def test_autoresearch_blocks_a_constrained_path_edit_with_the_illegal_action_message(
+    tmp_path: Path, fake_home: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Under a constraints file, eval.sh gives the fixed message, logs the block and spends no budget."""
+    caplog.set_level(logging.INFO, logger=native_engines.run_log.name)
+    task = Task(name="repo", seed_candidate="", objective="make it better")
+    seen: list[str] = []
+
+    def evaluate(candidate: str, example: dict[str, Any] | None = None) -> tuple[float, dict[str, Any]]:
+        """Score a patch that adds the word ``better`` highly."""
+        seen.append(candidate)
+        return (1.0 if "+better" in candidate else 0.5), {"feedback": "ok"}
+
+    single = EvalServer(task, evaluate, BudgetTracker(max_evals=5))
+    single.start()
+    try:
+        _install_fake(
+            fake_home,
+            "def run(*argv):\n"
+            "    return subprocess.run(list(argv), capture_output=True, text=True)\n"
+            "if count == 1:\n"
+            "    assert run('./eval.sh').returncode == 0\n"
+            "    pathlib.Path('repo/README.md').write_text('changed\\n')\n"
+            "    refused = run('./eval.sh')\n"
+            f"    assert refused.returncode != 0 and {repo_tree.ILLEGAL_ACTION_MESSAGE!r} in refused.stdout, refused\n"
+            "    assert 'README.md' not in refused.stdout + refused.stderr, refused\n"
+            "    assert run('./checkout.sh', 'base').returncode == 0\n"
+            "    pathlib.Path('repo/src/app.py').write_text('better\\n')\n"
+            "    assert run('./eval.sh').returncode == 0\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        config = _config(
+            "autoresearch",
+            ralph=False,
+            repo={
+                "checkout": str(checkout),
+                "base": repo_tree.BASE_REF,
+                "editable_paths": ["src"],
+                "readonly_paths": [],
+                "constrained": True,
+                "tools": str(Path(repo_tree.__file__).parent),
+            },
+        )
+        config.run_dir = str(tmp_path / "run")
+        result = native_engines.AutoResearchEngine(config).run(task, single)
+    finally:
+        single.stop()
+    assert len(seen) == 2
+    assert all("README.md" not in patch for patch in seen)
+    assert result.best_score == 1.0
+    blocks = _rule_blocks(caplog)
+    assert len(blocks) == 1
+    assert blocks[0]["rule"] == repo_tree.PATH_RULE
+    assert "README.md" in blocks[0]["reason"]
+
+
+def test_meta_harness_blocks_a_constrained_path_edit_with_the_illegal_action_message(
+    tmp_path: Path, fake_home: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Under a constraints file, save.sh and the candidate check give the fixed message and log each block."""
+    caplog.set_level(logging.INFO, logger=native_engines.run_log.name)
+    seen: list[str] = []
+    server = _repo_task_server(seen, max_evals=10)
+    readme_patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-hi\n+x\n"
+    try:
+        _install_fake(
+            fake_home,
+            "def run(*argv):\n"
+            "    return subprocess.run(list(argv), capture_output=True, text=True)\n"
+            "pathlib.Path('repo/README.md').write_text('changed\\n')\n"
+            "refused = run('./save.sh', 'outside')\n"
+            f"assert refused.returncode != 0 and {repo_tree.ILLEGAL_ACTION_MESSAGE!r} in refused.stderr, refused\n"
+            "assert 'README.md' not in refused.stdout + refused.stderr, refused\n"
+            "assert not pathlib.Path('agents/outside.patch').exists()\n"
+            "assert run('./checkout.sh', 'base').returncode == 0\n"
+            "pathlib.Path('repo/src/app.py').write_text('better\\n')\n"
+            "assert run('./save.sh', 'better').returncode == 0\n"
+            f"pathlib.Path('agents/manual.patch').write_text({readme_patch!r})\n"
+            "pathlib.Path('logs/run/pending_eval.json').write_text(json.dumps({'candidates': ["
+            "{'name': 'better', 'file': 'agents/better.patch'},"
+            "{'name': 'manual', 'file': 'agents/manual.patch'}]}))\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        config = _repo_config(tmp_path, checkout, max_iterations=1, max_candidates_per_iter=2)
+        config.engine_config["repo"]["constrained"] = True
+        config.engine = "meta_harness"
+        engine = native_engines.MetaHarnessEngine(config)
+        result = engine.run(server.task, server)
+    finally:
+        server.stop()
+    assert all("README.md" not in patch for patch in seen)
+    assert result.best_score == 1.0
+    rows = [json.loads(line) for line in (engine.logs_dir / "evolution_summary.jsonl").read_text().splitlines()]
+    assert rows[1]["system"] == "manual"
+    assert rows[1]["outcome"] == f"failed: {repo_tree.ILLEGAL_ACTION_MESSAGE}"
+    blocks = _rule_blocks(caplog)
+    assert len(blocks) == 2
+    assert all(block["rule"] == repo_tree.PATH_RULE and "README.md" in block["reason"] for block in blocks)
 
 
 def test_agent_proposer_keeps_the_parent_when_its_diff_is_too_large(

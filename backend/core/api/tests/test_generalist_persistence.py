@@ -36,6 +36,7 @@ from ...storage.models import (
     AgentMessageModel,
     Base,
     BillingCustomerModel,
+    UserModel,
 )
 from .. import auth as auth_mod
 from .. import model_catalog
@@ -122,6 +123,10 @@ def persistence_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Eng
     """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        for email in ("alice@example.com", "mallory@example.com"):
+            session.add(UserModel(email=email, name=email, password_hash="x"))
+        session.commit()
     monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr(_SECRET))
     monkeypatch.setattr(agent_mod, "run_generalist_agent", _fake_stream)
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
