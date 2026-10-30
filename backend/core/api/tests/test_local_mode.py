@@ -282,13 +282,15 @@ def test_host_cli_proposer_is_refused_outside_local_mode(monkeypatch: pytest.Mon
     assert store.created_ids() == []
 
 
-def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("field", ["execution_runtime", "proposer_runtime"])
+def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch, field: str) -> None:
     """A hosted deployment runs only Vercel sandboxes, so a Docker run gets 422.
 
     Args:
         monkeypatch: Pytest fixture used to switch local mode.
+        field: The runtime field that names Docker.
     """
-    payload = SimpleNamespace(execution_runtime="docker")
+    payload = SimpleNamespace(**{field: "docker"})
     monkeypatch.setattr(settings, "local_mode", False)
 
     with pytest.raises(DomainError) as refused:
@@ -412,6 +414,7 @@ _VALID_SCORER = {"kind": "python", "metric_code": "def score(p):\n    return 1\n
         {"proposer": {"host_cli": "codex"}},
         {"task_model_config": {"name": "anthropic/claude-sonnet-4.6", "token_source": "subscription"}},
         {"execution_runtime": "docker"},
+        {"proposer_runtime": "docker"},
     ],
 )
 def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
@@ -443,7 +446,8 @@ def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyP
         )
 
     assert response.status_code == 422
-    code = "local.not_available" if "execution_runtime" in payload else "models.subscription_local_only"
+    runtime_fields = {"execution_runtime", "proposer_runtime"}
+    code = "local.not_available" if runtime_fields & payload.keys() else "models.subscription_local_only"
     assert response.json()["detail"] == DomainError(code).detail
 
 
