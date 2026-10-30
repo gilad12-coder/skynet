@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 import test from "node:test";
+
+const srcUrl = new URL("../../../", import.meta.url).href;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith("@/")) {
+      return { shortCircuit: true, url: new URL(`${specifier.slice(2)}.ts`, srcUrl).href };
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 const {
   CLI_PROVIDERS,
