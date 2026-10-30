@@ -1,0 +1,40 @@
+export {
+  useLocalStatus,
+  loadLocalStatus,
+  peekLocalStatus,
+  localAgentModel,
+  localModelRefusalMessage,
+  useLocalAgentMenuModels,
+} from "./hooks/use-local-status";
+export {
+  byokHintKey,
+  runEstimateLabelKey,
+  usageChargedKey,
+  usageCostNoteKey,
+  CLI_PROVIDERS,
+  cliState,
+  defaultAgentCli,
+  findCli,
+  firstReadyCli,
+  hostCliPatch,
+  isCliProvider,
+  isLocalModelRefusal,
+  parseSubscriptionModelId,
+  subscriptionAgentModel,
+  subscriptionCatalogModels,
+  subscriptionMenuModels,
+  subscriptionModelConfig,
+  subscriptionModelId,
+  withChosenCli,
+  withSupportedHostCli,
+  type CliState,
+  type CliStatus,
+  type LocalStatus,
+} from "./lib/subscription-model";
+export {
+  SubscriptionSourcePicker,
+  cliLabel,
+  hostCliChoices,
+  hostCliValue,
+} from "./components/SubscriptionSourcePicker";
+export { HostAgentPermissionField } from "./components/HostAgentPermissionField";

@@ -25,6 +25,8 @@ import { ACTIVE_STATUSES } from "@/shared/constants/job-status";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { getRunUsage } from "@/shared/lib/api";
 import { formatBudgetUsd, formatCentsUsd } from "@/features/billing";
+import { usageChargedKey, usageCostNoteKey } from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { cn } from "@/shared/lib/utils";
 import { budgetPaceLine } from "../lib/budget-pace";
@@ -155,11 +157,15 @@ function Summary({
   usage,
   running,
   splitCost,
+  apiRatesNote,
+  apiRateEquivalent,
 }: {
   job: OptimizationStatusResponse;
   usage: RunUsage;
   running: boolean;
   splitCost: boolean;
+  apiRatesNote: boolean;
+  apiRateEquivalent: boolean;
 }) {
   const locale = getActiveIntlLocale();
   const budget = job.execution_budget ?? job.terminal_evidence?.execution_budget;
@@ -180,9 +186,16 @@ function Summary({
   items.push([spentLabel, formatCentsUsd(total.chargedCents, locale)]);
   if (splitCost && total.providerCents != null) {
     items.push([
-      msg("usage_tab.provider"),
+      `${msg("usage_tab.provider")}${apiRatesNote ? "*" : ""}`,
       formatCentsUsd(total.providerCents, locale),
       tip("usage_tab.provider"),
+    ]);
+  }
+  if (apiRateEquivalent && total.apiRateCents != null) {
+    items.push([
+      `${msg("usage_tab.api_rate")}*`,
+      formatCentsUsd(total.apiRateCents, locale),
+      tip("usage_tab.api_rate"),
     ]);
   }
   if (budget) {
@@ -284,6 +297,8 @@ interface UsageShape {
   notModelAt: number;
   /** The run had an execution budget, which adds a summary tile. */
   budgeted?: boolean;
+  /** A settled subscription run showed its API-rate column and summary tile. */
+  apiRate?: boolean;
 }
 
 const usageLayoutKey = (id: string, pairIndex: number | null) =>
@@ -302,13 +317,15 @@ const COLD_USAGE_SHAPE: UsageShape = {
  * flight, built from the same table primitives (and the grouping control
  * itself, ghosted) so every row folds and wraps like the loaded one.
  */
-function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: UsageShape }) {
+export function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: UsageShape }) {
   const s = shape ?? COLD_USAGE_SHAPE;
   const bone = <Skeleton width={40} height={12} inline />;
   return (
     <div className="space-y-4" aria-hidden="true">
       <div className={SUMMARY_GRID_CLASS}>
-        {Array.from({ length: budgeted ? 6 : 3 }).map((_, i) => (
+        {Array.from({
+          length: (budgeted ? 6 : 3) + (s.splitCost ? 1 : 0) + (s.apiRate ? 1 : 0),
+        }).map((_, i) => (
           <div key={i} className="min-w-0 space-y-1">
             <div className="flex h-4 items-center">
               <Skeleton width="60%" height={10} containerClassName="block w-full" />
@@ -332,6 +349,11 @@ function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: Usag
                 </TableHead>
                 <TableHead className="text-end">{bone}</TableHead>
                 {s.splitCost && (
+                  <TableHead className="text-end" collapse="sm">
+                    {bone}
+                  </TableHead>
+                )}
+                {s.apiRate && (
                   <TableHead className="text-end" collapse="sm">
                     {bone}
                   </TableHead>
@@ -384,6 +406,11 @@ function UsageTabSkeleton({ budgeted, shape }: { budgeted: boolean; shape?: Usag
                     </TableCell>
                     <TableCell className="text-end">{bone}</TableCell>
                     {s.splitCost && (
+                      <TableCell className="text-end" collapse="sm">
+                        {bone}
+                      </TableCell>
+                    )}
+                    {s.apiRate && (
                       <TableCell className="text-end" collapse="sm">
                         {bone}
                       </TableCell>
@@ -443,6 +470,15 @@ export function UsageTab({
   const layoutKey = usageLayoutKey(job.optimization_id, pairIndex);
   const shapeHint = useLayoutHint<UsageShape>(layoutKey);
   const offeredKey = offered.join(",");
+  const costNoteKey =
+    usage && groups.length > 0
+      ? usageCostNoteKey(isLocalMode(), rows, {
+          final: !running && !usage.settling,
+          pairIndex,
+        })
+      : null;
+  // Display only: a settled subscription run's tokens priced at API rates, never billed.
+  const showApiRate = costNoteKey === "usage_tab.subscription_api_rates_note_local";
   useEffect(() => {
     if (!usage) return;
     rememberLayout(layoutKey, {
@@ -452,6 +488,7 @@ export function UsageTab({
       splitCost,
       notModelAt: -1,
       budgeted,
+      apiRate: showApiRate,
     } satisfies UsageShape);
   }, [
     usage,
@@ -462,6 +499,7 @@ export function UsageTab({
     splitCost,
     firstNonModel,
     budgeted,
+    showApiRate,
   ]);
 
   if (!usage) {
@@ -480,16 +518,28 @@ export function UsageTab({
     );
   const provider = (g: UsageGroup) =>
     g.providerCents == null ? empty : formatCentsUsd(g.providerCents, locale);
+  const apiRate = (g: UsageGroup) =>
+    g.apiRateCents == null ? empty : formatCentsUsd(g.apiRateCents, locale);
   const empty = <span className="text-muted-foreground/50">{msg("common.empty")}</span>;
   const activity = (g: UsageGroup, value: string) => (g.nonModel ? empty : value);
-  const costLabel = splitCost ? msg("usage_tab.charged") : msg("usage_tab.col.cost");
+  const costKey = splitCost ? usageChargedKey(isLocalMode()) : "usage_tab.col.cost";
 
   return (
     <FadeIn>
       <div className="space-y-4">
         {running && <BudgetPace job={job} spentCents={total.chargedCents} />}
-        <Summary job={job} usage={usage} running={running} splitCost={splitCost} />
-        <div className="flex justify-end">
+        <Summary
+          job={job}
+          usage={usage}
+          running={running}
+          splitCost={splitCost}
+          apiRatesNote={costNoteKey === "usage_tab.api_rates_note_local"}
+          apiRateEquivalent={showApiRate}
+        />
+        <div
+          className={cn("flex items-center gap-3", costNoteKey ? "justify-between" : "justify-end")}
+        >
+          {costNoteKey && <p className="text-xs text-muted-foreground">{msg(costNoteKey)}</p>}
           <ExportTableMenu
             iconOnly
             disabled={groups.length === 0}
@@ -499,6 +549,7 @@ export function UsageTab({
                 "name",
                 "charged_usd",
                 ...(splitCost ? ["provider_usd_estimate"] : []),
+                ...(showApiRate ? ["api_rate_usd_estimate"] : []),
                 "calls",
                 "input_tokens",
                 "output_tokens",
@@ -508,6 +559,7 @@ export function UsageTab({
                 name: groupLabel(g, activeGrouping),
                 charged_usd: g.chargedCents / 100,
                 provider_usd_estimate: g.providerCents == null ? "" : g.providerCents / 100,
+                api_rate_usd_estimate: g.apiRateCents == null ? "" : g.apiRateCents / 100,
                 calls: g.calls,
                 input_tokens: g.inputTokens,
                 output_tokens: g.outputTokens,
@@ -533,14 +585,20 @@ export function UsageTab({
                       {msg(GROUPING_LABEL_KEYS[activeGrouping])}
                     </TableHead>
                     <TableHead className="text-end">
-                      <HelpTip text={tip(splitCost ? "usage_tab.charged" : "usage_tab.col.cost")}>
-                        {costLabel}
-                      </HelpTip>
+                      <HelpTip text={tip(costKey)}>{msg(costKey)}</HelpTip>
                     </TableHead>
                     {splitCost && (
                       <TableHead className="text-end" collapse="sm">
                         <HelpTip text={tip("usage_tab.provider")}>
                           {msg("usage_tab.provider")}
+                          {costNoteKey === "usage_tab.api_rates_note_local" && "*"}
+                        </HelpTip>
+                      </TableHead>
+                    )}
+                    {showApiRate && (
+                      <TableHead className="text-end" collapse="sm">
+                        <HelpTip text={tip("usage_tab.api_rate")}>
+                          {msg("usage_tab.api_rate")}*
                         </HelpTip>
                       </TableHead>
                     )}
@@ -582,6 +640,11 @@ export function UsageTab({
                             {provider(g)}
                           </TableCell>
                         )}
+                        {showApiRate && (
+                          <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
+                            {apiRate(g)}
+                          </TableCell>
+                        )}
                         <TableCell className="text-end tabular-nums">
                           {activity(g, formatCount(g.calls))}
                         </TableCell>
@@ -612,6 +675,11 @@ export function UsageTab({
                     {splitCost && (
                       <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
                         {provider(total)}
+                      </TableCell>
+                    )}
+                    {showApiRate && (
+                      <TableCell className="text-end tabular-nums" dir="ltr" collapse="sm">
+                        {apiRate(total)}
                       </TableCell>
                     )}
                     <TableCell className="text-end tabular-nums">

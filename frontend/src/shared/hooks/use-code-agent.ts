@@ -240,6 +240,8 @@ export interface UseCodeAgentArgs {
   // menu). Absent/`null` routes automatically. The agent panel forwards the
   // conversation's chosen model so code authoring follows the composer.
   model?: string | null;
+  /** Maps `model` to the id a request sends, at send time (local CLI roles). */
+  resolveModel?: (model: string | null) => Promise<string | null>;
   reasoningEffort?: string | null;
   /** The chat a reload brings back; read once, on mount. */
   initialMessages?: AgentMessage[];
@@ -274,6 +276,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     seedEnabled = true,
     interviewBrief,
     model,
+    resolveModel,
     reasoningEffort,
     unified = null,
     onBrief,
@@ -679,500 +682,502 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       let metricLaneDone = false;
       let runLaneDone = false;
 
-      void streamCodeAgent(
-        {
-          dataset_columns: parsedDataset?.columns ?? [],
-          column_roles: columnRoles,
-          column_kinds: imageColumnKinds,
-          sample_rows: sampleRows,
-          user_message: userMessage,
-          chat_history: chatHistory,
-          prior_signature: snapshot.signatureCode,
-          prior_metric: snapshot.metricCode,
-          prior_signature_validation: summarizeValidation(snapshot.signatureValidation),
-          prior_metric_validation: summarizeValidation(snapshot.metricValidation),
-          initial_signature: initialSignature,
-          initial_metric: initialMetric,
-          locale: getActiveLocale(),
-          ...(interviewBrief && interviewBrief.length > 0
-            ? { interview_brief: interviewBrief }
-            : {}),
-          ...(isWorkflow
-            ? {
-                prior_workflow: priorWorkflow,
-                initial_workflow: initialWorkflowRef.current ?? priorWorkflow,
+      void (resolveModel ? resolveModel(model ?? null) : Promise.resolve(model)).then((sentModel) =>
+        streamCodeAgent(
+          {
+            dataset_columns: parsedDataset?.columns ?? [],
+            column_roles: columnRoles,
+            column_kinds: imageColumnKinds,
+            sample_rows: sampleRows,
+            user_message: userMessage,
+            chat_history: chatHistory,
+            prior_signature: snapshot.signatureCode,
+            prior_metric: snapshot.metricCode,
+            prior_signature_validation: summarizeValidation(snapshot.signatureValidation),
+            prior_metric_validation: summarizeValidation(snapshot.metricValidation),
+            initial_signature: initialSignature,
+            initial_metric: initialMetric,
+            locale: getActiveLocale(),
+            ...(interviewBrief && interviewBrief.length > 0
+              ? { interview_brief: interviewBrief }
+              : {}),
+            ...(isWorkflow
+              ? {
+                  prior_workflow: priorWorkflow,
+                  initial_workflow: initialWorkflowRef.current ?? priorWorkflow,
+                }
+              : {}),
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...(unified ? { unified } : {}),
+            ...(unified && Object.keys(latestFiles).length > 0 ? { prior_files: latestFiles } : {}),
+            ...(steerKey ? { steer_key: steerKey } : {}),
+          },
+          {
+            signal: controller.signal,
+            onSteerApplied: ({ ids, text }) => {
+              if (controller.signal.aborted) return;
+              steerStore.applied(ids);
+              if (!text.trim()) return;
+              replyBeforeSteer = replyBufRef.current;
+              // The reply so far stays as its own bubble; the rest of the turn
+              // streams into a new one after the user's message.
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                const kept =
+                  last && last.role === "assistant" && !last.content && !last.toolCalls?.length
+                    ? prev.slice(0, -1)
+                    : prev;
+                return [
+                  ...kept,
+                  { role: "user", content: text },
+                  { role: "assistant", content: "", toolCalls: [] },
+                ];
+              });
+            },
+            onReasoningPatch: (chunk, source) => {
+              if (reasoningBufRef.current === "") {
+                setReasoningStartedAt(Date.now());
               }
-            : {}),
-          ...(model ? { model } : {}),
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-          ...(unified ? { unified } : {}),
-          ...(unified && Object.keys(latestFiles).length > 0 ? { prior_files: latestFiles } : {}),
-          ...(steerKey ? { steer_key: steerKey } : {}),
-        },
-        {
-          signal: controller.signal,
-          onSteerApplied: ({ ids, text }) => {
-            if (controller.signal.aborted) return;
-            steerStore.applied(ids);
-            if (!text.trim()) return;
-            replyBeforeSteer = replyBufRef.current;
-            // The reply so far stays as its own bubble; the rest of the turn
-            // streams into a new one after the user's message.
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              const kept =
-                last && last.role === "assistant" && !last.content && !last.toolCalls?.length
-                  ? prev.slice(0, -1)
-                  : prev;
-              return [
-                ...kept,
-                { role: "user", content: text },
-                { role: "assistant", content: "", toolCalls: [] },
-              ];
-            });
-          },
-          onReasoningPatch: (chunk, source) => {
-            if (reasoningBufRef.current === "") {
-              setReasoningStartedAt(Date.now());
-            }
-            const sections = reasoningSectionsRef.current;
-            if (!(source in sections.bufs)) {
-              sections.order.push(source);
-              sections.bufs[source] = "";
-              reasoningLanesRef.current.add(source);
-              if (reasoningEndedRef.current) {
-                reasoningEndedRef.current = false;
-                setReasoningEndedAt(null);
+              const sections = reasoningSectionsRef.current;
+              if (!(source in sections.bufs)) {
+                sections.order.push(source);
+                sections.bufs[source] = "";
+                reasoningLanesRef.current.add(source);
+                if (reasoningEndedRef.current) {
+                  reasoningEndedRef.current = false;
+                  setReasoningEndedAt(null);
+                }
+                if (source === "metric") {
+                  setMetricStatus((prev) => (prev === "waiting" ? "writing" : prev));
+                } else if (source === "signature") {
+                  setSignatureStatus((prev) => (prev === "waiting" ? "writing" : prev));
+                }
               }
-              if (source === "metric") {
-                setMetricStatus((prev) => (prev === "waiting" ? "writing" : prev));
-              } else if (source === "signature") {
-                setSignatureStatus((prev) => (prev === "waiting" ? "writing" : prev));
+              sections.bufs[source] += chunk;
+              reasoningBufRef.current = composeReasoning(sections, reasoningLanesRef.current);
+              setReasoning(reasoningBufRef.current);
+            },
+            onSignaturePatch: (chunk) => {
+              if (sigBufRef.current === "") {
+                setStatusLabel(
+                  unified
+                    ? unifiedMsg("submit.v2.metric.agent.writing_run")
+                    : msg("auto.features.submit.hooks.use.code.agent.literal.2"),
+                );
+                setSignatureStatus("writing");
+                markReasoningDone("signature");
               }
-            }
-            sections.bufs[source] += chunk;
-            reasoningBufRef.current = composeReasoning(sections, reasoningLanesRef.current);
-            setReasoning(reasoningBufRef.current);
-          },
-          onSignaturePatch: (chunk) => {
-            if (sigBufRef.current === "") {
-              setStatusLabel(
-                unified
-                  ? unifiedMsg("submit.v2.metric.agent.writing_run")
-                  : msg("auto.features.submit.hooks.use.code.agent.literal.2"),
-              );
-              setSignatureStatus("writing");
-              markReasoningDone("signature");
-            }
-            markFlowing("signature", true);
-            sigBufRef.current += chunk;
-            latestSignature = sigBufRef.current;
-            setSignatureCode(sigBufRef.current);
-            setSignatureValidation(null);
-          },
-          onMetricPatch: (chunk) => {
-            if (metricBufRef.current === "") {
-              setStatusLabel(
-                unified
-                  ? unifiedMsg("submit.v2.metric.agent.writing_metric")
-                  : msg("auto.features.submit.hooks.use.code.agent.literal.3"),
-              );
-              // The unified seed's run code finishes on its own `artifact_done`.
-              if (!unified) setSignatureStatus("done");
-              setMetricStatus("writing");
-              markReasoningDone("metric");
-            }
-            markFlowing("metric", true);
-            metricBufRef.current += chunk;
-            latestMetric = metricBufRef.current;
-            setMetricCode(metricBufRef.current);
-            setMetricValidation(null);
-          },
-          onArtifactDone: (source) => {
-            if (controller.signal.aborted) return;
-            markReasoningDone(source);
-            if (source === "signature" || source === "metric") markFlowing(source, false);
-            // The seed's turn only ends after the intro message is written,
-            // seconds later; landing the lane's code now keeps its "Edited"
-            // row in the transcript instead of a gap until then.
-            if (source === "signature") {
-              runLaneDone = true;
-              pushSignatureVersion(latestSignature);
-              setSignatureStatus("done");
-              if (!metricLaneDone) {
-                setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
-              }
-            } else if (source === "metric") {
-              metricLaneDone = true;
-              pushMetricVersion(latestMetric);
-              setMetricStatus("done");
-              if (!runLaneDone) {
-                setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_run"));
-              }
-            }
-          },
-          onMessagePatch: (chunk) => {
-            if (replyBufRef.current === "") {
-              setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.4"));
-              markReasoningDone();
-            }
-            replyBufRef.current += chunk;
-            appendReply(chunk);
-          },
-          onAsk: (ask) => {
-            if (controller.signal.aborted) return;
-            setQuestion(ask.options.length > 0 ? ask : null);
-          },
-          onBrief: (fields) => {
-            if (controller.signal.aborted) return;
-            onBriefRef.current?.(fields);
-          },
-          onToolStart: (ev) => {
-            markReasoningDone();
-            if (ev.tool !== "open_file") setStatusLabel(
-              ev.tool === "verify_code"
-                ? msg("agent.coding_tool.check.checking")
-                : ev.tool === "write_file" || ev.tool === "delete_file"
-                  ? formatMsg("agent.coding_tool.editing", { file: ev.path ?? "" })
-                  : ev.tool === "set_brief"
-                ? unifiedMsg("submit.v2.metric.agent.writing_brief")
-                : isSeedTool(ev.tool)
-                    ? unified
-                      ? unifiedMsg("submit.v2.metric.agent.writing_run")
-                      : msg("auto.features.submit.hooks.use.code.agent.literal.5")
-                    : isScorerTool(ev.tool)
-                      ? unified
-                        ? unifiedMsg("submit.v2.metric.agent.writing_metric")
-                        : msg("auto.features.submit.hooks.use.code.agent.literal.6")
-                      : msg("workflow.agent.editing_graph"),
-            );
-            if (isSeedTool(ev.tool)) setSignatureStatus("writing");
-            else if (isScorerTool(ev.tool)) setMetricStatus("writing");
-            else if (ev.tool === "write_file" && ev.path) {
-              const path = ev.path;
-              setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
-            }
-            pushToolCall({
-              id: ev.id,
-              tool: ev.tool,
-              reason: ev.reason,
-              status: "running",
-              startedAt: Date.now(),
-              endedAt: null,
-              ...(ev.path && { path: ev.path }),
-            });
-          },
-          onCodeDraft: ({ source, chunk, reset, path }) => {
-            if (controller.signal.aborted) return;
-            if (source === "file" && path) {
-              if (!fileBefore.has(path)) fileBefore.set(path, latestFiles[path] ?? null);
-              const text = (reset ? "" : (fileDraft.get(path) ?? "")) + chunk;
-              fileDraft.set(path, text);
-              setFileRef.current?.(path, text);
-              setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
-            } else if (source === "signature") {
-              setSignatureCode(drafts.write(source, chunk, reset));
-              setSignatureStatus("writing");
               markFlowing("signature", true);
-            } else if (source === "metric") {
-              setMetricCode(drafts.write(source, chunk, reset));
-              setMetricStatus("writing");
+              sigBufRef.current += chunk;
+              latestSignature = sigBufRef.current;
+              setSignatureCode(sigBufRef.current);
+              setSignatureValidation(null);
+            },
+            onMetricPatch: (chunk) => {
+              if (metricBufRef.current === "") {
+                setStatusLabel(
+                  unified
+                    ? unifiedMsg("submit.v2.metric.agent.writing_metric")
+                    : msg("auto.features.submit.hooks.use.code.agent.literal.3"),
+                );
+                // The unified seed's run code finishes on its own `artifact_done`.
+                if (!unified) setSignatureStatus("done");
+                setMetricStatus("writing");
+                markReasoningDone("metric");
+              }
               markFlowing("metric", true);
-            }
-          },
-          onFileReplace: (path, code) => {
-            if (controller.signal.aborted) return;
-            markReasoningDone();
-            fileBefore.delete(path);
-            fileDraft.delete(path);
-            const prevCode = latestFiles[path] ?? "";
-            latestFiles[path] = code;
-            setFileRef.current?.(path, code);
-            // A file the user wrote or cloned is the base the agent's first
-            // version diffs against; stamped 0 so it is never counted as an edit.
-            if (prevCode) pushFileVersion(path, prevCode, 0);
-            pushFileVersion(path, code);
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant" || !last.toolCalls?.length) return prev;
-              const next = prev.slice();
-              next[next.length - 1] = {
-                ...last,
-                toolCalls: last.toolCalls.map((t) =>
-                  t.tool === "write_file" && t.path === path && t.status === "running"
-                    ? { ...t, prevCode, newCode: code }
-                    : t,
-                ),
-              };
-              return next;
-            });
-          },
-          onFileDelete: (path) => {
-            if (controller.signal.aborted) return;
-            delete latestFiles[path];
-            fileBefore.delete(path);
-            fileDraft.delete(path);
-            setFileRef.current?.(path, null);
-          },
-          onVerifyResult: (result) => {
-            if (controller.signal.aborted) return;
-            setVerification(result);
-            updateToolCall(result.id, { verification: result });
-          },
-          onToolEnd: (ev) => {
-            if (ev.status !== "ok") {
-              if (isSeedTool(ev.tool)) dropDraft("signature");
-              else if (isScorerTool(ev.tool)) dropDraft("metric");
-              else if (ev.tool === "write_file" && ev.path) dropFileDraft(ev.path);
-            }
-            if (ev.tool === "write_file" && ev.path) stopWriting(ev.path);
-            if (ev.tool === "open_file" && ev.status === "ok" && ev.path && !controller.signal.aborted) {
-              if (ev.line) updateToolCall(ev.id, { line: ev.line });
-              onOpenFileRef.current?.(ev.path, ev.line);
-            }
-            finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
-            if (isSeedTool(ev.tool)) {
+              metricBufRef.current += chunk;
+              latestMetric = metricBufRef.current;
+              setMetricCode(metricBufRef.current);
+              setMetricValidation(null);
+            },
+            onArtifactDone: (source) => {
+              if (controller.signal.aborted) return;
+              markReasoningDone(source);
+              if (source === "signature" || source === "metric") markFlowing(source, false);
+              // The seed's turn only ends after the intro message is written,
+              // seconds later; landing the lane's code now keeps its "Edited"
+              // row in the transcript instead of a gap until then.
+              if (source === "signature") {
+                runLaneDone = true;
+                pushSignatureVersion(latestSignature);
+                setSignatureStatus("done");
+                if (!metricLaneDone) {
+                  setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_metric"));
+                }
+              } else if (source === "metric") {
+                metricLaneDone = true;
+                pushMetricVersion(latestMetric);
+                setMetricStatus("done");
+                if (!runLaneDone) {
+                  setStatusLabel(unifiedMsg("submit.v2.metric.agent.writing_run"));
+                }
+              }
+            },
+            onMessagePatch: (chunk) => {
+              if (replyBufRef.current === "") {
+                setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.4"));
+                markReasoningDone();
+              }
+              replyBufRef.current += chunk;
+              appendReply(chunk);
+            },
+            onAsk: (ask) => {
+              if (controller.signal.aborted) return;
+              setQuestion(ask.options.length > 0 ? ask : null);
+            },
+            onBrief: (fields) => {
+              if (controller.signal.aborted) return;
+              onBriefRef.current?.(fields);
+            },
+            onToolStart: (ev) => {
+              markReasoningDone();
+              if (ev.tool !== "open_file") setStatusLabel(
+                ev.tool === "verify_code"
+                  ? msg("agent.coding_tool.check.checking")
+                  : ev.tool === "write_file" || ev.tool === "delete_file"
+                    ? formatMsg("agent.coding_tool.editing", { file: ev.path ?? "" })
+                    : ev.tool === "set_brief"
+                  ? unifiedMsg("submit.v2.metric.agent.writing_brief")
+                  : isSeedTool(ev.tool)
+                      ? unified
+                        ? unifiedMsg("submit.v2.metric.agent.writing_run")
+                        : msg("auto.features.submit.hooks.use.code.agent.literal.5")
+                      : isScorerTool(ev.tool)
+                        ? unified
+                          ? unifiedMsg("submit.v2.metric.agent.writing_metric")
+                          : msg("auto.features.submit.hooks.use.code.agent.literal.6")
+                        : msg("workflow.agent.editing_graph"),
+              );
+              if (isSeedTool(ev.tool)) setSignatureStatus("writing");
+              else if (isScorerTool(ev.tool)) setMetricStatus("writing");
+              else if (ev.tool === "write_file" && ev.path) {
+                const path = ev.path;
+                setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
+              }
+              pushToolCall({
+                id: ev.id,
+                tool: ev.tool,
+                reason: ev.reason,
+                status: "running",
+                startedAt: Date.now(),
+                endedAt: null,
+                ...(ev.path && { path: ev.path }),
+              });
+            },
+            onCodeDraft: ({ source, chunk, reset, path }) => {
+              if (controller.signal.aborted) return;
+              if (source === "file" && path) {
+                if (!fileBefore.has(path)) fileBefore.set(path, latestFiles[path] ?? null);
+                const text = (reset ? "" : (fileDraft.get(path) ?? "")) + chunk;
+                fileDraft.set(path, text);
+                setFileRef.current?.(path, text);
+                setWritingFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
+              } else if (source === "signature") {
+                setSignatureCode(drafts.write(source, chunk, reset));
+                setSignatureStatus("writing");
+                markFlowing("signature", true);
+              } else if (source === "metric") {
+                setMetricCode(drafts.write(source, chunk, reset));
+                setMetricStatus("writing");
+                markFlowing("metric", true);
+              }
+            },
+            onFileReplace: (path, code) => {
+              if (controller.signal.aborted) return;
+              markReasoningDone();
+              fileBefore.delete(path);
+              fileDraft.delete(path);
+              const prevCode = latestFiles[path] ?? "";
+              latestFiles[path] = code;
+              setFileRef.current?.(path, code);
+              // A file the user wrote or cloned is the base the agent's first
+              // version diffs against; stamped 0 so it is never counted as an edit.
+              if (prevCode) pushFileVersion(path, prevCode, 0);
+              pushFileVersion(path, code);
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant" || !last.toolCalls?.length) return prev;
+                const next = prev.slice();
+                next[next.length - 1] = {
+                  ...last,
+                  toolCalls: last.toolCalls.map((t) =>
+                    t.tool === "write_file" && t.path === path && t.status === "running"
+                      ? { ...t, prevCode, newCode: code }
+                      : t,
+                  ),
+                };
+                return next;
+              });
+            },
+            onFileDelete: (path) => {
+              if (controller.signal.aborted) return;
+              delete latestFiles[path];
+              fileBefore.delete(path);
+              fileDraft.delete(path);
+              setFileRef.current?.(path, null);
+            },
+            onVerifyResult: (result) => {
+              if (controller.signal.aborted) return;
+              setVerification(result);
+              updateToolCall(result.id, { verification: result });
+            },
+            onToolEnd: (ev) => {
+              if (ev.status !== "ok") {
+                if (isSeedTool(ev.tool)) dropDraft("signature");
+                else if (isScorerTool(ev.tool)) dropDraft("metric");
+                else if (ev.tool === "write_file" && ev.path) dropFileDraft(ev.path);
+              }
+              if (ev.tool === "write_file" && ev.path) stopWriting(ev.path);
+              if (ev.tool === "open_file" && ev.status === "ok" && ev.path && !controller.signal.aborted) {
+                if (ev.line) updateToolCall(ev.id, { line: ev.line });
+                onOpenFileRef.current?.(ev.path, ev.line);
+              }
+              finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
+              if (isSeedTool(ev.tool)) {
+                setSignatureStatus("done");
+                markFlowing("signature", false);
+              } else if (isScorerTool(ev.tool)) {
+                setMetricStatus("done");
+                markFlowing("metric", false);
+              }
+            },
+            onWorkflowReplace: (workflow, changedNodeId) => {
+              markReasoningDone();
+              applyAgentWorkflowRef.current?.(workflow, changedNodeId);
+            },
+            onSignatureReplace: (code) => {
+              drafts.land("signature");
+              const prevCode = lastSignatureCode;
+              lastSignatureCode = code;
+              latestSignature = code;
+              setSignatureCode(code);
+              setSignatureManuallyEdited(false);
+              attachCodeToLatestRunningToolCall("seed", prevCode, code);
+              const changed = diffChangedLines(prevCode, code);
+              setSignatureFlashLines(changed);
+              if (flashClearRef.current) clearTimeout(flashClearRef.current);
+              flashClearRef.current = setTimeout(() => {
+                setSignatureFlashLines([]);
+              }, 1200);
+              pushSignatureVersion(code);
+              pendingValidationsRef.current.push({
+                kind: "signature",
+                promise: runnersRef.current.runSignatureValidation(code),
+              });
+            },
+            onMetricReplace: (code) => {
+              drafts.land("metric");
+              const prevCode = lastMetricCode;
+              lastMetricCode = code;
+              latestMetric = code;
+              setMetricCode(code);
+              setMetricManuallyEdited(false);
+              attachCodeToLatestRunningToolCall("scorer", prevCode, code);
+              const changed = diffChangedLines(prevCode, code);
+              setMetricFlashLines(changed);
+              if (flashClearRef.current) clearTimeout(flashClearRef.current);
+              flashClearRef.current = setTimeout(() => {
+                setMetricFlashLines([]);
+              }, 1200);
+              pushMetricVersion(code);
+              pendingValidationsRef.current.push({
+                kind: "metric",
+                promise: runnersRef.current.runMetricValidation(code),
+              });
+            },
+            onDone: async (result) => {
+              // A superseded/reset run's late completion must not clobber the
+              // fresh session (mirrors the onError guard below). The check at
+              // the auto-fix step still matters — abort can land while the
+              // validations above are awaited.
+              if (controller.signal.aborted) return;
+              dropDraft("signature");
+              dropDraft("metric");
+              dropFileDrafts();
+              if (result.files) {
+                // The server's files after the turn are the truth; the events
+                // above already landed them, so this only mends a missed one.
+                for (const [path, code] of Object.entries(result.files)) {
+                  if (latestFiles[path] !== code) setFileRef.current?.(path, code);
+                }
+                for (const path of Object.keys(latestFiles)) {
+                  if (!(path in result.files)) setFileRef.current?.(path, null);
+                }
+              }
+              if (result.verification !== undefined && result.verification !== null) {
+                setVerification(result.verification);
+              }
+              // A chat turn that ends without a word is a failed turn, not a
+              // finished one: the chat offers a retry instead of a bare "Done.".
+              if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
+                setStatus("error");
+                setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
+                setSignatureStatus("idle");
+                setMetricStatus("idle");
+                setError(null);
+                if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last && last.role === "assistant" && !last.toolCalls?.length) {
+                    return prev.slice(0, -1);
+                  }
+                  return prev;
+                });
+                return;
+              }
+              if (!isChat && isWorkflow) {
+                // Workflow seed: the graph landed via workflow_replace (or
+                // rides the done payload after a repair); only the metric
+                // flows through the code editor.
+                if (result.workflow) {
+                  applyAgentWorkflowRef.current?.(result.workflow, null);
+                }
+                setMetricCode(result.metric_code);
+                setMetricManuallyEdited(false);
+                pushMetricVersion(result.metric_code);
+                pendingValidationsRef.current.push({
+                  kind: "metric",
+                  promise: runnersRef.current.runMetricValidation(result.metric_code),
+                });
+              } else if (!isChat) {
+                setSignatureCode(result.signature_code);
+                setMetricCode(result.metric_code);
+                setSignatureManuallyEdited(false);
+                setMetricManuallyEdited(false);
+                const sigChanged = diffChangedLines(snapshot.signatureCode, result.signature_code);
+                const metChanged = diffChangedLines(snapshot.metricCode, result.metric_code);
+                setSignatureFlashLines(sigChanged);
+                setMetricFlashLines(metChanged);
+                if (flashClearRef.current) clearTimeout(flashClearRef.current);
+                flashClearRef.current = setTimeout(() => {
+                  setSignatureFlashLines([]);
+                  setMetricFlashLines([]);
+                }, 800);
+                pushSignatureVersion(result.signature_code);
+                pushMetricVersion(result.metric_code);
+                pendingValidationsRef.current.push({
+                  kind: "signature",
+                  promise: runnersRef.current.runSignatureValidation(result.signature_code),
+                });
+                pendingValidationsRef.current.push({
+                  kind: "metric",
+                  promise: runnersRef.current.runMetricValidation(result.metric_code),
+                });
+              }
               setSignatureStatus("done");
-              markFlowing("signature", false);
-            } else if (isScorerTool(ev.tool)) {
               setMetricStatus("done");
-              markFlowing("metric", false);
-            }
-          },
-          onWorkflowReplace: (workflow, changedNodeId) => {
-            markReasoningDone();
-            applyAgentWorkflowRef.current?.(workflow, changedNodeId);
-          },
-          onSignatureReplace: (code) => {
-            drafts.land("signature");
-            const prevCode = lastSignatureCode;
-            lastSignatureCode = code;
-            latestSignature = code;
-            setSignatureCode(code);
-            setSignatureManuallyEdited(false);
-            attachCodeToLatestRunningToolCall("seed", prevCode, code);
-            const changed = diffChangedLines(prevCode, code);
-            setSignatureFlashLines(changed);
-            if (flashClearRef.current) clearTimeout(flashClearRef.current);
-            flashClearRef.current = setTimeout(() => {
-              setSignatureFlashLines([]);
-            }, 1200);
-            pushSignatureVersion(code);
-            pendingValidationsRef.current.push({
-              kind: "signature",
-              promise: runnersRef.current.runSignatureValidation(code),
-            });
-          },
-          onMetricReplace: (code) => {
-            drafts.land("metric");
-            const prevCode = lastMetricCode;
-            lastMetricCode = code;
-            latestMetric = code;
-            setMetricCode(code);
-            setMetricManuallyEdited(false);
-            attachCodeToLatestRunningToolCall("scorer", prevCode, code);
-            const changed = diffChangedLines(prevCode, code);
-            setMetricFlashLines(changed);
-            if (flashClearRef.current) clearTimeout(flashClearRef.current);
-            flashClearRef.current = setTimeout(() => {
-              setMetricFlashLines([]);
-            }, 1200);
-            pushMetricVersion(code);
-            pendingValidationsRef.current.push({
-              kind: "metric",
-              promise: runnersRef.current.runMetricValidation(code),
-            });
-          },
-          onDone: async (result) => {
-            // A superseded/reset run's late completion must not clobber the
-            // fresh session (mirrors the onError guard below). The check at
-            // the auto-fix step still matters — abort can land while the
-            // validations above are awaited.
-            if (controller.signal.aborted) return;
-            dropDraft("signature");
-            dropDraft("metric");
-            dropFileDrafts();
-            if (result.files) {
-              // The server's files after the turn are the truth; the events
-              // above already landed them, so this only mends a missed one.
-              for (const [path, code] of Object.entries(result.files)) {
-                if (latestFiles[path] !== code) setFileRef.current?.(path, code);
+              setStatus("done");
+              setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.7"));
+              if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
+
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                const fallback = isChat
+                  ? ""
+                  : unified
+                    ? unifiedMsg("submit.v2.metric.agent.seed_done")
+                    : "I wrote a Signature and Metric based on your data.";
+                let replyTail = result.assistant_message;
+                if (replyBeforeSteer !== null) {
+                  replyTail = replyTail.startsWith(replyBeforeSteer)
+                    ? replyTail.slice(replyBeforeSteer.length).trimStart()
+                    : last.content;
+                  // Nothing came after the steer: no hollow bubble.
+                  if (!replyTail && !last.content && !last.toolCalls?.length) return prev.slice(0, -1);
+                }
+                const finalContent = replyTail || last.content || fallback;
+                const next = prev.slice();
+                next[next.length - 1] = {
+                  ...last,
+                  content: finalContent,
+                  model: result.model,
+                  servedModel: result.served_model,
+                  stats: result.stats,
+                };
+                return next;
+              });
+
+              // Auto-fix: wait for any validations kicked off during this run,
+              // then if the validator flagged errors, fire a follow-up chat
+              // turn so the agent can see the errors (via prior_*_validation)
+              // and patch them. Bounded by MAX_AUTO_FIX to prevent loops.
+              const pending = pendingValidationsRef.current;
+              pendingValidationsRef.current = [];
+              if (pending.length === 0) return;
+              // allSettled so a single failed validation doesn't suppress
+              // auto-fix for the other kind. A rejection here means the
+              // validation request itself errored (network/server) — there
+              // is nothing concrete for the agent to patch in that case, so
+              // we skip just that entry rather than aborting the whole run.
+              const settled = await Promise.allSettled(pending.map((e) => e.promise));
+              const responses: Array<ValidateCodeResponse | null> = settled.map((r) =>
+                r.status === "fulfilled" ? ((r.value as ValidateCodeResponse | null) ?? null) : null,
+              );
+              for (let i = 0; i < pending.length; i++) {
+                const entry = pending[i];
+                if (!entry) continue;
+                const resp = responses[i] ?? null;
+                if (entry.kind === "signature") {
+                  snapshotRef.current = {
+                    ...snapshotRef.current,
+                    signatureValidation: resp,
+                  };
+                } else {
+                  snapshotRef.current = {
+                    ...snapshotRef.current,
+                    metricValidation: resp,
+                  };
+                }
               }
-              for (const path of Object.keys(latestFiles)) {
-                if (!(path in result.files)) setFileRef.current?.(path, null);
+              let signatureHasError = false;
+              let metricHasError = false;
+              for (let i = 0; i < pending.length; i++) {
+                const entry = pending[i];
+                const resp = responses[i];
+                const broken = !!resp && !resp.valid && resp.errors.length > 0;
+                if (!entry || !broken) continue;
+                if (entry.kind === "signature") signatureHasError = true;
+                else metricHasError = true;
               }
-            }
-            if (result.verification !== undefined && result.verification !== null) {
-              setVerification(result.verification);
-            }
-            // A chat turn that ends without a word is a failed turn, not a
-            // finished one: the chat offers a retry instead of a bare "Done.".
-            if (isChat && !result.assistant_message.trim() && !replyBufRef.current.trim()) {
+              if (!signatureHasError && !metricHasError) return;
+              if (controller.signal.aborted) return;
+              if (autoFixAttemptsRef.current >= MAX_AUTO_FIX) return;
+              autoFixAttemptsRef.current += 1;
+              // Outside the unified contract only the workflow canvas authors,
+              // and there the graph is checked on the canvas: only the metric
+              // can fail validation. The request body carries the concrete errors.
+              const fixMessage = unified
+                ? unifiedMsg("submit.v2.metric.agent.fix")
+                : msg("auto.features.submit.hooks.use.code.agent.template.5");
+              queueMicrotask(() => {
+                runAgentRef.current?.(fixMessage, messagesRef.current);
+              });
+            },
+            onError: (message, code) => {
+              if (controller.signal.aborted) return;
+              dropDraft("signature");
+              dropDraft("metric");
+              setLimitReached(code === DAILY_LIMIT_CODE);
               setStatus("error");
               setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
               setSignatureStatus("idle");
               setMetricStatus("idle");
-              setError(null);
-              if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
+              setError(message);
+              // Drop the empty placeholder agent bubble so the error UI
+              // isn't followed by a blank message.
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
-                if (last && last.role === "assistant" && !last.toolCalls?.length) {
+                if (last && last.role === "assistant" && !last.content && !last.toolCalls?.length) {
                   return prev.slice(0, -1);
                 }
                 return prev;
               });
-              return;
-            }
-            if (!isChat && isWorkflow) {
-              // Workflow seed: the graph landed via workflow_replace (or
-              // rides the done payload after a repair); only the metric
-              // flows through the code editor.
-              if (result.workflow) {
-                applyAgentWorkflowRef.current?.(result.workflow, null);
-              }
-              setMetricCode(result.metric_code);
-              setMetricManuallyEdited(false);
-              pushMetricVersion(result.metric_code);
-              pendingValidationsRef.current.push({
-                kind: "metric",
-                promise: runnersRef.current.runMetricValidation(result.metric_code),
-              });
-            } else if (!isChat) {
-              setSignatureCode(result.signature_code);
-              setMetricCode(result.metric_code);
-              setSignatureManuallyEdited(false);
-              setMetricManuallyEdited(false);
-              const sigChanged = diffChangedLines(snapshot.signatureCode, result.signature_code);
-              const metChanged = diffChangedLines(snapshot.metricCode, result.metric_code);
-              setSignatureFlashLines(sigChanged);
-              setMetricFlashLines(metChanged);
-              if (flashClearRef.current) clearTimeout(flashClearRef.current);
-              flashClearRef.current = setTimeout(() => {
-                setSignatureFlashLines([]);
-                setMetricFlashLines([]);
-              }, 800);
-              pushSignatureVersion(result.signature_code);
-              pushMetricVersion(result.metric_code);
-              pendingValidationsRef.current.push({
-                kind: "signature",
-                promise: runnersRef.current.runSignatureValidation(result.signature_code),
-              });
-              pendingValidationsRef.current.push({
-                kind: "metric",
-                promise: runnersRef.current.runMetricValidation(result.metric_code),
-              });
-            }
-            setSignatureStatus("done");
-            setMetricStatus("done");
-            setStatus("done");
-            setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.7"));
-            if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
-
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              const fallback = isChat
-                ? ""
-                : unified
-                  ? unifiedMsg("submit.v2.metric.agent.seed_done")
-                  : "I wrote a Signature and Metric based on your data.";
-              let replyTail = result.assistant_message;
-              if (replyBeforeSteer !== null) {
-                replyTail = replyTail.startsWith(replyBeforeSteer)
-                  ? replyTail.slice(replyBeforeSteer.length).trimStart()
-                  : last.content;
-                // Nothing came after the steer: no hollow bubble.
-                if (!replyTail && !last.content && !last.toolCalls?.length) return prev.slice(0, -1);
-              }
-              const finalContent = replyTail || last.content || fallback;
-              const next = prev.slice();
-              next[next.length - 1] = {
-                ...last,
-                content: finalContent,
-                model: result.model,
-                servedModel: result.served_model,
-                stats: result.stats,
-              };
-              return next;
-            });
-
-            // Auto-fix: wait for any validations kicked off during this run,
-            // then if the validator flagged errors, fire a follow-up chat
-            // turn so the agent can see the errors (via prior_*_validation)
-            // and patch them. Bounded by MAX_AUTO_FIX to prevent loops.
-            const pending = pendingValidationsRef.current;
-            pendingValidationsRef.current = [];
-            if (pending.length === 0) return;
-            // allSettled so a single failed validation doesn't suppress
-            // auto-fix for the other kind. A rejection here means the
-            // validation request itself errored (network/server) — there
-            // is nothing concrete for the agent to patch in that case, so
-            // we skip just that entry rather than aborting the whole run.
-            const settled = await Promise.allSettled(pending.map((e) => e.promise));
-            const responses: Array<ValidateCodeResponse | null> = settled.map((r) =>
-              r.status === "fulfilled" ? ((r.value as ValidateCodeResponse | null) ?? null) : null,
-            );
-            for (let i = 0; i < pending.length; i++) {
-              const entry = pending[i];
-              if (!entry) continue;
-              const resp = responses[i] ?? null;
-              if (entry.kind === "signature") {
-                snapshotRef.current = {
-                  ...snapshotRef.current,
-                  signatureValidation: resp,
-                };
-              } else {
-                snapshotRef.current = {
-                  ...snapshotRef.current,
-                  metricValidation: resp,
-                };
-              }
-            }
-            let signatureHasError = false;
-            let metricHasError = false;
-            for (let i = 0; i < pending.length; i++) {
-              const entry = pending[i];
-              const resp = responses[i];
-              const broken = !!resp && !resp.valid && resp.errors.length > 0;
-              if (!entry || !broken) continue;
-              if (entry.kind === "signature") signatureHasError = true;
-              else metricHasError = true;
-            }
-            if (!signatureHasError && !metricHasError) return;
-            if (controller.signal.aborted) return;
-            if (autoFixAttemptsRef.current >= MAX_AUTO_FIX) return;
-            autoFixAttemptsRef.current += 1;
-            // Outside the unified contract only the workflow canvas authors,
-            // and there the graph is checked on the canvas: only the metric
-            // can fail validation. The request body carries the concrete errors.
-            const fixMessage = unified
-              ? unifiedMsg("submit.v2.metric.agent.fix")
-              : msg("auto.features.submit.hooks.use.code.agent.template.5");
-            queueMicrotask(() => {
-              runAgentRef.current?.(fixMessage, messagesRef.current);
-            });
+            },
           },
-          onError: (message, code) => {
-            if (controller.signal.aborted) return;
-            dropDraft("signature");
-            dropDraft("metric");
-            setLimitReached(code === DAILY_LIMIT_CODE);
-            setStatus("error");
-            setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.8"));
-            setSignatureStatus("idle");
-            setMetricStatus("idle");
-            setError(message);
-            // Drop the empty placeholder agent bubble so the error UI
-            // isn't followed by a blank message.
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last && last.role === "assistant" && !last.content && !last.toolCalls?.length) {
-                return prev.slice(0, -1);
-              }
-              return prev;
-            });
-          },
-        },
+      ),
       );
     },
     [
@@ -1185,6 +1190,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       interviewBrief,
       unified,
       model,
+      resolveModel,
       reasoningEffort,
       setSignatureCode,
       setMetricCode,

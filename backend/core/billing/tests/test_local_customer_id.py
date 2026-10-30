@@ -97,7 +97,7 @@ def engine(request: pytest.FixtureRequest) -> Iterator[Engine]:
 @pytest.fixture
 def preview_grant(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give new accounts the PR-preview grant so a budget can be funded without a top-up."""
-    monkeypatch.setattr(settings, "railway_environment_name", "skynet-pr-107")
+    monkeypatch.setattr(settings, "app_environment", "skynet-pr-107")
     monkeypatch.setattr(settings, "preview_grant_cents", 1000)
 
 

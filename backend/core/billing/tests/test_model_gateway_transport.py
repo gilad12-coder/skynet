@@ -612,6 +612,26 @@ def test_readiness_probes_skip_the_novelty_embeddings_route(gateway: ModelGatewa
     ]
 
 
+def test_readiness_probes_skip_parent_only_routes(gateway: ModelGateway) -> None:
+    """A route only the parent calls, such as a rule judge, is not probed as one of the run's model roles.
+
+    Args:
+        gateway: Parent protocol over the funded fixture budget.
+    """
+    guest = gateway.register(
+        model="fixture/text", api_key="provider-secret", role="optimization", policy=ChargePolicy("managed_model")
+    )
+    gateway.register(
+        model="fixture/text",
+        api_key="provider-secret",
+        role="judge",
+        policy=ChargePolicy("managed_model"),
+        parent_only=True,
+    )
+
+    assert [probe["token"] for probe in gateway.model_routes()] == [guest["token"]]
+
+
 class _FlakyGet:
     """Fail a set number of budget-state reads before answering."""
 
@@ -685,3 +705,52 @@ def test_guest_call_the_limit_refuses_is_remembered(gateway: ModelGateway) -> No
         del gateway._routes["fixture-token"]
 
     assert str(gateway.budget_refusal) == "The next operation needs up to 135 cents."
+
+
+def test_a_role_observer_sees_each_answered_model_call_of_that_role_only(gateway: ModelGateway) -> None:
+    """The rule watch counts the coding agent's model calls, over HTTP and the mailbox, and no other role's.
+
+    Args:
+        gateway: Funded real HTTP gateway fixture.
+    """
+    agent = gateway.register(
+        model="fixture/text", api_key="upstream-secret", role="optimization", policy=ChargePolicy("managed_model")
+    )
+    task = gateway.register(
+        model="fixture/text", api_key="upstream-secret", role="task", policy=ChargePolicy("managed_model")
+    )
+    seen: list[dict[str, Any]] = []
+
+    def observe(body: dict[str, Any]) -> None:
+        """Record the call, then fail, which must not reach the agent.
+
+        Args:
+            body: The model request.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        seen.append(body)
+        raise RuntimeError("observer failed")
+
+    gateway.observe_role("optimization", observe)
+    body = {"model": "fixture/text", "max_tokens": 16, "messages": [{"role": "user", "content": "step one"}]}
+    response = httpx.post(
+        f"{gateway.url}/chat/completions",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+        json=body,
+        trust_env=False,
+    )
+    mailbox = gateway.dispatch_guest(
+        agent["token"], "/v1/chat/completions", {**body, "messages": [{"role": "user", "content": "step two"}]}, {}
+    )
+    httpx.post(
+        f"{gateway.url}/chat/completions",
+        headers={"Authorization": f"Bearer {task['token']}"},
+        json=body,
+        trust_env=False,
+    )
+
+    assert response.status_code == 200
+    assert mailbox.status == 200
+    assert [call["messages"][0]["content"] for call in seen] == ["step one", "step two"]

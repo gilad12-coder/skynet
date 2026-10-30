@@ -33,8 +33,15 @@ run `/scope`.
 
 ## Merge policy (MANDATORY)
 
-Feature PRs target `staging`, never `main`. Every PR gets its own Railway PR
-environment, a full copy of staging with an empty database.
+Feature PRs target `staging`, never `main`. Each PR from this repository gets
+a PR environment (preview), a full copy of staging with an empty database, at
+`https://pr-<n>.staging.skynetml.com` (API `https://api-pr-<n>.staging.skynetml.com`).
+Run the acceptance checks and record the videos there, before the merge.
+`.github/workflows/preview.yml` builds it on every push and deletes it when the
+PR closes. At most 4 previews run at once; a preview with no push for 48 hours
+is deleted. PRs from forks or Dependabot, and PRs whose files cannot change
+the running app (docs, `droid-wiki/`, `tools/reel-skynet/`, tests), get no
+preview; add the label `preview` to ask for one.
 
 **Backend PRs** (no file under `frontend/`) merge themselves into `staging`
 only when **all** of these gates pass:
@@ -75,24 +82,19 @@ locally, check them again, and then push them together in one push.
 
 ### PR preview environments: keep them able to run an optimization
 
-The merger has to sign up and finish a real run in each `*-pr-<n>` Railway
-environment. Six things broke that once; keep them true:
+The merger has to sign up and finish a real run in each `*-pr-<n>`
+environment. Five things broke that once; keep them true:
 
-- **No watch paths on `staging` services.** PR environments copy `staging`,
-  and Railway skips a service whose watch paths the PR doesn't touch. A skipped
-  `litellm` (or its `Postgres-ZPeG` database) means every model call fails with
-  `Litellm_proxyException - Connection error`. Never add watch paths to
-  `litellm`, `backend` or `frontend` on `staging`.
-- **The proxy knows the backend's key.** A PR environment gets a fresh
-  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
-  there and every managed call (the assistant included) fails with
+- **The proxy knows the backend's key.** Previews share the `staging`
+  `litellm`. If its database loses the virtual key in `LITELLM_PROXY_API_KEY`,
+  every managed call (the assistant included) fails with
   `Invalid proxy server token`. `deploy/litellm/start.py` registers
-  `LITELLM_SEED_KEY` at boot; on `staging` it must stay a reference to
-  `${{backend.LITELLM_PROXY_API_KEY}}`.
+  `LITELLM_SEED_KEY` at boot; on `staging` it must equal the backend's
+  `LITELLM_PROXY_API_KEY`.
 - **Preview accounts verify email and get credit.** In a `*-pr-<n>`
   environment, sign-up sends a real confirmation code, exactly like `staging`
   (the test-account helper reads it from the owned inbox), and a new account gets
-  `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
+  `PREVIEW_GRANT_CENTS` (from the `staging` app secrets, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
 - **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
   new account (password or OAuth sign-up) starts with the intake marked done
@@ -113,8 +115,10 @@ environment. Six things broke that once; keep them true:
   its model proxy. `Sandbox.run` caps `kill_after` at
   `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
-  deployment in the PR environment (`railway status --json`). A service with
-  no deployment can be started with Railway's `serviceInstanceDeployV2`.
+  deployment and its events (`aws ecs describe-services --cluster
+  skynet-<env> --services backend worker frontend litellm`; a preview's
+  services are `pr-<n>-backend`, `pr-<n>-worker` and `pr-<n>-frontend` in
+  `skynet-staging`, with logs in `/ecs/skynet-staging/preview`).
 
 ## Product and runtime model
 
@@ -144,8 +148,9 @@ environment. Six things broke that once; keep them true:
 - **Dependency management**: `uv` is authoritative for backend development and
   CI; compiled `requirements*.txt` files support the pip/Docker paths. The
   frontend uses npm and a committed lockfile.
-- **Deployment**: Railway backend/worker/frontend containers, a LiteLLM
-  gateway, and a pinned Vercel Container Registry sandbox image.
+- **Deployment**: AWS ECS Fargate backend/worker/frontend containers and a
+  LiteLLM gateway (`infra/terraform`), and a pinned Vercel Container Registry
+  sandbox image.
 
 ## Project layout
 

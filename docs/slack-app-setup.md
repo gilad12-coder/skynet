@@ -28,7 +28,7 @@ features:
 oauth_config:
   redirect_urls:
     - http://localhost:8004/notifications/slack/oauth/callback
-    - https://backend-staging-6295.up.railway.app/notifications/slack/oauth/callback
+    - https://api-staging.skynetml.com/notifications/slack/oauth/callback
   scopes:
     bot:
       - chat:write
@@ -67,11 +67,11 @@ Public Distribution**. You don't need to submit it to the Slack Marketplace.
 
 ## 4. Set the environment
 
-| Variable | Local (`backend/.env`) | Staging (Railway backend service) |
+| Variable | Local (`backend/.env`) | Staging (`skynet/staging/app` secret) |
 | --- | --- | --- |
 | `SLACK_CLIENT_ID` | the Client ID | the Client ID |
 | `SLACK_CLIENT_SECRET` | the Client Secret | the Client Secret |
-| `SLACK_REDIRECT_URL` | `http://localhost:8004/notifications/slack/oauth/callback` | `https://backend-staging-6295.up.railway.app/notifications/slack/oauth/callback` |
+| `SLACK_REDIRECT_URL` | `http://localhost:8004/notifications/slack/oauth/callback` | `https://api-staging.skynetml.com/notifications/slack/oauth/callback` |
 | `BYOK_VAULT_KEY` | already set if connectors work; otherwise generate one (below) | already set; don't rotate it |
 | `APP_PUBLIC_URL` | the frontend, e.g. `http://localhost:3000` | the staging frontend URL |
 
@@ -80,7 +80,7 @@ Public Distribution**. You don't need to submit it to the Slack Marketplace.
   becomes unreadable, shows as broken, and users must reconnect. To generate
   a key:
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-- Set `SLACK_REDIRECT_URL` explicitly on staging. Behind Railway's proxy, the
+- Set `SLACK_REDIRECT_URL` explicitly on staging. Behind the load balancer, the
   URL derived from the request can come out as `http://`, which Slack rejects
   as a mismatch.
 - After the install, the backend sends the browser to

@@ -109,3 +109,28 @@ describe("availableGroupings", () => {
     assert.deepEqual(availableGroupings([row({ model: null }), row({ role: "sandbox", stage: "x" })]), ["role"]);
   });
 });
+
+describe("apiRateCents", () => {
+  it("sums subscription API-rate amounts apart from the charge", () => {
+    const sub = [
+      row({ role: "task", billing: "subscription", calls: 3, api_rate_cents: 1.25 }),
+      row({ role: "proposer", billing: "subscription", calls: 1, api_rate_cents: 0.5 }),
+    ];
+    const total = usageTotal(sub);
+    assert.equal(total.apiRateCents, 1.75);
+    assert.equal(total.chargedCents, 0);
+    assert.deepEqual(
+      groupUsage(sub, "role").map((g) => [g.key, g.apiRateCents]),
+      [
+        ["proposer", 0.5],
+        ["task", 1.25],
+      ],
+    );
+  });
+
+  it("stays null when no row has an API-rate amount", () => {
+    assert.equal(usageTotal(rows).apiRateCents, null);
+    const unpriced = row({ billing: "subscription", calls: 2, api_rate_cents: null });
+    assert.equal(usageTotal([unpriced]).apiRateCents, null);
+  });
+});

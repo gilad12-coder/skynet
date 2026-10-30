@@ -8,15 +8,17 @@ bypass — so a generated token genuinely round-trips through hashing + DB looku
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import ApiTokenModel
+from ...storage.models import ApiTokenModel, UserModel
 from ..auth import (
     API_TOKEN_PREFIX,
     AuthenticatedUser,
@@ -27,6 +29,9 @@ from ..auth import (
     token_last4,
 )
 from ..routers.api_tokens import create_api_tokens_router
+
+# The decided PAT lifetime (SKY-150): one year from generation.
+_MAX_AGE = timedelta(days=365)
 
 
 def test_generate_api_token_is_prefixed_and_unique() -> None:
@@ -78,10 +83,12 @@ def token_app() -> FastAPI:
         A FastAPI app whose ``app.state.job_store`` and router both point at a
         shared in-memory SQLite store holding the ``api_tokens`` table.
     """
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     ApiTokenModel.__table__.create(engine)
+    UserModel.__table__.create(engine)
+    with Session(engine) as session:
+        session.add(UserModel(email="alice", name="Alice", password_hash="x"))
+        session.commit()
     store = _Store(engine)
     app = FastAPI()
     app.state.job_store = store
@@ -126,14 +133,8 @@ def test_regenerate_invalidates_previous_token(token_app: FastAPI) -> None:
     assert first != second
 
     token_app.dependency_overrides.clear()
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {second}"}).status_code
-        == 200
-    )
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {first}"}).status_code
-        == 401
-    )
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {second}"}).status_code == 200
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {first}"}).status_code == 401
 
 
 def test_revoke_then_token_rejected(token_app: FastAPI) -> None:
@@ -144,10 +145,7 @@ def test_revoke_then_token_rejected(token_app: FastAPI) -> None:
     assert client.delete("/settings/api-token").status_code == 204
 
     token_app.dependency_overrides.clear()
-    assert (
-        client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code
-        == 401
-    )
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
 def test_get_returns_null_when_no_token(token_app: FastAPI) -> None:
@@ -157,3 +155,87 @@ def test_get_returns_null_when_no_token(token_app: FastAPI) -> None:
     response = client.get("/settings/api-token")
     assert response.status_code == 200
     assert response.json() is None
+
+
+def _age_token(app: FastAPI, age: timedelta) -> None:
+    """Move alice's token ``created_at`` back by ``age``.
+
+    Args:
+        app: App whose store holds the token.
+        age: How old the token should be.
+    """
+    with Session(app.state.job_store.engine) as session:
+        row = session.get(ApiTokenModel, "alice")
+        assert row is not None
+        row.created_at = datetime.now(UTC) - age
+        session.commit()
+
+
+def test_token_within_max_age_still_works(token_app: FastAPI) -> None:
+    """A token one day short of the maximum age still authenticates."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    token = client.post("/settings/api-token").json()["token"]
+    _age_token(token_app, _MAX_AGE - timedelta(days=1))
+
+    token_app.dependency_overrides.clear()
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+
+def test_token_past_max_age_is_refused(token_app: FastAPI) -> None:
+    """A token older than one year gets 401, and rotating issues a working one."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    old = client.post("/settings/api-token").json()["token"]
+    _age_token(token_app, _MAX_AGE + timedelta(seconds=1))
+
+    token_app.dependency_overrides.clear()
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {old}"}).status_code == 401
+
+    _bypass_as(token_app)
+    fresh = client.post("/settings/api-token").json()["token"]
+    token_app.dependency_overrides.clear()
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {fresh}"}).status_code == 200
+
+
+def test_get_reports_no_token_once_it_expires(token_app: FastAPI) -> None:
+    """Settings sees an expired token as no token, so it offers to generate a new one."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    client.post("/settings/api-token")
+    _age_token(token_app, _MAX_AGE - timedelta(days=1))
+    assert client.get("/settings/api-token").json() is not None
+
+    _age_token(token_app, _MAX_AGE + timedelta(seconds=1))
+    response = client.get("/settings/api-token")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_create_refuses_when_the_account_row_is_gone(token_app: FastAPI) -> None:
+    """A caller whose account was deleted after authenticating cannot add a token row."""
+    _bypass_as(token_app, "deleted-user")
+    client = TestClient(token_app)
+
+    response = client.post("/settings/api-token")
+
+    assert response.status_code == 401
+    with Session(token_app.state.job_store.engine) as session:
+        assert session.get(ApiTokenModel, "deleted-user") is None
+
+
+def test_token_older_than_its_account_row_still_works(token_app: FastAPI) -> None:
+    """An OAuth user's PAT predates the row their first later sign-in created; it keeps working."""
+    _bypass_as(token_app)
+    client = TestClient(token_app)
+    token = client.post("/settings/api-token").json()["token"]
+    _age_token(token_app, timedelta(days=30))
+    with Session(token_app.state.job_store.engine) as session:
+        account = session.get(UserModel, "alice")
+        assert account is not None
+        account.created_at = datetime.now(UTC)
+        session.commit()
+
+    token_app.dependency_overrides.clear()
+    assert client.get("/settings/api-token", headers={"Authorization": f"Bearer {token}"}).status_code == 200

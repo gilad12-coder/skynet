@@ -200,6 +200,7 @@
     "agent.status.tool_start": "एजेंट टूल आमंत्रित कर रहा है…",
     "agent.turn.not_found": "एजेंट का टर्न नहीं मिला या उसकी समय-सीमा समाप्त हो गई।",
     "analytics.other_bucket": "अन्य",
+    "auth.account_not_found": "यह खाता अब मौजूद नहीं है। फिर से साइन इन करें।",
     "auth.invalid_token": "प्रमाणीकरण टोकन अमान्य या समाप्त हो चुका है।",
     "auth.missing_token": "प्रमाणीकरण टोकन आवश्यक है।",
     "auth.not_configured": "बैकएंड प्रमाणीकरण कॉन्फ़िगर नहीं किया गया है।",

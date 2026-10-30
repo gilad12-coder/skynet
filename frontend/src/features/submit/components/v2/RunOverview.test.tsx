@@ -1,5 +1,6 @@
 /*
- * node --test cannot load .tsx, so run it from frontend/ through jiti:
+ * node --test cannot load .tsx, so this runs through jiti (RunOverview.render.test.ts
+ * spawns it inside `npm run test:unit`). To run it by hand from frontend/:
  * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
  */
 import assert from "node:assert/strict";
@@ -97,5 +98,27 @@ void describe("RunOverview", () => {
     assert.doesNotMatch(html, /submit\.v2\.overview\.tab\.data</);
     assert.match(html, /acme\/agent @ main/);
     assert.match(html, /submit\.v2\.repo\.check_on_submit/);
+  });
+
+  void it("names the subscription as the billing source when every model runs on one", () => {
+    const state = initialWizardV2State("expert");
+    state.optimizer.taskModel = {
+      name: "anthropic/claude-haiku-4.5",
+      token_source: "subscription",
+      cli_provider: "claude",
+    };
+    state.optimizer.reflectionModel = {
+      name: "openai/gpt-5",
+      token_source: "subscription",
+      cli_provider: "codex",
+    };
+    const html = render(state);
+    assert.match(html, /subscription\.mode</);
+    assert.doesNotMatch(html, /billing\.mode\.managed/);
+    // One managed model puts the run back on the balance.
+    state.optimizer.reflectionModel = { name: "openai/gpt-5" };
+    const mixed = render(state);
+    assert.match(mixed, /billing\.mode\.managed</);
+    assert.doesNotMatch(mixed, /subscription\.mode</);
   });
 });

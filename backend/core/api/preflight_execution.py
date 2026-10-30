@@ -656,7 +656,13 @@ def _perform_preflight(
                 engine=engine,
             )
             infer_repo_setup(protected, staged, gateway)
-            bind_repo_scorer(protected, staged, gateway, owner_id=f"preflight-{identity}")
+            bind_repo_scorer(
+                protected,
+                staged,
+                gateway,
+                owner_id=f"preflight-{identity}",
+                managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",
+            )
         if request.workflow == "anything":
             result = _verify_anything(gateway, protected, scope=request.scope, identity=identity)
             if is_repo_payload(protected):

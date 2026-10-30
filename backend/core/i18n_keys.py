@@ -45,6 +45,7 @@ class I18nKey(StrEnum):
     AGENT_STATUS_TOOL_START = 'agent.status.tool_start'
     AGENT_TURN_NOT_FOUND = 'agent.turn.not_found'
     ANALYTICS_OTHER_BUCKET = 'analytics.other_bucket'
+    AUTH_ACCOUNT_NOT_FOUND = 'auth.account_not_found'
     AUTH_INVALID_TOKEN = 'auth.invalid_token'
     AUTH_MISSING_TOKEN = 'auth.missing_token'
     AUTH_NOT_CONFIGURED = 'auth.not_configured'

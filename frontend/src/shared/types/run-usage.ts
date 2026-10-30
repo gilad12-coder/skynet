@@ -10,8 +10,11 @@ export type UsageRole =
   | "rounding"
   | "other";
 
-/** How a row was paid: through Skynet, through the owner's key with a fee, or straight to the provider. */
-export type UsageBilling = "skynet" | "byok" | "direct";
+/**
+ * How a row was paid: through Skynet, through the owner's key with a fee, straight to the provider,
+ * or by the owner's CLI subscription (local build).
+ */
+export type UsageBilling = "skynet" | "byok" | "direct" | "subscription";
 
 /** One row of `GET /optimizations/{id}/usage`. */
 export interface RunUsageRow {
@@ -25,6 +28,8 @@ export interface RunUsageRow {
   billing: UsageBilling | string;
   charged_cents: number;
   provider_cents: number | null;
+  // What a subscription row's tokens would cost at API rates; display only, never billed.
+  api_rate_cents?: number | null;
   calls: number;
   input_tokens: number;
   output_tokens: number;

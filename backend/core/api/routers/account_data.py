@@ -121,7 +121,10 @@ def create_account_data_router(*, job_store) -> APIRouter:
                 account's confirmation password is missing or does not match.
         """
         with Session(job_store.engine) as session:
-            row = session.get(UserModel, user.username)
+            # Hold the account row until commit: a concurrent API-token create
+            # takes a share lock on it, so it either finishes before the token
+            # sweep or sees the account gone and adds no orphan token (SKY-150).
+            row = session.get(UserModel, user.username, with_for_update=True)
             if _has_password(row) and not verify_password(body.password, str(row.password_hash)):
                 raise DomainError("accounts.invalid_credentials", status=401)
             summary = delete_account(session, user.username)
