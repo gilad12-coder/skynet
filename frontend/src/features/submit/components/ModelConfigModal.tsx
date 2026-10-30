@@ -1,8 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { Coins, Key, X } from "@/shared/ui/icons";
+import { Coins, Desktop, Key, X } from "@/shared/ui/icons";
 import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/features/billing";
+import {
+  SubscriptionSourcePicker,
+  byokHintKey,
+  findCli,
+  firstReadyCli,
+  isCliProvider,
+  subscriptionCatalogModels,
+  useLocalStatus,
+  withChosenCli,
+} from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { useSettingsModal } from "@/features/settings";
 import { getByokModelCatalog, cachedByokCatalog } from "@/shared/lib/model-catalog";
 import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
@@ -47,19 +58,54 @@ interface ModelConfigModalProps {
   nameOnly?: boolean;
   /** Keep billing selection, but use the model's own sampling defaults. */
   modelDefaultsOnly?: boolean;
+  /**
+   * In the local build, offer only the user's own key: the caller's backend
+   * refuses managed models locally and cannot run subscription ones.
+   */
+  byokOnlyLocally?: boolean;
 }
 
 const TOKEN_SOURCE_SEGMENTS: Array<{
   mode: TokenSourceMode;
   icon: typeof Coins;
-  labelKey: "billing.mode.managed" | "billing.mode.byok";
+  labelKey: "billing.mode.managed" | "billing.mode.byok" | "subscription.mode";
 }> = [
   { mode: "managed", icon: Coins, labelKey: "billing.mode.managed" },
   { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
 ];
 
+// The local desktop build runs models on the user's signed-in coding-agent
+// CLIs or provider keys; it has no managed models, so it offers no managed source.
+const LOCAL_TOKEN_SOURCE_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
+  { mode: "subscription", icon: Desktop, labelKey: "subscription.mode" },
+];
+
+const LOCAL_BYOK_ONLY_SEGMENTS: typeof TOKEN_SOURCE_SEGMENTS = [
+  { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
+];
+
+/**
+ * The draft a config opens as: in the local build a managed model opens on the
+ * subscription source, or on the user's own key where only that source runs.
+ */
+function initialDraft(config: ModelConfig, local: boolean, byokOnly = false): ModelConfig {
+  const draft = withoutInlineConnection(config);
+  if (local && byokOnly && draft.token_source !== "byok") {
+    return withoutInlineConnection({
+      ...draft,
+      name: "",
+      token_source: "byok",
+      byok_provider: undefined,
+    });
+  }
+  return local && draft.token_source === "managed"
+    ? { ...draft, name: "", token_source: "subscription", cli_provider: null }
+    : draft;
+}
+
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
-  const { base_url: _baseUrl, ...rest } = config;
+  const { base_url: _baseUrl, cli_provider: cliProvider, ...rest } = config;
   const {
     api_key: _apiKey,
     api_base: _ApiBase,
@@ -71,6 +117,10 @@ function withoutInlineConnection(config: ModelConfig): ModelConfig {
     ...rest,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? rest.byok_provider : undefined,
+    // A saved CLI the app no longer offers opens unchosen, so a ready one is preselected.
+    ...(tokenSource === "subscription"
+      ? { cli_provider: isCliProvider(cliProvider) ? cliProvider : null }
+      : {}),
     extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
   };
 }
@@ -86,6 +136,7 @@ export function ModelConfigModal({
   onRemoveRecent,
   nameOnly = false,
   modelDefaultsOnly = false,
+  byokOnlyLocally = false,
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
@@ -100,8 +151,27 @@ export function ModelConfigModal({
   const hasParams = (c: ModelConfig) =>
     c.temperature != null || c.max_tokens != null || !!c.extra?.reasoning_effort;
   const showParameters = isVisible("wizard.model_params", level) || hasParams(config);
-  const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
+  const localMode = isLocalMode();
+  const byokOnly = localMode && byokOnlyLocally;
+  const [draft, setDraft] = React.useState<ModelConfig>(() =>
+    initialDraft(config, localMode, byokOnly),
+  );
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
+  const local = useLocalStatus(localMode && open && mode === "subscription");
+  const subscriptionModels = React.useMemo(
+    () =>
+      mode === "subscription"
+        ? subscriptionCatalogModels(findCli(local.status, draft.cli_provider), catalogModels)
+        : undefined,
+    [mode, local.status, draft.cli_provider, catalogModels],
+  );
+  // Preselect a ready CLI once the status lands, so switching to the
+  // subscription source lists models without a second click.
+  const readyCli = firstReadyCli(local.status);
+  React.useEffect(() => {
+    if (mode !== "subscription" || draft.cli_provider || !readyCli) return;
+    setDraft((current) => withChosenCli(current, readyCli, local.status));
+  }, [mode, draft.cli_provider, readyCli, local.status]);
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -130,7 +200,12 @@ export function ModelConfigModal({
       cancelled = true;
     };
   }, [mode, byokProviderKey]);
-  const detectionModels = mode === "byok" ? (byokModels ?? undefined) : catalogModels;
+  const detectionModels =
+    mode === "byok"
+      ? (byokModels ?? undefined)
+      : mode === "subscription"
+        ? subscriptionModels
+        : catalogModels;
 
   // Recent chips follow the chosen source: a remembered managed model never
   // shows under BYOK (and vice versa), and a chip whose model the active
@@ -139,17 +214,20 @@ export function ModelConfigModal({
     if (!recentConfigs?.length) return [];
     const served = detectionModels ? new Set(detectionModels.map((m) => m.value)) : null;
     return recentConfigs.filter(
-      (rc) => (rc.token_source ?? "managed") === mode && (!served || served.has(rc.name)),
+      (rc) =>
+        (rc.token_source ?? "managed") === mode &&
+        (mode !== "subscription" || rc.cli_provider === draft.cli_provider) &&
+        (!served || served.has(rc.name)),
     );
-  }, [recentConfigs, detectionModels, mode]);
+  }, [recentConfigs, detectionModels, mode, draft.cli_provider]);
 
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
     if (open) {
-      setDraft(withoutInlineConnection(config));
+      setDraft(initialDraft(config, localMode, byokOnly));
       setParametersOpen(paramsFirstOpen || hasParams(config));
     }
-  }, [open, config]);
+  }, [open, config, localMode, byokOnly]);
 
   // The effort ladder is model-specific (providers reject levels outside
   // their documented set). "none" is expressed by the switch itself. An
@@ -226,6 +304,7 @@ export function ModelConfigModal({
         name: draft.name,
         token_source: draft.token_source ?? "managed",
         byok_provider: draft.token_source === "byok" ? draft.byok_provider : undefined,
+        ...(draft.token_source === "subscription" ? { cli_provider: draft.cli_provider } : {}),
       });
     } else {
       onSave(withoutInlineConnection(draft));
@@ -317,7 +396,12 @@ export function ModelConfigModal({
                         }),
                       )
                     }
-                    options={TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => ({
+                    options={(byokOnly
+                      ? LOCAL_BYOK_ONLY_SEGMENTS
+                      : localMode
+                        ? LOCAL_TOKEN_SOURCE_SEGMENTS
+                        : TOKEN_SOURCE_SEGMENTS
+                    ).map(({ mode: value, icon: Icon, labelKey }) => ({
                       value,
                       label: msg(labelKey),
                       icon: <Icon className="size-3.5" aria-hidden="true" />,
@@ -329,11 +413,31 @@ export function ModelConfigModal({
                     <span className="min-w-0 flex-1">{msg("billing.mode.managed_hint")}</span>
                   </div>
                 )}
+                {byokOnly && (
+                  <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1" dir="auto">
+                      {msg("tagger.assist.local_key_needed")}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {mode === "subscription" && (
+                <SubscriptionSourcePicker
+                  value={draft.cli_provider}
+                  onChange={(cli) =>
+                    setDraft((current) => withChosenCli(current, cli, local.status))
+                  }
+                  status={local.status}
+                  loading={local.loading}
+                  failed={local.failed}
+                  onRefresh={local.refresh}
+                />
+              )}
 
               {mode === "byok" && (
                 <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1">{msg("billing.mode.byok_hint")}</span>
+                  <span className="min-w-0 flex-1">{msg(byokHintKey(localMode))}</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -390,6 +494,7 @@ export function ModelConfigModal({
               }
               byokMode={mode === "byok"}
               byokProviders={byokProviders}
+              modelsOverride={subscriptionModels}
               placeholder={msg("auto.features.submit.components.modelconfigmodal.literal.3")}
             />
           </div>
@@ -493,6 +598,7 @@ export function ModelConfigModal({
             onClick={handleSave}
             disabled={
               !draft.name.trim() ||
+              (mode === "subscription" && !draft.cli_provider) ||
               (!nameOnly &&
                 !modelDefaultsOnly &&
                 ((draft.temperature != null &&

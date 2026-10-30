@@ -45,6 +45,8 @@ import { tip } from "@/shared/lib/tooltips";
 import { perLocale } from "@/shared/lib/per-locale";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatCentsUsd } from "@/features/billing";
+import { runEstimateLabelKey } from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { TERMS } from "@/shared/lib/terms";
 import {
   ConfigCarousel,
@@ -249,15 +251,10 @@ export function BlackboxConfigCard({
       icon: <Coins />,
     });
   }
-  if (estimateLow != null && estimateHigh != null) {
+  const estimateLabelKey = runEstimateLabelKey(tokenSource, isLocalMode());
+  if (estimateLabelKey && estimateLow != null && estimateHigh != null) {
     generalRows.push({
-      label: (
-        <HelpTip text={tip("submit.estimate")}>
-          {tokenSource === "byok"
-            ? msg("submit.summary.estimate_fee")
-            : msg("submit.summary.estimate_cost")}
-        </HelpTip>
-      ),
+      label: <HelpTip text={tip("submit.estimate")}>{msg(estimateLabelKey)}</HelpTip>,
       // Isolate "low–high" as one LTR run (U+2066…U+2069) so the dash between
       // the two number groups doesn't flip them under RTL.
       value: formatMsg("submit.summary.estimate_range", {

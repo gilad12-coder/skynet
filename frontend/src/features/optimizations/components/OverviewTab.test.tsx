@@ -98,4 +98,37 @@ void describe("detail page result layout", () => {
     assert.ok(!view.includes("RunResultCard"));
     assert.ok(!view.includes("resultCard"));
   });
+
+  void it("shows the not-held-out notice once, just above the run summary card", () => {
+    const view = fs.readFileSync(path.join(dir, "OptimizationDetailView.tsx"), "utf8");
+    assert.equal(view.match(/<HeldOutNotice /g)?.length, 1);
+    const notice = view.indexOf("<HeldOutNotice ");
+    const summary = view.indexOf(
+      '<div className="rounded-xl border border-border/40 bg-card p-4 sm:p-5">',
+    );
+    assert.ok(notice > 0 && notice < summary, "notice renders before the summary card");
+    assert.ok(!view.slice(notice, summary).includes("<div"), "nothing else sits between them");
+    const gate = view.lastIndexOf("{jobIsBlackbox", notice);
+    assert.ok(
+      view.slice(gate, notice).includes("isNotHeldOut("),
+      "the FadeIn wrapper renders only with the notice, so no empty gap sits above the summary",
+    );
+
+    const fixture = overviewFixture("oa-gepa-prompt");
+    const job = {
+      ...fixture.job,
+      blackbox_result: {
+        ...fixture.job.blackbox_result!,
+        split_counts: {
+          train: 2,
+          val: 1,
+          test: 0,
+          held_out: false,
+          selection_split: "val",
+          report_split: "val",
+        },
+      },
+    } as unknown as Fixture["job"];
+    assert.ok(!render({ ...fixture, job }).includes("not-held-out"), "Overview drops the notice");
+  });
 });

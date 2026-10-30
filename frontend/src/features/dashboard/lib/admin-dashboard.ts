@@ -7,8 +7,6 @@ import type {
   AdminDashboardDay,
   AdminDashboardTotals,
   AdminFailureReason,
-  AdminSentryIssue,
-  AdminSentryIssuesResponse,
   AdminTopProgram,
 } from "@/shared/lib/api";
 
@@ -106,43 +104,5 @@ export function programRows(programs: AdminTopProgram[]): ProgramRow[] {
     calls: program.calls,
     errors: program.errors,
     error_rate: program.calls === 0 ? 0 : Math.round((program.errors / program.calls) * 100),
-  }));
-}
-
-export type SentryView =
-  | { kind: "not_connected" }
-  | { kind: "unavailable" }
-  | { kind: "ready"; issues: AdminSentryIssue[] };
-
-/** What the error-monitoring panel should show for a Sentry response. */
-export function sentryView(response: AdminSentryIssuesResponse): SentryView {
-  if (!response.configured) return { kind: "not_connected" };
-  if (!response.available) return { kind: "unavailable" };
-  return { kind: "ready", issues: response.issues };
-}
-
-export interface SentryRow {
-  [key: string]: string | number | null;
-  id: string;
-  issue: string;
-  title: string;
-  level: string;
-  events: number;
-  users: number;
-  last_seen: string;
-  permalink: string;
-}
-
-/** Sentry issues flattened for the table; `last_seen` stays ISO so it sorts. */
-export function sentryRows(issues: AdminSentryIssue[]): SentryRow[] {
-  return issues.map((issue) => ({
-    id: issue.id,
-    issue: issue.short_id ?? issue.id,
-    title: issue.title,
-    level: issue.level ?? "",
-    events: issue.count,
-    users: issue.users,
-    last_seen: issue.last_seen ?? "",
-    permalink: issue.permalink ?? "",
   }));
 }

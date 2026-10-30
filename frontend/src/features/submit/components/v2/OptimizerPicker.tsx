@@ -14,9 +14,11 @@ import {
   optimizerOptions,
   type OptimizerOptionView,
 } from "../../lib/optimizer-options";
+import { optimizerSources } from "../../lib/optimizer-sources";
 import { EngineCard } from "../blackbox/EngineCard";
 import { StepCard } from "../blackbox/shared";
 import { v2Msg } from "./ArtifactConfirmCard";
+import { OptimizerSourceLinks } from "./OptimizerSourceLinks";
 
 // Product names stay untranslated in every locale; Auto is the one generic word.
 const OPTIMIZER_NAMES: Record<Exclude<OptimizerChoice, "auto">, string> = {
@@ -125,33 +127,45 @@ export function OptimizerPicker({
         >
           {options.map((option, i) => {
             const checked = choice === option.id;
+            const label = optimizerLabel(option.id, guided);
+            const sources = optimizerSources(option.id);
+            // Links cannot nest inside the radio button, so they sit beside it
+            // and overlay the slot EngineCard reserves at the card's foot,
+            // in the bottom-end corner.
             return (
-              <button
-                key={option.id}
-                type="button"
-                role="radio"
-                aria-checked={checked}
-                aria-disabled={!option.available || undefined}
-                tabIndex={i === focusIndex ? 0 : -1}
-                onClick={() => choose(i)}
-                className={`flex flex-col overflow-hidden rounded-xl border bg-background/60 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  checked
-                    ? "border-primary ring-1 ring-primary"
-                    : "border-border/50 hover:border-border"
-                } ${option.available ? "cursor-pointer" : "cursor-not-allowed opacity-70"}`}
-              >
-                <EngineCard
-                  engine={{
-                    id: option.id,
-                    label: optimizerLabel(option.id, guided),
-                    description: optimizerDescription(option, kind, guided || plain),
-                    available: option.available,
-                    unavailable_reason: option.unavailableReason,
-                  }}
-                  blocked={!option.available}
-                  blockedNote={option.unavailableReason ?? t("submit.v2.optimizer.unavailable")}
+              <div key={option.id} className="group/card relative flex">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  aria-disabled={!option.available || undefined}
+                  tabIndex={i === focusIndex ? 0 : -1}
+                  onClick={() => choose(i)}
+                  className={`flex flex-1 flex-col overflow-hidden rounded-xl border bg-background/60 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    checked
+                      ? "border-primary ring-1 ring-primary"
+                      : "border-border/50 group-hover/card:border-border"
+                  } ${option.available ? "cursor-pointer" : "cursor-not-allowed opacity-70"}`}
+                >
+                  <EngineCard
+                    engine={{
+                      id: option.id,
+                      label,
+                      description: optimizerDescription(option, kind, guided || plain),
+                      available: option.available,
+                      unavailable_reason: option.unavailableReason,
+                    }}
+                    blocked={!option.available}
+                    blockedNote={option.unavailableReason ?? t("submit.v2.optimizer.unavailable")}
+                    footerSlot={sources.length > 0}
+                  />
+                </button>
+                <OptimizerSourceLinks
+                  optimizerName={label}
+                  sources={sources}
+                  className="absolute end-3 bottom-3"
                 />
-              </button>
+              </div>
             );
           })}
         </div>

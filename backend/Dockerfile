@@ -2,11 +2,18 @@ FROM docker.io/node:22.22.0-bookworm-slim AS node-runtime
 
 FROM node-runtime AS harness-deps
 
+# npm installs only the opencode binary packages that match the build CPU, so
+# the package names depend on the target architecture (ECS runs arm64).
+ARG TARGETARCH
 COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
-RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
+RUN case "$TARGETARCH" in \
+        amd64) OPENCODE_PKGS="opencode-linux-x64 opencode-linux-x64-baseline" ;; \
+        arm64) OPENCODE_PKGS="opencode-linux-arm64" ;; \
+        *) echo "unsupported arch for opencode: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
     && rm -rf \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-musl \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline-musl \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-*-musl \
     && mkdir -p \
         /opt/skynet-harness-layers/anthropic \
         /opt/skynet-harness-layers/codex \
@@ -26,11 +33,11 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnes
         /opt/skynet-harness-layers/prime/@earendil-works/ \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@earendil-works \
         /opt/skynet-harness-layers/pi/ \
-    && mv \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64 \
-        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline \
-        /opt/skynet-harness-layers/opencode/
+    && mv /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
+        /opt/skynet-harness-layers/opencode/ \
+    && for PKG in $OPENCODE_PKGS; do \
+        mv "/usr/local/lib/skynet-harnesses/node_modules/$PKG" /opt/skynet-harness-layers/opencode/ || exit 1; \
+    done
 
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
@@ -117,7 +124,7 @@ RUN python -m venv /opt/prime-agent/kernel-venv \
 # and the readiness probe reports shinka_ready from it.
 # Off by default: the layer is ~700 MB and carries GPL packages (Levenshtein,
 # imageio-ffmpeg's FFmpeg), so only the sandbox image build opts in with
-# --build-arg INCLUDE_SHINKA_EVOLVE=1; Railway API/worker images stay without it.
+# --build-arg INCLUDE_SHINKA_EVOLVE=1; API/worker images stay without it.
 ARG INCLUDE_SHINKA_EVOLVE=false
 COPY core/service_gateway/optimization/blackbox/shinka_requirements.txt /opt/shinka/requirements.txt
 RUN if [ "$INCLUDE_SHINKA_EVOLVE" = "1" ] || [ "$INCLUDE_SHINKA_EVOLVE" = "true" ]; then \
@@ -191,11 +198,14 @@ ENV LITELLM_LOCAL_MODEL_COST_MAP=True
 EXPOSE 8000
 
 # One image, two roles: the API (default) and the standalone job worker
-# (SERVICE_ROLE=worker, no HTTP). Railway deploys both services from this
+# (SERVICE_ROLE=worker, no HTTP). Both services deploy from this
 # same Dockerfile; the env var picks the entrypoint so neither service needs
 # a dashboard-only custom start command.
-# Bind the platform-provided PORT when present (Railway/Heroku-style runtimes
-# inject it and route edge traffic to it) so the bound port always matches
+# Bind the platform-provided PORT when present (PaaS runtimes inject it and
+# route edge traffic to it) so the bound port always matches
 # settings.port and the generalist agent's derived MCP self-dial URL. The
 # sh -c + exec keeps the process as PID 1 for clean SIGTERM handling.
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# Uvicorn trusts X-Forwarded-For/-Proto only from FORWARDED_ALLOW_IPS; behind a
+# load balancer, set it to the balancer's subnet CIDRs. Unset keeps uvicorn's
+# own default (127.0.0.1).
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then exec python worker_main.py; else exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\"; fi"]

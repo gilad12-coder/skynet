@@ -15,6 +15,14 @@ from core.models.tests.test_blackbox import _repo_request
 
 from ..repo_scorer import RepoScoreError, RepoScorer, fold_case_scores
 from ..repo_workspace import RepoWorkspace
+from ..rule_judge import (
+    EVENT_BLOCK,
+    EVENT_NOTE,
+    EVENT_REJECTION,
+    ILLEGAL_ACTION_MESSAGE,
+    WATCH_EVERY_ACTIONS,
+    RuleJudge,
+)
 from ..sandbox import LocalSubprocessRuntime, SandboxSpec
 from ..service import run_blackbox_optimization
 from .test_repo_workspace import _archive, _patch
@@ -377,3 +385,180 @@ def test_a_repository_run_needs_its_tree(engine: str) -> None:
     route = {"url": "http://127.0.0.1:1/v1/_evaluator", "token": "t"}
     with pytest.raises(ServiceError, match="repository its parent fetched"):
         run_blackbox_optimization(payload, artifact_id="job", evaluator_route=route, repo_snapshot=None)
+
+
+class _StubJudge:
+    """Answer rule-judge prompts with one fixed reply and count the questions."""
+
+    def __init__(self, reply: str | None) -> None:
+        """Keep the reply.
+
+        Args:
+            reply: What the judge model answers, or ``None`` for a failed call.
+        """
+        self.reply = reply
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str | None:
+        """Return the fixed reply.
+
+        Args:
+            prompt: The judge prompt.
+
+        Returns:
+            The reply.
+        """
+        self.prompts.append(prompt)
+        return self.reply
+
+
+_LEGAL = json.dumps({"violation": False, "rule": None, "reason": "General change."})
+_HARDCODED = json.dumps({"violation": True, "rule": 1, "reason": "It returns the expected value for one case."})
+
+
+def _ruled(
+    tmp_path: Path, strong: _StubJudge, fast: _StubJudge | None = None
+) -> tuple[RepoScorer, Path, list[dict[str, Any]], RuleJudge]:
+    """Open a scorer for a repository with one plain-language rule and a protected folder.
+
+    Args:
+        tmp_path: Scratch folder.
+        strong: The final judge stub.
+        fast: The watch judge stub.
+
+    Returns:
+        The scorer, the archive, the recorded rule events and the judge.
+    """
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n", "eval/labels.csv": "1\n"})
+    events: list[dict[str, Any]] = []
+    judge = RuleJudge(
+        ("Do not hardcode answers for dataset cases.",),
+        ask_fast=fast or _StubJudge(_LEGAL),
+        ask_strong=strong,
+        emit=events.append,
+        run_watch=lambda watch: watch(),
+    )
+    scorer = RepoScorer(
+        RepoWorkspace(
+            runtime=LocalSubprocessRuntime(),
+            spec=SandboxSpec(lifetime_seconds=120, network_disabled=True),
+            archive=archive,
+            editable_paths=["src"],
+            readonly_paths=[],
+            setup_command=None,
+            secrets={},
+            protected_paths=["eval"],
+        ),
+        "import os\ndef score(repo_path):\n"
+        "    value = int(open(os.path.join(repo_path, 'src/app.py')).read().split('=')[1])\n"
+        "    return {'score': value / 10, 'feedback': 'value read'}\n",
+        timeout_seconds=60,
+        rule_judge=judge,
+    )
+    return scorer, archive, events, judge
+
+
+def test_a_blocked_version_gets_only_the_fixed_message(tmp_path: Path) -> None:
+    """A path-rule refusal tells the agent the fixed text; the reason goes to the run's events."""
+    scorer, archive, events, _ = _ruled(tmp_path, _StubJudge(_LEGAL))
+    try:
+        reply = scorer.dispatch({"candidate": _patch(tmp_path / "bad", archive, {"eval/labels.csv": "9\n"})})
+        assert reply.status == 422
+        assert reply.body.decode() == ILLEGAL_ACTION_MESSAGE
+        assert events == [
+            {
+                "kind": EVENT_BLOCK,
+                "rule": "optimize.toml [paths]",
+                "reason": "'eval/labels.csv' is protected by the repository's optimize.toml ([paths] protected).",
+            }
+        ]
+    finally:
+        scorer.close()
+
+
+def test_a_version_that_rewrites_a_protected_file_while_it_runs_is_blocked(tmp_path: Path) -> None:
+    """The runtime protected-file check is the same gate: fixed message, reason in the events."""
+    scorer, archive, events, _ = _ruled(tmp_path, _StubJudge(_LEGAL))
+    try:
+        cheat = _patch(
+            tmp_path / "cheat",
+            archive,
+            {"src/app.py": "x = 1\nopen('eval/labels.csv', 'w').write('99')\n"},
+        )
+        scorer._code = "import os, runpy\ndef score(repo_path):\n    runpy.run_path(os.path.join(repo_path, 'src/app.py'))\n    return {'score': 1.0}\n"
+        reply = scorer.dispatch({"candidate": cheat})
+        assert reply.status == 422
+        assert reply.body.decode() == ILLEGAL_ACTION_MESSAGE
+        assert [event["kind"] for event in events] == [EVENT_BLOCK]
+        assert "eval/labels.csv" in events[0]["reason"]
+    finally:
+        scorer.close()
+
+
+def test_an_illegal_approach_scores_zero_without_running_the_scorer(tmp_path: Path) -> None:
+    """The final judge's rejection is a scored 0 with its reason, so every optimizer keeps it in history."""
+    strong = _StubJudge(_HARDCODED)
+    scorer, archive, events, _ = _ruled(tmp_path, strong)
+    try:
+        version = _patch(tmp_path / "v1", archive, {"src/app.py": "x = 9\n"})
+        first = scorer.dispatch({"candidate": version})
+        second = scorer.score(version)
+        assert first.status == 200
+        assert json.loads(first.body) == {
+            "score": 0.0,
+            "feedback": "Illegal approach (Rule 1): It returns the expected value for one case.",
+            "illegal_approach": {"rule": "Rule 1", "reason": "It returns the expected value for one case."},
+        }
+        assert second["score"] == 0.0
+        assert len(strong.prompts) == 1
+        assert "x = 9" in strong.prompts[0]
+        assert scorer._calls == 0
+        assert [event["kind"] for event in events] == [EVENT_REJECTION]
+    finally:
+        scorer.close()
+
+
+def test_a_legal_version_is_scored_and_the_baseline_is_not_judged(tmp_path: Path) -> None:
+    """The starting commit needs no verdict; a legal change is scored normally."""
+    strong = _StubJudge(_LEGAL)
+    scorer, archive, events, _ = _ruled(tmp_path, strong)
+    try:
+        assert scorer.score("")["score"] == pytest.approx(0.1)
+        assert strong.prompts == []
+        assert scorer.score(_patch(tmp_path / "v1", archive, {"src/app.py": "x = 4\n"}))["score"] == pytest.approx(0.4)
+        assert len(strong.prompts) == 1
+        assert events == []
+    finally:
+        scorer.close()
+
+
+def test_a_version_the_judge_cannot_check_stays_unscored(tmp_path: Path) -> None:
+    """A failed judge never turns into a false 0 or a free pass."""
+    scorer, archive, events, _ = _ruled(tmp_path, _StubJudge(None))
+    try:
+        reply = scorer.dispatch({"candidate": _patch(tmp_path / "v1", archive, {"src/app.py": "x = 4\n"})})
+        assert reply.status == 422
+        assert "rule judge could not check this version" in reply.body.decode()
+        assert scorer._calls == 0
+        assert events == []
+    finally:
+        scorer.close()
+
+
+def test_a_watch_note_reaches_the_agent_in_its_next_scoring_reply(tmp_path: Path) -> None:
+    """The watch judge's warning is put in front of the next feedback the agent reads, once."""
+    fast = _StubJudge(json.dumps({"violation": True, "rule": 1, "reason": "It reads expected answers."}))
+    scorer, archive, events, judge = _ruled(tmp_path, _StubJudge(_LEGAL), fast)
+    try:
+        for index in range(WATCH_EVERY_ACTIONS):
+            judge.record_action(f"action {index}")
+        version = _patch(tmp_path / "v1", archive, {"src/app.py": "x = 4\n"})
+        warned = json.loads(scorer.dispatch({"candidate": version}).body)
+        assert warned["feedback"] == (
+            "Check the constraints file. You are probably about to violate rule 1.\n\nvalue read"
+        )
+        assert warned["score"] == pytest.approx(0.4)
+        assert json.loads(scorer.dispatch({"candidate": version}).body)["feedback"] == "value read"
+        assert [event["kind"] for event in events] == [EVENT_NOTE]
+    finally:
+        scorer.close()

@@ -175,7 +175,7 @@ def test_new_account_skips_intake_only_in_preview_environments(
     accounts_client: TestClient, monkeypatch: pytest.MonkeyPatch, route: str, environment_name: str, skipped: bool
 ) -> None:
     """A new account starts with the setup intake done only in a PR preview environment."""
-    monkeypatch.setattr(settings, "railway_environment_name", environment_name)
+    monkeypatch.setattr(settings, "app_environment", environment_name)
     created = accounts_client.post(
         route,
         json={"email": "ivy@example.com", "password": "longenough1", "name": "Ivy"},
