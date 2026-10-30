@@ -213,8 +213,9 @@ locals {
 # ---------------------------------------------------------------- deploy roles
 # One role per environment. Each trusts only its own GitHub environment and
 # reaches only its own cluster, services, task roles, logs and parameters.
-# Task definitions: RegisterTaskDefinition has no resource-level scope, so
-# each role must tag a new revision Environment=<env>. ECS authorizes that tag
+# Task definitions: the deploy roles allow RegisterTaskDefinition on every
+# family (resource "*") and use a tag condition instead: each role must tag a
+# new revision Environment=<env>. ECS authorizes that tag
 # as ecs:TagResource on the new revision, which EcsTags allows only for the
 # role's own families. scripts/deploy.sh also uses only revisions whose
 # execution and task roles are its own environment's roles; PassTaskRoles

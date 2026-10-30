@@ -435,13 +435,19 @@ delete() {
     done
   fi
 
-  # The newest migrate revision carries the database name and Redis DB.
-  migrate_td="$(aws ecs list-task-definitions --family-prefix "skynet-pr-$pr-migrate" --status ACTIVE \
-    --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)"
-  if [[ "$migrate_td" == */skynet-pr-$pr-migrate:* ]]; then
-    echo "dropping database skynet_pr_$pr"
-    run_migrate_task "$cfg" "$migrate_td" \
-      "$(jq -cn --arg s "$drop_db" '{containerOverrides: [{name: "migrate", command: ["sh", "-c", $s]}]}')"
+  # Only while the PR holds its slot: a delete that released the slot already
+  # dropped the database and flushed the Redis DB, and its images are gone.
+  # The Redis DB comes from the slot, not from the revision, because another
+  # PR may hold the revision's old index now.
+  if [[ -n "$slot" ]]; then
+    migrate_td="$(aws ecs list-task-definitions --family-prefix "skynet-pr-$pr-migrate" --status ACTIVE \
+      --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)"
+    if [[ "$migrate_td" == */skynet-pr-$pr-migrate:* ]]; then
+      echo "dropping database skynet_pr_$pr"
+      run_migrate_task "$cfg" "$migrate_td" \
+        "$(jq -cn --arg s "$drop_db" --arg slot "$slot" '{containerOverrides: [{name: "migrate", command: ["sh", "-c", $s],
+          environment: [{name: "PREVIEW_REDIS_DB", value: $slot}]}]}')"
+    fi
   fi
 
   for repo in skynet/preview-backend skynet/preview-frontend; do
