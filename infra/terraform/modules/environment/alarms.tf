@@ -163,53 +163,34 @@ resource "aws_cloudwatch_metric_alarm" "service_memory" {
   }
 }
 
-# Fires when a service runs fewer tasks than desired (crash loop, failed
-# deploy, image pull failure). Needs Container Insights (enabled).
+# Fires when a service runs fewer tasks than its configured count (crash
+# loop, failed start, image pull failure, scale to 0). The floor is the
+# configured count, not DesiredTaskCount: a scale to 0 lowers desired too,
+# so "running - desired" stays 0. Container Insights (enabled) sends no data
+# while a service has no tasks, so missing data breaches. Deploys keep
+# running at or above the floor (minimum healthy percent 100), and
+# autoscaling never goes below it. 3 of 5 one-minute points: ALARM about
+# 3 to 5 minutes after the outage starts.
 resource "aws_cloudwatch_metric_alarm" "service_running" {
-  for_each = aws_ecs_service.this
+  for_each = { for k, v in aws_ecs_service.this : k => v if var.services[k].desired_count > 0 }
 
   alarm_name          = "${local.name}-${each.key}-tasks-missing"
-  alarm_description   = "${each.key} runs fewer tasks than desired for 10 minutes."
+  alarm_description   = "${each.key} running tasks were below ${var.services[each.key].desired_count}, or missing, in 3 of the last 5 minutes."
+  namespace           = "ECS/ContainerInsights"
+  metric_name         = "RunningTaskCount"
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 3
+  threshold           = var.services[each.key].desired_count
   comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
-  threshold           = 0
   treat_missing_data  = "breaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
-  metric_query {
-    id          = "gap"
-    expression  = "running - desired"
-    label       = "running minus desired"
-    return_data = true
-  }
-
-  metric_query {
-    id = "running"
-    metric {
-      namespace   = "ECS/ContainerInsights"
-      metric_name = "RunningTaskCount"
-      period      = 300
-      stat        = "Minimum"
-      dimensions = {
-        ClusterName = aws_ecs_cluster.this.name
-        ServiceName = aws_ecs_service.this[each.key].name
-      }
-    }
-  }
-
-  metric_query {
-    id = "desired"
-    metric {
-      namespace   = "ECS/ContainerInsights"
-      metric_name = "DesiredTaskCount"
-      period      = 300
-      stat        = "Maximum"
-      dimensions = {
-        ClusterName = aws_ecs_cluster.this.name
-        ServiceName = aws_ecs_service.this[each.key].name
-      }
-    }
+  dimensions = {
+    ClusterName = aws_ecs_cluster.this.name
+    ServiceName = each.value.name
   }
 }
 
