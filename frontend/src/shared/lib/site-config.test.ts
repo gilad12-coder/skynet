@@ -32,8 +32,8 @@ test("empty NEXT_PUBLIC_SITE_URL falls back to https://skynetml.com", () => {
 });
 
 test("a set NEXT_PUBLIC_SITE_URL wins over the fallback", () => {
-  withSiteUrl("https://frontend-staging-102e.up.railway.app", () => {
-    assert.equal(getSiteUrl(), "https://frontend-staging-102e.up.railway.app");
+  withSiteUrl("https://staging.skynetml.com", () => {
+    assert.equal(getSiteUrl(), "https://staging.skynetml.com");
   });
 });
 

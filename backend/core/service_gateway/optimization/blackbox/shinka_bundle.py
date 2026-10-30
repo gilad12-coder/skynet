@@ -21,7 +21,7 @@ import random
 import re
 import subprocess
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -334,15 +334,24 @@ def _score_text(program: Any) -> str:
 class RepoBundle:
     """The run's repository checkout and the rules a bundle version must follow."""
 
-    def __init__(self, checkout: Path, editable_paths: Sequence[str], readonly_paths: Sequence[str]) -> None:
+    def __init__(
+        self,
+        checkout: Path,
+        editable_paths: Sequence[str],
+        readonly_paths: Sequence[str],
+        on_block: Callable[[str], None] | None = None,
+    ) -> None:
         """Bind to a checkout whose ``HEAD`` is the run's starting commit.
 
         Args:
             checkout: Folder made by ``repo_tree.unpack_tree``, seed already committed.
             editable_paths: Files and folders a version may change.
             readonly_paths: Submodules and Git LFS files, which stay as fetched.
+            on_block: Under a constraints file, receives each path-rule
+                refusal's reason, and the model reads only the illegal-action message.
         """
         self.checkout = checkout
+        self.on_block = on_block
         self.editable_paths = [str(path) for path in editable_paths]
         self.readonly_paths = [str(path) for path in readonly_paths]
         self.start = self._git("rev-parse", "HEAD").strip()
@@ -351,13 +360,21 @@ class RepoBundle:
         self._paths: list[str] | None = None
 
     @classmethod
-    def prepare(cls, repo: Mapping[str, Any], seed_patch: Any, destination: Path) -> RepoBundle:
+    def prepare(
+        cls,
+        repo: Mapping[str, Any],
+        seed_patch: Any,
+        destination: Path,
+        on_block: Callable[[str], None] | None = None,
+    ) -> RepoBundle:
         """Unpack the shipped tree and commit the seed version on top as the starting commit.
 
         Args:
-            repo: Parent payload's ``repo`` entry: tree chunks and path rules.
+            repo: Parent payload's ``repo`` entry: tree chunks, path rules and
+                whether a constraints file governs the run.
             seed_patch: Starting version as a patch against the fetched commit, or empty.
             destination: Folder the checkout goes in.
+            on_block: Receives each path-rule block's reason when ``repo`` is constrained.
 
         Returns:
             The bundle rules bound to the new checkout.
@@ -367,7 +384,12 @@ class RepoBundle:
             repo_tree.apply_patch(checkout, seed_patch)
             _run_git(checkout, "add", "--all")
             _run_git(checkout, "commit", "--quiet", "--no-verify", "-m", "seed")
-        return cls(checkout, repo["editable_paths"], repo.get("readonly_paths") or ())
+        return cls(
+            checkout,
+            repo["editable_paths"],
+            repo.get("readonly_paths") or (),
+            on_block=on_block if repo.get("constrained") else None,
+        )
 
     def _git(self, *arguments: str) -> str:
         """Run git in the checkout.
@@ -397,6 +419,22 @@ class RepoBundle:
         if not _covers(self.editable_paths, path):
             return "it is outside the editable paths"
         return None
+
+    def refusal(self, path: str, problem: str) -> str:
+        """Word a path-rule refusal, and log it as a block under a constraints file.
+
+        Args:
+            path: Repository-relative path the version may not change.
+            problem: The reason from :meth:`rule_problem`.
+
+        Returns:
+            The illegal-action message under a constraints file, else the reason naming the path.
+        """
+        reason = f"Cannot change '{path}': {problem}."
+        if self.on_block is None:
+            return reason
+        self.on_block(reason)
+        return repo_tree.ILLEGAL_ACTION_MESSAGE
 
     def paths(self) -> list[str]:
         """List the starting commit's text files a version may change.
@@ -519,10 +557,11 @@ class RepoBundle:
         applied = 0
         for path, body in edits:
             problem = self.rule_problem(path)
-            current = self.current(updated, path)
-            if problem is None and current is None and self.exists_at_start(path):
-                problem = f"it is binary or larger than {MAX_FILE_BYTES // 1024} KiB, so it cannot be edited"
             if problem is not None:
+                return None, 0, self.refusal(path, problem)
+            current = self.current(updated, path)
+            if current is None and self.exists_at_start(path):
+                problem = f"it is binary or larger than {MAX_FILE_BYTES // 1024} KiB, so it cannot be edited"
                 return None, 0, f"Cannot change '{path}': {problem}."
             try:
                 updated[path], count = apply_file_edit(body, current)
@@ -585,7 +624,7 @@ class RepoBundle:
         for path in files:
             problem = self.rule_problem(path)
             if problem is not None:
-                raise ValueError(f"Cannot change '{path}': {problem}.")
+                raise ValueError(self.refusal(path, problem))
         with self._lock:
             self._git("reset", "--quiet", "--hard", self.start)
             self._git("clean", "--quiet", "-fdx")

@@ -23,6 +23,7 @@ import {
   useExperienceOptional,
   type ExperienceLevel,
 } from "@/features/experience";
+import { withSupportedHostCli } from "@/features/local-runtime";
 import { syncPushSubscription } from "@/features/notifications";
 import { readPref, useUserPrefs } from "@/features/settings";
 import {
@@ -490,7 +491,7 @@ export function WizardV2Provider({
       optimizer: {
         choice: optimizer.choice,
         budget: optimizer.budget,
-        proposer: optimizer.proposer,
+        proposer: withSupportedHostCli(optimizer.proposer),
         shinka: optimizer.choice === "shinka_evolve" ? optimizer.shinka : null,
       },
       models: {
@@ -574,11 +575,15 @@ export function WizardV2Provider({
   // The server creates a repository run's budget and runs its setup check
   // (staging the checkout, inferring a setup command) on submit.
   const submitRepo = async () => {
-    const request = repoRunRequest(state, {
-      username,
-      tokenSource,
-      maxCostCents: budgetUncapped ? null : maxCostCents,
-    });
+    const proposer = withSupportedHostCli(state.optimizer.proposer);
+    const request = repoRunRequest(
+      { ...state, optimizer: { ...state.optimizer, proposer } },
+      {
+        username,
+        tokenSource,
+        maxCostCents: budgetUncapped ? null : maxCostCents,
+      },
+    );
     if (runBlockedReason || !request) {
       toast.error(v2Text(runBlockedReason ?? "submit.v2.metric.issue.metric_code", guided));
       return;

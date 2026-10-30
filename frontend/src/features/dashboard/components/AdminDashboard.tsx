@@ -6,15 +6,11 @@ import type { ReactNode } from "react";
 import {
   ApiError,
   getAdminDashboard,
-  getAdminSentryIssues,
   type AdminDashboardResponse,
-  type AdminSentryIssuesResponse,
 } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { EmptyState } from "@/shared/ui/empty-state";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { ShieldCheck, Warning } from "@/shared/ui/icons";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { LoadingState } from "@/shared/ui/loading-state";
 import { AnimatedNumber, StaggerContainer, StaggerItem } from "@/shared/ui/motion";
@@ -28,11 +24,8 @@ import {
   growthSeries,
   programRows,
   runSeries,
-  sentryRows,
-  sentryView,
   successRate,
   type AdminRange,
-  type SentryRow,
 } from "../lib/admin-dashboard";
 import { DailyLines, StackedTimeline, type DailySeries } from "./AnalyticsCharts";
 import { KpiCard } from "./AnalyticsParts";
@@ -69,18 +62,6 @@ function formatMoney(cents: number): string {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(getActiveIntlLocale(), {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 /** A KPI label with its definition on hover. */
@@ -130,98 +111,6 @@ function growthLines(): readonly DailySeries[] {
       color: "var(--color-chart-5)",
     },
   ];
-}
-
-function SentryPanel({ state }: { state: LoadState<AdminSentryIssuesResponse> }) {
-  if (state.kind === "loading") return <LoadingState className="py-6" />;
-  if (state.kind === "forbidden") return null;
-  if (state.kind === "error") {
-    return <InlineErrorRow message={msg("dashboard.admin.sentry.unavailable")} />;
-  }
-  const view = sentryView(state.data);
-  if (view.kind === "not_connected") {
-    return (
-      <EmptyState
-        variant="compact"
-        icon={ShieldCheck}
-        title={msg("dashboard.admin.sentry.not_connected")}
-        description={msg("dashboard.admin.sentry.not_connected_description")}
-      />
-    );
-  }
-  if (view.kind === "unavailable") {
-    return (
-      <EmptyState
-        variant="compact"
-        icon={Warning}
-        title={msg("dashboard.admin.sentry.unavailable")}
-        description={msg("dashboard.admin.sentry.unavailable_description")}
-      />
-    );
-  }
-  if (view.issues.length === 0) {
-    return (
-      <EmptyState
-        variant="compact"
-        icon={ShieldCheck}
-        title={msg("dashboard.admin.sentry.empty")}
-      />
-    );
-  }
-  return (
-    <SortableTable<SentryRow>
-      rows={sentryRows(view.issues)}
-      rowKey={(row) => row.id}
-      exportName="sentry-issues"
-      initialSort="events"
-      initialDir="desc"
-      columns={[
-        {
-          key: "title",
-          label: msg("dashboard.admin.col.error"),
-          width: 320,
-          // Sentry titles are English; without ltr an RTL page moves their trailing period to the front.
-          dir: "ltr",
-          className: "max-w-[24rem] truncate",
-          render: (row) =>
-            row.permalink ? (
-              <a
-                href={row.permalink}
-                target="_blank"
-                rel="noreferrer"
-                title={row.title}
-                aria-label={`${row.title}, ${msg("dashboard.admin.sentry.open")}`}
-                className="underline-offset-2 hover:underline"
-              >
-                {row.title}
-              </a>
-            ) : (
-              <span title={row.title}>{row.title}</span>
-            ),
-        },
-        { key: "issue", label: msg("dashboard.admin.col.issue"), width: 120, dir: "ltr" },
-        { key: "level", label: msg("dashboard.admin.col.level"), width: 90, filter: true },
-        {
-          key: "events",
-          label: msg("dashboard.admin.col.events"),
-          width: 90,
-          render: (row) => formatCount(row.events),
-        },
-        {
-          key: "users",
-          label: msg("dashboard.admin.col.users"),
-          width: 90,
-          render: (row) => formatCount(row.users),
-        },
-        {
-          key: "last_seen",
-          label: msg("dashboard.admin.col.last_seen"),
-          width: 140,
-          render: (row) => formatTime(row.last_seen),
-        },
-      ]}
-    />
-  );
 }
 
 /** The dashboard body for a loaded window. */
@@ -498,7 +387,7 @@ function DashboardBody({ data, compact }: { data: AdminDashboardResponse; compac
 
 /**
  * Admin-only dashboard: signups, activation, active users, runs and why they
- * fail, money, served programs, product events and Sentry errors. A 403 from
+ * fail, money, served programs and product events. A 403 from
  * the backend hides it, so a stale admin flag never shows a broken panel.
  * `compact` draws the same sections smaller, with definitions on hover only.
  */
@@ -513,7 +402,6 @@ export function AdminDashboard({
   const [dashboard, setDashboard] = useState<LoadState<AdminDashboardResponse>>({
     kind: "loading",
   });
-  const [sentry, setSentry] = useState<LoadState<AdminSentryIssuesResponse>>({ kind: "loading" });
 
   const loadDashboard = useCallback(async (window: AdminRange) => {
     setDashboard({ kind: "loading" });
@@ -524,22 +412,9 @@ export function AdminDashboard({
     }
   }, []);
 
-  const loadSentry = useCallback(async () => {
-    setSentry({ kind: "loading" });
-    try {
-      setSentry({ kind: "ready", data: await getAdminSentryIssues() });
-    } catch (err) {
-      setSentry(stateFromError(err));
-    }
-  }, []);
-
   useEffect(() => {
     if (active) void loadDashboard(days);
   }, [active, days, loadDashboard]);
-
-  useEffect(() => {
-    if (active) void loadSentry();
-  }, [active, loadSentry]);
 
   if (dashboard.kind === "forbidden") return null;
 
@@ -571,19 +446,6 @@ export function AdminDashboard({
         />
       )}
       {dashboard.kind === "ready" && <DashboardBody data={dashboard.data} compact={compact} />}
-
-      <AnalyticsSection
-        title={msg("dashboard.admin.section.errors")}
-        className="border-border/60"
-        compact={compact}
-      >
-        <PanelIntro
-          title={msg("dashboard.admin.sentry.title")}
-          help={msg("dashboard.admin.sentry_help")}
-          compact={compact}
-        />
-        <SentryPanel state={sentry} />
-      </AnalyticsSection>
     </div>
   );
 }

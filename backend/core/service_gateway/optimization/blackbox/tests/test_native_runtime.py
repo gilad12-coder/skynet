@@ -398,7 +398,12 @@ def test_repository_tree_and_rules_reach_every_repository_engine(
     session = FakeSession()
     session.candidate = ""
     ctx = _context(tmp_path, FakeRuntime(session))
-    repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
+    repo = {
+        "chunks": [str(chunk) for chunk in chunks],
+        "editable_paths": ["src"],
+        "readonly_paths": ["vendor/lib"],
+        "constrained": True,
+    }
     ctx.native_options = replace(ctx.native_options, repo=repo)
     task = Task("", cases=[{"id": "a"}, {"id": "b"}])
     run_native_engine(engine_id, task, EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
@@ -410,6 +415,7 @@ def test_repository_tree_and_rules_reach_every_repository_engine(
         "chunks": ["repo-tree/tree.0000.b64", "repo-tree/tree.0001.b64"],
         "editable_paths": ["src"],
         "readonly_paths": ["vendor/lib"],
+        "constrained": True,
     }
     assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
 
@@ -1102,6 +1108,7 @@ def test_shinka_ships_a_repository_checkout_with_its_bundle_helpers(
         "chunks": ["repo-tree/tree.0000.b64"],
         "editable_paths": ["src"],
         "readonly_paths": ["vendor"],
+        "constrained": False,
     }
     assert {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py"} <= set(session.files)
 

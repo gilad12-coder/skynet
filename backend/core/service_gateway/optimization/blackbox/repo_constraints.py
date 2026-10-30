@@ -7,8 +7,10 @@ add instructions for the agent. It can never widen an editable path or grant
 a service; asking for either fails the setup check with the reason.
 
 Enforced: ``[paths] editable`` and ``[paths] protected`` (every version is
-checked against them before it is scored or published). Not enforced:
-``[instructions]``, which the agent reads as guidance only.
+checked against them before it is scored or published), and ``[rules]
+illegal``, plain-language rules that judge models check during the run and on
+every version before it is scored. Not enforced: ``[instructions]``, which
+the agent reads as guidance only.
 """
 
 from __future__ import annotations
@@ -28,10 +30,13 @@ _MAX_INTENT_CHARS = 4_000
 _MAX_INVARIANTS = 50
 _MAX_INVARIANT_CHARS = 500
 _MAX_COMMAND_CHARS = 300
+_MAX_RULES = 50
+_MAX_RULE_CHARS = 500
 _SECTIONS: dict[str, frozenset[str]] = {
     "paths": frozenset({"editable", "protected"}),
     "setup": frozenset({"command"}),
     "instructions": frozenset({"intent", "invariants"}),
+    "rules": frozenset({"illegal"}),
 }
 
 
@@ -49,6 +54,7 @@ class RepoConstraints:
     setup_command: str | None = None
     intent: str | None = None
     invariants: tuple[str, ...] = ()
+    rules: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,11 @@ class RepoEnvironment:
     setup_command: str | None
     constraints: RepoConstraints | None = None
     notes: tuple[str, ...] = ()
+
+    @property
+    def rules(self) -> tuple[str, ...]:
+        """Return the plain-language rules the judges enforce, in file order."""
+        return self.constraints.rules if self.constraints is not None else ()
 
     def record(
         self, *, repository: str, commit: str, readonly_paths: Sequence[str], secret_names: Iterable[str]
@@ -88,6 +99,7 @@ class RepoEnvironment:
             "instructions": {"intent": file.intent, "invariants": list(file.invariants)}
             if file and (file.intent or file.invariants)
             else None,
+            "rules": list(self.rules),
             "notes": list(self.notes),
         }
 
@@ -222,6 +234,10 @@ def parse_constraints(raw: bytes) -> RepoConstraints:
         raise ConstraintsError(
             f"{CONSTRAINTS_FILE}: [instructions] invariants must be a list of at most {_MAX_INVARIANTS} items."
         )
+    rules = document.get("rules", {})
+    illegal = rules.get("illegal", [])
+    if "illegal" in rules and (not isinstance(illegal, list) or not 1 <= len(illegal) <= _MAX_RULES):
+        raise ConstraintsError(f"{CONSTRAINTS_FILE}: [rules] illegal must list 1 to {_MAX_RULES} rules.")
     return RepoConstraints(
         sha256=hashlib.sha256(raw).hexdigest(),
         editable_paths=editable,
@@ -231,6 +247,7 @@ def parse_constraints(raw: bytes) -> RepoConstraints:
         if "intent" in instructions
         else None,
         invariants=tuple(_text(item, "[instructions] invariants", _MAX_INVARIANT_CHARS) for item in invariants),
+        rules=tuple(_text(item, "[rules] illegal", _MAX_RULE_CHARS) for item in illegal),
     )
 
 
@@ -345,8 +362,9 @@ def instructions_brief(environment: RepoEnvironment) -> str:
         environment: The effective rules.
 
     Returns:
-        Markdown naming the protected paths and the file's instructions, marked
-        as guidance where the runtime does not enforce them.
+        Markdown naming the protected paths, every numbered plain-language
+        rule, and the file's instructions, marked as guidance where the
+        runtime does not enforce them.
     """
     lines = [
         f"## Repository rules ({CONSTRAINTS_FILE})",
@@ -355,6 +373,15 @@ def instructions_brief(environment: RepoEnvironment) -> str:
         + ", ".join(f"`{path}`" for path in environment.protected_paths)
         + ".",
     ]
+    if environment.rules:
+        lines += [
+            "",
+            "Illegal approaches. A judge model checks your work against these rules during the run, and"
+            " checks every version before it is scored. A version that breaks a rule is not scored: it"
+            " gets a score of 0 and keeps the judge's reason in the run history.",
+            "",
+        ]
+        lines += [f"- {label}: {rule}" for label, rule in numbered_rules(environment.rules)]
     file = environment.constraints
     if file is not None and (file.intent or file.invariants):
         lines += ["", "Guidance from the repository (not enforced; the scorer decides):"]
@@ -362,3 +389,15 @@ def instructions_brief(environment: RepoEnvironment) -> str:
             lines += ["", file.intent]
         lines += [f"- {item}" for item in file.invariants]
     return "\n".join(lines)
+
+
+def numbered_rules(rules: Sequence[str]) -> list[tuple[str, str]]:
+    """Name each plain-language rule the way the agent, judges and events refer to it.
+
+    Args:
+        rules: The rules in file order.
+
+    Returns:
+        ``("Rule 1", text)`` pairs, numbered from 1.
+    """
+    return [(f"Rule {index}", rule) for index, rule in enumerate(rules, start=1)]
