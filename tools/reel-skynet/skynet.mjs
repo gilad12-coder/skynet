@@ -6,12 +6,47 @@ export const TICKETS_CSV = fileURLToPath(new URL("./fixtures/tickets.csv", impor
 
 const WORKBENCH = ".monaco-workbench";
 
-// AWS builds no PR previews yet (SKY-164), so reels run against staging or local dev.
 export const STAGING_URL = "https://staging.skynetml.com";
 
-/** The backend that serves the frontend `origin`: AWS staging or local dev. */
+/** The PR preview frontend (SKY-164). Its API is `https://api-pr-<n>.staging.skynetml.com`. */
+export const previewUrl = (pr) => `https://pr-${pr}.staging.skynetml.com`;
+
+/** The backend that serves the frontend `origin`: a PR preview, AWS staging or local dev. */
 function apiFor(origin) {
+  const host = new URL(origin).hostname;
+  if (/^pr-\d+\.staging\.skynetml\.com$/.test(host)) return `https://api-${host}`;
   return origin === STAGING_URL ? "https://api-staging.skynetml.com" : "http://localhost:8000";
+}
+
+async function servedCommit(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    return res.ok ? ((await res.json()).commit ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wait until the PR preview serves `sha` on both the backend (`/health`) and
+ * the frontend (`/api/version`). Without `sha`, wait until both answer.
+ * Returns `{ backend, frontend }` (commit SHAs). Throws after `timeoutMs`.
+ */
+export async function waitForPreview(pr, { sha, timeoutMs = 20 * 60_000 } = {}) {
+  const app = previewUrl(pr);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const served = {
+      backend: await servedCommit(`${apiFor(app)}/health`),
+      frontend: await servedCommit(`${app}/api/version`),
+    };
+    const ok = sha ? served.backend === sha && served.frontend === sha : served.backend && served.frontend;
+    if (ok) return served;
+    if (Date.now() > deadline) {
+      throw new Error(`preview ${app} is not ready: ${JSON.stringify(served)}. See the PR's preview comment and run.`);
+    }
+    await new Promise((r) => setTimeout(r, 15_000));
+  }
 }
 
 function origin(page) {

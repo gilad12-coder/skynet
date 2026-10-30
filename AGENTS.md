@@ -33,9 +33,15 @@ run `/scope`.
 
 ## Merge policy (MANDATORY)
 
-Feature PRs target `staging`, never `main`. A PR environment is a full copy of
-staging with an empty database. AWS does not build PR environments yet
-(SKY-164); until it does, run the acceptance checks on AWS staging.
+Feature PRs target `staging`, never `main`. Each PR from this repository gets
+a PR environment (preview), a full copy of staging with an empty database, at
+`https://pr-<n>.staging.skynetml.com` (API `https://api-pr-<n>.staging.skynetml.com`).
+Run the acceptance checks and record the videos there, before the merge.
+`.github/workflows/preview.yml` builds it on every push and deletes it when the
+PR closes. At most 4 previews run at once; a preview with no push for 48 hours
+is deleted. PRs from forks or Dependabot, and PRs whose files cannot change
+the running app (docs, `droid-wiki/`, `tools/reel-skynet/`, tests), get no
+preview; add the label `preview` to ask for one.
 
 **Backend PRs** (no file under `frontend/`) merge themselves into `staging`
 only when **all** of these gates pass:
@@ -79,16 +85,16 @@ locally, check them again, and then push them together in one push.
 The merger has to sign up and finish a real run in each `*-pr-<n>`
 environment. Five things broke that once; keep them true:
 
-- **The proxy knows the backend's key.** A PR environment gets a fresh
-  `litellm` database, so the virtual key in `LITELLM_PROXY_API_KEY` is unknown
-  there and every managed call (the assistant included) fails with
+- **The proxy knows the backend's key.** Previews share the `staging`
+  `litellm`. If its database loses the virtual key in `LITELLM_PROXY_API_KEY`,
+  every managed call (the assistant included) fails with
   `Invalid proxy server token`. `deploy/litellm/start.py` registers
   `LITELLM_SEED_KEY` at boot; on `staging` it must equal the backend's
   `LITELLM_PROXY_API_KEY`.
 - **Preview accounts verify email and get credit.** In a `*-pr-<n>`
   environment, sign-up sends a real confirmation code, exactly like `staging`
   (the test-account helper reads it from the owned inbox), and a new account gets
-  `PREVIEW_GRANT_CENTS` (set on `staging` `backend` and `worker`, 1000 = $10)
+  `PREVIEW_GRANT_CENTS` (from the `staging` app secrets, 1000 = $10)
   that can fund a budget. Production and `staging` keep a 0 grant.
 - **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
   new account (password or OAuth sign-up) starts with the intake marked done
@@ -110,7 +116,9 @@ environment. Five things broke that once; keep them true:
   `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
 - **Diagnose before labeling `needs-human`.** Check each service's latest
   deployment and its events (`aws ecs describe-services --cluster
-  skynet-<env> --services backend worker frontend litellm`).
+  skynet-<env> --services backend worker frontend litellm`; a preview's
+  services are `pr-<n>-backend`, `pr-<n>-worker` and `pr-<n>-frontend` in
+  `skynet-staging`, with logs in `/ecs/skynet-staging/preview`).
 
 ## Product and runtime model
 

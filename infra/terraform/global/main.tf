@@ -1,8 +1,9 @@
 # Account-wide resources shared by staging and production:
-# - ECR repositories (one image is built once and promoted by tag).
+# - ECR repositories (one image is built once and promoted by tag), and
+#   separate repositories for PR preview images.
 # - The GitHub Actions OIDC provider and its roles (no static AWS keys): one
-#   deploy role per environment, a read-only plan role for pull requests and
-#   an apply role limited to the staging and main branches.
+#   deploy role per environment, a PR preview role, a read-only plan role for
+#   pull requests and an apply role limited to the staging and main branches.
 
 terraform {
   required_version = ">= 1.11.0"
@@ -128,6 +129,61 @@ resource "aws_ecr_lifecycle_policy" "this" {
   })
 }
 
+# PR preview images (SKY-164) live in their own repositories. The preview
+# role builds from any branch, so it must not push a tag that staging or
+# production could later deploy from skynet/backend or skynet/frontend.
+resource "aws_ecr_repository" "preview" {
+  for_each = toset(["backend", "frontend"])
+
+  name                 = "skynet/preview-${each.key}"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "KMS"
+  }
+}
+
+# scripts/preview.sh deletes a PR's images when it deletes the preview. These
+# rules remove what a failed delete leaves. A live preview is redeployed at
+# least every 48 hours or deleted, and a redeploy pushes an image again when
+# it is older than 11 days, so 14 days never removes a running image.
+resource "aws_ecr_lifecycle_policy" "preview" {
+  for_each   = aws_ecr_repository.preview
+  repository = each.value.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Delete untagged images after 1 day"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 1
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Delete PR images after 14 days"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*-pr-*"]
+          countType      = "sinceImagePushed"
+          countUnit      = "days"
+          countNumber    = 14
+        }
+        action = { type = "expire" }
+      },
+    ]
+  })
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.enable_github_oidc ? 1 : 0
 
@@ -158,8 +214,9 @@ locals {
 # ---------------------------------------------------------------- deploy roles
 # One role per environment. Each trusts only its own GitHub environment and
 # reaches only its own cluster, services, task roles, logs and parameters.
-# Task definitions: RegisterTaskDefinition has no resource-level scope, so
-# each role must tag a new revision Environment=<env>. ECS authorizes that tag
+# Task definitions: the deploy roles allow RegisterTaskDefinition on every
+# family (resource "*") and use a tag condition instead: each role must tag a
+# new revision Environment=<env>. ECS authorizes that tag
 # as ecs:TagResource on the new revision, which EcsTags allows only for the
 # role's own families. scripts/deploy.sh also uses only revisions whose
 # execution and task roles are its own environment's roles; PassTaskRoles
@@ -231,13 +288,21 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
-    sid = "EcsReadTaskDefinitions"
+    sid = "EcsTaskDefinitionsUnscoped"
     # No resource-level permissions for these read actions.
     actions = [
       "ecs:DescribeTaskDefinition",
       "ecs:ListTaskDefinitions",
     ]
     resources = ["*"]
+  }
+
+  # deploy.sh reads the Environment tag with describe-task-definition
+  # --include TAGS, which may need this action.
+  statement {
+    sid       = "EcsReadTaskDefinitionTags"
+    actions   = ["ecs:ListTagsForResource"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-${each.key}-*:*"]
   }
 
   statement {
@@ -325,6 +390,307 @@ resource "aws_iam_role_policy" "github_deploy" {
   name   = "deploy"
   role   = each.value.id
   policy = data.aws_iam_policy_document.github_deploy[each.key].json
+}
+
+# ---------------------------------------------------------------- preview role
+# PR previews (SKY-164): .github/workflows/preview.yml runs scripts/preview.sh
+# for pull requests from this repository (fork PRs get no OIDC token). The
+# GitHub environment aws-preview must allow every branch, so anyone who can
+# push a branch can run code with this role. It reaches only the preview
+# pieces in the staging cluster:
+#   - new revisions of the task definition families skynet-pr-*, tagged
+#     Environment=preview (it cannot deregister or delete any revision),
+#   - services pr-<n>-* and the migrate task of a preview family,
+#   - the slot listener rules that Terraform made (tag Environment=preview,
+#     modules/environment/preview.tf); it cannot create, delete or tag rules
+#     or target groups,
+#   - the skynet/preview-* image repositories and the slot parameters.
+# It passes the staging backend, worker, frontend and migrate roles, so a
+# preview reads the staging secrets. dbadmin and litellm roles stay out.
+# Known limits: ModifyRule cannot limit the host or the action, so this role
+# can point a slot rule at any host or staging target group (rules at 102-109
+# match after the staging rules at 10 and 20). CreateService and UpdateService
+# cannot limit the target group either, so a pr-* service can register its
+# tasks in a staging target group.
+
+locals {
+  preview_env     = "staging"
+  preview_cluster = "arn:aws:ecs:${var.region}:${local.account_id}:cluster/skynet-${local.preview_env}"
+}
+
+data "aws_iam_policy_document" "github_preview_trust" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:environment:aws-preview"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_preview" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name                 = "skynet-github-deploy-preview"
+  description          = "Assumed by GitHub Actions (OIDC, environment aws-preview) to build and run PR previews in the staging cluster."
+  assume_role_policy   = data.aws_iam_policy_document.github_preview_trust[0].json
+  max_session_duration = 3600
+}
+
+data "aws_iam_policy_document" "github_preview" {
+  statement {
+    sid       = "EcrLogin"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "EcrPreviewImages"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchDeleteImage",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages",
+      "ecr:DescribeRepositories",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:InitiateLayerUpload",
+      "ecr:ListImages",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+    ]
+    resources = [for r in ["backend", "frontend"] : "arn:aws:ecr:${var.region}:${local.account_id}:repository/skynet/preview-${r}"]
+  }
+
+  statement {
+    sid       = "EcsTaskDefinitionsRead"
+    actions   = ["ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"]
+    resources = ["*"]
+  }
+
+  # preview.sh reads the Environment tag of the staging revisions with
+  # describe-task-definition --include TAGS, which may need this action.
+  statement {
+    sid       = "EcsReadTaskDefinitionTags"
+    actions   = ["ecs:ListTagsForResource"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-${local.preview_env}-*:*"]
+  }
+
+  statement {
+    sid       = "EcsRegisterTaskDefinitions"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*:*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = ["preview"]
+    }
+  }
+
+  # A preview service may run only a preview revision: without this, a
+  # pr-<n> service could run the staging dbadmin or litellm revision.
+  statement {
+    sid       = "EcsPreviewServices"
+    actions   = ["ecs:CreateService", "ecs:UpdateService"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:service/skynet-${local.preview_env}/pr-*"]
+
+    condition {
+      test     = "ArnLike"
+      variable = "ecs:task-definition"
+      values   = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*"]
+    }
+  }
+
+  statement {
+    sid       = "EcsDeleteServices"
+    actions   = ["ecs:DeleteService", "ecs:DescribeServices"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:service/skynet-${local.preview_env}/pr-*"]
+  }
+
+  statement {
+    sid       = "EcsRunMigrate"
+    actions   = ["ecs:RunTask"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*-migrate:*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [local.preview_cluster]
+    }
+  }
+
+  statement {
+    sid       = "EcsTasks"
+    actions   = ["ecs:DescribeTasks"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task/skynet-${local.preview_env}/*"]
+  }
+
+  statement {
+    sid     = "EcsTags"
+    actions = ["ecs:TagResource"]
+    resources = [
+      "arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*",
+      "arn:aws:ecs:${var.region}:${local.account_id}:service/skynet-${local.preview_env}/pr-*",
+      "arn:aws:ecs:${var.region}:${local.account_id}:task/skynet-${local.preview_env}/*",
+    ]
+  }
+
+  statement {
+    sid     = "PassTaskRoles"
+    actions = ["iam:PassRole"]
+    resources = flatten([
+      for f in ["backend", "worker", "frontend", "migrate"] : [
+        "arn:aws:iam::${local.account_id}:role/skynet-${local.preview_env}-${f}-exec",
+        "arn:aws:iam::${local.account_id}:role/skynet-${local.preview_env}-${f}-task",
+      ]
+    ])
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid       = "ElbRead"
+    actions   = ["elasticloadbalancing:Describe*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ElbPreviewRules"
+    actions   = ["elasticloadbalancing:ModifyRule"]
+    resources = ["arn:aws:elasticloadbalancing:${var.region}:${local.account_id}:listener-rule/app/skynet-${local.preview_env}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = ["preview"]
+    }
+  }
+
+  statement {
+    sid       = "ReadPreviewLogs"
+    actions   = ["logs:GetLogEvents", "logs:FilterLogEvents"]
+    resources = ["arn:aws:logs:${var.region}:${local.account_id}:log-group:/ecs/skynet-${local.preview_env}/preview:*"]
+  }
+
+  statement {
+    sid       = "ReadPreviewParameter"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/skynet/${local.preview_env}/preview"]
+  }
+
+  # The cap on live previews: a slot is claimed with PutParameter without
+  # overwrite, which fails when another PR holds it.
+  statement {
+    sid = "PreviewSlots"
+    actions = [
+      "ssm:DeleteParameter",
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:PutParameter",
+    ]
+    resources = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/skynet/preview/slots/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_preview" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name   = "preview"
+  role   = aws_iam_role.github_preview[0].id
+  policy = data.aws_iam_policy_document.github_preview.json
+}
+
+# Preview cleanup role: the prune job of .github/workflows/preview-cleanup.yml
+# deletes the task definitions of deleted previews. It trusts only workflow
+# runs on main without a GitHub environment, because
+# ecs:DeregisterTaskDefinition has no resource-level scope: this role could
+# deregister any revision, so only reviewed code may assume it.
+# DeleteTaskDefinitions is limited to the skynet-pr-* families.
+
+data "aws_iam_policy_document" "github_preview_cleanup_trust" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_preview_cleanup" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name                 = "skynet-github-preview-cleanup"
+  description          = "Assumed by GitHub Actions (OIDC, main only) to delete the task definitions of deleted PR previews."
+  assume_role_policy   = data.aws_iam_policy_document.github_preview_cleanup_trust[0].json
+  max_session_duration = 3600
+}
+
+data "aws_iam_policy_document" "github_preview_cleanup" {
+  statement {
+    sid = "EcsTaskDefinitionsUnscoped"
+    actions = [
+      "ecs:DeregisterTaskDefinition",
+      "ecs:ListTaskDefinitionFamilies",
+      "ecs:ListTaskDefinitions",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "EcsDeleteTaskDefinitions"
+    actions   = ["ecs:DeleteTaskDefinitions"]
+    resources = ["arn:aws:ecs:${var.region}:${local.account_id}:task-definition/skynet-pr-*:*"]
+  }
+
+  statement {
+    sid       = "ReadPreviewSlots"
+    actions   = ["ssm:GetParameters"]
+    resources = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/skynet/preview/slots/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_preview_cleanup" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name   = "preview-cleanup"
+  role   = aws_iam_role.github_preview_cleanup[0].id
+  policy = data.aws_iam_policy_document.github_preview_cleanup.json
 }
 
 # ---------------------------------------------------------------- terraform roles
@@ -500,6 +866,16 @@ output "ecr_repository_urls" {
 output "github_deploy_role_arns" {
   description = "Deploy role ARN per environment. Set each as the AWS_DEPLOY_ROLE_ARN variable of the GitHub environment aws-<env> (empty while enable_github_oidc is false)."
   value       = { for k, r in aws_iam_role.github_deploy : k => r.arn }
+}
+
+output "github_preview_role_arn" {
+  description = "PR preview role ARN. Set it as the AWS_DEPLOY_ROLE_ARN variable of the GitHub environment aws-preview (empty while enable_github_oidc is false)."
+  value       = one(aws_iam_role.github_preview[*].arn)
+}
+
+output "github_preview_cleanup_role_arn" {
+  description = "PR preview cleanup role ARN. Set it as the repository variable AWS_PREVIEW_CLEANUP_ROLE_ARN (empty while enable_github_oidc is false)."
+  value       = one(aws_iam_role.github_preview_cleanup[*].arn)
 }
 
 output "github_plan_role_arn" {
