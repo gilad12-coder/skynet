@@ -405,7 +405,7 @@ deploy() {
 
 delete() {
   check_pr
-  local cfg cluster domain slot version s key host rule names=() migrate_td
+  local cfg cluster domain slot version s key host rule names=() acct src img migrate_td
   cfg="$(preview_config)"
   cluster="$(jq -r .cluster <<<"$cfg")"
   domain="$(jq -r .domain <<<"$cfg")"
@@ -436,23 +436,25 @@ delete() {
   fi
 
   # Only while the PR holds its slot: a delete that released the slot already
-  # dropped the database and flushed the Redis DB, and its images are gone.
-  # The Redis DB comes from the slot, not from the revision, because another
-  # PR may hold the revision's old index now.
+  # dropped the database and flushed the Redis DB. The drop runs in a fresh
+  # migrate revision with the staging image, because the PR's images can be
+  # gone (an earlier cleanup, or the ECR lifecycle rule). It is idempotent.
+  # The Redis DB comes from the slot, which this PR holds.
   if [[ -n "$slot" ]]; then
-    migrate_td="$(aws ecs list-task-definitions --family-prefix "skynet-pr-$pr-migrate" --status ACTIVE \
-      --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)"
-    if [[ "$migrate_td" == */skynet-pr-$pr-migrate:* ]]; then
-      echo "dropping database skynet_pr_$pr"
-      run_migrate_task "$cfg" "$migrate_td" \
-        "$(jq -cn --arg s "$drop_db" --arg slot "$slot" '{containerOverrides: [{name: "migrate", command: ["sh", "-c", $s],
-          environment: [{name: "PREVIEW_REDIS_DB", value: $slot}]}]}')"
-    fi
+    acct="$(account)"
+    src="$(staging_revision migrate "$(jq -r .families.migrate <<<"$cfg")" "$acct")"
+    img="$(aws ecs describe-task-definition --task-definition "$src" \
+      --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+    migrate_td="$(register migrate "$img" '{}' "$slot" "$cfg" "$acct")"
+    echo "dropping database skynet_pr_$pr"
+    run_migrate_task "$cfg" "$migrate_td" \
+      "$(jq -cn --arg s "$drop_db" --arg slot "$slot" '{containerOverrides: [{name: "migrate", command: ["sh", "-c", $s],
+        environment: [{name: "PREVIEW_REDIS_DB", value: $slot}]}]}')"
   fi
 
   # A failed delete keeps the slot and the next run retries. The images go
-  # only after the release: a retry runs the drop task on them, and a slot
-  # that changed belongs to a newer deploy. Images that stay behind expire
+  # only after the release: a slot that changed belongs to a newer deploy of
+  # the PR, which may use the same images. Images that stay behind expire
   # under the ECR lifecycle rule.
   if [[ -n "$slot" ]]; then
     if [[ "$(aws ssm get-parameter --name "$slot_prefix/$slot" --query Parameter.Version --output text)" != "$version" ]]; then
