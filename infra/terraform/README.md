@@ -58,8 +58,8 @@ There is no DynamoDB table.
 - ElastiCache Valkey 8.1 (TLS, AUTH token). One shared cache for app and litellm,
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
-  targets, backend latency, ECS CPU and memory, running tasks below the
-  configured count (or no task data) in 3 of 5 minutes, RDS CPU, memory,
+  targets, backend latency, ECS CPU and memory, running tasks below desired
+  (or none) in 3 of 5 minutes, RDS CPU, memory,
   free storage and connections, Valkey CPU and memory, error lines in the logs,
   RDS failure events, and no finished automated RDS backup in 30 hours. The
   topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
