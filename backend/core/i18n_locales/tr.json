@@ -200,6 +200,7 @@
     "agent.status.tool_start": "Aracı, aracı çağırıyor…",
     "agent.turn.not_found": "Aracı turu bulunamadı veya süresi doldu.",
     "analytics.other_bucket": "Diğer",
+    "auth.account_not_found": "Bu hesap artık mevcut değil. Yeniden oturum açın.",
     "auth.invalid_token": "Kimlik doğrulama belirteci geçersiz veya süresi dolmuş.",
     "auth.missing_token": "Kimlik doğrulama belirteci gereklidir.",
     "auth.not_configured": "Arka uç kimlik doğrulaması yapılandırılmamış.",

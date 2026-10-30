@@ -200,6 +200,7 @@
     "agent.status.tool_start": "Агент вызывает инструмент…",
     "agent.turn.not_found": "Ход агента не найден или истёк.",
     "analytics.other_bucket": "Прочее",
+    "auth.account_not_found": "Эта учётная запись больше не существует. Войдите снова.",
     "auth.invalid_token": "Токен аутентификации недействителен или просрочен.",
     "auth.missing_token": "Требуется токен аутентификации.",
     "auth.not_configured": "Аутентификация на сервере не настроена.",

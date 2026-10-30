@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 import secrets
 import threading
@@ -45,6 +46,8 @@ from .remote_evaluator import RemoteEvaluatorBroker, RemoteEvaluatorTransportErr
 from .runtime import BudgetRuntime, ProviderFailedError, UsagePendingError
 from .signals import BudgetReached
 from .usage_tags import USAGE_TAGS_HEADERS
+
+logger = logging.getLogger(__name__)
 
 ROUTE_KEY = "_skynet_budget_route"
 # Key, inside the first optimization model's route, of the embeddings route
@@ -217,6 +220,8 @@ class ModelGateway:
         self._routes: dict[str, OpenRouterDispatcher | CliDispatcher] = {}
         self._capabilities: dict[str, Callable[[bytes, dict[str, str]], ModelHTTPResult]] = {}
         self._capability_tokens: dict[str, str] = {}
+        self._observers: dict[str, list[Callable[[Mapping[str, Any]], None]]] = {}
+        self._parent_only: set[str] = set()
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
         self._evaluator: EvaluatorEndpoint | None = None
@@ -340,6 +345,8 @@ class ModelGateway:
                         )
                     )
                     self._reply(response)
+                    if route is not None and not (is_tools or is_evaluator or is_packages):
+                        gateway._observe(route, body, response)
                 except BudgetReached:
                     self._error(402, "budget_reached", "The remaining budget cannot cover the next operation.")
                 except BudgetInsufficientError:
@@ -455,6 +462,7 @@ class ModelGateway:
         policy: ChargePolicy,
         batch: bool = False,
         embeddings: bool = False,
+        parent_only: bool = False,
     ) -> dict[str, str]:
         """Register one fixed role without exposing its provider credential.
 
@@ -465,6 +473,7 @@ class ModelGateway:
             policy: Approved conversion policy for this particular model source.
             batch: Send this role's chat calls through half-price OpenRouter batches.
             embeddings: Serve only ``/embeddings`` for an embeddings model instead of chat.
+            parent_only: Only the parent calls this route, so readiness probes skip it.
 
         Returns:
             Scoped guest route containing no upstream credential.
@@ -488,6 +497,8 @@ class ModelGateway:
             ),
             embeddings=embeddings,
         )
+        if parent_only:
+            self._parent_only.add(token)
         return {"url": self.url, "token": token, "model": model, "role": role}
 
     def register_subscription(self, model: str, cli: CliProvider, role: str) -> dict[str, str]:
@@ -569,7 +580,7 @@ class ModelGateway:
         return [
             {"url": self.url, "token": token, "model": route.model, "role": route.role}
             for token, route in self._routes.items()
-            if not route.embeddings
+            if not route.embeddings and token not in self._parent_only
         ]
 
     def bind_evaluator(self, evaluator: EvaluatorEndpoint) -> dict[str, str]:
@@ -686,7 +697,7 @@ class ModelGateway:
                 raise ValueError("The tool capability cannot dispatch models or sandbox commands.")
             return self._tools.dispatch(body)
         try:
-            return route.dispatch(
+            response = route.dispatch(
                 path.removeprefix("/v1"),
                 body,
                 operation_key=_model_attempt_key(headers),
@@ -695,6 +706,33 @@ class ModelGateway:
         except BudgetInsufficientError as error:
             self.budget_refusal = error
             raise
+        self._observe(route, body, response)
+        return response
+
+    def observe_role(self, role: str, observer: Callable[[Mapping[str, Any]], None]) -> None:
+        """Show every answered model call of one role to a parent-side observer.
+
+        Args:
+            role: The route role to watch, such as ``optimization``.
+            observer: Receives each answered request body; it must return quickly.
+        """
+        self._observers.setdefault(role, []).append(observer)
+
+    def _observe(self, route: OpenRouterDispatcher | CliDispatcher, body: Mapping[str, Any], response: ModelHTTPResult) -> None:
+        """Pass one answered model call to its role's observers.
+
+        Args:
+            route: The route that served the call.
+            body: The model request.
+            response: The reply the caller received.
+        """
+        if not 200 <= response.status < 300:
+            return
+        for observer in self._observers.get(route.role, ()):
+            try:
+                observer(body)
+            except Exception:  # isolation boundary: an observer must never fail the model call it watched
+                logger.warning("A model-call observer failed.", exc_info=True)
 
     def _budget_state(self) -> dict[str, Any]:
         """Expose only the owning run's state and mark replaced capabilities as fenced."""

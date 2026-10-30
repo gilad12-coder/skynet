@@ -200,6 +200,7 @@
     "agent.status.tool_start": "L'agente sta invocando lo strumento…",
     "agent.turn.not_found": "Turno dell'agente non trovato o scaduto.",
     "analytics.other_bucket": "Altro",
+    "auth.account_not_found": "Questo account non esiste più. Accedi di nuovo.",
     "auth.invalid_token": "Il token di autenticazione non è valido o è scaduto.",
     "auth.missing_token": "Il token di autenticazione è obbligatorio.",
     "auth.not_configured": "L'autenticazione del backend non è configurata.",

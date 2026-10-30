@@ -19,7 +19,7 @@ from core.models.common import ModelConfig
 _ENV_VARS = (
     "APP_LOCAL_MODE",
     "SKYNET_LOCAL_MODE",
-    "RAILWAY_ENVIRONMENT_NAME",
+    "APP_ENVIRONMENT",
     "API_HOST",
     "APP_LOCAL_SANDBOX_IMAGE",
     "APP_CLI_MAX_CONCURRENCY",
@@ -48,7 +48,7 @@ def test_local_mode_is_off_by_default() -> None:
 
 
 def test_local_mode_starts_on_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Local mode loads when the API binds a loopback host off Railway.
+    """Local mode loads when the API binds a loopback host off any deployment.
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
@@ -59,17 +59,22 @@ def test_local_mode_starts_on_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings(_env_file=None).local_mode is True
 
 
-def test_local_mode_refuses_railway(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Railway environment name makes local mode fail at startup.
+@pytest.mark.parametrize("environment", ["staging", "production", "skynet-pr-766"])
+def test_local_mode_refuses_a_deployed_environment(monkeypatch: pytest.MonkeyPatch, environment: str) -> None:
+    """A deployment environment name makes local mode fail at startup.
+
+    Every deployed service sets ``APP_ENVIRONMENT``, so this keeps local mode
+    off staging, production and PR previews.
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
+        environment: The ``APP_ENVIRONMENT`` value a deployment sets.
     """
     monkeypatch.setenv("APP_LOCAL_MODE", "1")
     monkeypatch.setenv("API_HOST", "127.0.0.1")
-    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "x")
+    monkeypatch.setenv("APP_ENVIRONMENT", environment)
 
-    with pytest.raises(ValidationError, match="Railway"):
+    with pytest.raises(ValidationError, match="deployed environment"):
         Settings(_env_file=None)
 
 
@@ -168,6 +173,11 @@ def test_old_droid_bin_env_var_is_ignored(monkeypatch: pytest.MonkeyPatch) -> No
     assert not hasattr(loaded, "droid_bin")
 
 
+# The image trusts forwarded headers only from FORWARDED_ALLOW_IPS; unset keeps
+# uvicorn's own default.
+_PROXY_FLAGS = " --proxy-headers --forwarded-allow-ips 127.0.0.1"
+
+
 def _dockerfile_bind(env: dict[str, str]) -> str:
     """Run the image's start command with ``exec`` replaced by ``echo``.
 
@@ -217,7 +227,7 @@ def _run_dockerfile_cmd(env: dict[str, str], swap: tuple[str, str]) -> str:
 
 def test_dockerfile_keeps_the_hosted_bind() -> None:
     """Without local mode the image binds every interface, as before."""
-    assert _dockerfile_bind({"API_HOST": "127.0.0.1"}) == "uvicorn main:app --host 0.0.0.0 --port 8000"
+    assert _dockerfile_bind({"API_HOST": "127.0.0.1"}) == "uvicorn main:app --host 0.0.0.0 --port 8000" + _PROXY_FLAGS
 
 
 @pytest.mark.parametrize("flag", ["APP_LOCAL_MODE", "SKYNET_LOCAL_MODE", "app_local_mode", "Skynet_Local_Mode"])
@@ -229,7 +239,7 @@ def test_dockerfile_binds_the_checked_host_in_local_mode(flag: str) -> None:
     """
     env = {flag: "1", "api_host": "127.0.0.1", "PORT": "9000"}
 
-    assert _dockerfile_bind(env) == "uvicorn main:app --host 127.0.0.1 --port 9000"
+    assert _dockerfile_bind(env) == "uvicorn main:app --host 127.0.0.1 --port 9000" + _PROXY_FLAGS
 
 
 def test_local_bind_host_reads_the_env_file(tmp_path: Path) -> None:
@@ -314,14 +324,14 @@ def test_dockerfile_binds_the_settings_port(env: dict[str, str], port: str) -> N
     """The image binds the platform PORT and hands the same port to Settings.
 
     docker compose passes backend/.env (with API_PORT) into the container, and
-    Railway sets PORT. The image keeps its old bind in both cases and exports
+    a PaaS runtime may set PORT. The image keeps its old bind in both cases and exports
     it as API_PORT, so Settings and the MCP URL see the port uvicorn binds.
 
     Args:
         env: Environment the container starts with.
         port: Port the image must bind and export.
     """
-    assert _dockerfile_bind(env) == f"uvicorn main:app --host 0.0.0.0 --port {port}"
+    assert _dockerfile_bind(env) == f"uvicorn main:app --host 0.0.0.0 --port {port}" + _PROXY_FLAGS
     assert _dockerfile_env(env, "API_PORT") == port
 
 

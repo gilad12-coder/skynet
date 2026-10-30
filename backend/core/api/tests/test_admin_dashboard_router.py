@@ -1,9 +1,8 @@
 """Tests for the admin dashboard router.
 
 Mounts ``create_admin_dashboard_router`` on an in-memory SQLite store and
-covers authorization, the empty window, every aggregate, the exclusion of
-internal accounts, and the Sentry feed's not-configured / unreachable / ok
-states (the Sentry HTTP call is stubbed).
+covers authorization, the empty window, every aggregate, and the exclusion of
+internal accounts.
 """
 
 from __future__ import annotations
@@ -11,19 +10,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import pytest
-import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...config import settings
 from ...storage.models import Base, JobModel, TelemetryEventModel, UserModel, WalletLedgerModel
 from ...storage.remote import RemoteDBJobStore
-from .. import sentry_issues
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers.admin_dashboard import create_admin_dashboard_router
 
@@ -112,12 +106,6 @@ def test_dashboard_forbidden_for_non_admin() -> None:
     assert client.get("/admin/dashboard").status_code == 403
 
 
-def test_sentry_issues_forbidden_for_non_admin() -> None:
-    """A non-admin caller gets 403 from the Sentry feed."""
-    client, _ = _client(_NONADMIN)
-    assert client.get("/admin/sentry/issues").status_code == 403
-
-
 def test_dashboard_empty_window_is_zero_filled() -> None:
     """With no data every total is zero and each day of the window is present."""
     client, _ = _client(_ADMIN)
@@ -193,147 +181,3 @@ def test_dashboard_rejects_out_of_range_window() -> None:
     client, _ = _client(_ADMIN)
     assert client.get("/admin/dashboard", params={"days": 0}).status_code == 422
     assert client.get("/admin/dashboard", params={"days": 366}).status_code == 422
-
-
-@pytest.fixture
-def sentry_settings(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    """Configure a Sentry token and organization for one test.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        The same monkeypatch, for further stubbing.
-    """
-    monkeypatch.setattr(settings, "sentry_api_token", SecretStr("token"))
-    monkeypatch.setattr(settings, "sentry_org", "skynet")
-    monkeypatch.setattr(settings, "sentry_dsn", None)
-    monkeypatch.setattr(settings, "sentry_project", None)
-    monkeypatch.setattr(settings, "sentry_base_url", None)
-    return monkeypatch
-
-
-def test_sentry_issues_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without a token the feed reports not configured and never calls Sentry."""
-    monkeypatch.setattr(settings, "sentry_api_token", None)
-    monkeypatch.setattr(settings, "sentry_org", None)
-
-    def _fail(*_: Any, **__: Any) -> None:
-        """Fail the test if Sentry is called."""
-        raise AssertionError("sentry must not be called")
-
-    monkeypatch.setattr(sentry_issues.requests, "get", _fail)
-    client, _ = _client(_ADMIN)
-    assert client.get("/admin/sentry/issues").json() == {"configured": False, "available": False, "issues": []}
-
-
-def test_sentry_issues_unreachable(sentry_settings: pytest.MonkeyPatch) -> None:
-    """A network error degrades to configured-but-unavailable."""
-
-    def _boom(*_: Any, **__: Any) -> None:
-        """Simulate a network failure."""
-        raise requests.ConnectionError("down")
-
-    sentry_settings.setattr(sentry_issues.requests, "get", _boom)
-    client, _ = _client(_ADMIN)
-    assert client.get("/admin/sentry/issues").json() == {"configured": True, "available": False, "issues": []}
-
-
-class _Response:
-    """Minimal stand-in for a ``requests.Response``."""
-
-    def __init__(self, status: int, body: Any) -> None:
-        """Store the status and JSON body.
-
-        Args:
-            status: HTTP status.
-            body: Decoded JSON body.
-        """
-        self.status_code = status
-        self.ok = 200 <= status < 300
-        self._body = body
-
-    def json(self) -> Any:
-        """Return the JSON body."""
-        return self._body
-
-
-def test_sentry_issues_rejected_token(sentry_settings: pytest.MonkeyPatch) -> None:
-    """A 401 from Sentry degrades to configured-but-unavailable."""
-    sentry_settings.setattr(sentry_issues.requests, "get", lambda *_, **__: _Response(401, {"detail": "no"}))
-    client, _ = _client(_ADMIN)
-    assert client.get("/admin/sentry/issues").json()["available"] is False
-
-
-def test_sentry_issues_trims_issue_fields(sentry_settings: pytest.MonkeyPatch) -> None:
-    """Issues come back trimmed, with string counts parsed and the org in the URL."""
-    calls: list[dict[str, Any]] = []
-
-    def _get(url: str, **kwargs: Any) -> _Response:
-        """Record the call and return one issue."""
-        calls.append({"url": url, **kwargs})
-        return _Response(
-            200,
-            [
-                {
-                    "id": "42",
-                    "shortId": "BACKEND-7",
-                    "title": "ValueError: bad",
-                    "culprit": "core.worker.engine",
-                    "level": "error",
-                    "project": {"slug": "backend"},
-                    "count": "17",
-                    "userCount": 3,
-                    "lastSeen": "2026-10-12T08:00:00Z",
-                    "permalink": "https://sentry.io/issues/42/",
-                },
-                {"id": "43", "title": "XSS", "permalink": "javascript:alert(1)"},
-            ],
-        )
-
-    sentry_settings.setattr(sentry_issues.requests, "get", _get)
-    client, _ = _client(_ADMIN)
-    body = client.get("/admin/sentry/issues").json()
-    assert body["configured"] is True
-    assert body["available"] is True
-    issue = body["issues"][0]
-    assert issue["short_id"] == "BACKEND-7"
-    assert issue["project"] == "backend"
-    assert (issue["count"], issue["users"]) == (17, 3)
-    assert issue["last_seen"].startswith("2026-10-12T08:00:00")
-    assert issue["permalink"] == "https://sentry.io/issues/42/"
-    assert body["issues"][1]["permalink"] is None
-    assert calls[0]["url"] == "https://sentry.io/api/0/organizations/skynet/issues/"
-    assert calls[0]["headers"] == {"Authorization": "Bearer token"}
-    assert calls[0]["params"]["query"] == "is:unresolved"
-
-
-def test_sentry_issues_honor_project_and_base_url(sentry_settings: pytest.MonkeyPatch) -> None:
-    """SENTRY_PROJECT narrows the query and SENTRY_BASE_URL overrides the DSN-derived origin."""
-    calls: list[dict[str, Any]] = []
-
-    def _get(url: str, **kwargs: Any) -> _Response:
-        """Record the call and return no issues."""
-        calls.append({"url": url, **kwargs})
-        return _Response(200, [])
-
-    sentry_settings.setattr(settings, "sentry_project", "skynet")
-    sentry_settings.setattr(settings, "sentry_base_url", "https://us.sentry.io/")
-    sentry_settings.setattr(sentry_issues.requests, "get", _get)
-    client, _ = _client(_ADMIN)
-    assert client.get("/admin/sentry/issues").json() == {"configured": True, "available": True, "issues": []}
-    assert calls[0]["url"] == "https://us.sentry.io/api/0/organizations/skynet/issues/"
-    assert calls[0]["params"]["query"] == "is:unresolved project:skynet"
-
-
-@pytest.mark.parametrize(
-    ("dsn", "base"),
-    [
-        (None, "https://sentry.io"),
-        ("https://key@o1.ingest.sentry.io/2", "https://sentry.io"),
-        ("https://key@o1.ingest.de.sentry.io/2", "https://de.sentry.io"),
-    ],
-)
-def test_sentry_api_base_follows_dsn_region(dsn: str | None, base: str) -> None:
-    """An EU DSN routes API calls to the EU region."""
-    assert sentry_issues.sentry_api_base(dsn) == base

@@ -12,10 +12,10 @@ const BRAND_SLUGS: Record<string, string> = {
  * Company slug for a routed model id, in the vocabulary `ProviderLogo` reads.
  *
  * The OpenRouter prefix is transport, not brand, so it is skipped when a
- * company segment follows it.
+ * company segment follows it. So is the local build's `subscription/<cli>/`.
  */
 export function modelProviderSlug(id: string): string {
-  const parts = id.split("/");
+  const parts = id.startsWith("subscription/") ? id.split("/").slice(2) : id.split("/");
   const slug = (parts[0] === "openrouter" && parts.length > 2 ? parts[1] : parts[0]) ?? id;
   return BRAND_SLUGS[slug] ?? slug;
 }

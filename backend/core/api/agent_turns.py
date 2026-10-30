@@ -1,9 +1,9 @@
 """Resumable server-side turns for the wizard's long-running agent streams.
 
-The hosting edge (Railway) closes every HTTP request after 15 minutes, data
-flowing or not, and that cap is not configurable. A code-agent turn over a
-large code base can run longer, so a turn must not live inside the request
-that started it:
+The hosting edge can close a long HTTP request (the first host closed every
+request after 15 minutes, data flowing or not). A code-agent turn over a large
+code base can run longer, so a turn must not live inside the request that
+started it:
 
 * :meth:`AgentTurnRegistry.start` runs the turn's (already metered) event
   stream as a background task on this replica and numbers every event with a

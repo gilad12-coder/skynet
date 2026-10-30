@@ -471,6 +471,11 @@ def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.Monke
     assert refused.value.code == "models.managed_unavailable_local"
 
 
+# The evaluation check validates the scorer before it runs the gate, so these
+# requests carry a valid scorer to reach the gate.
+_VALID_SCORER = {"kind": "python", "metric_code": "def score(p):\n    return 1\n"}
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -502,7 +507,7 @@ def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyP
             json={
                 "workflow": "anything",
                 "scope": "evaluation",
-                "payload": payload,
+                "payload": {**payload, "scorer": _VALID_SCORER},
                 "execution_budget_id": "draft",
                 "execution_budget_revision": 1,
             },

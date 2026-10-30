@@ -98,9 +98,10 @@ def cmd_setup() -> None:
 def cmd_migrate() -> None:
     """Bring the database schema to head, exactly as a booting pod would.
 
-    Railway runs this as each service's pre-deploy command, so a failing
-    migration cancels the deploy while the old pods keep serving, instead of
-    crash-looping the new ones. Pods still run the same idempotent bootstrap
+    The deploy runs this as a one-off task before it updates the services
+    (``infra/terraform/scripts/deploy.sh``), so a failing migration stops the
+    deploy while the old tasks keep serving, instead of crash-looping the new
+    ones. Pods still run the same idempotent bootstrap
     at boot, which is a no-op once this has succeeded.
     """
     store = RemoteDBJobStore(_get_db_url())

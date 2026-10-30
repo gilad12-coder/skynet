@@ -171,7 +171,8 @@ class NativeOptions:
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
     # A repository run's packed tree: ``chunks`` (files on this machine),
-    # ``editable_paths`` and ``readonly_paths``.
+    # ``editable_paths``, ``readonly_paths`` and ``constrained`` (a
+    # constraints file governs the run).
     repo: dict[str, Any] | None = None
     # ShinkaEvolve's evolution settings, and its optimization models in bandit
     # order: each ``{"model", "url", "token"}`` names one scoped gateway route.
@@ -1111,6 +1112,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "chunks": chunks,
                 "editable_paths": list(options.repo["editable_paths"]),
                 "readonly_paths": list(options.repo["readonly_paths"]),
+                "constrained": bool(options.repo.get("constrained")),
             }
         document_text = json.dumps(payload, default=side_info_json_default)
         assert_metric_absent(document_text, task)

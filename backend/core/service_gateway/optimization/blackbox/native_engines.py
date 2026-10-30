@@ -22,6 +22,7 @@ and ``backend/THIRD_PARTY_NOTICES.md``.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -97,6 +98,37 @@ def log_event(
     )
 
 
+def blocked_patch(repo: dict[str, Any], patch: str) -> str | None:
+    """Refuse a version that breaks the path rules of a run with a constraints file.
+
+    The agent reads only the fixed illegal-action message; the run log keeps the
+    reason. A run without a constraints file is not checked here: its guest
+    gates keep naming the refused paths to the agent.
+
+    Args:
+        repo: Repository settings holding ``editable_paths``, ``readonly_paths``
+            and ``constrained``.
+        patch: The version's diff against the starting commit.
+
+    Returns:
+        The illegal-action message for a refused version, else ``None``.
+    """
+    if not repo.get("constrained"):
+        return None
+    problems = repo_tree.patch_violations(patch, repo["editable_paths"], repo["readonly_paths"])
+    if not problems:
+        return None
+    reason = " ".join(problems)
+    log_event(
+        repo_tree.RULE_BLOCK_EVENT,
+        f"Illegal action blocked: {repo_tree.PATH_RULE}. {reason}",
+        level=logging.WARNING,
+        rule=repo_tree.PATH_RULE,
+        reason=reason,
+    )
+    return repo_tree.ILLEGAL_ACTION_MESSAGE
+
+
 ASSET_CHECKSUMS = {
     "meta_harness/SKILL.md": "fce9a51d2e95d8a2d59c60b91106adc0309232a8d6b2fe0fa0785395dcb78d1c",
 }
@@ -153,8 +185,9 @@ if [ "$HTTP_CODE" != "200" ]; then echo "evaluator returned HTTP $HTTP_CODE" >&2
 # Repository mode: the candidate is the diff between the lab's ``repo/`` checkout
 # and the commit it started from. The rules file and the shared ``repo_tree``
 # module reject a diff the trusted scorer would refuse anyway, without spending
-# budget; the scorer still enforces the same rules on its own. Example ids are
-# probes, as in text mode.
+# budget; the scorer still enforces the same rules on its own. Under a
+# constraints file the engine's evaluator wrapper refuses it instead, so the
+# block reaches the run log. Example ids are probes, as in text mode.
 REPO_EVAL_SCRIPT = """\
 #!/usr/bin/env bash
 # Usage: ./eval.sh [example_id ...]
@@ -173,7 +206,9 @@ try:
 except UnicodeDecodeError:
     sys.exit("Not evaluated: a changed text file is not UTF-8.")
 rules = json.load(open(".repo-rules.json", encoding="utf-8"))
-problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+problems = [] if rules["constrained"] else repo_tree.patch_violations(
+    patch, rules["editable_paths"], rules["readonly_paths"]
+)
 if problems:
     sys.exit("Not evaluated:\\n" + "\\n".join(problems))
 body = {{"candidate": patch}}
@@ -210,7 +245,9 @@ echo "repo/ is now $VERSION"
 # Meta-Harness repository mode: a candidate is ``agents/<name>.patch``, the diff
 # of ``repo/`` against the starting commit when the proposer saved it. The same
 # rules check as ``eval.sh`` refuses a diff the trusted scorer would refuse, so
-# a bad candidate fails here instead of costing a benchmark.
+# a bad candidate fails here instead of costing a benchmark. Under a
+# constraints file a refused diff moves to the blocks folder, which the engine
+# reads after each proposer turn to log the block.
 MH_SAVE_SCRIPT = """\
 #!/usr/bin/env bash
 # Usage: ./save.sh <name>   (writes repo/'s changes against the starting commit to agents/<name>.patch)
@@ -221,7 +258,7 @@ case "$NAME" in .*|*[!A-Za-z0-9_.-]*) echo "invalid candidate name: $NAME" >&2; 
 PATCH_FILE="agents/$NAME.patch"
 git -C repo add --all
 git -C repo diff --cached --binary --no-color --no-ext-diff {base} > "$PATCH_FILE"
-PATCH_FILE="$PATCH_FILE" PYTHONPATH="{tools}" "{python}" -c 'import json, os, sys
+PATCH_FILE="$PATCH_FILE" PYTHONPATH="{tools}" "{python}" -c 'import json, os, sys, time
 import repo_tree
 path = os.environ["PATCH_FILE"]
 try:
@@ -231,6 +268,10 @@ except UnicodeDecodeError:
     sys.exit("Not saved: a changed text file is not UTF-8.")
 rules = json.load(open(".repo-rules.json", encoding="utf-8"))
 problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+if problems and rules["constrained"]:
+    os.makedirs("{blocks}", exist_ok=True)
+    os.replace(path, os.path.join("{blocks}", f"{{time.time_ns()}}.patch"))
+    sys.exit(repo_tree.ILLEGAL_ACTION_MESSAGE)
 if not patch.strip():
     problems.append("repo/ has no changes against the starting commit.")
 if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
@@ -240,6 +281,8 @@ if problems:
     sys.exit("Not saved:\\n" + "\\n".join(problems))'
 echo "saved $PATCH_FILE"
 """
+
+MH_RULE_BLOCKS_DIR = ".rule-blocks"
 
 MH_CHECKOUT_SCRIPT = """\
 #!/usr/bin/env bash
@@ -814,8 +857,9 @@ class AutoResearchEngine:
         self.multi_round = bool(engine_config.pop("ralph", True))
         no_eval = engine_config.pop("max_no_eval_seconds", None)
         self.max_no_eval_seconds = None if no_eval is None else float(no_eval)
-        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
-        # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths``,
+        # ``constrained`` (a constraints file governs the run) and ``tools``
+        # (the folder holding ``repo_tree.py``) for a repository run.
         self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
         self.suffix = ".patch" if self.repo else ".txt"
         self.max_token_cost = config.max_token_cost
@@ -904,6 +948,20 @@ class AutoResearchEngine:
         if notebook.is_file():
             shutil.copyfile(notebook, target / "notebook.md")
 
+    def _refuse_blocked(self, candidate: str) -> None:
+        """Stop a version the constraints file refuses before it uses any budget.
+
+        Args:
+            candidate: The version's diff.
+
+        Raises:
+            RuntimeError: With the illegal-action message, which the evaluation
+                server returns to ``eval.sh``.
+        """
+        refusal = blocked_patch(self.repo, candidate) if self.repo else None
+        if refusal:
+            raise RuntimeError(refusal)
+
     def _record(self, server: EvalServer) -> Callable[[], None]:
         """Capture every evaluator answer the agent receives, per example.
 
@@ -923,6 +981,7 @@ class AutoResearchEngine:
 
             def evaluate_examples(candidate: str, example_ids: Any = None, split: Any = None) -> Any:
                 """Score through the server, then log the per-example answer."""
+                self._refuse_blocked(candidate)
                 score, info = original(candidate, example_ids=example_ids, split=split)
                 scores = {str(k): float(v) for k, v in (info.get("scores") or {}).items()}
                 feedback = {str(k): _feedback_text(v) for k, v in (info.get("infos") or {}).items()}
@@ -942,6 +1001,7 @@ class AutoResearchEngine:
 
         def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> Any:
             """Score through the server, then log the whole-candidate answer."""
+            self._refuse_blocked(candidate)
             score, info = original_single(candidate, example, **kwargs)
             # Upstream checkpoints only dataset sweeps; without one the run
             # view would never see a version, so each answer is its checkpoint.
@@ -1085,7 +1145,11 @@ class AutoResearchEngine:
         if self.repo:
             brief += repo_rules(self.repo)
             (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
-            rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
+            rules = {
+                "editable_paths": self.repo["editable_paths"],
+                "readonly_paths": self.repo["readonly_paths"],
+                "constrained": bool(self.repo.get("constrained")),
+            }
             (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
             script = REPO_EVAL_SCRIPT.format(
                 server_url=server.url,
@@ -1517,8 +1581,9 @@ class MetaHarnessEngine:
         self.candidates_per_iter = max(1, int(engine_config.pop("max_candidates_per_iter", 3)))
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
-        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
-        # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths``,
+        # ``constrained`` (a constraints file governs the run) and ``tools``
+        # (the folder holding ``repo_tree.py``) for a repository run.
         self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
         self.suffix = ".patch" if self.repo else ".txt"
         self.run_dir = Path(config.run_dir or "meta-harness-run").resolve()
@@ -1604,11 +1669,15 @@ class MetaHarnessEngine:
         if self.repo:
             brief += repo_rules(self.repo)
             (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
-            rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
+            rules = {
+                "editable_paths": self.repo["editable_paths"],
+                "readonly_paths": self.repo["readonly_paths"],
+                "constrained": bool(self.repo.get("constrained")),
+            }
             (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
             scripts = {
                 "save.sh": MH_SAVE_SCRIPT.format(
-                    base=self.repo["base"], tools=self.repo["tools"], python=sys.executable
+                    base=self.repo["base"], tools=self.repo["tools"], python=sys.executable, blocks=MH_RULE_BLOCKS_DIR
                 ),
                 "checkout.sh": MH_CHECKOUT_SCRIPT.format(base=self.repo["base"]),
             }
@@ -1864,6 +1933,7 @@ class MetaHarnessEngine:
         propose_seconds = time.monotonic() - started
         self.cost_usd += outcome.cost_usd
         self.session_ids.append(outcome.session_id)
+        self._log_save_blocks()
         outcome.raise_if_failed(f"iter{iteration}")
         candidates = self._read_pending(pending)
         if not candidates:
@@ -1922,6 +1992,20 @@ class MetaHarnessEngine:
             best=new_best[1] if new_best else None,
         )
 
+    def _log_save_blocks(self) -> None:
+        """Log each diff ``save.sh`` refused under the constraints file, then drop it.
+
+        The diffs are checked again here, so a file the agent wrote into the
+        folder becomes an event only when it truly breaks the path rules.
+        """
+        blocks = self.work_dir / MH_RULE_BLOCKS_DIR
+        if not self.repo or not blocks.is_dir():
+            return
+        for path in sorted(blocks.glob("*.patch")):
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                blocked_patch(self.repo, path.read_text(encoding="utf-8"))
+            path.unlink(missing_ok=True)
+
     def _read_pending(self, pending: Path) -> list[dict[str, Any]]:
         """Read the proposer's ``pending_eval.json`` candidate list.
 
@@ -1972,6 +2056,9 @@ class MetaHarnessEngine:
         if self.repo:
             if len(text.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
                 return "patch is larger than a version may be"
+            refusal = blocked_patch(self.repo, text)
+            if refusal:
+                return refusal
             problems = repo_tree.patch_violations(text, self.repo["editable_paths"], self.repo["readonly_paths"])
             if problems:
                 return "; ".join(problems)

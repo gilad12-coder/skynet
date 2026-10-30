@@ -2,36 +2,30 @@
 
 ``GET /admin/dashboard`` rolls signups, activation, active users, runs,
 failure reasons, money, served programs and product events over a trailing
-window. ``GET /admin/sentry/issues`` lists the organization's unresolved Sentry
-issues when ``SENTRY_API_TOKEN`` and ``SENTRY_ORG`` are configured. Both are
-admin-only; internal and test accounts (``users.is_internal``) are excluded
-from every per-user figure.
+window. It is admin-only; internal and test accounts (``users.is_internal``)
+are excluded from every per-user figure.
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated, Any
-from urllib.parse import urlsplit
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from ...config import settings
 from ...constants import PAYLOAD_OVERVIEW_NAME
 from ...models.common import OptimizationStatus
 from ...storage.models import JobModel, TelemetryEventModel, UserModel, WalletLedgerModel
 from ..auth import AuthenticatedUser, get_authenticated_user, require_admin_user
-from ..sentry_issues import SentryUnavailableError, fetch_unresolved_issues, sentry_api_base
 from .serve import SERVE_INFERENCE_EVENT
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 TOP_LIMIT = 10
-SENTRY_ISSUE_LIMIT = 25
 RUN_FAILED_EVENT = "run_failed"
 # Clawbacks are negative rows too, but they reverse a top-up rather than
 # charge for usage, so they stay out of the usage total.
@@ -102,29 +96,6 @@ class AdminDashboardResponse(BaseModel):
     top_events: list[AdminEventCount]
 
 
-class AdminSentryIssue(BaseModel):
-    """One unresolved Sentry issue, trimmed to what the dashboard shows."""
-
-    id: str
-    short_id: str | None
-    title: str
-    culprit: str | None
-    level: str | None
-    project: str | None
-    count: int
-    users: int
-    last_seen: datetime | None
-    permalink: str | None
-
-
-class AdminSentryIssuesResponse(BaseModel):
-    """Sentry issues, or why there are none: not configured, or unreachable."""
-
-    configured: bool
-    available: bool
-    issues: list[AdminSentryIssue]
-
-
 def _day(value: datetime) -> date:
     """Return the UTC calendar day of a timestamp.
 
@@ -139,79 +110,6 @@ def _day(value: datetime) -> date:
     if value.tzinfo is None:
         return value.date()
     return value.astimezone(UTC).date()
-
-
-def _int(value: Any) -> int:
-    """Coerce a Sentry count (sent as a string) to an int, 0 when unparseable.
-
-    Args:
-        value: Raw count value.
-
-    Returns:
-        The integer count.
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _parse_time(value: Any) -> datetime | None:
-    """Parse a Sentry ISO timestamp, ``None`` when missing or malformed.
-
-    Args:
-        value: Raw timestamp string.
-
-    Returns:
-        An aware datetime, or ``None``.
-    """
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _safe_link(value: Any) -> str | None:
-    """Keep a Sentry permalink only when it is an ``https`` URL.
-
-    The dashboard renders it as an ``href``; anything else (``javascript:``,
-    relative paths) is dropped rather than trusted.
-
-    Args:
-        value: Raw permalink value.
-
-    Returns:
-        The URL, or ``None``.
-    """
-    if isinstance(value, str) and urlsplit(value).scheme == "https":
-        return value
-    return None
-
-
-def to_sentry_issue(raw: dict[str, Any]) -> AdminSentryIssue:
-    """Trim a raw Sentry issue object to the dashboard's fields.
-
-    Args:
-        raw: One element of the Sentry issues API response.
-
-    Returns:
-        The trimmed issue.
-    """
-    project = raw.get("project")
-    return AdminSentryIssue(
-        id=str(raw.get("id", "")),
-        short_id=raw.get("shortId"),
-        title=str(raw.get("title") or raw.get("culprit") or ""),
-        culprit=raw.get("culprit"),
-        level=raw.get("level"),
-        project=project.get("slug") if isinstance(project, dict) else None,
-        count=_int(raw.get("count")),
-        users=_int(raw.get("userCount")),
-        last_seen=_parse_time(raw.get("lastSeen")),
-        permalink=_safe_link(raw.get("permalink")),
-    )
 
 
 def read_dashboard(session: Session, *, days: int, now: datetime) -> AdminDashboardResponse:
@@ -435,44 +333,5 @@ def create_admin_dashboard_router(*, job_store) -> APIRouter:
         require_admin_user(current_user)
         with Session(job_store.engine) as session:
             return read_dashboard(session, days=days, now=datetime.now(UTC))
-
-    @router.get(
-        "/admin/sentry/issues",
-        response_model=AdminSentryIssuesResponse,
-        summary="Admin: the organization's most frequent unresolved Sentry issues",
-    )
-    def get_sentry_issues(current_user: AuthenticatedUserDep) -> AdminSentryIssuesResponse:
-        """Return unresolved Sentry issues, or an empty list with the reason.
-
-        Args:
-            current_user: Authenticated caller; must be a backend admin.
-
-        Returns:
-            An :class:`AdminSentryIssuesResponse`; ``configured`` is false when
-            the token or organization is unset, ``available`` is false when
-            Sentry could not be read.
-
-        Raises:
-            DomainError: 403 when the caller is not a backend admin.
-        """
-        require_admin_user(current_user)
-        token = settings.sentry_api_token.get_secret_value() if settings.sentry_api_token else ""
-        if not token or not settings.sentry_org:
-            return AdminSentryIssuesResponse(configured=False, available=False, issues=[])
-        dsn = settings.sentry_dsn.get_secret_value() if settings.sentry_dsn else None
-        base_url = (settings.sentry_base_url or "").rstrip("/") or sentry_api_base(dsn)
-        try:
-            raw = fetch_unresolved_issues(
-                token=token,
-                org=settings.sentry_org,
-                base_url=base_url,
-                limit=SENTRY_ISSUE_LIMIT,
-                project=settings.sentry_project,
-            )
-        except SentryUnavailableError:
-            return AdminSentryIssuesResponse(configured=True, available=False, issues=[])
-        return AdminSentryIssuesResponse(
-            configured=True, available=True, issues=[to_sentry_issue(item) for item in raw]
-        )
 
     return router
