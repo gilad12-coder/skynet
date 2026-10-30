@@ -163,17 +163,65 @@ resource "aws_cloudwatch_metric_alarm" "service_memory" {
   }
 }
 
-# Fires when a service runs fewer tasks than desired (crash loop, failed
-# deploy, image pull failure). Needs Container Insights (enabled).
+# Fires when a service runs no tasks (crash loop, failed start, image pull
+# failure, scale to 0). A fixed floor of 1, not "running - desired": a scale
+# to 0 lowers desired too. Container Insights (enabled) sends no data while a
+# service has no tasks. FILL turns each missing minute into 0: with
+# treat_missing_data alone, CloudWatch keeps using older real points while
+# its look-back range holds enough of them, which delays the alarm.
+# 3 of 5 one-minute points: ALARM about 3 to 5 minutes after the outage.
 resource "aws_cloudwatch_metric_alarm" "service_running" {
-  for_each = aws_ecs_service.this
+  for_each = { for k, v in aws_ecs_service.this : k => v if var.services[k].desired_count > 0 }
 
   alarm_name          = "${local.name}-${each.key}-tasks-missing"
-  alarm_description   = "${each.key} runs fewer tasks than desired for 10 minutes."
+  alarm_description   = "${each.key} ran no tasks in 3 of the last 5 minutes."
   comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
-  threshold           = 0
+  evaluation_periods  = 5
+  datapoints_to_alarm = 3
+  threshold           = 1
   treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  metric_query {
+    id          = "filled"
+    expression  = "FILL(running, 0)"
+    label       = "running tasks, missing as 0"
+    return_data = true
+  }
+
+  metric_query {
+    id = "running"
+    metric {
+      namespace   = "ECS/ContainerInsights"
+      metric_name = "RunningTaskCount"
+      period      = 60
+      stat        = "Minimum"
+      dimensions = {
+        ClusterName = aws_ecs_cluster.this.name
+        ServiceName = each.value.name
+      }
+    }
+  }
+}
+
+# Fires when a service runs fewer tasks than desired (lost or failing tasks
+# of a multi-task service). Desired is the live ECS value: the service
+# ignores desired_count changes after create. 10 of 10 one-minute points,
+# because CPU target tracking can scale out in several steps (one task per
+# step when CPU is just above target, 60 s cooldown), so a scale-out to 3x
+# desired can keep running below desired for up to about 7 minutes while
+# the tasks start. A service with no tasks is the alarm above, which stays
+# within 5 minutes.
+resource "aws_cloudwatch_metric_alarm" "service_below_desired" {
+  for_each = aws_cloudwatch_metric_alarm.service_running
+
+  alarm_name          = "${local.name}-${each.key}-tasks-below-desired"
+  alarm_description   = "${each.key} ran fewer tasks than desired for 10 minutes."
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 10
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
@@ -189,7 +237,7 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
     metric {
       namespace   = "ECS/ContainerInsights"
       metric_name = "RunningTaskCount"
-      period      = 300
+      period      = 60
       stat        = "Minimum"
       dimensions = {
         ClusterName = aws_ecs_cluster.this.name
@@ -203,7 +251,7 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
     metric {
       namespace   = "ECS/ContainerInsights"
       metric_name = "DesiredTaskCount"
-      period      = 300
+      period      = 60
       stat        = "Maximum"
       dimensions = {
         ClusterName = aws_ecs_cluster.this.name
