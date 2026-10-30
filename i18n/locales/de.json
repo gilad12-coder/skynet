@@ -195,6 +195,7 @@
     "agent.status.tool_start": "Agent ruft Werkzeug auf…",
     "agent.turn.not_found": "Agentendurchlauf nicht gefunden oder abgelaufen.",
     "analytics.other_bucket": "Sonstige",
+    "auth.account_not_found": "Dieses Konto existiert nicht mehr. Melden Sie sich erneut an.",
     "auth.invalid_token": "Das Authentifizierungstoken ist ungültig oder abgelaufen.",
     "auth.missing_token": "Ein Authentifizierungstoken ist erforderlich.",
     "auth.not_configured": "Die Backend-Authentifizierung ist nicht konfiguriert.",

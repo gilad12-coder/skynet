@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import sentry_sdk
@@ -49,7 +48,7 @@ def configure_error_reporting(service_name: str) -> bool:
     sentry_sdk.init(
         dsn=dsn.get_secret_value(),
         environment=settings.sentry_environment,
-        release=os.getenv("RAILWAY_GIT_COMMIT_SHA"),
+        release=settings.app_git_sha or None,
         send_default_pii=False,
         include_local_variables=False,
         max_request_body_size="never",

@@ -51,8 +51,8 @@ export const PRIVACY_POLICY: LegalDocument = {
           kind: "paragraph",
           text:
             "If you use the optional voice-input feature, the audio you record is sent to our speech " +
-            "provider (Groq) to transcribe it into text; we do not retain the audio after " +
-            "transcription.",
+            "provider (OpenRouter, which forwards it to the speech model's host) to transcribe it into " +
+            "text; we do not retain the audio after transcription.",
         },
       ],
     },
@@ -136,9 +136,9 @@ export const PRIVACY_POLICY: LegalDocument = {
           items: [
             "LLM providers (via OpenRouter, and a self-hosted gateway where configured) to run your optimization jobs.",
             "Stripe, to process payments and manage billing.",
-            "Speech transcription (Groq) when you use voice input.",
-            "Hosting and infrastructure providers: Railway (application servers, database, and cache), Vercel (website hosting and the isolated sandboxes that run evaluation code), our email delivery provider, and Better Stack (operational logs, when enabled).",
-            "Analytics and error-monitoring providers (currently PostHog and Sentry, when enabled) to understand feature usage and diagnose failures. Analytics can be disabled in account settings; we configure these providers to minimize personal data.",
+            "Speech transcription (via OpenRouter) when you use voice input.",
+            "Hosting and infrastructure providers: Amazon Web Services (website and application servers, database, and cache), Vercel (the isolated sandboxes that run evaluation code), and our email delivery provider.",
+            "Error-monitoring providers (currently Sentry, when enabled) to diagnose failures. We keep product analytics on our own servers. You can turn off analytics from your browser in account settings. We configure these providers to minimize personal data.",
             "Professional advisers, and authorities or other parties, where necessary to comply with law, enforce our Terms, or protect the rights, property, or safety of our users or others.",
             "A successor entity in connection with a merger, acquisition, financing, or sale of assets, subject to this Policy.",
           ],

@@ -17,7 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from ...storage.models import ApiTokenModel
+from ...storage.models import ApiTokenModel, UserModel
 from .. import auth as auth_mod
 from ..auth import (
     AuthenticatedUser,
@@ -26,9 +26,10 @@ from ..auth import (
     hash_api_token,
     require_admin_user,
 )
+from ..errors import DomainError
 
-# The JWT path of ``get_authenticated_user`` never reads ``request`` (only the
-# PAT branch does), so these unit tests pass a placeholder for that parameter.
+# Tests that fail before any store lookup (bad header, signature, audience)
+# pass a placeholder for ``request``.
 _NO_REQUEST = cast(Any, None)
 
 
@@ -55,6 +56,28 @@ def _sign(payload: dict[str, Any], secret: str = "test-secret") -> str:
     return f"{header}.{body}.{signature}"
 
 
+def _store_request(*accounts: str) -> Any:
+    """Build a request stand-in whose store holds ``accounts`` as ``users`` rows.
+
+    Args:
+        accounts: Emails to create account rows for.
+
+    Returns:
+        The request stand-in.
+    """
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    UserModel.__table__.create(engine)
+    ApiTokenModel.__table__.create(engine)
+    with Session(engine) as session:
+        for email in accounts:
+            session.add(UserModel(email=email, name=email, password_hash="x"))
+        session.commit()
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(job_store=SimpleNamespace(engine=engine))),
+        state=SimpleNamespace(),
+    )
+
+
 def _payload(**overrides: Any) -> dict[str, Any]:
     """Build a valid backend auth payload with optional overrides."""
     now = int(time.time())
@@ -77,7 +100,7 @@ def test_get_authenticated_user_accepts_valid_signed_token(monkeypatch: pytest.M
     monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
     token = _sign(_payload())
 
-    user = get_authenticated_user(_NO_REQUEST, f"Bearer {token}")
+    user = get_authenticated_user(_store_request("alice@example.com"), f"Bearer {token}")
 
     assert user.username == "alice@example.com"
     assert user.groups == ("skynet-admins",)
@@ -99,7 +122,9 @@ def test_get_authenticated_user_accepts_both_audience_and_issuer_spellings(
     monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
     token = _sign(_payload(aud=audience, iss=issuer))
 
-    assert get_authenticated_user(_NO_REQUEST, f"Bearer {token}").username == "alice@example.com"
+    assert (
+        get_authenticated_user(_store_request("alice@example.com"), f"Bearer {token}").username == "alice@example.com"
+    )
 
 
 @pytest.mark.parametrize(("audience", "issuer"), [("other-backend", "app-frontend"), ("app-backend", "other")])
@@ -174,16 +199,11 @@ def _pat_request(username: str = "alice@example.com") -> tuple[Any, str]:
     Returns:
         The request stand-in and the raw ``skyd_`` token it accepts.
     """
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    ApiTokenModel.__table__.create(engine)
+    request = _store_request(username)
     token = generate_api_token()
-    with Session(engine) as session:
+    with Session(request.app.state.job_store.engine) as session:
         session.add(ApiTokenModel(username=username, token_hash=hash_api_token(token), last4=token[-4:]))
         session.commit()
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(job_store=SimpleNamespace(engine=engine))),
-        state=SimpleNamespace(),
-    )
     return request, token
 
 
@@ -207,3 +227,28 @@ def test_session_jwt_auth_leaves_channel_unset(monkeypatch: pytest.MonkeyPatch) 
     get_authenticated_user(request, f"Bearer {_sign(_payload())}")
 
     assert not hasattr(request.state, "auth_channel")
+
+
+def test_session_jwt_for_a_deleted_account_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A valid, unexpired JWT whose ``users`` row is gone gets 401 (SKY-150)."""
+    monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
+    monkeypatch.setattr(auth_mod.settings, "max_monthly_active_users", 0)
+    request = _store_request("someone-else@example.com")
+
+    with pytest.raises(DomainError) as exc:
+        get_authenticated_user(request, f"Bearer {_sign(_payload())}")
+
+    assert exc.value.status_code == 401
+    # A distinct code lets the web app sign the browser out instead of retrying.
+    assert exc.value.code == "auth.account_not_found"
+
+
+def test_session_jwt_without_a_store_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no store to check the account against, a valid JWT is not accepted."""
+    monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr("test-secret"))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), state=SimpleNamespace())
+
+    with pytest.raises(HTTPException) as exc:
+        get_authenticated_user(cast(Any, request), f"Bearer {_sign(_payload())}")
+
+    assert exc.value.status_code == 500
