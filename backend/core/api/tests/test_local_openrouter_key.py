@@ -42,7 +42,7 @@ from ...service_gateway import language_models, tagging
 from ...service_gateway.agents import code as code_agent
 from ...service_gateway.agents import generalist
 from ...service_gateway.language_models import build_language_model
-from ...storage.models import AgentEnginePreferenceModel, Base, BillingProviderKeyModel
+from ...storage.models import AgentEnginePreferenceModel, Base, BillingProviderKeyModel, UserModel
 from .. import agent_engine, interview_model, model_catalog, model_router
 from .. import auth as auth_mod
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -458,6 +458,9 @@ def test_local_chat_turn_runs_on_the_saved_key(
     caplog.set_level(logging.DEBUG)
     engine = _engine()
     _fund(engine)
+    with Session(engine) as session:
+        session.add(UserModel(email=_USER, name=_USER, password_hash="x"))
+        session.commit()
     store = SimpleNamespace(engine=engine)
     _save(_client(store))
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
