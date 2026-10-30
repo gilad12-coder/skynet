@@ -208,10 +208,11 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
 # Fires when a service runs fewer tasks than desired (lost or failing tasks
 # of a multi-task service). Desired is the live ECS value: the service
 # ignores desired_count changes after create. 10 of 10 one-minute points,
-# because a CPU scale-out adds one task per step about every 60 s, so a
-# scale-out to 3x desired keeps running below desired for up to about
-# 7 minutes while the tasks start. A service with no tasks is the alarm
-# above, which stays within 5 minutes.
+# because CPU target tracking can scale out in several steps (one task per
+# step when CPU is just above target, 60 s cooldown), so a scale-out to 3x
+# desired can keep running below desired for up to about 7 minutes while
+# the tasks start. A service with no tasks is the alarm above, which stays
+# within 5 minutes.
 resource "aws_cloudwatch_metric_alarm" "service_below_desired" {
   for_each = aws_cloudwatch_metric_alarm.service_running
 
