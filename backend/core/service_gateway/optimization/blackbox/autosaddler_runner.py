@@ -1,13 +1,13 @@
 """Sandbox-side runner that drives the pinned upstream AutoSaddler v2 engine.
 
-This file is copied verbatim into an isolated sandbox next to the Skynet
-plugin assets. It imports no Skynet application code and never receives
-held-out test examples. Everything Skynet contributes is expressed through
+This file is copied verbatim into an isolated sandbox next to the app
+plugin assets. It imports no backend application code; the parent owns the
+scorer and its cases. Everything the app contributes is expressed through
 the upstream ports: a scenario whose evaluator scores candidates through the
 parent-owned budget over the same filesystem mailbox the other native engines
 use, an evidence builder that surfaces the scorer's per-case feedback, and a
-prompt pack composed from the upstream methodology plus the Skynet plugin.
-The engine loop, policies, run store and Claude provider are upstream's own.
+prompt pack composed from the upstream methodology plus the app plugin.
+The engine loop, policies and run store are upstream's own.
 
 The prompt-pack wiring and plugin prompts are adapted from microsoft/AutoSaddler
 under the MIT License; see ``autosaddler_plugin/NOTICE.md`` and
@@ -28,12 +28,13 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
 import uuid
-from collections.abc import Mapping, Sequence
-from pathlib import Path
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -43,56 +44,61 @@ try:
     from autosaddler.v2.core.engine import AutoSaddlerEngine
     from autosaddler.v2.core.run_state import RunState
     from autosaddler.v2.harness.component_map import ComponentMapHarnessSpace
+    from autosaddler.v2.harness.git import GitHarnessSpace, GitVerificationVerdict
     from autosaddler.v2.prompting import assets as as_assets
     from autosaddler.v2.prompting.history import build_history_bundle
     from autosaddler.v2.prompting.models import SessionSpec
     from autosaddler.v2.prompting.models import Usage as SessionUsage
     from autosaddler.v2.providers.base import BaseAgentProvider, TransportOutcome
-    from autosaddler.v2.providers.claude import ClaudeAgentProvider, ClaudeProviderConfig
     from autosaddler.v2.providers.workspace_renderer import WorkspaceRenderer
     from autosaddler.v2.storage.local import LocalRunStore
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
     as_domain = as_policies = as_ports = as_assets = None
-    AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = None
-    build_history_bundle = SessionSpec = ClaudeAgentProvider = ClaudeProviderConfig = LocalRunStore = None
+    AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = GitHarnessSpace = GitVerificationVerdict = None
+    build_history_bundle = SessionSpec = LocalRunStore = None
     SessionUsage = BaseAgentProvider = TransportOutcome = WorkspaceRenderer = None
 
 try:
-    from . import harness_bridge
-except ImportError:  # In the sandbox this file runs as a script beside the bridge.
-    _bridge_spec = importlib.util.spec_from_file_location(
-        "harness_bridge", Path(__file__).with_name("harness_bridge.py")
-    )
-    assert _bridge_spec is not None
-    assert _bridge_spec.loader is not None
-    harness_bridge = importlib.util.module_from_spec(_bridge_spec)
-    sys.modules["harness_bridge"] = harness_bridge
-    _bridge_spec.loader.exec_module(harness_bridge)
+    from . import harness_bridge, repo_tree
+except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
+    _sibling_modules = {}
+    for _sibling in ("harness_bridge", "repo_tree"):
+        _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
+        assert _spec is not None
+        assert _spec.loader is not None
+        _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
+        sys.modules[_sibling] = _sibling_modules[_sibling]
+        _spec.loader.exec_module(_sibling_modules[_sibling])
+    harness_bridge = _sibling_modules["harness_bridge"]
+    repo_tree = _sibling_modules["repo_tree"]
 
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
-_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _PROC_ROOT = Path("/proc")
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-_PLUGIN_NAME = "skynet"
+_PLUGIN_NAME = "app"
 _PLUGIN_ROOT = Path(__file__).resolve().parent / "autosaddler_plugin"
 _SINGLE_COMPONENT = "candidate"
-_EVIDENCE_SCHEMA = "skynet-autosaddler-evidence/v1"
-_DIAGNOSIS_SCHEMA = "skynet-autosaddler-diagnosis/v1"
-_EVOLUTION_SCHEMA = "skynet-autosaddler-evolution/v1"
-_REFLECTION_SCHEMA = "skynet-autosaddler-reflection/v1"
+_EVIDENCE_SCHEMA = "app-autosaddler-evidence/v1"
+_DIAGNOSIS_SCHEMA = "app-autosaddler-diagnosis/v1"
+_EVOLUTION_SCHEMA = "app-autosaddler-evolution/v1"
+_REFLECTION_SCHEMA = "app-autosaddler-reflection/v1"
 _SESSION_CONTEXT_PATH = ".autosaddler/session_context.json"
 _TRAINING_EVIDENCE_PATH = ".autosaddler/training_evidence.json"
 _PROMPT_ASSETS_PATH = ".autosaddler/prompt_assets.json"
 _CAPABILITIES = frozenset({"read_workspace", "edit_workspace", "load_skills"})
-# Every harness but Claude Code brings its own tools; the renderer only needs
-# to know each capability is available. ``.agents/skills`` is the shared
+# Every harness brings its own tools; the renderer only needs to know each
+# capability is available. ``.agents/skills`` is the shared
 # skill location pi, codex and opencode all discover.
 _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
     ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
 )
 _HARNESS_SKILL_DIRECTORY = ".agents/skills"
-_MIN_CASES = 2
+_GIT_IDENTITY = ("-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false")
+# Repository runs read their prompts and skills from this plugin subfolder.
+_REPO_ASSETS = "repo/"
 
 
 class EvaluationStopped(BaseException):
@@ -161,6 +167,10 @@ class EvaluatorMailbox:
                     self.total_evals += 1
                 return float(response["score"]), dict(response.get("info") or {})
             time.sleep(0.05)
+        if self.stopped.is_set():
+            # The supervisor stopped the run and records why; claiming a reply
+            # timeout here would mask that reason.
+            raise self.error or EvaluationStopped("The parent evaluator has stopped this run.")
         self.error = self.error or EvaluationStopped("Native evaluator response timed out.")
         self.stopped.set()
         raise self.error
@@ -177,7 +187,7 @@ class EvaluatorMailbox:
 
 
 def candidate_value(components: Mapping[str, str]) -> str | dict[str, str]:
-    """Return the Skynet candidate shape encoded by a component map.
+    """Return the app candidate shape encoded by a component map.
 
     Args:
         components: Upstream frozen-key component mapping.
@@ -191,7 +201,7 @@ def candidate_value(components: Mapping[str, str]) -> str | dict[str, str]:
 
 
 def baseline_components(seed: Any) -> dict[str, str]:
-    """Encode the Skynet seed as an upstream component map.
+    """Encode the app seed as an upstream component map.
 
     Args:
         seed: Seed text or named parts from the task.
@@ -200,46 +210,30 @@ def baseline_components(seed: Any) -> dict[str, str]:
         Component mapping upstream can mutate.
 
     Raises:
-        ValueError: When the seed is missing or has an empty component.
+        ValueError: When the seed is neither text nor named parts.
     """
     if isinstance(seed, str):
-        components = {_SINGLE_COMPONENT: seed}
-    elif isinstance(seed, dict) and seed:
-        components = {str(name): str(text) for name, text in seed.items()}
-    else:
-        raise ValueError("AutoSaddler requires a seed candidate: a version text or named parts.")
-    if any(not text.strip() for text in components.values()):
-        raise ValueError("AutoSaddler cannot start from an empty candidate component.")
-    return components
+        return {_SINGLE_COMPONENT: seed}
+    if isinstance(seed, dict) and seed:
+        return {str(name): str(text) for name, text in seed.items()}
+    raise ValueError("AutoSaddler requires a seed candidate: a version text or named parts.")
 
 
-def split_cases(train_set: Sequence[Any] | None, val_set: Sequence[Any] | None) -> tuple[list[Any], list[Any]]:
-    """Assign visible examples to the disjoint train and development splits upstream requires.
+def visible_examples(cases: Sequence[Any] | None) -> list[Any]:
+    """Return the examples both upstream splits score, one ``None`` when there are no cases.
+
+    Upstream diagnoses on a training split and confirms each patch on a
+    development split. The app confirms a patch by re-running the same scorer,
+    so both splits hold the same examples; without cases the scorer runs once
+    per candidate with ``case=None``.
 
     Args:
-        train_set: Skynet training examples, if any.
-        val_set: Skynet validation examples, if any.
+        cases: The run's cases, if any.
 
     Returns:
-        Training examples that drive diagnosis and development examples that gate acceptance.
-
-    Raises:
-        ValueError: When fewer than two examples are visible.
+        The examples to score, never empty.
     """
-    train = list(train_set or [])
-    development = list(val_set or [])
-    if train and development:
-        return train, development
-    examples = train or development
-    if len(examples) < _MIN_CASES:
-        raise ValueError(
-            "AutoSaddler needs at least two visible examples: it diagnoses failures on training "
-            "cases and confirms every patch on held-out development cases."
-        )
-    # Without a validation split, hold out a quarter so acceptance is never
-    # judged on the cases a patch was diagnosed against.
-    held_out = max(1, len(examples) // 4)
-    return examples[:-held_out], examples[-held_out:]
+    return list(cases or []) or [None]
 
 
 def _case_id(split: str, index: int, example: Any) -> str:
@@ -259,7 +253,7 @@ def _case_id(split: str, index: int, example: Any) -> str:
 
 
 def build_cases(split: str, examples: Sequence[Any]) -> tuple[Any, ...]:
-    """Wrap Skynet examples as upstream cases that carry the raw example payload.
+    """Wrap app examples as upstream cases that carry the raw example payload.
 
     Args:
         split: Upstream split name.
@@ -278,7 +272,172 @@ def build_cases(split: str, examples: Sequence[Any]) -> tuple[Any, ...]:
     )
 
 
-class SkynetEvaluator:
+def _git_output(cwd: Path, *arguments: str, env: Mapping[str, str] | None = None) -> str:
+    """Run git in a checkout and return its output as UTF-8 text.
+
+    Args:
+        cwd: Checkout or worktree to run in.
+        *arguments: Arguments after ``git``.
+        env: Process environment, when it differs from this process's.
+
+    Returns:
+        Standard output.
+
+    Raises:
+        RuntimeError: When git fails.
+        UnicodeDecodeError: When the output is not UTF-8.
+    """
+    result = subprocess.run(
+        ["git", "--literal-pathspecs", *_GIT_IDENTITY, *arguments],
+        cwd=cwd,
+        env=None if env is None else dict(env),
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace") or result.stdout.decode("utf-8", "replace")
+        raise RuntimeError(f"git {arguments[0]} failed: {detail.strip()[-2000:]}")
+    return result.stdout.decode("utf-8")
+
+
+def workspace_patch(workspace: Path, base: str, changed_paths: Sequence[Any]) -> str:
+    """Diff a mutation workspace against the starting commit without touching its index.
+
+    Args:
+        workspace: Upstream mutation worktree, checked out at the parent version.
+        base: Starting commit of the run.
+        changed_paths: Paths the agent changed relative to the parent.
+
+    Returns:
+        The patch the parent would score for this version.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        # Upstream stages and commits the changed paths itself after verification,
+        # so the worktree's own index must stay untouched; a private one stages them here.
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        _git_output(workspace, "read-tree", "HEAD", env=env)
+        if changed_paths:
+            _git_output(workspace, "add", "--all", "--", *(str(path) for path in changed_paths), env=env)
+        return _git_output(workspace, "diff", "--cached", "--binary", "--no-color", "--no-ext-diff", base, env=env)
+
+
+def rule_blocker(mailbox: EvaluatorMailbox) -> Callable[[str], None]:
+    """Build the callback that sends a path-rule block to the parent's run log.
+
+    Args:
+        mailbox: Parent connection.
+
+    Returns:
+        A function taking the block's reason.
+    """
+
+    def block(reason: str) -> None:
+        """Send one ``rule.block`` run event.
+
+        Args:
+            reason: Why the path rules refused the version.
+        """
+        mailbox.emit(_LOG_PREFIX, repo_tree.rule_block_record(reason))
+
+    return block
+
+
+def repo_verifier(
+    base: str,
+    editable_paths: Sequence[str],
+    readonly_paths: Sequence[str],
+    on_block: Callable[[str], None] | None = None,
+) -> Any:
+    """Build the upstream verifier that refuses versions the trusted scorer would refuse.
+
+    Args:
+        base: Starting commit of the run.
+        editable_paths: Paths a version may change.
+        readonly_paths: Submodules and Git LFS files that stay as fetched.
+        on_block: Under a constraints file, receives each path-rule refusal's
+            reason, and the agent reads only the illegal-action message.
+
+    Returns:
+        A ``GitVerifier`` for upstream's ``GitHarnessSpace``.
+    """
+
+    def verify(context: Any) -> Any:
+        """Check one finished mutation before upstream commits it.
+
+        Args:
+            context: Upstream verification context.
+
+        Returns:
+            Upstream verdict; a rejection becomes a rejected iteration, never a score.
+        """
+        try:
+            patch = workspace_patch(context.workspace, base, context.changed_paths)
+        except UnicodeDecodeError:
+            return GitVerificationVerdict(False, "utf8", "A changed text file is not UTF-8.", ())
+        problems = repo_tree.patch_violations(patch, editable_paths, readonly_paths)
+        if problems and on_block is not None:
+            on_block(" ".join(problems))
+            return GitVerificationVerdict(False, "repository-rules", repo_tree.ILLEGAL_ACTION_MESSAGE, ())
+        if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+            problems.append("The change is larger than a version may be.")
+        if problems:
+            return GitVerificationVerdict(False, "repository-rules", "; ".join(problems), ())
+        return GitVerificationVerdict(True, "repository-rules", "The change stays inside the editable paths.", ())
+
+    return verify
+
+
+def repo_space(
+    repo: Mapping[str, Any],
+    seed_patch: Any,
+    run_dir: Path,
+    proposer: dict[str, Any],
+    mailbox: EvaluatorMailbox,
+) -> tuple[Any, str]:
+    """Unpack the shipped repository and open upstream's Git candidate space on it.
+
+    Args:
+        repo: Parent payload's ``repo`` entry: tree chunks, path rules and
+            whether a constraints file governs the run.
+        seed_patch: Starting version as a patch against the fetched commit, or empty.
+        run_dir: Upstream run directory.
+        proposer: Serialized harness launch, whose workspace files never join a version.
+        mailbox: Parent connection that receives path-rule blocks.
+
+    Returns:
+        The Git harness space and the fetched commit every version is diffed against.
+    """
+    checkout = repo_tree.unpack_tree((Path(chunk) for chunk in repo["chunks"]), Path("repo-checkout").resolve())
+    base = _git_output(checkout, "rev-parse", repo_tree.BASE_REF).strip()
+    # Harnesses read skills rendered into the mutation worktree, a
+    # folder upstream does not treat as its own; left unexcluded, they would
+    # count as the agent's change. Every worktree shares this exclude file.
+    with (checkout / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"\n/{_HARNESS_SKILL_DIRECTORY}/\n")
+    repo_tree.exclude_paths(checkout, harness_bridge.workspace_files(proposer))
+    start = base
+    if isinstance(seed_patch, str) and seed_patch.strip():
+        repo_tree.apply_patch(checkout, seed_patch)
+        _git_output(checkout, "add", "--all")
+        _git_output(checkout, "commit", "--quiet", "--no-verify", "-m", "seed")
+        start = _git_output(checkout, "rev-parse", "HEAD").strip()
+    editable = [str(path) for path in repo["editable_paths"]]
+    readonly = [str(path) for path in repo["readonly_paths"]]
+    space = GitHarnessSpace(
+        source_repo=checkout,
+        base_revision=start,
+        store_root=run_dir / "candidates",
+        worktree_root=run_dir / "worktrees",
+        writable_paths=[PurePosixPath(path) for path in editable],
+        forbidden_paths=[PurePosixPath(path) for path in readonly],
+        verifier=repo_verifier(
+            base, editable, readonly, on_block=rule_blocker(mailbox) if repo.get("constrained") else None
+        ),
+    )
+    return space, base
+
+
+class AppEvaluator:
     """Score upstream candidates through the parent scorer, case by case."""
 
     def __init__(
@@ -291,20 +450,24 @@ class SkynetEvaluator:
         stop_at_score: float | None,
         fingerprint: str,
         development_case_ids: Sequence[str] = (),
+        repo_base: str | None = None,
     ) -> None:
         """Bind the evaluator to the parent transport and run layout.
 
         Args:
             mailbox: Parent evaluation transport.
-            harness_space: Upstream component-map space holding candidate text.
+            harness_space: Upstream space holding candidate text or repository versions.
             store_run_dir: Upstream run directory used for relative artifact references.
             max_concurrency: Parallel scorer requests the parent admits.
             stop_at_score: Development aggregate that ends the search early.
             fingerprint: Stable identity of the scorer for upstream observations.
             development_case_ids: Development cases in split order, which names them by position.
+            repo_base: Starting commit of a repository run, whose versions go to the parent as patches against it.
         """
         self.mailbox = mailbox
         self.harness_space = harness_space
+        self.repo_base = repo_base
+        self.patches: dict[str, str] = {}
         self.store_run_dir = store_run_dir
         self.stop_at_score = stop_at_score
         self.fingerprint = fingerprint
@@ -315,6 +478,29 @@ class SkynetEvaluator:
         self.versions: dict[str, int] = {}
         self.case_ids = {case_id: str(index) for index, case_id in enumerate(development_case_ids)}
         self._semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+    def value_of(self, candidate: Any) -> str | dict[str, str]:
+        """Return the candidate in the shape the parent scorer takes.
+
+        Args:
+            candidate: Upstream candidate reference.
+
+        Returns:
+            The text or named parts, or for a repository version its patch against the starting commit.
+        """
+        if self.repo_base is None:
+            return candidate_value(self.components_of(candidate))
+        if candidate.candidate_id not in self.patches:
+            materialized = self.harness_space.materialize(candidate, "inspect")
+            try:
+                # The parent rebuilds every version from this patch alone, exactly
+                # as it does for every other engine's repository versions.
+                self.patches[candidate.candidate_id] = _git_output(
+                    materialized.root, "diff", "--binary", "--no-color", "--no-ext-diff", self.repo_base, "HEAD"
+                )
+            finally:
+                materialized.release()
+        return self.patches[candidate.candidate_id]
 
     def components_of(self, candidate: Any) -> dict[str, str]:
         """Read and remember a candidate's component text.
@@ -348,7 +534,7 @@ class SkynetEvaluator:
         Raises:
             TargetReached: When a development aggregate meets the stop target.
         """
-        value = candidate_value(self.components_of(candidate))
+        value = self.value_of(candidate)
         context.artifact_dir.mkdir(parents=True, exist_ok=True)
         if context.purpose == "development":
             self.versions.setdefault(candidate.candidate_id, len(self.versions))
@@ -369,7 +555,7 @@ class SkynetEvaluator:
             observations=tuple(sorted(observations, key=lambda item: (item.case_id, item.repetition))),
             artifact_dir=as_domain.ArtifactRef(
                 uri=context.artifact_dir.relative_to(self.store_run_dir).as_posix(),
-                kind="skynet-evaluation-directory",
+                kind="app-evaluation-directory",
             ),
         )
         if context.purpose == "development":
@@ -383,7 +569,7 @@ class SkynetEvaluator:
 
         Args:
             candidate_id: Upstream candidate identity.
-            value: Skynet candidate shape sent to the scorer.
+            value: App candidate shape sent to the scorer.
             case: Case to score.
             repetition: Repetition index.
             context: Upstream evaluation context.
@@ -451,7 +637,7 @@ class SkynetEvaluator:
 
         Args:
             candidate_id: Upstream candidate identity.
-            value: Skynet candidate shape.
+            value: App candidate shape.
             score: Mean development score, if every case produced one.
             observations: The evaluation's per-case observations.
 
@@ -482,7 +668,7 @@ class SkynetEvaluator:
             raise TargetReached(f"Development score {score} reached the target {self.stop_at_score}.")
 
 
-class SkynetEvidenceBuilder:
+class AppEvidenceBuilder:
     """Turn a training evaluation into the scorer feedback the agent diagnoses from."""
 
     def __init__(self, store: Any, cases: Mapping[str, Any]) -> None:
@@ -508,7 +694,7 @@ class SkynetEvidenceBuilder:
             ValueError: When evidence is requested for a non-training split.
         """
         if evaluation.split != "train":
-            raise ValueError("Skynet evidence is built from the training split only")
+            raise ValueError("App evidence is built from the training split only")
         case_records = []
         for case_id in evaluation.requested_case_ids:
             observations = [item for item in evaluation.observations if item.case_id == case_id]
@@ -539,7 +725,7 @@ class SkynetEvidenceBuilder:
                 "purpose": evaluation.purpose,
                 "case_records": case_records,
             },
-            kind="skynet-training-evidence",
+            kind="app-training-evidence",
         )
 
 
@@ -605,6 +791,31 @@ def _evolve_schema(candidate_ids: Sequence[str], source_options: Mapping[str, Se
     }
 
 
+def _repo_diagnosis_schema() -> dict[str, Any]:
+    """Describe the diagnosis output for a repository run, whose change is the edited workspace itself.
+
+    Returns:
+        JSON schema for diagnose-patch session output.
+    """
+    return {
+        "type": "object",
+        "required": ["schema_version", "intent", "diagnosis", "expected_effect", "changed_paths"],
+        "properties": {
+            "schema_version": {"const": _DIAGNOSIS_SCHEMA},
+            "intent": {"type": "string", "minLength": 1},
+            "diagnosis": {"type": "string", "minLength": 1},
+            "expected_effect": {"type": "string", "minLength": 1},
+            "changed_paths": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": True,
+                "minItems": 1,
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
 def _reflection_schema() -> dict[str, Any]:
     """Describe the lesson output upstream records after each iteration.
 
@@ -648,7 +859,7 @@ def _strings(value: Any, label: str) -> tuple[str, ...]:
         TypeError: When the value is not a non-empty list of strings.
     """
     if not isinstance(value, list) or not value or any(not isinstance(item, str) for item in value):
-        raise TypeError(f"Skynet prompt context {label} must be a non-empty list of strings")
+        raise TypeError(f"App prompt context {label} must be a non-empty list of strings")
     return tuple(value)
 
 
@@ -697,7 +908,7 @@ def _shared_asset(relative_path: str, asset_id: str) -> Any:
 
 
 def _plugin_asset(relative_path: str, asset_id: str) -> Any:
-    """Load one Skynet plugin asset.
+    """Load one app plugin asset.
 
     Args:
         relative_path: Path below the plugin directory.
@@ -714,12 +925,13 @@ def _plugin_asset(relative_path: str, asset_id: str) -> Any:
     )
 
 
-def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
-    """Compose upstream methodology with the Skynet plugin for one session kind.
+def resolved_assets(kind: str, skill_paths: Mapping[str, str | None], prefix: str = "") -> Any:
+    """Compose upstream methodology with the app plugin for one session kind.
 
     Args:
         kind: Upstream session kind.
         skill_paths: Skill names mapped to optional plugin skill documents.
+        prefix: Plugin subfolder holding this run's prompts, empty for text candidates.
 
     Returns:
         Resolved system context, task prompt and skills with provenance.
@@ -734,11 +946,11 @@ def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
         as_assets.PromptComposition(
             system_assets=(
                 _shared_asset("methodology/system/optimizer-invariants.md", "methodology.system.invariants"),
-                _plugin_asset("SYSTEM.md", f"{_PLUGIN_NAME}.system"),
+                _plugin_asset(f"{prefix}SYSTEM.md", f"{_PLUGIN_NAME}.system"),
             ),
             task_assets=(
                 _shared_asset(f"methodology/prompts/{method}-method.md", f"methodology.prompt.{kind}"),
-                _plugin_asset(f"prompts/{kind}.md", f"{_PLUGIN_NAME}.prompt.{kind}"),
+                _plugin_asset(f"{prefix}prompts/{kind}.md", f"{_PLUGIN_NAME}.prompt.{kind}"),
             ),
             skill_assets={
                 name: (
@@ -747,7 +959,7 @@ def resolved_assets(kind: str, skill_paths: Mapping[str, str | None]) -> Any:
                         if name in shared_skills
                         else ()
                     ),
-                    *((_plugin_asset(path, f"{_PLUGIN_NAME}.skill.{name}"),) if path is not None else ()),
+                    *((_plugin_asset(f"{prefix}{path}", f"{_PLUGIN_NAME}.skill.{name}"),) if path is not None else ()),
                 )
                 for name, path in skill_paths.items()
             },
@@ -764,8 +976,11 @@ _DIAGNOSE_SKILLS: dict[str, str | None] = {
 _ANALYSIS_SKILLS: dict[str, str | None] = {"history-analysis": None}
 
 
-def composition_record() -> Any:
-    """Record every prompt composition the Skynet plugin can produce.
+def composition_record(prefix: str = "") -> Any:
+    """Record every prompt composition the app plugin can produce.
+
+    Args:
+        prefix: Plugin subfolder holding this run's prompts, empty for text candidates.
 
     Returns:
         Upstream composition entity for the run store.
@@ -773,31 +988,40 @@ def composition_record() -> Any:
     return as_assets.prompt_composition_record(
         plugin_name=_PLUGIN_NAME,
         compositions={
-            "evolve": resolved_assets("evolve", _ANALYSIS_SKILLS),
-            "diagnose_patch": resolved_assets("diagnose_patch", _DIAGNOSE_SKILLS),
-            "reflect": resolved_assets("reflect", _ANALYSIS_SKILLS),
+            "evolve": resolved_assets("evolve", _ANALYSIS_SKILLS, prefix),
+            "diagnose_patch": resolved_assets("diagnose_patch", _DIAGNOSE_SKILLS, prefix),
+            "reflect": resolved_assets("reflect", _ANALYSIS_SKILLS, prefix),
         },
     )
 
 
-class SkynetPromptPack:
-    """Render upstream sessions with the Skynet objective and candidate schema."""
+class AppPromptPack:
+    """Render upstream sessions with the app objective and candidate schema."""
 
     def __init__(
-        self, *, store: Any, component_names: Sequence[str], objective: str | None, background: str | None
+        self,
+        *,
+        store: Any,
+        component_names: Sequence[str],
+        objective: str | None,
+        background: str | None,
+        readonly_paths: Sequence[str] | None = None,
     ) -> None:
         """Bind the prompt pack to the run store and task framing.
 
         Args:
             store: Upstream run store used for history bundles and evidence.
-            component_names: Frozen candidate component schema.
+            component_names: Frozen candidate component schema, or a repository's editable paths.
             objective: User objective text.
             background: User background notes.
+            readonly_paths: Paths that stay as fetched; set only for a repository run.
         """
         self.store = store
         self.component_names = tuple(component_names)
         self.objective = objective
         self.background = background
+        self.readonly_paths = None if readonly_paths is None else tuple(readonly_paths)
+        self.prefix = "" if readonly_paths is None else _REPO_ASSETS
 
     def session(self, kind: str, context: Mapping[str, Any]) -> Any:
         """Build the session specification for one upstream session kind.
@@ -817,13 +1041,16 @@ class SkynetPromptPack:
             "objective": self.objective,
             "background": self.background,
             "mutation_scope": list(self.component_names),
+            **({} if self.readonly_paths is None else {"readonly_paths": list(self.readonly_paths)}),
         }
         workspace_files = {_SESSION_CONTEXT_PATH: as_domain.canonical_json(rendered) + "\n"}
         workspace_files.update(build_history_bundle(self.store, context).workspace_files)
         mutation_label = None
         if kind == "diagnose_patch":
             workspace_files[_TRAINING_EVIDENCE_PATH] = self._evidence(context.get("evidence"))
-            schema = _diagnosis_schema(self.component_names)
+            schema = (
+                _diagnosis_schema(self.component_names) if self.readonly_paths is None else _repo_diagnosis_schema()
+            )
             skill_paths = _DIAGNOSE_SKILLS
             mutation_label = "candidate-patch"
         elif kind == "evolve":
@@ -836,8 +1063,8 @@ class SkynetPromptPack:
             schema = _reflection_schema()
             skill_paths = _ANALYSIS_SKILLS
         else:
-            raise ValueError(f"Unknown Skynet session kind: {kind}")
-        resolved = resolved_assets(kind, skill_paths)
+            raise ValueError(f"Unknown app session kind: {kind}")
+        resolved = resolved_assets(kind, skill_paths, self.prefix)
         workspace_files[_PROMPT_ASSETS_PATH] = (
             as_domain.canonical_json(
                 {
@@ -880,18 +1107,18 @@ class SkynetPromptPack:
             ValueError: When the evidence drifted or carries the wrong schema.
         """
         if not isinstance(artifact, Mapping) or not isinstance(artifact.get("uri"), str):
-            raise TypeError("Skynet diagnosis context requires an evidence artifact")
+            raise TypeError("App diagnosis context requires an evidence artifact")
         payload = (self.store.run_dir / artifact["uri"]).read_bytes()
         if as_domain.sha256_digest(payload) != artifact.get("sha256"):
-            raise ValueError("Skynet training evidence digest drift")
+            raise ValueError("App training evidence digest drift")
         value = json.loads(payload)
         if not isinstance(value, dict) or value.get("schema_version") != _EVIDENCE_SCHEMA:
-            raise ValueError("Skynet training evidence schema is invalid")
+            raise ValueError("App training evidence schema is invalid")
         return payload.decode("utf-8")
 
 
 class HarnessTransport:
-    """Run one rendered AutoSaddler session through a Skynet agent harness."""
+    """Run one rendered AutoSaddler session through an app agent harness."""
 
     def __init__(self, proposer: dict[str, Any], model: str) -> None:
         """Remember the launch to replay for every session.
@@ -930,7 +1157,7 @@ class HarnessTransport:
         )
         if outcome.timed_out:
             raise TimeoutError(f"Harness session {session.session_id} exceeded {timeout_seconds:.0f}s")
-        failed = outcome.returncode != 0
+        failed = outcome.failed
         usage = SessionUsage(
             input_tokens=outcome.usage.get("input_tokens", 0),
             output_tokens=outcome.usage.get("output_tokens", 0),
@@ -941,13 +1168,13 @@ class HarnessTransport:
             error_type="HarnessExit" if failed else None,
             usage_incomplete=not outcome.usage,
         )
-        detail = (outcome.stderr or outcome.stdout).strip()[-2000:]
+        detail = harness_bridge.failure_detail(outcome)
         raw = outcome.text if outcome.text is not None else f"Harness exited with {outcome.returncode}: {detail}"
         return TransportOutcome(raw_response=raw, usage=(usage,))
 
 
 def harness_provider(proposer: dict[str, Any], model: str) -> Any:
-    """Build the upstream provider for a non-Claude proposer harness.
+    """Build the upstream provider for the proposer harness.
 
     Args:
         proposer: Serialized harness launch from the parent payload.
@@ -1006,7 +1233,7 @@ class UsageTrackingProvider:
 
 
 def record_usage(destination: dict[str, dict[str, int]], usage: Any, model: str) -> None:
-    """Fold one upstream usage record into Skynet's per-model token counters.
+    """Fold one upstream usage record into the app's per-model token counters.
 
     Args:
         destination: Per-model cumulative usage.
@@ -1026,7 +1253,7 @@ def _descendants() -> list[int]:
     """Find only processes descended from this isolated runner.
 
     Returns:
-        Child process ids, including separately grouped Claude sessions.
+        Child process ids, including separately grouped proposer sessions.
     """
     parents: dict[int, int] = {}
     if _PROC_ROOT.is_dir():
@@ -1105,7 +1332,7 @@ def _json_finite(value: Any) -> Any:
     return value
 
 
-def _incumbent(store: Any, evaluator: SkynetEvaluator, seed: Any) -> dict[str, Any]:
+def _incumbent(store: Any, evaluator: AppEvaluator, seed: Any) -> dict[str, Any]:
     """Recover the candidate to report when the run stops before selecting.
 
     Args:
@@ -1125,8 +1352,8 @@ def _incumbent(store: Any, evaluator: SkynetEvaluator, seed: Any) -> dict[str, A
         state = RunState.replay(store.events())
         if state.accepted_candidate_ids:
             candidate = state.candidates[state.accepted_candidate_ids[-1]]
-            return {"best_candidate": candidate_value(evaluator.components_of(candidate)), "best_score": None}
-    return {"best_candidate": candidate_value(evaluator.components_of(seed)), "best_score": None}
+            return {"best_candidate": evaluator.value_of(candidate), "best_score": None}
+    return {"best_candidate": evaluator.value_of(seed), "best_score": None}
 
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1150,67 +1377,67 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("The pinned upstream autosaddler package is not importable in this runtime.")
     model = str(payload["model"])
     timeout = float(payload["timeout_seconds"])
-    components = baseline_components(task.get("seed_candidate"))
-    train_examples, development_examples = split_cases(task.get("train_set"), task.get("val_set"))
-    train_cases = build_cases("train", train_examples)
-    development_cases = build_cases("development", development_examples)
+    repo = payload.get("repo")
+    proposer = payload["proposer"]
+    examples = visible_examples(task.get("train_set"))
+    train_cases = build_cases("train", examples)
+    development_cases = build_cases("development", examples)
     run_dir = Path("autosaddler-run").resolve()
-    store = LocalRunStore(run_dir=run_dir, run_id=f"skynet-{payload['nonce'][:12]}")
-    harness_space = ComponentMapHarnessSpace(
-        baseline=components,
-        store_root=run_dir / "candidates",
-        materialization_root=run_dir / "materialized",
-    )
+    store = LocalRunStore(run_dir=run_dir, run_id=f"app-{payload['nonce'][:12]}")
     mailbox = EvaluatorMailbox(payload["nonce"], timeout)
-    evaluator = SkynetEvaluator(
+    if repo is None:
+        components = baseline_components(task.get("seed_candidate"))
+        harness_space: Any = ComponentMapHarnessSpace(
+            baseline=components,
+            store_root=run_dir / "candidates",
+            materialization_root=run_dir / "materialized",
+        )
+        repo_base = None
+        component_names = tuple(components)
+        readonly_paths = None
+    else:
+        harness_space, repo_base = repo_space(repo, task.get("seed_candidate"), run_dir, proposer, mailbox)
+        component_names = tuple(str(path) for path in repo["editable_paths"])
+        readonly_paths = tuple(str(path) for path in repo["readonly_paths"])
+    prefix = "" if repo is None else _REPO_ASSETS
+    evaluator = AppEvaluator(
         mailbox=mailbox,
         harness_space=harness_space,
         store_run_dir=run_dir,
         max_concurrency=int(payload.get("max_concurrency", 1)),
         stop_at_score=payload.get("stop_at_score"),
-        fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "skynet-parent-scorer"})),
+        fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "app-parent-scorer"})),
         development_case_ids=[case.case_id for case in development_cases],
+        repo_base=repo_base,
     )
     scenario = as_ports.ScenarioComponents(
         name=_PLUGIN_NAME,
         version="1",
         harness_space=harness_space,
         evaluator=evaluator,
-        evidence_builder=SkynetEvidenceBuilder(store, {case.case_id: case for case in train_cases}),
-        prompt_pack=SkynetPromptPack(
+        evidence_builder=AppEvidenceBuilder(store, {case.case_id: case for case in train_cases}),
+        prompt_pack=AppPromptPack(
             store=store,
-            component_names=tuple(components),
+            component_names=component_names,
             objective=task.get("objective"),
             background=task.get("background"),
+            readonly_paths=readonly_paths,
         ),
         train_cases=train_cases,
         development_cases=development_cases,
         required_capabilities=_CAPABILITIES,
         resolved_entities={
             **as_assets.prompt_source_entities(plugin_root=_PLUGIN_ROOT, plugin_name=_PLUGIN_NAME),
-            "resolved/prompts/compositions.json": composition_record(),
+            "resolved/prompts/compositions.json": composition_record(prefix),
             "resolved/scenario_runtime.json": {
-                "schema_version": "skynet-autosaddler-scenario/v1",
-                "components": list(components),
+                "schema_version": "app-autosaddler-scenario/v1",
+                "components": list(component_names),
                 "train_case_ids": [case.case_id for case in train_cases],
                 "development_case_ids": [case.case_id for case in development_cases],
             },
         },
     )
-    proposer = payload.get("proposer") or {"harness": "claude_code"}
-    if proposer.get("harness") == "claude_code":
-        harness_bridge.use_direct_anthropic(os.environ)
-        inner = ClaudeAgentProvider(
-            ClaudeProviderConfig(
-                model=model,
-                effort=proposer.get("effort"),
-                permission_mode="bypassPermissions",
-                base_url=os.environ["ANTHROPIC_BASE_URL"],
-            )
-        )
-    else:
-        inner = harness_provider(proposer, model)
-    provider = UsageTrackingProvider(inner, model)
+    provider = UsageTrackingProvider(harness_provider(proposer, model), model)
     max_evals = int(payload["max_evals"])
     max_iterations = payload.get("max_iterations") or max_evals
     policies = as_policies.PolicyBundle(
@@ -1222,10 +1449,10 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     store.initialize(
         resolved_config={
-            "schema_version": "skynet-autosaddler-run/v1",
+            "schema_version": "app-autosaddler-run/v1",
             "engine": "autosaddler",
             "source": payload.get("source"),
-            "provider": {"type": proposer.get("harness", "claude_code"), "model": model},
+            "provider": {"type": proposer["harness"], "model": model},
             "optimization": {
                 "task_selection": {"type": "fixed", "batch_size": policies.task_selection.batch_size},
                 "acceptance": {"type": "matched_valid_strict_improvement"},
@@ -1249,9 +1476,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             selected = store.read_json("result.json")
             document.update(
                 {
-                    "best_candidate": candidate_value(
-                        evaluator.components_of(_candidate(store, result.selected_candidate_id))
-                    ),
+                    "best_candidate": evaluator.value_of(_candidate(store, result.selected_candidate_id)),
                     "best_score": result.development_score,
                     "total_evals": mailbox.total_evals,
                     "metadata": {

@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 
 import type { BlackboxRunResult } from "@/shared/types/api";
 
-import { buildVersions, candidateToText, defaultVersionIndex } from "./blackbox-versions.ts";
+import {
+  buildVersions,
+  candidateToText,
+  defaultVersionIndex,
+} from "./blackbox-versions.ts";
 
 function runResult(overrides: Partial<BlackboxRunResult>): BlackboxRunResult {
   return {

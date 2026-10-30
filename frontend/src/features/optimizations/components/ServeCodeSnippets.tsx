@@ -1,17 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 import type { ServeInfoResponse } from "@/shared/types/api";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { LangPicker } from "./ui-primitives";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 export function ServeCodeSnippets({
   serveInfo,
@@ -46,10 +40,10 @@ export function ServeCodeSnippets({
   const snippets = {
     curl: [
       tokenHint,
-      `#   export SKYNET_API_TOKEN=skyd_...`,
+      `#   export APP_API_TOKEN=skyd_...`,
       `# Send a POST request to the optimized program endpoint`,
       `curl -X POST ${url} \\`,
-      `  -H "Authorization: Bearer $SKYNET_API_TOKEN" \\`,
+      `  -H "Authorization: Bearer $APP_API_TOKEN" \\`,
       `  -H "Idempotency-Key: $(uuidgen)" \\`,
       `  -H "Content-Type: application/json" \\`,
       `  -d '${inputsJson}'`,
@@ -59,8 +53,8 @@ export function ServeCodeSnippets({
       `import uuid`,
       `import requests`,
       ``,
-      `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `token = os.environ["SKYNET_API_TOKEN"]`,
+      `# Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `token = os.environ["APP_API_TOKEN"]`,
       ``,
       `# Call the optimized program via the REST API`,
       `response = requests.post(`,
@@ -77,8 +71,8 @@ export function ServeCodeSnippets({
       ...serveInfo.output_fields.map((f) => `print(result["outputs"]["${f}"])`),
     ].join("\n"),
     javascript: [
-      `// Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `const token = process.env.SKYNET_API_TOKEN;`,
+      `// Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `const token = process.env.APP_API_TOKEN;`,
       ``,
       `// Call the optimized program via fetch`,
       `const response = await fetch("${url}", {`,
@@ -109,8 +103,8 @@ export function ServeCodeSnippets({
       `)`,
       ``,
       `func main() {`,
-      `\t// Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `\ttoken := os.Getenv("SKYNET_API_TOKEN")`,
+      `\t// Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `\ttoken := os.Getenv("APP_API_TOKEN")`,
       ``,
       `\t// Build the request payload`,
       `\tpayload, _ := json.Marshal(map[string]any{`,
@@ -141,8 +135,8 @@ export function ServeCodeSnippets({
             `import dspy`,
             `import base64, pickle, requests`,
             ``,
-            `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-            `token = os.environ["SKYNET_API_TOKEN"]`,
+            `# Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+            `token = os.environ["APP_API_TOKEN"]`,
             ``,
             `# Fetch the grid result and pick the target pair's artifact`,
             `grid = requests.get(`,
@@ -169,8 +163,8 @@ export function ServeCodeSnippets({
             `import dspy`,
             `import base64, pickle, requests`,
             ``,
-            `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-            `token = os.environ["SKYNET_API_TOKEN"]`,
+            `# Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+            `token = os.environ["APP_API_TOKEN"]`,
             ``,
             `# Download the optimized program artifact`,
             `artifact = requests.get(`,

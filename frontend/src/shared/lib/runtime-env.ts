@@ -7,8 +7,8 @@
  *
  * 1. The server component in `app/layout.tsx` reads the runtime env at request
  *    time via `getServerRuntimeEnv()` and injects it as a tiny `<script>` that
- *    sets `window.__SKYNET_ENV__` before hydration.
- * 2. Client code calls `getRuntimeEnv()` which prefers `window.__SKYNET_ENV__`
+ *    sets `window.__APP_ENV__` before hydration.
+ * 2. Client code calls `getRuntimeEnv()` which prefers `window.__APP_ENV__`
  *    and falls back to the build-time `NEXT_PUBLIC_*` defaults so `pnpm dev`
  *    keeps working without touching any pod-only state.
  *
@@ -20,11 +20,14 @@
 export interface RuntimeEnv {
   apiUrl: string;
   appVersion: string;
+  // Present (and true) only when the server runs with APP_LOCAL_MODE=1, the
+  // single-user desktop build; hosted deploys never serialize the key.
+  localMode?: true;
 }
 
 declare global {
   interface Window {
-    __SKYNET_ENV__?: RuntimeEnv;
+    __APP_ENV__?: RuntimeEnv;
   }
 }
 
@@ -41,6 +44,7 @@ export function getServerRuntimeEnv(): RuntimeEnv {
     apiUrl: process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL,
     appVersion:
       process.env.APP_VERSION ?? process.env.NEXT_PUBLIC_APP_VERSION ?? DEFAULT_APP_VERSION,
+    ...(process.env.APP_LOCAL_MODE === "1" ? { localMode: true as const } : {}),
   };
 }
 
@@ -48,7 +52,7 @@ export function getServerRuntimeEnv(): RuntimeEnv {
  * Universal getter — safe to call from server or client components.
  *
  * On the server it delegates to `getServerRuntimeEnv()`. On the client it
- * reads `window.__SKYNET_ENV__` (injected by the layout) and falls back to
+ * reads `window.__APP_ENV__` (injected by the layout) and falls back to
  * the build-time `NEXT_PUBLIC_*` defaults so dev mode without an injected
  * script keeps working.
  */
@@ -56,16 +60,22 @@ export function getRuntimeEnv(): RuntimeEnv {
   if (typeof window === "undefined") {
     return getServerRuntimeEnv();
   }
-  const injected = window.__SKYNET_ENV__;
+  const injected = window.__APP_ENV__;
   return {
     apiUrl: injected?.apiUrl ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL,
     appVersion:
       injected?.appVersion ?? process.env.NEXT_PUBLIC_APP_VERSION ?? DEFAULT_APP_VERSION,
+    ...(injected?.localMode === true ? { localMode: true as const } : {}),
   };
 }
 
+/** Whether this app runs as the local desktop build (``APP_LOCAL_MODE=1``). */
+export function isLocalMode(): boolean {
+  return getRuntimeEnv().localMode === true;
+}
+
 /**
- * Produce the inline `<script>` body that sets `window.__SKYNET_ENV__`.
+ * Produce the inline `<script>` body that sets `window.__APP_ENV__`.
  *
  * Uses `JSON.parse(JSON.stringify(...))` to keep parsing fast, and escapes any
  * sequence that could prematurely terminate the surrounding `<script>` tag
@@ -84,5 +94,5 @@ export function serializeRuntimeEnv(env: RuntimeEnv): string {
     .replace(/\//g, "\\u002F")
     .replace(LINE_SEPARATOR_RE, "\\u2028")
     .replace(PARAGRAPH_SEPARATOR_RE, "\\u2029");
-  return `window.__SKYNET_ENV__=JSON.parse(${JSON.stringify(json)});`;
+  return `window.__APP_ENV__=JSON.parse(${JSON.stringify(json)});`;
 }

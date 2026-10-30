@@ -121,7 +121,7 @@
     // Wordmark is non-interactive on its own — parent containers
     // (toolbar brand button, sidebar home link) handle click behavior.
     var wrap = document.createElement("span");
-    wrap.className = "skynet-wordmark";
+    wrap.className = "app-wordmark";
     wrap.setAttribute("role", "img");
     wrap.setAttribute("aria-label", "SKYNET");
     wrap.setAttribute("dir", "ltr");
@@ -150,7 +150,8 @@
   // hidden from the toolbar and re-mounted inside a sidebar header,
   // paired with a close button on the right.
   //
-  // State is persisted in localStorage under skynet-scalar-sidebar.
+  // State is persisted in localStorage under skynet-scalar-sidebar. The key keeps
+  // its pre-rename name so a returning reader keeps their saved choice.
   // Default on first visit is hidden.
 
   var SIDEBAR_STORAGE_KEY = "skynet-scalar-sidebar";
@@ -173,11 +174,11 @@
   }
 
   function applySidebarState(state) {
-    document.documentElement.dataset.skynetSidebar = state;
+    document.documentElement.dataset.appSidebar = state;
   }
 
   function toggleSidebar() {
-    var current = document.documentElement.dataset.skynetSidebar === "visible";
+    var current = document.documentElement.dataset.appSidebar === "visible";
     var next = current ? "hidden" : "visible";
     applySidebarState(next);
     writeSidebarState(next);
@@ -218,12 +219,12 @@
   function createToolbarBrand() {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "skynet-toolbar-brand";
+    btn.className = "app-toolbar-brand";
     btn.setAttribute("aria-label", "Open sidebar");
     btn.title = "Open sidebar";
 
     var icon = createSidebarIcon();
-    icon.classList.add("skynet-toolbar-icon");
+    icon.classList.add("app-toolbar-icon");
     btn.appendChild(icon);
     btn.appendChild(createWordmark());
 
@@ -233,10 +234,10 @@
 
   function createSidebarHeader() {
     var header = document.createElement("div");
-    header.className = "skynet-sidebar-header";
+    header.className = "app-sidebar-header";
 
     var home = document.createElement("a");
-    home.className = "skynet-sidebar-home";
+    home.className = "app-sidebar-home";
     home.href = "#";
     home.setAttribute("aria-label", "Scroll to top");
     home.appendChild(createWordmark());
@@ -248,7 +249,7 @@
 
     var close = document.createElement("button");
     close.type = "button";
-    close.className = "skynet-sidebar-close";
+    close.className = "app-sidebar-close";
     close.setAttribute("aria-label", "Close sidebar");
     close.title = "Close sidebar";
     close.appendChild(createSidebarIcon());
@@ -267,10 +268,10 @@
     var sidebar = document.querySelector(".t-doc__sidebar");
     if (!toolbar) return false;
 
-    if (!toolbar.querySelector(".skynet-toolbar-brand")) {
+    if (!toolbar.querySelector(".app-toolbar-brand")) {
       toolbar.appendChild(createToolbarBrand());
     }
-    if (sidebar && !sidebar.querySelector(".skynet-sidebar-header")) {
+    if (sidebar && !sidebar.querySelector(".app-sidebar-header")) {
       sidebar.insertBefore(createSidebarHeader(), sidebar.firstChild);
     }
     // Require both mount points before we stop observing

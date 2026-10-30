@@ -17,8 +17,6 @@ export const TelemetryEvent = {
   SignupStarted: "signup_started",
   SignupSucceeded: "signup_succeeded",
   RunSubmitted: "run_submitted",
-  GridSearchSubmitted: "grid_search_submitted",
-  BlackboxSubmitted: "blackbox_submitted",
   SettingsOpened: "settings_opened",
   SettingsTabChanged: "settings_tab_changed",
   CheckoutStarted: "checkout_started",
@@ -29,4 +27,6 @@ export const TelemetryEvent = {
   TutorialStarted: "tutorial_started",
   TutorialCompleted: "tutorial_completed",
   ShareCreated: "share_created",
+  WizardStepViewed: "wizard_step_viewed",
+  SetupCheckFailed: "setup_check_failed",
 } as const;

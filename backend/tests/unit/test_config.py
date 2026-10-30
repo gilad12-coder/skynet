@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from core.config import Settings
+from core.config import Settings, app_env, legacy_env_name, with_legacy_env
 
 _SETTINGS_ENV_VARS = (
     "REMOTE_DB_URL",
@@ -24,13 +24,13 @@ _SETTINGS_ENV_VARS = (
     "EMBEDDING_INDEX_SWEEP_INTERVAL",
     "EMBEDDING_INDEX_SWEEP_BATCH_SIZE",
     "PROGRESS_EVENTS_PER_JOB_CAP",
-    "LOG_ENTRIES_PER_JOB_CAP",
     "CANCEL_POLL_INTERVAL",
     "JOB_RUN_START_METHOD",
     "DB_POOL_SIZE",
     "DB_POOL_MAX_OVERFLOW",
     "DB_POOL_RECYCLE",
     "DB_PGBOUNCER_TRANSACTION_MODE",
+    "APP_CODE_VERSION",
     "SKYNET_CODE_VERSION",
     "ARTIFACTS_DIR",
     "LOGS_DIR",
@@ -51,6 +51,10 @@ _SETTINGS_ENV_VARS = (
     "RATE_LIMIT_ACCOUNT_REQUESTS_PER_HOUR",
     "ADMIN_USERNAMES",
     "QUOTA_OVERRIDES",
+    "APP_ENVIRONMENT",
+    "RAILWAY_ENVIRONMENT_NAME",
+    "APP_GIT_SHA",
+    "RAILWAY_GIT_COMMIT_SHA",
 )
 
 
@@ -93,7 +97,6 @@ def test_settings_defaults_storage_retention_caps() -> None:
     s = Settings(_env_file=None)
 
     assert s.progress_events_per_job_cap == 5000
-    assert s.log_entries_per_job_cap == 5000
 
 
 def test_settings_defaults_job_max_attempts() -> None:
@@ -205,12 +208,10 @@ def test_settings_env_override_worker_threads(monkeypatch: pytest.MonkeyPatch) -
 def test_settings_env_override_storage_retention_caps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Storage retention caps are configurable via environment."""
     monkeypatch.setenv("PROGRESS_EVENTS_PER_JOB_CAP", "123")
-    monkeypatch.setenv("LOG_ENTRIES_PER_JOB_CAP", "456")
 
     s = Settings(_env_file=None)
 
     assert s.progress_events_per_job_cap == 123
-    assert s.log_entries_per_job_cap == 456
 
 
 def test_settings_env_override_job_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,12 +239,68 @@ def test_settings_env_override_db_pool_config(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_settings_code_version_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``SKYNET_CODE_VERSION`` provides the cached build version."""
+    """``APP_CODE_VERSION`` provides the cached build version over the legacy name."""
+    monkeypatch.setenv("APP_CODE_VERSION", "abcdef123456")
+    monkeypatch.setenv("SKYNET_CODE_VERSION", "fedcba654321")
+
+    s = Settings(_env_file=None)
+
+    assert s.code_version == "abcdef123456"
+
+
+def test_settings_code_version_falls_back_to_legacy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The legacy ``SKYNET_CODE_VERSION`` still works when the new name is unset."""
     monkeypatch.setenv("SKYNET_CODE_VERSION", "abcdef123456")
 
     s = Settings(_env_file=None)
 
     assert s.code_version == "abcdef123456"
+
+
+def test_app_env_prefers_new_name() -> None:
+    """The ``APP_*`` name wins when both spellings are set."""
+    assert app_env("APP_X", environ={"APP_X": "new", "SKYNET_X": "old"}) == "new"
+
+
+def test_app_env_falls_back_to_legacy_name() -> None:
+    """The ``SKYNET_*`` name is used when the new one is absent or blank."""
+    assert app_env("APP_X", environ={"SKYNET_X": "old"}) == "old"
+    assert app_env("APP_X", environ={"APP_X": "", "SKYNET_X": "old"}) == "old"
+
+
+def test_app_env_returns_default_when_neither_is_set() -> None:
+    """Neither spelling set yields the default."""
+    assert app_env("APP_X", environ={}) is None
+    assert app_env("APP_X", "fallback", environ={}) == "fallback"
+
+
+def test_app_env_reads_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without an explicit mapping the helper reads ``os.environ``."""
+    monkeypatch.delenv("APP_ENV_PROBE", raising=False)
+    monkeypatch.setenv("SKYNET_ENV_PROBE", "old")
+
+    assert app_env("APP_ENV_PROBE") == "old"
+
+
+def test_legacy_env_name_rejects_other_prefixes() -> None:
+    """Only ``APP_*`` names have a legacy spelling."""
+    assert legacy_env_name("APP_MODEL") == "SKYNET_MODEL"
+    with pytest.raises(ValueError):
+        legacy_env_name("OPENAI_BASE_URL")
+
+
+def test_with_legacy_env_copies_new_names_only() -> None:
+    """Child environments carry both spellings of every ``APP_*`` entry."""
+    assert with_legacy_env({"APP_MODEL": "m", "PATH": "/bin"}) == {
+        "APP_MODEL": "m",
+        "SKYNET_MODEL": "m",
+        "PATH": "/bin",
+    }
+
+
+def test_with_legacy_env_overwrites_a_stale_legacy_value() -> None:
+    """The new value wins, so code reading either spelling sees the same thing."""
+    assert with_legacy_env({"SKYNET_GATEWAY_URL": "stale", "APP_GATEWAY_URL": "relay"})["SKYNET_GATEWAY_URL"] == "relay"
 
 
 def test_settings_env_override_port(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -678,3 +735,54 @@ def test_settings_cost_guardrails_disable_values(monkeypatch: pytest.MonkeyPatch
     assert s.max_monthly_active_users == 0
     assert s.max_concurrent_jobs_per_user == 0
     assert s.generalist_agent_model == ""
+
+
+_PLATFORM_ENV_CASES = (
+    ("app_environment", "APP_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME"),
+    ("app_git_sha", "APP_GIT_SHA", "RAILWAY_GIT_COMMIT_SHA"),
+)
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_reads_the_neutral_name(
+    monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
+) -> None:
+    """The ECS task definitions set the neutral ``APP_*`` name."""
+    monkeypatch.setenv(neutral, "from-neutral")
+    assert getattr(Settings(_env_file=None), field) == "from-neutral"
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_ignores_the_railway_name(
+    monkeypatch: pytest.MonkeyPatch, field: str, neutral: str, railway: str
+) -> None:
+    """Railway is gone, so its old variable name no longer feeds the setting."""
+    monkeypatch.setenv(railway, "from-railway")
+    assert getattr(Settings(_env_file=None), field) == ""
+
+
+@pytest.mark.parametrize(("field", "neutral", "railway"), _PLATFORM_ENV_CASES)
+def test_platform_setting_defaults_to_empty(field: str, neutral: str, railway: str) -> None:
+    """A developer machine sets neither name."""
+    assert getattr(Settings(_env_file=None), field) == ""
+
+
+@pytest.mark.parametrize(
+    ("environment", "railway", "expected"),
+    [
+        ("skynet-pr-161", None, True),
+        (None, "skynet-pr-161", False),
+        ("staging", None, False),
+        ("production", "skynet-pr-161", False),
+        (None, None, False),
+    ],
+)
+def test_preview_detection_reads_only_app_environment(
+    monkeypatch: pytest.MonkeyPatch, environment: str | None, railway: str | None, expected: bool
+) -> None:
+    """Only a ``-pr-<n>`` ``APP_ENVIRONMENT`` marks a preview; the Railway name is ignored."""
+    if environment is not None:
+        monkeypatch.setenv("APP_ENVIRONMENT", environment)
+    if railway is not None:
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", railway)
+    assert Settings(_env_file=None).is_preview_environment is expected

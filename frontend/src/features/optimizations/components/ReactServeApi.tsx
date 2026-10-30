@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Separator } from "@/shared/ui/primitives/separator";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
@@ -13,12 +11,8 @@ import { tip } from "@/shared/lib/tooltips";
 
 import { CopyButton } from "@/shared/ui/copy-button";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { LangPicker } from "./ui-primitives";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 export interface ReactServeApiProps {
   optimizationId: string;
@@ -38,12 +32,12 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
   const snippets = {
     curl: [
       `# Generate a token in Settings → API, then set it in your environment`,
-      `#   export SKYNET_API_TOKEN=skyd_...`,
+      `#   export APP_API_TOKEN=skyd_...`,
       `# Stream one chat turn against the optimized ReAct agent (Server-Sent Events).`,
       `# trust_mode "yolo" runs tools without approval; "ask" emits pending_approval`,
       `# events you resolve via POST ${confirmPath}.`,
       `curl -N -X POST ${url} \\`,
-      `  -H "Authorization: Bearer $SKYNET_API_TOKEN" \\`,
+      `  -H "Authorization: Bearer $APP_API_TOKEN" \\`,
       `  -H "Content-Type: application/json" \\`,
       `  -d '{"user_message": "<your message>", "trust_mode": "yolo"}'`,
     ].join("\n"),
@@ -51,8 +45,8 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
       `import os`,
       `import requests`,
       ``,
-      `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `token = os.environ["SKYNET_API_TOKEN"]`,
+      `# Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `token = os.environ["APP_API_TOKEN"]`,
       ``,
       `# Stream one chat turn against the optimized ReAct agent (Server-Sent Events).`,
       `# trust_mode "yolo" runs tools without approval; "ask" pauses for confirmation.`,
@@ -67,8 +61,8 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
       `            print(line.decode())`,
     ].join("\n"),
     javascript: [
-      `// Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `const token = process.env.SKYNET_API_TOKEN;`,
+      `// Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `const token = process.env.APP_API_TOKEN;`,
       ``,
       `// Stream one chat turn against the optimized ReAct agent (Server-Sent Events).`,
       `// trust_mode "yolo" runs tools without approval; "ask" pauses for confirmation.`,
@@ -103,8 +97,8 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
       `)`,
       ``,
       `func main() {`,
-      `\t// Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `\ttoken := os.Getenv("SKYNET_API_TOKEN")`,
+      `\t// Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `\ttoken := os.Getenv("APP_API_TOKEN")`,
       ``,
       `\t// Stream one chat turn against the optimized ReAct agent (Server-Sent Events).`,
       `\t// trust_mode "yolo" runs tools without approval; "ask" pauses for confirmation.`,
@@ -133,8 +127,8 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
       `from mcp import ClientSession`,
       `from mcp.client.streamable_http import streamablehttp_client`,
       ``,
-      `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
-      `token = os.environ["SKYNET_API_TOKEN"]`,
+      `# Generate a token in Settings → API and set APP_API_TOKEN in your env`,
+      `token = os.environ["APP_API_TOKEN"]`,
       `auth = {"Authorization": f"Bearer {token}"}`,
       ``,
       `# Define the DSPy Signature you trained this agent with (the one you submitted)`,
@@ -197,7 +191,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <HelpTip text={tip("serve.section_run")}>{msg("optimizations.react.api_title")}</HelpTip>
+          {msg("optimizations.react.api_title")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -221,9 +215,7 @@ export function ReactServeApi({ optimizationId }: ReactServeApiProps) {
 
         <div className="space-y-2">
           <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-            <HelpTip text={tip("serve.integration_code")}>
-              {msg("auto.app.optimizations.id.page.26")}
-            </HelpTip>
+            {msg("auto.app.optimizations.id.page.26")}
           </p>
           <CodeEditor
             value={snippet}

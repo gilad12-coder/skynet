@@ -9,7 +9,15 @@ import {
   Minus,
   Plus,
 } from "@/shared/ui/icons";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { formatBlackboxScore } from "@/shared/lib";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -27,34 +35,59 @@ import {
   type ClimbModel,
   type ClimbPoint,
 } from "../lib/meta-harness";
+import { usePinchZoom } from "../lib/pinch-zoom";
 import { displayCandidateId } from "../lib/types";
 
 // The palette mirrors TrajectoryTree so a climb and a tree read as one family.
-const EDGE_STROKE = "rgba(124, 99, 80, 0.42)";
-const NODE_CORE_FILL = "#fdfaf4";
-const NODE_CORE_STROKE = "rgba(28, 22, 18, 0.16)";
-const NODE_CORE_STROKE_HOVER = "rgba(28, 22, 18, 0.42)";
-const NODE_CORE_STROKE_SELECTED = "#1c1612";
-const IMPROVED_FILL = "#7C8B5A";
-const REGRESSED_FILL = "#B26B4A";
-const SCORE_TRACK_STROKE = "rgba(124, 99, 80, 0.14)";
-const PENDING_STROKE = "rgba(124, 99, 80, 0.6)";
-const PENDING_PROGRESS = "#7C6350";
-const WINNER_INDICATOR = "#9C7A3F";
-const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
-const WINNER_FILL = "#F8EBC8";
-const WINNER_BADGE_FILL = "#9C7A3F";
-const WINNER_BADGE_INK = "#FBF4DF";
-const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
-const GRID_LINE_COLOR = "oklch(0.91 0.006 50)";
-const AXIS_INK = "rgba(28, 22, 18, 0.55)";
+const EDGE_STROKE = "color-mix(in srgb, var(--muted-foreground) 42%, transparent)";
+const NODE_CORE_FILL = "var(--card)";
+const NODE_CORE_STROKE = "color-mix(in srgb, var(--foreground) 16%, transparent)";
+const NODE_CORE_STROKE_HOVER = "color-mix(in srgb, var(--foreground) 42%, transparent)";
+const NODE_CORE_STROKE_SELECTED = "var(--foreground)";
+const IMPROVED_FILL = "var(--tree-pass)";
+const REGRESSED_FILL = "var(--tree-fail)";
+const SCORE_TRACK_STROKE = "color-mix(in srgb, var(--muted-foreground) 14%, transparent)";
+const PENDING_STROKE = "color-mix(in srgb, var(--muted-foreground) 60%, transparent)";
+const PENDING_PROGRESS = "var(--primary)";
+const WINNER_INDICATOR = "var(--tree-winner)";
+const WINNER_HALO = "var(--tree-winner-halo)";
+const WINNER_FILL = "var(--tree-winner-fill)";
+const WINNER_BADGE_FILL = "var(--tree-winner)";
+const WINNER_BADGE_INK = "var(--tree-winner-badge-ink)";
+const LABEL_HALO = "color-mix(in srgb, var(--background) 90%, transparent)";
+const GRID_LINE_COLOR = "var(--tree-grid)";
+const AXIS_INK = "color-mix(in srgb, var(--foreground) 55%, transparent)";
 const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(--background) 70%)";
 // Room under the plot for the legend that floats over the chart's bottom edge.
+// A coarse pointer (any iPad, even with a trackpad attached) grows every legend
+// toggle to a 44px target, so the legend needs more room there or it covers
+// the axis labels.
 const LEGEND_ROOM_PX = 48;
+const LEGEND_ROOM_COARSE_PX = 68;
+const COARSE_POINTER_QUERY = "(any-pointer: coarse)";
 // Inline the chart is as tall as the climb's natural layout plus that room;
 // maximized, the climb stretches to the screen instead.
-const CHART_HEIGHT_PX =
-  CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom + LEGEND_ROOM_PX;
+const PLOT_HEIGHT_PX = CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom;
+/** The inline chart's height, for skeletons that stand in for it. */
+export const CLIMB_CHART_HEIGHT_PX = {
+  fine: PLOT_HEIGHT_PX + LEGEND_ROOM_PX,
+  coarse: PLOT_HEIGHT_PX + LEGEND_ROOM_COARSE_PX,
+} as const;
+
+function subscribeCoarsePointer(onChange: () => void): () => void {
+  const query = window.matchMedia(COARSE_POINTER_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function useLegendRoom(): number {
+  const coarse = useSyncExternalStore(
+    subscribeCoarsePointer,
+    () => window.matchMedia(COARSE_POINTER_QUERY).matches,
+    () => false,
+  );
+  return coarse ? LEGEND_ROOM_COARSE_PX : LEGEND_ROOM_PX;
+}
 
 // The map controls mirror TrajectoryTree, except that zooming out stops where
 // the whole climb is in view rather than at a fixed floor.
@@ -98,14 +131,14 @@ export interface MetaHarnessClimbProps {
 }
 
 // At rest the climb sits at its natural size against the start edge, shrunk
-// only when it would not fit; the viewer zooms in and pans from there.
-function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
-  if (size.w < 2 || size.h < 2 || layoutW <= 0 || layoutH <= 0) {
+// only when it would not fit; the viewer zooms in and pans from there. ``plot``
+// is the canvas above the legend's room.
+function fitView(plot: { w: number; h: number }, layoutW: number, layoutH: number): View {
+  if (plot.w < 2 || plot.h < 2 || layoutW <= 0 || layoutH <= 0) {
     return { k: 1, tx: 0, ty: 0 };
   }
-  const plotH = size.h - LEGEND_ROOM_PX;
-  const k = Math.min(1, size.w / layoutW, plotH / layoutH);
-  return { k, tx: 0, ty: Math.max(0, (plotH - layoutH * k) / 2) };
+  const k = Math.min(1, plot.w / layoutW, plot.h / layoutH);
+  return { k, tx: 0, ty: Math.max(0, (plot.h - layoutH * k) / 2) };
 }
 
 // The resting frame is the zoom floor: the climb never shrinks below the size
@@ -115,15 +148,15 @@ function fitView(size: { w: number; h: number }, layoutW: number, layoutH: numbe
 // opens up beside the drawing.
 function clampView(
   view: View,
-  size: { w: number; h: number },
+  plot: { w: number; h: number },
   layoutW: number,
   layoutH: number,
 ): View {
-  const rest = fitView(size, layoutW, layoutH);
+  const rest = fitView(plot, layoutW, layoutH);
   if (view.k <= rest.k) return rest;
   const k = Math.min(ZOOM_MAX, view.k);
-  const slackX = size.w - layoutW * k;
-  const slackY = size.h - LEGEND_ROOM_PX - layoutH * k;
+  const slackX = plot.w - layoutW * k;
+  const slackY = plot.h - layoutH * k;
   return {
     k,
     tx: slackX >= 0 ? 0 : Math.max(slackX, Math.min(0, view.tx)),
@@ -236,14 +269,16 @@ export function MetaHarnessClimb({
     };
   }, [isMaximized]);
 
+  const legendRoom = useLegendRoom();
+  const plot = useMemo(() => ({ w: size.w, h: size.h - legendRoom }), [size, legendRoom]);
   const layout = useMemo(
     () =>
       layoutClimb(model, {
-        availableWidth: size.w,
-        availableHeight: isMaximized ? size.h - LEGEND_ROOM_PX : undefined,
+        availableWidth: plot.w,
+        availableHeight: isMaximized ? plot.h : undefined,
         showPending: live,
       }),
-    [model, size.w, size.h, isMaximized, live],
+    [model, plot, isMaximized, live],
   );
   const bestPoint = useMemo(
     () => layout.points.find((point) => point.id === model.bestId) ?? null,
@@ -254,15 +289,15 @@ export function MetaHarnessClimb({
     if (size.w < 2 || size.h < 2) return;
     setView((v) =>
       userInteractedRef.current
-        ? clampView(v, size, layout.width, layout.height)
-        : fitView(size, layout.width, layout.height),
+        ? clampView(v, plot, layout.width, layout.height)
+        : fitView(plot, layout.width, layout.height),
     );
-  }, [size, layout.width, layout.height]);
+  }, [size, plot, layout.width, layout.height]);
 
   const zoomAt = useCallback(
     (cx: number, cy: number, factor: number) => {
       setView((v) => {
-        const rest = fitView(size, layout.width, layout.height);
+        const rest = fitView(plot, layout.width, layout.height);
         const nextK = Math.max(rest.k, Math.min(ZOOM_MAX, v.k * factor));
         if (nextK === v.k) return v;
         // Zooming all the way out lands on the resting frame, which then keeps
@@ -276,13 +311,13 @@ export function MetaHarnessClimb({
         const wy = (cy - v.ty) / v.k;
         return clampView(
           { k: nextK, tx: cx - wx * nextK, ty: cy - wy * nextK },
-          size,
+          plot,
           layout.width,
           layout.height,
         );
       });
     },
-    [size, layout.width, layout.height],
+    [plot, layout.width, layout.height],
   );
 
   useEffect(() => {
@@ -299,11 +334,18 @@ export function MetaHarnessClimb({
     // Same portal caveat as the ResizeObserver: the listener follows the host.
   }, [zoomAt, isMaximized]);
 
+  const { start: pinchStart, move: pinchMove, end: pinchEnd } = usePinchZoom(containerRef, zoomAt);
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       const target = e.target as Element | null;
       if (target?.closest("[data-trajectory-controls]")) return;
+      if (pinchStart(e)) {
+        if (panStateRef.current?.moved) setIsDragging(false);
+        panStateRef.current = null;
+        return;
+      }
       // Capturing here would steal the click from the node under the pointer,
       // so capture waits until the pointer actually starts panning.
       panStateRef.current = {
@@ -315,11 +357,12 @@ export function MetaHarnessClimb({
         moved: false,
       };
     },
-    [view.tx, view.ty],
+    [view.tx, view.ty, pinchStart],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (pinchMove(e)) return;
       const ps = panStateRef.current;
       if (!ps || ps.pointerId !== e.pointerId) return;
       const dx = e.clientX - ps.startClientX;
@@ -334,25 +377,29 @@ export function MetaHarnessClimb({
         setView((v) =>
           clampView(
             { k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy },
-            size,
+            plot,
             layout.width,
             layout.height,
           ),
         );
       }
     },
-    [size, layout.width, layout.height],
+    [plot, layout.width, layout.height, pinchMove],
   );
 
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const ps = panStateRef.current;
-    if (!ps || ps.pointerId !== e.pointerId) return;
-    panStateRef.current = null;
-    if (ps.moved) {
-      (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-      setIsDragging(false);
-    }
-  }, []);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pinchEnd(e);
+      const ps = panStateRef.current;
+      if (!ps || ps.pointerId !== e.pointerId) return;
+      panStateRef.current = null;
+      if (ps.moved) {
+        (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+        setIsDragging(false);
+      }
+    },
+    [pinchEnd],
+  );
 
   // A release that ends a pan must not also select the node it lands on.
   const handleSelect = useCallback(
@@ -368,8 +415,8 @@ export function MetaHarnessClimb({
     [size.w, size.h, zoomAt],
   );
   const restView = useMemo(
-    () => fitView(size, layout.width, layout.height),
-    [size, layout.width, layout.height],
+    () => fitView(plot, layout.width, layout.height),
+    [plot, layout.width, layout.height],
   );
   const resetView = useCallback(() => {
     userInteractedRef.current = false;
@@ -387,13 +434,13 @@ export function MetaHarnessClimb({
       ref={containerRef}
       className={
         isMaximized
-          ? "fixed inset-0 z-50 h-screen w-screen overflow-hidden border-0"
-          : "relative w-full overflow-hidden rounded-xl border border-[#DDD4C8]/60"
+          ? "fixed inset-0 z-50 h-dvh w-screen overflow-hidden border-0"
+          : "relative w-full overflow-hidden rounded-xl border border-border/60"
       }
       style={
         isMaximized
           ? { background: SURFACE_GRADIENT }
-          : { height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }
+          : { height: PLOT_HEIGHT_PX + legendRoom, background: SURFACE_GRADIENT }
       }
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -504,7 +551,7 @@ export function MetaHarnessClimb({
       </CanvasControlGroup>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
-        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur">
+        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 backdrop-blur">
           <LegendToggle
             pressed={layers.improved}
             onToggle={() => toggleLayer("improved")}
@@ -555,8 +602,8 @@ export function MetaHarnessClimb({
       <>
         <div
           aria-hidden
-          className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
-          style={{ height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }}
+          className="w-full rounded-xl border border-border/60 opacity-40"
+          style={{ height: PLOT_HEIGHT_PX + legendRoom, background: SURFACE_GRADIENT }}
         />
         {createPortal(body, document.body)}
       </>
@@ -768,7 +815,7 @@ const ClimbContent = memo(function ClimbContent({
                       fontFamily="var(--font-mono, monospace)"
                       fontSize="13"
                       fontWeight={700}
-                      fill="#1c1612"
+                      fill={winnerShown ? "var(--tree-winner-number)" : "var(--foreground)"}
                       pointerEvents="none"
                     >
                       {displayCandidateId(point.id)}
@@ -792,7 +839,7 @@ const ClimbContent = memo(function ClimbContent({
                     fontFamily="var(--font-mono, monospace)"
                     fontSize="10.5"
                     fontWeight={600}
-                    fill="rgba(28, 22, 18, 0.72)"
+                    fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
                     stroke={LABEL_HALO}
                     strokeWidth={2.5}
                     strokeLinejoin="round"
@@ -899,7 +946,7 @@ const ClimbContent = memo(function ClimbContent({
               fontFamily="var(--font-mono, monospace)"
               fontSize="10.5"
               fontWeight={700}
-              fill="#1c1612"
+              fill="var(--foreground)"
               pointerEvents="none"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
@@ -912,7 +959,7 @@ const ClimbContent = memo(function ClimbContent({
               fontFamily="var(--font-mono, monospace)"
               fontSize="10.5"
               fontWeight={600}
-              fill="rgba(28, 22, 18, 0.72)"
+              fill="color-mix(in srgb, var(--foreground) 72%, transparent)"
               stroke={LABEL_HALO}
               strokeWidth={2.5}
               strokeLinejoin="round"

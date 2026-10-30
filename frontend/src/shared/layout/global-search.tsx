@@ -4,12 +4,11 @@ import { Kbd } from "@/shared/ui/kbd";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { ArrowUpRight, GraduationCap, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
+import { ArrowUpRight, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
 import type { Icon } from "@/shared/ui/icons";
 
 import { useGeneralistPanelStateOptional } from "@/features/agent-panel";
 import { SETTINGS_TABS, useSettingsModal, visibleSettingsTabs } from "@/features/settings";
-import { useTutorialContext } from "@/features/tutorial";
 import { APP_PAGES, matchesQuery, splitKeywords } from "@/shared/lib/app-pages";
 import { APP_PAGE_ICONS, appPageDescription, appPageKeywords, appPageLabel } from "@/shared/lib/app-pages-ui";
 import { useLocale } from "@/shared/providers";
@@ -47,7 +46,6 @@ export function GlobalSearch() {
   const isAdmin = session?.user?.role === "admin";
   const { open: settingsOpen, openTo } = useSettingsModal();
   const agentPanel = useGeneralistPanelStateOptional();
-  const { startTrack } = useTutorialContext();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -79,14 +77,6 @@ export function GlobalSearch() {
           ]
         : []),
       {
-        id: "action-tour",
-        group: "actions",
-        label: msg("app.shell.search.action.tour"),
-        keywords: splitKeywords(msg("app.shell.search.kw.tour")),
-        icon: GraduationCap,
-        run: () => startTrack("quick"),
-      },
-      {
         id: "action-sign-out",
         group: "actions",
         label: msg("app.shell.logout"),
@@ -105,7 +95,7 @@ export function GlobalSearch() {
       run: () => openTo(tab),
     }));
     return [...pages, ...actions, ...settings];
-  }, [agentPanel, isAdmin, openTo, router, startTrack, locale]);
+  }, [agentPanel, isAdmin, openTo, router, locale]);
 
   const filteredItems = React.useMemo(() => {
     if (!query.trim()) return items.filter((item) => item.group !== "settings");
@@ -203,13 +193,13 @@ export function GlobalSearch() {
           id="global-search-dialog"
           showCloseButton={false}
           dir={dir}
-          className="max-w-[calc(100%-1.5rem)] gap-0 overflow-hidden rounded-2xl border border-border/75 bg-background p-0 shadow-[0_16px_48px_rgba(28,22,18,0.16)] sm:max-w-xl"
+          className="max-w-[calc(100%-1.5rem)] gap-0 overflow-hidden rounded-2xl border border-border/75 bg-background p-0 shadow-[var(--shadow-float)] sm:max-w-xl"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{msg("app.shell.search.title")}</DialogTitle>
             <DialogDescription>{msg("app.shell.search.description")}</DialogDescription>
           </DialogHeader>
-          <div className="group flex h-[58px] items-center gap-3 border-b border-border/60 px-4 focus-within:bg-white/50">
+          <div className="group flex h-[58px] items-center gap-3 border-b border-border/60 px-4 focus-within:bg-white/50 dark:focus-within:bg-white/5">
             <MagnifyingGlass
               className="size-5 shrink-0 text-primary/60 transition-colors group-focus-within:text-primary"
               aria-hidden="true"
@@ -270,7 +260,7 @@ export function GlobalSearch() {
                             className={cn(
                               "group/item flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start outline-none transition-[background-color,color] duration-100",
                               selected
-                                ? "bg-primary/[0.09] text-foreground"
+                                ? "bg-primary-fill/[0.09] text-foreground"
                                 : "text-foreground/80 hover:bg-accent/55",
                             )}
                           >
@@ -278,7 +268,7 @@ export function GlobalSearch() {
                               className={cn(
                                 "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-100",
                                 selected
-                                  ? "bg-primary/[0.12] text-primary"
+                                  ? "bg-primary-fill/[0.12] text-primary"
                                   : "bg-muted/70 text-muted-foreground group-hover/item:text-primary",
                               )}
                             >

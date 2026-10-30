@@ -14,5 +14,5 @@ export const DEFAULT_WIDTH = MIN_WIDTH;
 
 export const NARROW_VIEWPORT_QUERY = "(max-width: 1023px)";
 
-export const STORAGE_KEY_OPEN = "skynet.generalist-panel.open";
-export const STORAGE_KEY_WIDTH = "skynet.generalist-panel.width";
+export const STORAGE_KEY_OPEN = "app.generalist-panel.open";
+export const STORAGE_KEY_WIDTH = "app.generalist-panel.width";

@@ -68,7 +68,7 @@ def verify_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dic
     monkeypatch.setattr(settings, "smtp_host", "smtp.test.local")
     sent: list[dict[str, str]] = []
 
-    def _capture(to: str, subject: str, body: str) -> None:
+    def _capture(to: str, subject: str, body: str, *, html_body: str | None = None) -> None:
         sent.append({"to": to, "subject": subject, "body": body})
 
     monkeypatch.setattr(accounts_module, "send_email", _capture)
@@ -148,6 +148,39 @@ def test_register_emails_code_and_blocks_login_until_confirmed(
     )
     assert confirmed.status_code == 200
     assert _login(client, "amy@example.com", "originalpass1").status_code == 200
+
+
+def test_preview_environment_still_requires_the_emailed_code(
+    verify_client: tuple[TestClient, list[dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PR preview with a relay emails a code and refuses login until it is confirmed."""
+    client, sent = verify_client
+    monkeypatch.setattr(settings, "app_environment", "skynet-pr-762")
+    assert settings.is_preview_environment
+    _register(client, "pia@example.com", "originalpass1")
+    assert len(sent) == 1
+    code = _last_code(sent)
+
+    blocked = _login(client, "pia@example.com", "originalpass1")
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"] == t_en("accounts.email_not_verified")
+
+    wrong = "000000" if code != "000000" else "111111"
+    rejected = client.post(
+        "/auth/email-verify/confirm",
+        json={"email": "pia@example.com", "code": wrong},
+        headers=_AUTH_HEADER,
+    )
+    assert rejected.status_code == 422
+    assert _login(client, "pia@example.com", "originalpass1").status_code == 403
+
+    confirmed = client.post(
+        "/auth/email-verify/confirm",
+        json={"email": "pia@example.com", "code": code},
+        headers=_AUTH_HEADER,
+    )
+    assert confirmed.status_code == 200
+    assert _login(client, "pia@example.com", "originalpass1").status_code == 200
 
 
 def test_register_without_smtp_auto_verifies(

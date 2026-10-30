@@ -31,6 +31,8 @@ interface Props {
   onGoTo: (idx: number) => void;
   onFinishRound: () => void;
   predictError: boolean;
+  /** The local build refused the tagging model: it needs the user's own key. */
+  localKeyError?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export function TaggerAssistRail({
   onGoTo,
   onFinishRound,
   predictError,
+  localKeyError = false,
 }: Props) {
   const row = frameData[currentIndex];
   const rowId = row ? String(row.id) : "";
@@ -136,7 +139,7 @@ export function TaggerAssistRail({
           <span className="text-xs text-muted-foreground">
             {msg("tagger.assist.rail.agreement")}
           </span>
-          <span className="text-sm font-semibold tabular-nums" style={{ color: "#a68b6b" }}>
+          <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--primary)" }}>
             {agreement === null ? "—" : `${Math.round(agreement * 100)}%`}
           </span>
         </div>
@@ -171,7 +174,7 @@ export function TaggerAssistRail({
               max={Math.max(1, openRound.rowIds.length)}
               size="sm"
               className="mt-1.5"
-              fillClassName="bg-primary/40"
+              fillClassName="bg-primary-fill/40"
             />
           </div>
         )}
@@ -179,7 +182,11 @@ export function TaggerAssistRail({
 
       <div className="rounded-xl border border-border/60 bg-card p-4">
         {predictError ? (
-          <p className="text-sm text-muted-foreground">{msg("tagger.assist.rail.predict_error")}</p>
+          <p className="text-sm text-muted-foreground" dir="auto">
+            {msg(
+              localKeyError ? "tagger.assist.local_key_needed" : "tagger.assist.rail.predict_error",
+            )}
+          </p>
         ) : (
           <ReviewPanel
             config={config}

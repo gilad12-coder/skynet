@@ -11,6 +11,7 @@ import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { APP_NAME } from "@/shared/lib/brand";
 import { JobsStreamProvider } from "@/shared/hooks/use-jobs-stream";
 import {
   AgentPillDock,
@@ -19,6 +20,8 @@ import {
   WizardStateProvider,
   isGeneralistAgentEnabled,
 } from "@/features/agent-panel";
+import { IntakeHost } from "@/features/experience";
+import { NotificationBell } from "@/features/notifications";
 
 const HEADER_HEIGHT_PX = 53;
 const TABBAR_HEIGHT_PX = 56;
@@ -65,7 +68,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
 
   const shell = (
     <div
-      className="flex min-h-screen flex-col"
+      className="flex min-h-dvh flex-col"
       style={{
         ["--header-height" as string]: `${HEADER_HEIGHT_PX}px`,
         ["--tabbar-height" as string]: `calc(${TABBAR_HEIGHT_PX}px + env(safe-area-inset-bottom))`,
@@ -80,9 +83,12 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
           className="text-sm font-bold uppercase tracking-[0.14em] text-foreground"
           style={{ fontFamily: "var(--font-ui)" }}
         >
-          SKYNET
+          {APP_NAME}
         </Link>
-        <GlobalSearch />
+        <div className="flex items-center gap-1">
+          <GlobalSearch />
+          <NotificationBell />
+        </div>
       </header>
 
       <main
@@ -140,13 +146,23 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  if (!generalistEnabled) return <JobsStreamProvider>{shell}</JobsStreamProvider>;
+  // The shared wizard state is mounted with or without the agent: the
+  // first-login setup prefills the wizard through it either way.
+  if (!generalistEnabled) {
+    return (
+      <WizardStateProvider>
+        <JobsStreamProvider>{shell}</JobsStreamProvider>
+        <IntakeHost />
+      </WizardStateProvider>
+    );
+  }
 
   return (
     <WizardStateProvider>
       <GeneralistPanelProvider>
         <JobsStreamProvider>{shell}</JobsStreamProvider>
         <GeneralistPanel />
+        <IntakeHost />
       </GeneralistPanelProvider>
     </WizardStateProvider>
   );

@@ -36,17 +36,12 @@ function scoreTip(version: CandidateVersion): string | null {
 
 function BestMark({ className }: { className?: string }) {
   return (
-    <HelpTip text={tip("blackbox.versions.best")}>
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 font-medium text-[var(--warning)]",
-          className,
-        )}
-      >
-        <Trophy className="size-3 shrink-0" aria-hidden="true" />
-        {msg("optimization.blackbox.versions.best")}
-      </span>
-    </HelpTip>
+    <span
+      className={cn("inline-flex items-center gap-1 font-medium text-[var(--warning)]", className)}
+    >
+      <Trophy className="size-3 shrink-0" aria-hidden="true" />
+      {msg("optimization.blackbox.versions.best")}
+    </span>
   );
 }
 
@@ -165,7 +160,10 @@ export function VersionRail({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72 overflow-hidden p-0">
-            <div className="max-h-72 overflow-y-auto py-1" dir="ltr">
+            <div
+              className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto py-1"
+              dir="ltr"
+            >
               {newestFirst.map((i) => (
                 <VersionRow
                   key={versions[i]?.number ?? i}

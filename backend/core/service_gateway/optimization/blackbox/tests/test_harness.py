@@ -11,7 +11,6 @@ import pytest
 
 from core.exceptions import ServiceError
 from core.models.blackbox import (
-    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_HARNESS_CODEX,
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
@@ -32,7 +31,6 @@ from ..harness import (
     launch_payload,
 )
 from ..harness_bridge import (
-    parse_claude_output,
     parse_codex_output,
     parse_opencode_output,
     parse_pi_output,
@@ -60,14 +58,14 @@ def test_pi_launch_wires_the_gateway_provider_and_json_stream() -> None:
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
 
     assert launch.instructions_file == "AGENTS.md"
-    models = json.loads(launch.files[".skynet/pi/models.json"])
-    provider = models["providers"]["skynet"]
+    models = json.loads(launch.files[".app/pi/models.json"])
+    provider = models["providers"]["app"]
     assert provider["baseUrl"] == _GATEWAY.url
     assert provider["api"] == "openai-completions"
-    assert provider["apiKey"] == "!printenv SKYNET_API_KEY"
+    assert provider["apiKey"] == "!printenv APP_API_KEY"
     assert provider["models"][0]["id"] == "target-model"
-    assert 'cp .skynet/pi/models.json "$HOME/.pi/agent/models.json"' in launch.run_command
-    assert "pi --mode json --no-session --provider skynet --model" in launch.run_command
+    assert 'cp .app/pi/models.json "$HOME/.pi/agent/models.json"' in launch.run_command
+    assert "pi --mode json --no-session --provider app --model" in launch.run_command
     assert launch.parse_output is parse_pi_output
 
 
@@ -77,20 +75,20 @@ def test_pi_launch_bounds_reasoning_behind_openrouter() -> None:
 
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), gateway)
 
-    entry = json.loads(launch.files[".skynet/pi/models.json"])["providers"]["skynet"]["models"][0]
+    entry = json.loads(launch.files[".app/pi/models.json"])["providers"]["app"]["models"][0]
     assert entry["reasoning"] is True
     assert entry["compat"] == {"thinkingFormat": "openrouter"}
-    assert '--model "$SKYNET_MODEL:low"' in launch.run_command
+    assert '--model "$APP_MODEL:low"' in launch.run_command
 
 
 def test_pi_launch_leaves_reasoning_alone_behind_other_gateways() -> None:
     """A generic OpenAI-compatible gateway may reject OpenRouter's reasoning field, so pi never sends it."""
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
 
-    entry = json.loads(launch.files[".skynet/pi/models.json"])["providers"]["skynet"]["models"][0]
+    entry = json.loads(launch.files[".app/pi/models.json"])["providers"]["app"]["models"][0]
     assert entry["reasoning"] is False
     assert "compat" not in entry
-    assert '--model "$SKYNET_MODEL" ' in launch.run_command
+    assert '--model "$APP_MODEL" ' in launch.run_command
 
 
 def test_pi_launch_pins_the_harness_version_ahead_of_the_image_copy() -> None:
@@ -102,7 +100,7 @@ def test_pi_launch_pins_the_harness_version_ahead_of_the_image_copy() -> None:
     assert '[ "$(pi --version 2>/dev/null)" = "0.87.1" ]' in launch.install_command
     assert launch.install_command.endswith("&& pi --version")
     for command in (launch.install_command, launch.run_command):
-        assert command.startswith('export PATH="$HOME/.skynet/pi/bin:$PATH";')
+        assert command.startswith('export PATH="$HOME/.app/pi/bin:$PATH";')
 
 
 def test_build_launch_drops_the_openrouter_routing_prefix() -> None:
@@ -111,24 +109,24 @@ def test_build_launch_drops_the_openrouter_routing_prefix() -> None:
 
     launch = build_launch(target, _GATEWAY)
 
-    models = json.loads(launch.files[".skynet/pi/models.json"])
-    assert models["providers"]["skynet"]["models"][0]["id"] == "acme/agent-1"
-    assert launch.env["SKYNET_MODEL"] == "acme/agent-1"
+    models = json.loads(launch.files[".app/pi/models.json"])
+    assert models["providers"]["app"]["models"][0]["id"] == "acme/agent-1"
+    assert launch.env["APP_MODEL"] == "acme/agent-1"
 
 
 def test_pi_launch_carries_the_base_environment() -> None:
-    """Every SKYNET_* var plus the CI/NO_COLOR pair reaches the sandbox."""
+    """Every APP_* var, its legacy SKYNET_* twin, and the CI/NO_COLOR pair reach the sandbox."""
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
 
-    assert launch.env == {
-        "SKYNET_MODEL": "target-model",
-        "SKYNET_GATEWAY_URL": _GATEWAY.url,
-        "SKYNET_API_KEY": "secret-key",
-        "SKYNET_PROMPT_FILE": PROMPT_FILE,
-        "SKYNET_ANSWER_FILE": ANSWER_FILE,
-        "CI": "1",
-        "NO_COLOR": "1",
+    app_env = {
+        "APP_MODEL": "target-model",
+        "APP_GATEWAY_URL": _GATEWAY.url,
+        "APP_API_KEY": "secret-key",
+        "APP_PROMPT_FILE": PROMPT_FILE,
+        "APP_ANSWER_FILE": ANSWER_FILE,
     }
+    legacy_env = {"SKYNET_" + name.removeprefix("APP_"): value for name, value in app_env.items()}
+    assert launch.env == {**app_env, **legacy_env, "CI": "1", "NO_COLOR": "1"}
 
 
 def test_codex_launch_writes_a_gateway_config_toml() -> None:
@@ -136,26 +134,14 @@ def test_codex_launch_writes_a_gateway_config_toml() -> None:
     launch = build_launch(_target(BLACKBOX_HARNESS_CODEX), _GATEWAY)
 
     assert launch.instructions_file == "AGENTS.md"
-    config = launch.files[".skynet/codex/config.toml"]
-    assert 'env_key = "SKYNET_API_KEY"' in config
+    config = launch.files[".app/codex/config.toml"]
+    assert 'env_key = "APP_API_KEY"' in config
     assert 'wire_api = "responses"' in config
     assert "request_max_retries = 0" in config
     assert "stream_max_retries = 0" in config
     assert json.dumps(_GATEWAY.url) in config
-    assert 'CODEX_HOME="$PWD/.skynet/codex" codex exec' in launch.run_command
+    assert 'CODEX_HOME="$PWD/.app/codex" codex exec' in launch.run_command
     assert launch.parse_output is parse_codex_output
-
-
-def test_claude_code_launch_strips_the_v1_suffix_for_the_anthropic_sdk() -> None:
-    """Claude Code uses CLAUDE.md and an ANTHROPIC_BASE_URL without the trailing /v1."""
-    launch = build_launch(_target(BLACKBOX_HARNESS_CLAUDE_CODE), _GATEWAY)
-
-    assert launch.instructions_file == "CLAUDE.md"
-    assert launch.env["ANTHROPIC_BASE_URL"] == "https://gw.example"
-    assert launch.env["ANTHROPIC_AUTH_TOKEN"] == "secret-key"
-    assert launch.files == {}
-    assert "claude -p" in launch.run_command
-    assert launch.parse_output is parse_claude_output
 
 
 def test_opencode_launch_names_the_gateway_model() -> None:
@@ -164,9 +150,9 @@ def test_opencode_launch_names_the_gateway_model() -> None:
 
     assert launch.instructions_file == "AGENTS.md"
     config = json.loads(launch.files["opencode.json"])
-    assert config["model"] == "skynet/target-model"
-    assert config["provider"]["skynet"]["options"]["apiKey"] == "{env:SKYNET_API_KEY}"
-    assert 'opencode run --format json --model "skynet/$SKYNET_MODEL"' in launch.run_command
+    assert config["model"] == "app/target-model"
+    assert config["provider"]["app"]["options"]["apiKey"] == "{env:APP_API_KEY}"
+    assert 'opencode run --format json --model "app/$APP_MODEL"' in launch.run_command
     assert launch.parse_output is parse_opencode_output
 
 
@@ -186,7 +172,7 @@ def test_protected_harness_uses_offline_dependencies_and_local_relay(tmp_path: P
         launch.run_command,
         shell=True,
         cwd=tmp_path,
-        env={"PATH": os.defpath, "SKYNET_BUDGET_RELAY_URL": "http://127.0.0.1:3210/v1"},
+        env={"PATH": os.defpath, "APP_BUDGET_RELAY_URL": "http://127.0.0.1:3210/v1"},
         timeout=10,
         check=True,
     )
@@ -197,19 +183,19 @@ def test_protected_harness_uses_offline_dependencies_and_local_relay(tmp_path: P
 
 
 def test_prime_agent_launch_reuses_the_pi_gateway_config_in_its_own_agent_dir() -> None:
-    """Prime Agent gets Pi's models.json under .skynet/prime, is pointed there, and streams Pi-shaped JSON."""
+    """Prime Agent gets Pi's models.json under .app/prime, is pointed there, and streams Pi-shaped JSON."""
     launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), _GATEWAY)
 
     assert launch.instructions_file == "AGENTS.md"
-    models = json.loads(launch.files[".skynet/prime/models.json"])
-    provider = models["providers"]["skynet"]
+    models = json.loads(launch.files[".app/prime/models.json"])
+    provider = models["providers"]["app"]
     assert provider["baseUrl"] == _GATEWAY.url
     assert provider["api"] == "openai-completions"
-    assert provider["apiKey"] == "!printenv SKYNET_API_KEY"
+    assert provider["apiKey"] == "!printenv APP_API_KEY"
     assert provider["models"][0]["id"] == "target-model"
-    assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.skynet/prime" ')
+    assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.app/prime" ')
     assert " prime-agent --mode json" in launch.run_command
-    assert '--no-session --provider skynet --model "$SKYNET_MODEL"' in launch.run_command
+    assert '--no-session --provider app --model "$APP_MODEL"' in launch.run_command
     assert launch.parse_output is parse_pi_output
 
 
@@ -224,7 +210,7 @@ def test_prime_agent_launch_pins_the_release_tarball_and_bootstraps_the_kernel()
     assert launch.env["PRIME_AGENT_INSTALL_UV"] == "1"
     assert launch.env["PRIME_AGENT_TELEMETRY"] == "0"
     assert launch.env["PI_SKIP_VERSION_CHECK"] == "1"
-    assert launch.env["SKYNET_MODEL"] == "target-model"
+    assert launch.env["APP_MODEL"] == "target-model"
 
 
 @pytest.mark.parametrize("image_kernel", [True, False])
@@ -249,10 +235,10 @@ def test_prime_agent_launch_bounds_reasoning_behind_openrouter() -> None:
     gateway = GatewayConfig(url="https://openrouter.ai/api/v1", api_key="k")
     launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), gateway)
 
-    entry = json.loads(launch.files[".skynet/prime/models.json"])["providers"]["skynet"]["models"][0]
+    entry = json.loads(launch.files[".app/prime/models.json"])["providers"]["app"]["models"][0]
     assert entry["reasoning"] is True
     assert entry["compat"] == {"thinkingFormat": "openrouter"}
-    assert '--model "$SKYNET_MODEL:low"' in launch.run_command
+    assert '--model "$APP_MODEL:low"' in launch.run_command
 
 
 def test_custom_launch_fills_placeholders() -> None:
@@ -279,7 +265,7 @@ def test_catalog_overrides_replace_the_default_commands() -> None:
 
     assert launch.install_command == "my-install target-model"
     assert launch.run_command == f"my-run {PROMPT_FILE}"
-    assert ".skynet/pi/models.json" in launch.files
+    assert ".app/pi/models.json" in launch.files
     assert launch.parse_output is parse_pi_output
 
 
@@ -290,7 +276,7 @@ def test_protected_custom_gateway_placeholder_uses_guest_endpoint() -> None:
     result = subprocess.run(
         launch.run_command,
         shell=True,
-        env={"PATH": os.defpath, "SKYNET_GATEWAY_URL": "http://127.0.0.1:3210/v1"},
+        env={"PATH": os.defpath, "APP_GATEWAY_URL": "http://127.0.0.1:3210/v1"},
         capture_output=True,
         text=True,
         timeout=10,
@@ -395,20 +381,9 @@ def test_parse_opencode_output_reads_text_parts_and_step_usage() -> None:
     assert parse_opencode_output("") == (None, {})
 
 
-def test_parse_claude_output_finds_the_result_object() -> None:
-    """Claude parsing reads the result and usage whether or not the JSON is the whole output."""
-    whole = json.dumps({"result": "done", "usage": {"input_tokens": 2, "output_tokens": 3}})
-    assert parse_claude_output(whole) == ("done", {"input_tokens": 2, "output_tokens": 3})
-
-    trailing = "chatter\n" + json.dumps({"result": "later", "usage": {"input_tokens": 1, "output_tokens": 1}})
-    assert parse_claude_output(trailing) == ("later", {"input_tokens": 1, "output_tokens": 1})
-
-    assert parse_claude_output(json.dumps({"foo": "bar"})) == (None, {})
-
-
 @pytest.mark.parametrize(
     ("harness", "output_format"),
-    [("pi", "pi"), ("codex", "codex"), ("claude_code", "claude"), ("opencode", "opencode"), ("prime", "pi")],
+    [("pi", "pi"), ("codex", "codex"), ("opencode", "opencode"), ("prime", "pi")],
 )
 def test_launch_payload_names_the_parser_for_every_built_in_harness(harness: str, output_format: str) -> None:
     """Serialize a launch so the sandbox bridge can pick the right output parser by name."""

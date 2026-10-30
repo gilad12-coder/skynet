@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 # Payload key naming the packed tree. The parent sets it to a file on its own
 # disk; the sandbox supervisor uploads that file and rewrites the key into
@@ -20,11 +21,40 @@ from pathlib import Path
 REPO_SNAPSHOT_KEY = "_repo_snapshot"
 # Uploads are text and capped at 16 MiB per request: 9 MiB of bytes is 12 MiB of base64.
 ARCHIVE_CHUNK_BYTES = 9 * 1024 * 1024
-_GIT_IDENTITY = ["-c", "user.name=skynet", "-c", "user.email=skynet@localhost", "-c", "commit.gpgsign=false"]
+_GIT_IDENTITY = ["-c", "user.name=app", "-c", "user.email=app@localhost", "-c", "commit.gpgsign=false"]
+
+# A run with a constraints file answers every refused action with this fixed
+# text, both in the sandbox and in the parent, and logs the reason as a
+# ``rule.block`` run event instead. ``rule_judge`` and its tests use these.
+ILLEGAL_ACTION_MESSAGE = (
+    "Illegal action. Read the constraints file. You cannot do this action. Do not repeat it, because it wastes time."
+)
+RULE_BLOCK_EVENT = "rule.block"
+PATH_RULE = "optimize.toml [paths]"
+
+
+def rule_block_record(reason: str) -> dict[str, Any]:
+    """Build the structured run-log record a sandboxed engine sends for one path-rule block.
+
+    Args:
+        reason: Why the path rules refused the action.
+
+    Returns:
+        The record the parent forwards to the run log as a ``rule.block`` event.
+    """
+    return {
+        "level": "WARNING",
+        "logger": "app.engine",
+        "message": f"Illegal action blocked: {PATH_RULE}. {reason}",
+        "source": "engine",
+        "event": RULE_BLOCK_EVENT,
+        "fields": {"rule": PATH_RULE, "reason": reason},
+    }
+
 
 # The shipped tree's commit. Versions diff against this ref rather than HEAD,
 # so an agent that commits in its checkout cannot hide those edits.
-BASE_REF = "refs/skynet/base"
+BASE_REF = "refs/app/base"
 # A version travels as one sandbox file, and uploads cap each file at 16 MiB.
 MAX_PATCH_BYTES = 8 * 1024 * 1024
 
@@ -144,20 +174,27 @@ def _inside(path: str, roots: Iterable[str]) -> bool:
     return any(root == "." or path == root or path.startswith(root.rstrip("/") + "/") for root in roots)
 
 
-def patch_violations(patch: str, editable_paths: Iterable[str], readonly_paths: Iterable[str] = ()) -> list[str]:
+def patch_violations(
+    patch: str,
+    editable_paths: Iterable[str],
+    readonly_paths: Iterable[str] = (),
+    protected_paths: Iterable[str] = (),
+) -> list[str]:
     """Explain every way a patch breaks the run's editing rules.
 
     Args:
         patch: ``git diff`` output for one version.
         editable_paths: Files and folders the agent may change.
         readonly_paths: Submodules and Git LFS files, which stay as fetched.
+        protected_paths: Files and folders the repository's constraints file
+            protects; they win over the editable paths.
 
     Returns:
         One readable reason per broken rule; empty when the patch is allowed.
     """
     if len(patch.encode("utf-8")) > MAX_PATCH_BYTES:
         return [f"The change is larger than the {MAX_PATCH_BYTES // (1024 * 1024)} MiB limit."]
-    editable, readonly = list(editable_paths), list(readonly_paths)
+    editable, readonly, protected = list(editable_paths), list(readonly_paths), list(protected_paths)
     problems: list[str] = []
     in_header = False
     for line in patch.splitlines():
@@ -173,6 +210,8 @@ def patch_violations(patch: str, editable_paths: Iterable[str], readonly_paths: 
         parts = path.split("/")
         if path.startswith("/") or any(part in ("", ".", "..") for part in parts) or ".git" in parts:
             problems.append(f"'{path}' is not a path inside the repository.")
+        elif _inside(path, protected):
+            problems.append(f"'{path}' is protected by the repository's optimize.toml ([paths] protected).")
         elif _inside(path, readonly):
             problems.append(f"'{path}' is a submodule or Git LFS file, which are read-only.")
         elif not _inside(path, editable):
@@ -237,6 +276,32 @@ def unpack_tree(chunks: Iterable[str | Path], destination: Path) -> Path:
     _git(["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "base"], destination)
     _git(["update-ref", BASE_REF, "HEAD"], destination)
     return destination
+
+
+def exclude_paths(checkout: Path, paths: Iterable[str]) -> None:
+    """Keep files a proposer harness writes into a checkout out of every version.
+
+    A harness's files can carry the proposer's credentials, so they must never
+    reach a patch the parent scores or opens as a pull request.
+
+    Args:
+        checkout: Folder made by :func:`unpack_tree`; its worktrees share the exclusions.
+        paths: Checkout-relative files the harness writes.
+
+    Raises:
+        ValueError: When a path is a file the repository tracks, which an exclusion cannot hide.
+    """
+    paths = [path.strip("/") for path in paths if path.strip("/")]
+    if not paths:
+        return
+    tracked = _git(["ls-files", "--", *paths], checkout).splitlines()
+    if tracked:
+        raise ValueError(f"The proposer harness writes files the repository already has: {', '.join(tracked)}")
+    exclude = Path(_git(["rev-parse", "--git-common-dir"], checkout).strip())
+    exclude = (exclude if exclude.is_absolute() else checkout / exclude) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as stream:
+        stream.write("".join(f"\n/{path}" for path in paths) + "\n")
 
 
 def version_patch(checkout: Path) -> str:

@@ -11,11 +11,11 @@ from __future__ import annotations
 import functools
 import json
 import logging
-import os
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from ....config import app_env
 from ..tool_overlay import (
     BundleIncompatibleError,
     ToolSchemaDriftError,
@@ -30,8 +30,9 @@ from .types import Bundle
 logger = logging.getLogger(__name__)
 
 
-BUNDLES_ROOT_ENV_VAR = "SKYNET_BUNDLES_ROOT"
+BUNDLES_ROOT_ENV_VAR = "APP_BUNDLES_ROOT"
 DEFAULT_BUNDLES_ROOT = Path(
+    # Deployed mounts still use this path; it is infrastructure, not a code identifier.
     "/etc/skynet/bundles"
 ).expanduser()
 """Production mount point. Local dev override the env var to point at
@@ -46,7 +47,7 @@ class BundleNotFoundError(FileNotFoundError):
 
 def _bundles_root() -> Path:
     """Resolve the bundle mount root, honoring the env override."""
-    raw = os.environ.get(BUNDLES_ROOT_ENV_VAR)
+    raw = app_env(BUNDLES_ROOT_ENV_VAR)
     if raw:
         return Path(raw).expanduser()
     return DEFAULT_BUNDLES_ROOT

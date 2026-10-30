@@ -27,7 +27,14 @@ def test_stream_preserves_phase_order_and_returns_one_result(monkeypatch: pytest
         _Events().put({"type": "preflight_phase", "phase": "untrusted-secret"})
         _Events().put({"type": "log", "message": "private-log"})
         report_preflight_phase("usage")
-        return SimpleNamespace(model_dump=lambda **kwargs: {"status": "succeeded", "id": "saved-result"})
+        result = SimpleNamespace(
+            checks=[],
+            pending_reason=None,
+            workflow_result=None,
+            model_dump=lambda **kwargs: {"status": "succeeded", "id": "saved-result"},
+        )
+        result.model_copy = lambda update: result
+        return result
 
     monkeypatch.setattr(wizard_preflight, "run_preflight", run)
     monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
@@ -40,7 +47,7 @@ def test_stream_preserves_phase_order_and_returns_one_result(monkeypatch: pytest
             json={
                 "workflow": "anything",
                 "scope": "evaluation",
-                "payload": {},
+                "payload": {"scorer": {"kind": "python", "metric_code": "def score(p):\n    return 1\n"}},
                 "execution_budget_id": "draft",
                 "execution_budget_revision": 1,
             },
@@ -78,7 +85,7 @@ def test_stream_reports_admission_failure_without_success(monkeypatch: pytest.Mo
         response = client.post(
             "/wizard/preflight/stream",
             json={
-                "workflow": "dspy",
+                "workflow": "anything",
                 "scope": "evaluation",
                 "payload": {},
                 "execution_budget_id": "draft",

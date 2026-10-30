@@ -213,6 +213,47 @@ async def test_stream_with_llm_metering_adds_stats_to_done(engine: Engine) -> No
     assert stats["duration_ms"] >= stats["ttft_ms"] >= 0
 
 
+async def test_stream_with_llm_metering_sends_stats_for_calls_after_done(engine: Engine) -> None:
+    """Usage added after ``done`` arrives in one last ``turn_stats`` event; an unchanged turn sends none."""
+    _fund(engine, "alice@x.io")
+    lm = _FakeLm([{"usage": {"prompt_tokens": 1_200, "completion_tokens": 300}}])
+
+    async def source(late: bool) -> AsyncIterator[dict[str, Any]]:
+        """Yield a done event, then optionally make one more model call.
+
+        Args:
+            late: Whether a call lands after ``done``.
+        """
+        yield {"event": "done", "data": {}}
+        if late:
+            lm.history.append({"usage": {"prompt_tokens": 100, "completion_tokens": 20}})
+            yield {"event": "thinking_summary", "data": {"index": 0, "text": "Pairs."}}
+
+    async def run(late: bool) -> list[dict[str, Any]]:
+        """Drain one metered stream.
+
+        Args:
+            late: Whether a call lands after ``done``.
+
+        Returns:
+            The streamed events.
+        """
+        return [
+            event
+            async for event in stream_with_llm_metering(
+                source(late), job_store=_StubStore(engine), username="alice@x.io", description="x", usage_sink=[lm]
+            )
+        ]
+
+    events = await run(late=True)
+    assert [e["event"] for e in events] == ["done", "thinking_summary", "turn_stats"]
+    done, final = events[0]["data"]["stats"], events[-1]["data"]["stats"]
+    assert (final["input_tokens"], final["output_tokens"]) == (1_300, 320)
+    assert final["duration_ms"] == done["duration_ms"]
+    assert final["reply_output_tokens"] == done["reply_output_tokens"] == 300
+    assert [e["event"] for e in await run(late=False)] == ["done"]
+
+
 async def test_stream_with_llm_metering_bills_on_early_teardown(engine: Engine) -> None:
     """A stream dropped before its terminal event still bills the sink's usage."""
     _fund(engine, "alice@x.io")

@@ -36,6 +36,8 @@ from fastmcp.server.providers.openapi.components import (
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from mcp.types import ToolAnnotations
 
+from ..brand import APP_NAME
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from fastmcp.utilities.openapi.models import HTTPRoute
@@ -140,6 +142,42 @@ def _strip_schema_noise(node: Any) -> Any:
     return node
 
 
+def _drop_forwarded_auth_header(component: OpenAPITool) -> None:
+    """Hide the ``authorization`` header parameter from an MCP tool, in place.
+
+    ``get_authenticated_user`` reads ``authorization`` as a FastAPI ``Header``
+    parameter, so the OpenAPI projection offers it to the model as an ordinary
+    tool argument. A value the model fills in (for example a sentence saying
+    the user asked for this) becomes the request's ``Authorization`` header,
+    and the forwarded bearer token is then skipped because the header is
+    already set, so the call returns 401. The bearer always comes from the MCP
+    request, so the argument is removed from the schema and from the route's
+    parameter map, and any stray value the model sends is ignored.
+
+    Args:
+        component: The MCP tool to edit in place.
+    """
+    route = component._route
+    parameter_map = getattr(route, "parameter_map", None) or {}
+    dropped = {
+        arg
+        for arg, mapping in parameter_map.items()
+        if mapping.get("location") == "header" and str(mapping.get("openapi_name", "")).lower() == "authorization"
+    }
+    for arg in dropped:
+        del parameter_map[arg]
+    route.parameters = [
+        p for p in route.parameters if not (p.location == "header" and p.name.lower() == "authorization")
+    ]
+    properties = component.parameters.get("properties")
+    if isinstance(properties, dict):
+        for arg in dropped | {"authorization"}:
+            properties.pop(arg, None)
+    required = component.parameters.get("required")
+    if isinstance(required, list):
+        component.parameters["required"] = [r for r in required if r not in dropped | {"authorization"}]
+
+
 def _trim_tool_spec(
     route: HTTPRoute,
     component: OpenAPITool | OpenAPIResource | OpenAPIResourceTemplate,
@@ -167,6 +205,7 @@ def _trim_tool_spec(
 
     if isinstance(component, OpenAPITool):
         component.parameters = _strip_schema_noise(component.parameters)
+        _drop_forwarded_auth_header(component)
         # Output schema is the single biggest tax on the tools/list payload
         # (nested Pydantic models expand into kilobytes per tool) and the
         # ReAct agent receives the actual JSON at runtime anyway. Drop it
@@ -201,7 +240,7 @@ def mount_mcp_on_app(app: FastAPI) -> None:
     # everything else EXCLUDE so it never appears in the MCP surface.
     mcp = FastMCP.from_fastapi(
         app=app,
-        name="Skynet",
+        name=APP_NAME,
         route_maps=[
             RouteMap(tags={AGENT_TAG}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),

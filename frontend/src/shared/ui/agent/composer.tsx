@@ -9,8 +9,13 @@ import { useUserPrefs } from "@/features/settings";
 import { Button } from "@/shared/ui/primitives/button";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { cn } from "@/shared/lib/utils";
+import { MarkdownPreviewField } from "@/shared/ui/markdown-preview-field";
 
 import { autoResizeTextarea } from "./auto-resize";
+import { PastedTextCard } from "./pasted-text-card";
+import { joinPastes, shouldAttachPaste, splitPastes } from "./pasted-text";
+import { PendingMessages } from "./pending-messages";
+import { appendToDraft, midTurnKeyAction, type MidTurnQueue } from "./steer-queue";
 import { formatRecSeconds, useDictation } from "./use-dictation";
 
 interface ComposerProps {
@@ -32,6 +37,10 @@ interface ComposerProps {
    *  into a single row. */
   layout?: "stacked" | "inline";
   className?: string;
+  /** Opts the chat into mid-turn input: typing and dictating stay open while
+   *  a turn streams, Enter steers (or queues) and Tab queues. Without it the
+   *  composer locks while streaming. */
+  midTurn?: MidTurnQueue;
 }
 
 /**
@@ -57,6 +66,7 @@ export function Composer({
   leadingControls,
   layout = "stacked",
   className,
+  midTurn,
 }: ComposerProps) {
   const inline = layout === "inline";
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -87,16 +97,84 @@ export function Composer({
   // A recording in flight keeps its controls even if the pref flips off in
   // the settings modal mid-take.
   const showMic = prefs.dictationEnabled || dictating;
+  // Without a mid-turn handler a streaming turn locks the input as before.
+  const locked = Boolean(streaming && !midTurn);
+  const hasDraft = value.trim().length > 0;
+  // Long pastes live in `value` as tagged blocks; the textarea only edits
+  // what was typed, and each block shows as a card above it.
+  const draft = splitPastes(value);
+  const setPastes = (pastes: string[], text = draft.text) => onChange(joinPastes({ text, pastes }));
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData.getData("text/plain");
+    if (!shouldAttachPaste(pasted)) return;
+    e.preventDefault();
+    setPastes([...draft.pastes, pasted]);
+  };
+
+  const resetHeight = () => {
+    if (textareaRef.current) textareaRef.current.style.height = inline ? "36px" : "42px";
+  };
+
+  const refocus = () =>
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        autoResizeTextarea(el);
+      }
+    });
+
+  const sendMidTurn = (mode: "steer" | "queue") => {
+    if (!midTurn || disabled || dictating || !hasDraft) return;
+    if (mode === "steer") midTurn.steer(value);
+    else midTurn.queue(value);
+    onChange("");
+    resetHeight();
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (disabled || streaming || dictating || !value.trim()) return;
+    if (streaming) {
+      sendMidTurn(midTurn?.canSteer ? "steer" : "queue");
+      return;
+    }
+    if (disabled || dictating || !hasDraft) return;
     onSubmit();
-    if (textareaRef.current) textareaRef.current.style.height = inline ? "36px" : "42px";
+    resetHeight();
+  };
+
+  const editPending = async (id: string) => {
+    const text = await midTurn?.edit(id);
+    if (text == null) return;
+    onChange(appendToDraft(valueRef.current, text));
+    refocus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (midTurn && !disabled) {
+      const action = midTurnKeyAction(e, {
+        streaming: Boolean(streaming),
+        draft: value,
+        canSteer: midTurn.canSteer,
+        queuedCount: midTurn.queued.length,
+      });
+      if (action === "recall") {
+        const text = midTurn.recallLast();
+        if (text !== null) {
+          e.preventDefault();
+          onChange(text);
+          refocus();
+        }
+        return;
+      }
+      if (action) {
+        e.preventDefault();
+        sendMidTurn(action);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -108,36 +186,73 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn("border-t border-border/40 px-3 py-3 shrink-0", className)}
     >
+      {midTurn && (
+        <PendingMessages
+          queued={midTurn.queued}
+          steering={midTurn.steering}
+          canPromote={midTurn.canSteer}
+          onPromote={midTurn.promote}
+          onEdit={(id) => void editPending(id)}
+          onRemove={midTurn.remove}
+          onReorderQueued={midTurn.reorderQueued}
+          onReorderSteering={midTurn.reorderSteering}
+        />
+      )}
       <div
         className={cn(
-          "rounded-2xl border border-[#DDD4C8] bg-muted/20 transition-colors",
-          "focus-within:border-[#C8A882]",
+          "rounded-2xl border border-border bg-muted/20 transition-colors",
+          "focus-within:border-primary-fill",
           inline && "flex min-h-[44px] items-end gap-1 p-1",
         )}
       >
+        {draft.pastes.length > 0 && !inline && (
+          <div className="flex flex-wrap gap-2 px-3 pt-3">
+            {draft.pastes.map((paste, i) => (
+              <PastedTextCard
+                key={i}
+                text={paste}
+                onRemove={() => setPastes(draft.pastes.filter((_, j) => j !== i))}
+                onRestore={() => {
+                  setPastes(
+                    draft.pastes.filter((_, j) => j !== i),
+                    draft.text ? `${draft.text.replace(/\s+$/, "")}\n\n${paste}` : paste,
+                  );
+                  refocus();
+                }}
+              />
+            ))}
+          </div>
+        )}
         {!dictating ? (
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              onChange(e.target.value);
-              autoResizeTextarea(e.target);
-            }}
-            onKeyDown={handleKeyDown}
-            disabled={disabled || streaming}
-            rows={1}
-            placeholder={placeholder}
-            className={cn(
-              "bg-transparent text-sm leading-[20px] resize-none overflow-hidden",
-              "max-h-[120px] outline-none ring-0 border-0 shadow-none",
-              "focus:outline-none focus-visible:outline-none focus-visible:ring-0",
-              "placeholder:text-muted-foreground/40",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              inline
-                ? "h-[44px] min-w-0 flex-1 px-3 py-2 sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
-                : "block h-[44px] w-full px-4 py-[11px] sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
-            )}
-          />
+          <MarkdownPreviewField
+            value={draft.text}
+            className={inline ? "min-w-0 flex-1" : undefined}
+            previewClassName={inline ? "px-3 py-2" : "px-4 py-[11px]"}
+          >
+            <textarea
+              ref={textareaRef}
+              value={draft.text}
+              onChange={(e) => {
+                onChange(joinPastes({ text: e.target.value, pastes: draft.pastes }));
+                autoResizeTextarea(e.target);
+              }}
+              onPaste={inline ? undefined : handlePaste}
+              onKeyDown={handleKeyDown}
+              disabled={disabled || locked}
+              rows={1}
+              placeholder={placeholder}
+              className={cn(
+                "bg-transparent text-sm leading-[20px] resize-none overflow-hidden",
+                "max-h-[120px] outline-none ring-0 border-0 shadow-none",
+                "focus:outline-none focus-visible:outline-none focus-visible:ring-0",
+                "placeholder:text-muted-foreground/40",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                inline
+                  ? "block h-[44px] w-full px-3 py-2 sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                  : "block h-[44px] w-full px-4 py-[11px] sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
+              )}
+            />
+          </MarkdownPreviewField>
         ) : (
           <div
             className={cn(
@@ -218,7 +333,7 @@ export function Composer({
                     size="icon"
                     variant="ghost"
                     onClick={() => void dictation.start()}
-                    disabled={disabled || streaming || dictation.state.kind === "busy"}
+                    disabled={disabled || locked || dictation.state.kind === "busy"}
                     className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
                     aria-label={msg("agent.composer.record")}
                   >
@@ -226,24 +341,13 @@ export function Composer({
                   </Button>
                 </TooltipButton>
               ))}
-            {streaming && onStop ? (
-              <TooltipButton tooltip={stopAriaLabel} side="top">
-                <Button
-                  type="button"
-                  size="icon"
-                  onClick={onStop}
-                  className="shrink-0 rounded-full"
-                  aria-label={stopAriaLabel}
-                >
-                  <Square className="size-3 fill-current" />
-                </Button>
-              </TooltipButton>
-            ) : (
+            {(!streaming || !onStop || (midTurn && hasDraft)) && (
               <Button
                 type="submit"
                 size="icon"
+                autoTooltip={false}
                 className="shrink-0 rounded-full"
-                disabled={disabled || dictating || !value.trim()}
+                disabled={disabled || dictating || !hasDraft}
                 aria-label={sendAriaLabel}
               >
                 <svg viewBox="0 0 24 24" fill="none" className="size-4">
@@ -256,6 +360,19 @@ export function Composer({
                   />
                 </svg>
               </Button>
+            )}
+            {streaming && onStop && (
+              <TooltipButton tooltip={stopAriaLabel} side="top">
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={onStop}
+                  className="shrink-0 rounded-full"
+                  aria-label={stopAriaLabel}
+                >
+                  <Square className="size-3 fill-current" />
+                </Button>
+              </TooltipButton>
             )}
           </div>
         </div>

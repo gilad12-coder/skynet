@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import random
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -39,7 +38,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from core.billing.model_gateway import raise_gateway_stop
-from core.config import Settings
+from core.config import Settings, app_env
 from core.constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
@@ -48,7 +47,6 @@ from core.constants import (
     PROGRESS_OPTIMIZED,
 )
 
-from ...language_models import GepaRecoverySeedBoundary
 from ..budget_stop import BudgetReached
 from ..incumbent import completed_gepa_result
 from ..logged_scores import reset_logged_metrics
@@ -87,7 +85,7 @@ GEPA's public API does not accept an ``auto`` enum; we resolve it here so the
 budget stays ergonomic. Numbers are operator-tunable via an explicit
 ``max_metric_calls`` for any campaign that doesn't fit the table."""
 
-_TOOL_SEVERITY_ATTR = "_skynet_severity"
+_TOOL_SEVERITY_ATTR = "_app_severity"
 
 
 def _severity_from_annotations(annotations: Any) -> str | None:
@@ -157,9 +155,9 @@ def _list_live_tools(mcp_url: str, auth_header: str | None) -> list[dspy.Tool]:
         List of dspy.Tool objects, one per MCP-exposed tool, each carrying its
         derived approval severity.
     """
-    relay_token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    relay_token = app_env("APP_TOOL_RELAY_TOKEN")
     if relay_token:
-        mcp_url = f"{os.environ['SKYNET_BUDGET_RELAY_URL'].rstrip('/')}/_mcp"
+        mcp_url = f"{_relay_url().rstrip('/')}/_mcp"
         auth_header = f"Bearer {relay_token}"
     headers = {"Authorization": auth_header} if auth_header else None
     try:
@@ -177,9 +175,24 @@ def _list_live_tools(mcp_url: str, auth_header: str | None) -> list[dspy.Tool]:
 
 def _raise_tool_budget_stop() -> None:
     """Restore authoritative budget stops before ReAct can treat them as tool observations."""
-    token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    token = app_env("APP_TOOL_RELAY_TOKEN")
     if token:
-        raise_gateway_stop({"url": os.environ["SKYNET_BUDGET_RELAY_URL"], "token": token})
+        raise_gateway_stop({"url": _relay_url(), "token": token})
+
+
+def _relay_url() -> str:
+    """Return the sandbox's budget relay URL.
+
+    Returns:
+        The relay URL from ``APP_BUDGET_RELAY_URL`` or its legacy name.
+
+    Raises:
+        KeyError: Neither name is set although a relay token is.
+    """
+    url = app_env("APP_BUDGET_RELAY_URL")
+    if url is None:
+        raise KeyError("APP_BUDGET_RELAY_URL")
+    return url
 
 
 async def _list_live_tool_specs(mcp_url: str, headers: dict[str, str] | None) -> list[Any]:
@@ -678,7 +691,6 @@ def run_react_optimization(
     run_dir: str | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     timing_callbacks: Sequence[Any] = (),
-    recovery_seed_model: object | None = None,
 ) -> dict[str, Any]:
     """Optimise a live react program and report baseline-vs-optimized scalars.
 
@@ -716,8 +728,6 @@ def run_react_optimization(
         timing_callbacks: Stage-timing callbacks (typically the generation-LM
             :class:`GenLMTimingCallback`) to attribute student-rollout latency
             to the baseline/training/evaluation stages. Empty by default.
-        recovery_seed_model: Protected student model used to publish the exact
-            upstream seed-evaluation boundary.
 
     Returns:
         A dict with the servable ``program_state``, baseline/optimized scalar
@@ -748,9 +758,6 @@ def run_react_optimization(
 
     target_stopper = build_target_score_stopper(target_score)
     stop_callbacks = [target_stopper] if target_stopper is not None else None
-    recovery_boundary = GepaRecoverySeedBoundary(recovery_seed_model) if recovery_seed_model is not None else None
-    if recovery_boundary is not None:
-        stop_callbacks = [recovery_boundary, *(stop_callbacks or [])]
     budget_stop: BudgetReached | None = None
     try:
         with track_stage(STAGE_TRAINING, *timing_callbacks):
@@ -762,7 +769,6 @@ def run_react_optimization(
                 reflection_lm=(lambda x: adapter.stripped_lm_call(x)[0]),
                 max_metric_calls=max_metric_calls,
                 stop_callbacks=stop_callbacks,
-                callbacks=[recovery_boundary] if recovery_boundary is not None else None,
                 seed=seed,
                 run_dir=run_dir,
                 # GEPA defaults both off, which left react runs without a score chart

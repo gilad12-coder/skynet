@@ -28,6 +28,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -35,12 +36,14 @@ import httpx
 
 from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
+from ....billing.signals import BudgetReached
 from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
-from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
+from ....config import Settings, app_env, with_legacy_env
 from ....exceptions import ServiceError
+from .sandbox_log import logged_command
 
-# The SDK is a declared dependency, but an air-gap build vendored from an
-# older requirements file must degrade to "agent targets unavailable", not
+# The SDK is a declared dependency, but an image built from an older
+# requirements file must degrade to "agent targets unavailable", not
 # fail to import the worker.
 try:
     from vercel import api as vercel_api
@@ -57,20 +60,37 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_EXIT_CODES = frozenset({124, 137})
 # Slack past the in-sandbox timeout before the service kills the wrapper as well.
 KILL_GRACE_SECONDS = 15.0
+# A protected box is funded and kept alive one slice at a time, so a run holds
+# coverage for the slice ahead rather than for the box's whole lifetime. A
+# whole number of minutes, matching Vercel's memory billing increment.
+COVERAGE_SLICE_SECONDS = 600
+# The next slice is funded and the box extended this long before the current one ends.
+_RENEWAL_LEAD_SECONDS = 180.0
+# Waiting for in-flight work to free room for the next slice stops this long before the box would end.
+_RENEWAL_MARGIN_SECONDS = 30.0
+_RENEWAL_JOIN_SECONDS = 30.0
 # Detached processes are watched with short status polls; the delay doubles from
-# the floor to the cap so quick commands return fast and long runs poll gently.
-_POLL_FLOOR_SECONDS = 1.0
-_POLL_CAP_SECONDS = 8.0
+# the floor to the cap while the command is silent. A quiet command is often
+# waiting on a mailbox answer that only the next poll can deliver, so the cap
+# stays low and the delay drops back to the floor whenever output moved.
+_POLL_FLOOR_SECONDS = 0.5
+_POLL_CAP_SECONDS = 2.0
+# Vercel caps a process kill timer at 18,000,000 ms even though a box itself
+# may live 24 hours, so a longer timer fails the whole command with HTTP 400.
+_VERCEL_KILL_TIMER_CEILING_SECONDS = 18_000
+
 # Client-side last resort past ``kill_after`` before declaring the process lost.
 _POLL_DEADLINE_SLACK_SECONDS = 60.0
 # Where a command's wrapper records its exit code for the poll to find.
-_EXIT_FILE_PREFIX = "/tmp/.skynet-exit-"
+_EXIT_FILE_PREFIX = "/tmp/.app-exit-"
 # A detached command's output is redirected here and read back while it runs.
-_OUTPUT_FILE_PREFIX = "/tmp/.skynet-output-"
+_OUTPUT_FILE_PREFIX = "/tmp/.app-output-"
 # Called with the stream name (``stdout``/``stderr``) and each new piece of output.
 OutputSink = Callable[[str, str], None]
 _BRIEF_COMMAND_CHARS = 80
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
+# Both tags are stored on live Vercel sandboxes and queried by the straggler sweep;
+# renaming them would hide boxes created before the rename.
 SANDBOX_TAG = {"skynet": "blackbox"}
 JOB_TAG = "skynet_job"
 _STOPPABLE_STATUSES = frozenset({"pending", "running"})
@@ -84,12 +104,20 @@ _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VE
 # so its HTTPS calls verify the same way — never the worker's secrets.
 _LOCAL_ENV_PASSTHROUGH = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 _LOCAL_KILLED_EXIT_CODE = 137
-_BUDGET_RELAY_ENV = "SKYNET_BUDGET_RELAY_URL"
-_TOOL_RELAY_ENV = "SKYNET_TOOL_RELAY_TOKEN"
-_RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "SKYNET_GATEWAY_URL")
+_BUDGET_RELAY_ENV = "APP_BUDGET_RELAY_URL"
+_TOOL_RELAY_ENV = "APP_TOOL_RELAY_TOKEN"
+_RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "APP_GATEWAY_URL")
 # A custom network policy denies every host it does not list; this entry keeps the
 # network open, so only the header injection distinguishes it from ``allow-all``.
 _ANY_HOST = "*"
+# Scorer workspaces live under their own root, apart from proposer workspaces
+# (``app-sandbox-*`` in the shared temp directory), so a proposer cannot find
+# metric code by listing its parent directory. Owner write+search only: the
+# root cannot be listed without first changing its mode. Under one uid that is
+# a speed bump, not a boundary; separate boxes are the real boundary.
+_PRIVATE_ROOT_MODE = 0o311
+_private_root_path: Path | None = None
+_private_root_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -110,6 +138,9 @@ class SandboxSpec:
     allowed_hosts: tuple[str, ...] = ()
     vcpus: int = 2
     operation_key: str | None = None
+    # Holds code no optimizer may read (the metric): a local workspace opens
+    # under a private root instead of beside proposer workspaces.
+    private: bool = False
 
 
 @dataclass(frozen=True)
@@ -204,7 +235,7 @@ class VercelCredentials:
 
 
 _RUNTIME_OVERRIDE: contextvars.ContextVar[SandboxRuntime | None] = contextvars.ContextVar(
-    "skynet_sandbox_runtime", default=None
+    "app_sandbox_runtime", default=None
 )
 
 
@@ -275,7 +306,15 @@ class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
     def __init__(
-        self, box: Any, api_session: Any, context: contextvars.Context, usage: VercelUsageReservation | None = None
+        self,
+        box: Any,
+        api_session: Any,
+        context: contextvars.Context,
+        usage: VercelUsageReservation | None = None,
+        *,
+        lifetime_ms: int | None = None,
+        env: Mapping[str, str] | None = None,
+        owner: str | None = None,
     ) -> None:
         """Wrap an open sandbox.
 
@@ -284,7 +323,13 @@ class VercelSandboxSession:
             api_session: The entered ``vercel.api.session`` context that owns it.
             context: The ``contextvars`` context ``api_session`` was entered in.
             usage: Optional pre-dispatch reservation and trusted provider usage collector.
+            lifetime_ms: The most the box may live once every slice is funded;
+                only a protected box opened for a shorter first slice passes it.
+            env: The box's environment, kept so its values are redacted from logged output.
+            owner: Job the box belongs to, which its logged output is routed to.
         """
+        self._env = dict(env or {})
+        self.log_owner = owner
         self._box = box
         # The named-sandbox handle silently resumes stopped VMs. An exact session
         # cannot create another billable lifetime behind the admission boundary.
@@ -296,6 +341,50 @@ class VercelSandboxSession:
         self._cwd = box.cwd
         self._usage = usage
         self._closed = False
+        self._started = time.monotonic()
+        self._ceiling_ms = lifetime_ms
+        self._stopping = threading.Event()
+        self._renewer: threading.Thread | None = None
+        if usage is not None and lifetime_ms is not None and lifetime_ms > usage.lifetime_ms:
+            self._renewer = threading.Thread(target=self._renew, name=f"renew-{box.name}", daemon=True)
+            self._renewer.start()
+
+    def _renew(self) -> None:
+        """Fund and extend the box one slice at a time until it closes or reaches its ceiling.
+
+        Runs only in the trusted parent: nothing in the box can ask for more
+        time. Each slice is admitted by the ledger before Vercel is asked to
+        extend, so Vercel's own timer never runs past funded coverage. When
+        the budget cannot pay for the next slice, the box is left to end when
+        its funded time runs out.
+        """
+        usage = self._usage
+        assert usage is not None
+        assert self._ceiling_ms is not None
+        while usage.lifetime_ms < self._ceiling_ms:
+            ends = self._started + usage.lifetime_ms / 1000
+            if self._stopping.wait(max(0.0, ends - _RENEWAL_LEAD_SECONDS - time.monotonic())):
+                return
+            funded = usage.lifetime_ms
+            target = min(funded + COVERAGE_SLICE_SECONDS * 1000, self._ceiling_ms)
+            try:
+                usage.extend(target, deadline=ends - _RENEWAL_MARGIN_SECONDS)
+            except (Exception, BudgetReached) as exc:
+                logger.warning("sandbox %s not extended past %ss: %s", self._box.name, funded // 1000, exc)
+                return
+            if self._stopping.is_set():
+                return
+            try:
+                updated = self._session.extend_execution_time_limit(timedelta(milliseconds=target - funded))
+                usage.confirm_extended(updated)
+            except Exception:
+                # The coverage is already held, so an unconfirmed extension
+                # leaves the box over-funded, never under. A limit beyond the
+                # funded lifetime ends the box at once instead.
+                logger.exception("sandbox %s extension unconfirmed; ending it", self._box.name)
+                with contextlib.suppress(Exception):
+                    self._session.stop()
+                return
 
     def write_files(self, files: Mapping[str, str]) -> None:
         """Write text files at paths relative to the working directory, creating parents.
@@ -309,6 +398,7 @@ class VercelSandboxSession:
                 self._session.fs.mkdir(parent, cwd=self._cwd, recursive=True)
             self._session.fs.write_text(path, text, cwd=self._cwd)
 
+    @logged_command
     def run(
         self,
         command: str,
@@ -349,11 +439,9 @@ class VercelSandboxSession:
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = f"timeout --signal=KILL {seconds}s {inner}"
-            # Vercel refuses a kill timer past its five-hour session maximum,
-            # and a command given a box's whole lifetime at that ceiling would
-            # ask for the grace on top. The box ends there anyway, so the grace
-            # has nothing left to cover.
-            kill_after = min(seconds + KILL_GRACE_SECONDS, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
+            # No command outlives Vercel's five-hour kill-timer maximum, however
+            # long its box may live.
+            kill_after = min(seconds + KILL_GRACE_SECONDS, _VERCEL_KILL_TIMER_CEILING_SECONDS)
             deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
         token = uuid.uuid4().hex
         sentinel = f"{_EXIT_FILE_PREFIX}{token}"
@@ -379,8 +467,8 @@ class VercelSandboxSession:
             time.sleep(delay)
             delay = min(delay * 2, _POLL_CAP_SECONDS)
             exit_code = self._recorded_exit_code(sentinel)
-            if on_output is not None:
-                self._forward_output(streams, on_output)
+            if self._forward_output(streams, on_output):
+                delay = _POLL_FLOOR_SECONDS
         self._forward_output(streams, on_output)
         return CommandResult(
             exit_code=exit_code,
@@ -389,13 +477,17 @@ class VercelSandboxSession:
             timed_out=timeout_seconds is not None and exit_code in _TIMEOUT_EXIT_CODES,
         )
 
-    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> None:
+    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> bool:
         """Re-read the command's output files and hand anything new to ``on_output``.
 
         Args:
             streams: The output files, by stream name.
             on_output: The sink, or ``None`` to only refresh the captured text.
+
+        Returns:
+            Whether either stream had new output.
         """
+        moved = False
         for name, stream in streams.items():
             text = stream.text
             with contextlib.suppress(Exception):
@@ -406,8 +498,10 @@ class VercelSandboxSession:
                 continue
             new = text[len(stream.text) :]
             stream.text = text
+            moved = True
             if on_output is not None:
                 on_output(name, new)
+        return moved
 
     def _recorded_exit_code(self, sentinel: str) -> int | None:
         """Return the exit code the wrapper wrote to ``sentinel``, or ``None`` while the command runs.
@@ -437,6 +531,21 @@ class VercelSandboxSession:
             return None
         return self._session.fs.read_text(path, cwd=self._cwd)
 
+    def disable_network(self) -> None:
+        """Switch the running box to deny-all networking and confirm Vercel applied it.
+
+        Raises:
+            ServiceError: When Vercel does not report the box as deny-all afterwards.
+        """
+        updated = self._session.update_network_policy(NetworkPolicy.deny_all())
+        policy = getattr(updated, "network_policy", None)
+        mode = getattr(policy, "mode", None)
+        # Vercel may echo an empty custom allowlist instead of the deny-all
+        # mode; both admit no host, and anything else fails closed.
+        if not (mode == "deny-all" or (mode == "custom" and not getattr(policy, "allow", None))):
+            raise ServiceError("Vercel did not confirm that the scoring box's network is off.")
+        self._session = updated
+
     def close(self) -> None:
         """Stop exactly one session, destroy its sandbox, and settle final usage.
 
@@ -447,6 +556,9 @@ class VercelSandboxSession:
         if self._closed:
             return
         self._closed = True
+        self._stopping.set()
+        if self._renewer is not None:
+            self._renewer.join(timeout=_RENEWAL_JOIN_SECONDS)
         try:
             if self._usage is None:
                 try:
@@ -554,9 +666,14 @@ class VercelSandboxRuntime:
         image = spec.image or self._image
         name = spec.name
         usage = None
+        lifetime_ms = math.ceil(spec.lifetime_seconds * 1000)
+        first_ms = lifetime_ms
         if self._budget is not None:
+            first_ms = min(lifetime_ms, COVERAGE_SLICE_SECONDS * 1000)
             if not spec.operation_key:
                 raise ServiceError("A protected sandbox requires a stable operation identity.")
+            # The name is the box's idempotency key in Vercel and in its usage
+            # reservation, so it keeps the pre-rename prefix.
             name = (
                 name
                 or "skynet-"
@@ -567,7 +684,7 @@ class VercelSandboxRuntime:
                 {
                     "name": name,
                     "image": image,
-                    "lifetime_ms": math.ceil(spec.lifetime_seconds * 1000),
+                    "lifetime_ms": first_ms,
                     "vcpus": spec.vcpus,
                     "network_disabled": spec.network_disabled,
                     **(
@@ -617,7 +734,7 @@ class VercelSandboxRuntime:
                 vercel_sync.create_sandbox,
                 name=name,
                 image=image,
-                execution_time_limit=spec.lifetime_seconds,
+                execution_time_limit=first_ms / 1000,
                 resources=vercel_sync.SandboxResources(vcpus=spec.vcpus, memory=spec.vcpus * 2048),
                 persistent=False,
                 ports=[],
@@ -631,10 +748,17 @@ class VercelSandboxRuntime:
                 ),
                 tags={**SANDBOX_TAG, **spec.tags},
             )
-            session = VercelSandboxSession(box, api_session, context, usage)
             if usage is not None:
                 usage.confirm_created(box.current_session)
-            return session
+            return VercelSandboxSession(
+                box,
+                api_session,
+                context,
+                usage,
+                lifetime_ms=lifetime_ms if usage is not None else None,
+                env=spec.env,
+                owner=spec.tags.get(JOB_TAG),
+            )
         except BaseException as error:
             if box is not None:
                 with contextlib.suppress(Exception):
@@ -695,7 +819,24 @@ def _contained_environment(environment: Mapping[str, str], relay: str) -> dict[s
     result["ANTHROPIC_BASE_URL"] = relay.removesuffix("/v1")
     for name in _RELAY_ENDPOINT_ENVS:
         result[name] = relay
-    return result
+    return with_legacy_env(result)
+
+
+def _private_root() -> Path:
+    """Return the process's private workspace root, creating it on first use.
+
+    The path is never placed in any environment, so only this process knows it.
+
+    Returns:
+        A random, unlistable directory under the temp directory.
+    """
+    global _private_root_path
+    with _private_root_lock:
+        if _private_root_path is None or not _private_root_path.is_dir():
+            root = Path(tempfile.mkdtemp(prefix=f".{uuid.uuid4().hex}-")).resolve()
+            root.chmod(_PRIVATE_ROOT_MODE)
+            _private_root_path = root
+        return _private_root_path
 
 
 class LocalSubprocessSession:
@@ -710,11 +851,16 @@ class LocalSubprocessSession:
 
         Args:
             spec: Environment for the sandbox; lifetime and labels are ignored
-                because per-command timeouts already bound local work.
+                because per-command timeouts already bound local work. A
+                ``private`` spec opens under the private root.
             protected_relay: Outer sandbox mailbox forced onto nested commands.
         """
-        self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
+        if spec.private:
+            self._dir = Path(tempfile.mkdtemp(prefix=f"{uuid.uuid4().hex}-", dir=_private_root())).resolve()
+        else:
+            self._dir = Path(tempfile.mkdtemp(prefix="app-sandbox-")).resolve()
         self._protected_relay = protected_relay
+        self.log_owner = spec.tags.get(JOB_TAG)
         (self._dir / "tmp").mkdir()
         # Not .resolve(): in a venv that follows the symlink to the base
         # interpreter, putting a python3 without the venv's packages on PATH.
@@ -763,6 +909,7 @@ class LocalSubprocessSession:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
 
+    @logged_command
     def run(
         self,
         command: str,
@@ -900,13 +1047,13 @@ class ContainedSubprocessRuntime:
         Raises:
             ServiceError: When the outer supervisor did not install its model mailbox.
         """
-        relay = os.environ.get(_BUDGET_RELAY_ENV)
+        relay = app_env(_BUDGET_RELAY_ENV)
         if not relay:
             raise ServiceError("Contained execution requires the protected model mailbox.")
         environment = _contained_environment(spec.env, relay)
-        tool_token = os.environ.get(_TOOL_RELAY_ENV)
+        tool_token = app_env(_TOOL_RELAY_ENV)
         if tool_token:
-            environment[_TOOL_RELAY_ENV] = tool_token
+            environment.update(with_legacy_env({_TOOL_RELAY_ENV: tool_token}))
         return LocalSubprocessSession(replace(spec, env=environment), protected_relay=relay)
 
 

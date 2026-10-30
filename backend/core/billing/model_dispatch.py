@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
@@ -17,12 +17,13 @@ from .data_policy import DataPolicy, apply_data_policy
 from .model_batch import BatchCollector
 from .model_terms import excluded_from_managed, managed_model_refusal
 from .openrouter_float import notify_managed_refusal
-from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
+from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_embedding_request, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
-from .responses_adapter import price_responses_request, responses_receipt
+from .responses_adapter import price_responses_request, responses_failure, responses_receipt
 from .runtime import BudgetRuntime, PaidResult
+from .usage_tags import header_tags
 
-MODEL_ATTEMPT_HEADER = "x-skynet-model-attempt-id"
+MODEL_ATTEMPT_HEADER = "x-app-model-attempt-id"
 
 logger = logging.getLogger(__name__)
 
@@ -283,9 +284,9 @@ class OpenRouterDispatcher:
         role: str,
         policy: ChargePolicy,
         client: httpx.Client,
-        quote_observer: Callable[[str, str, OperationQuote, str, int], bool] | None = None,
         batch: BatchCollector | None = None,
         data_policy: DataPolicy | None = None,
+        embeddings: bool = False,
     ) -> None:
         """Bind one model role to a trusted transport and pricing policy.
 
@@ -296,12 +297,12 @@ class OpenRouterDispatcher:
             role: Task, judge, or optimization attribution.
             policy: The approved model charge and external-cost scope.
             client: Non-retrying HTTP client with an enforced request timeout.
-            quote_observer: Optional parent-side recovery bound recorder and
-                atomic headroom claimant.
             batch: Economy-mode collector; managed chat calls then wait for an
                 OpenRouter batch at half price instead of answering directly.
             data_policy: The owner's provider privacy setting, forced onto every
                 request; ``None`` leaves BYOK routing to the caller's own account.
+            embeddings: Serve only ``/embeddings`` for an embeddings model,
+                instead of the chat protocols.
         """
         self.runtime = runtime
         self._api_key = api_key
@@ -309,11 +310,11 @@ class OpenRouterDispatcher:
         self.role = role
         self.policy = policy
         self._client = client
-        self._quote_observer = quote_observer
         self._attempt_quotes: dict[tuple[str, str, int], tuple[str, PricedRequest]] = {}
         self._refusal: tuple[bytes, float] | None = None
         self._batch = batch
         self._data_policy = data_policy
+        self.embeddings = embeddings
 
     def dispatch(
         self,
@@ -327,7 +328,7 @@ class OpenRouterDispatcher:
         """Send one final request only after its physical attempt is fully reserved.
 
         Args:
-            path: Chat completions or Anthropic messages protocol path.
+            path: Chat completions, Anthropic messages, Responses, or embeddings protocol path.
             request: Fully resolved SDK body including final token and tool settings.
             operation_key: Optional stable physical-attempt identity for a transport replay.
             attempt: Physical retry number within a stable logical operation.
@@ -336,7 +337,8 @@ class OpenRouterDispatcher:
         Returns:
             Provider response after its actual charge is settled or held for reconciliation.
         """
-        if path not in {"/chat/completions", "/messages", "/responses"} or request.get("model") != self.model:
+        paths = {"/embeddings"} if self.embeddings else {"/chat/completions", "/messages", "/responses"}
+        if path not in paths or request.get("model") != self.model:
             raise UnpricedOperationError("This scoped route cannot dispatch a different model or API operation.")
         if self.policy.kind == "managed_model" and excluded_from_managed(self.model):
             return ModelHTTPResult(403, "application/json", managed_model_refusal(self.model))
@@ -355,9 +357,8 @@ class OpenRouterDispatcher:
         else:
             catalog = fetch_endpoint_prices(self.model, client=self._client)
             routed = dict(request) if self._data_policy is None else apply_data_policy(request, self._data_policy)
-            priced = (price_responses_request if path == "/responses" else price_text_request)(
-                mark_prompt_cache(path, routed), catalog, self.policy
-            )
+            pricer = {"/responses": price_responses_request, "/embeddings": price_embedding_request}
+            priced = pricer.get(path, price_text_request)(mark_prompt_cache(path, routed), catalog, self.policy)
             priced = replace(
                 priced,
                 quote=replace(
@@ -371,15 +372,8 @@ class OpenRouterDispatcher:
             if attempt_key is not None:
                 self._attempt_quotes[attempt_key] = (request_identity, priced)
         physical_key = operation_key or str(uuid4())
-        recovery_headroom = False
-        if self._quote_observer is not None:
-            recovery_headroom = self._quote_observer(
-                self.role,
-                self.model,
-                priced.quote,
-                physical_key,
-                attempt,
-            )
+        tags = header_tags(protocol_headers)
+        started = time.monotonic()
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         headers.update(
             {
@@ -424,9 +418,11 @@ class OpenRouterDispatcher:
             status: int, content_type: str, content: bytes, interrupted: bool, retry_after: str | None
         ) -> PaidResult[ModelHTTPResult]:
             """Turn a provider answer into its measured charge and the relay's response."""
+            failure = None
             if path == "/responses":
                 identity, usage, complete = responses_receipt(content, content_type)
                 interrupted = interrupted or not complete
+                failure = responses_failure(content, content_type)
             else:
                 interrupted = interrupted or not response_complete(content, content_type)
                 identity, usage = response_usage(content, content_type)
@@ -438,6 +434,15 @@ class OpenRouterDispatcher:
                 "usage": usage,
                 "interrupted": interrupted,
             }
+            # A batched answer's wait is mostly the batch window and polling, not the model.
+            if batched:
+                evidence["batched"] = True
+            else:
+                evidence["latency_ms"] = round((time.monotonic() - started) * 1000)
+            if tags:
+                evidence["tags"] = tags
+            if failure is not None:
+                evidence["failure"] = failure
             amount = None
             if not interrupted and usage is not None and usage.get("cost") is not None:
                 amount = usage_charge(usage)
@@ -478,12 +483,15 @@ class OpenRouterDispatcher:
                         }
                     ).encode(),
                 )
+            if failure is not None and amount is None:
+                logger.warning("The provider failed a %s response (%s): %s", self.model, identity, failure)
             return PaidResult(
                 value=result,
                 provider_usd=amount,
                 evidence=evidence,
                 provider_request_id=identity,
                 refused=refused,
+                failure=failure if amount is None and not refused else None,
             )
 
         return self.runtime.execute(
@@ -494,7 +502,6 @@ class OpenRouterDispatcher:
             cost_kind="model",
             role=self.role,
             attempt=attempt,
-            recovery_headroom=recovery_headroom,
         )
 
     def stop_batch(self) -> None:

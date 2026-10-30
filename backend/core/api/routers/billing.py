@@ -36,6 +36,7 @@ from ...billing.service import (
     PURCHASE_FEE_RATE,
     BillingProfileSnapshot,
 )
+from ...brand import APP_NAME
 from ...config import settings
 from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -761,7 +762,7 @@ def create_billing_router(*, job_store) -> APIRouter:
     @router.post(
         "/billing/subscription/checkout",
         response_model=CheckoutSessionResponse,
-        summary="Start a Stripe Checkout session that subscribes the caller to Skynet Pro",
+        summary=f"Start a Stripe Checkout session that subscribes the caller to {APP_NAME} Pro",
     )
     def create_subscription_checkout(user: AuthenticatedUserDep) -> CheckoutSessionResponse:
         """Create a subscription Checkout session for the Skynet Pro monthly plan.

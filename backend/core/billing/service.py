@@ -15,6 +15,7 @@ the provider as unavailable, while mutations (checkout and portal) require
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from collections.abc import Iterable, Mapping
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from ..api.alerts import send_alert
 from ..api.errors import DomainError
+from ..brand import APP_NAME
 from ..config import settings
 from ..constants import (
     TOKEN_SOURCE_BYOK,
@@ -46,7 +48,7 @@ from .openrouter_float import check_float
 from .plans import PAST_DUE_STATUS, PLAN_FREE, PLAN_PRO, is_pro_status
 from .pricing import PLATFORM_FEE_FRACTION, ModelUsage, cents_for_cost_usd, cents_for_usage, raw_cost_usd
 
-logger = logging.getLogger("skynet.billing.service")
+logger = logging.getLogger("app.billing.service")
 
 # Cents granted per one-time pack. Mirrors the frontend TOP_UP_PACKS catalog;
 # the dollar price lives in Stripe (the price id), the cents granted live here.
@@ -96,10 +98,56 @@ def purchase_fee_cents(cents: int) -> int:
 # Grants seeded while this was non-zero were cleared by migration c4f1a7d9e2b5.
 FREE_GRANT_CENTS = 0
 
+
+def free_grant_cents() -> int:
+    """Return the one-time allowance a new account gets in this deployment.
+
+    Only a PR preview environment grants credit, so automated checks there can
+    pay for a run; everywhere else it is :data:`FREE_GRANT_CENTS`.
+    """
+    return settings.preview_grant_cents if settings.is_preview_environment else FREE_GRANT_CENTS
+
+
 # Prefix on the placeholder ``stripe_customer_id`` of a billing row created by a
 # local debit for an account that never reached Stripe. ``get_or_create_customer``
 # treats such a row as having no real Stripe customer yet and provisions one.
 LOCAL_CUSTOMER_PREFIX = "local:"
+
+# Width of the ``billing_customers.stripe_customer_id`` column.
+_CUSTOMER_ID_MAX_LENGTH = 64
+
+
+def local_customer_id(username: str) -> str:
+    """Build the placeholder ``stripe_customer_id`` for a customerless account.
+
+    The column is ``String(64)`` and unique, so the raw username (up to 255
+    characters) cannot follow the prefix. A truncated SHA-256 digest fits the
+    column and stays unique per username; only the prefix is ever read back.
+
+    Args:
+        username: Account identity the placeholder row belongs to.
+
+    Returns:
+        ``local:`` followed by a hex digest, at most 64 characters long.
+    """
+    digest = hashlib.sha256(username.encode("utf-8")).hexdigest()
+    return f"{LOCAL_CUSTOMER_PREFIX}{digest[: _CUSTOMER_ID_MAX_LENGTH - len(LOCAL_CUSTOMER_PREFIX)]}"
+
+
+def _is_customerless(customer_id: str) -> bool:
+    """Return whether a stored ``stripe_customer_id`` names no real Stripe customer.
+
+    An older checkout webhook stored ``""`` for a session without a customer, so
+    an empty id counts as customerless like a ``local:`` placeholder.
+
+    Args:
+        customer_id: Stored ``billing_customers.stripe_customer_id`` value.
+
+    Returns:
+        ``True`` for an empty or placeholder id.
+    """
+    return not customer_id or customer_id.startswith(LOCAL_CUSTOMER_PREFIX)
+
 
 # Subscription lifecycle events the webhook mirrors onto ``billing_customers``.
 # Each one re-reads the subscription, so they are order-independent.
@@ -577,7 +625,7 @@ class StripeBillingService:
         """Seed the one-time free grant if unseeded; return the remaining cents.
 
         Seeds an unseeded row (NULL ``grant_remaining`` — a new account) to the
-        one-time :data:`FREE_GRANT_CENTS`. The grant is lifetime — once seeded
+        one-time :func:`free_grant_cents`. The grant is lifetime — once seeded
         it only ever draws down; there is no renewal. Mutates ``customer`` in
         place; the caller commits. A missing row (``None``) reads a full free
         grant without persisting — the row is created on the first real mutation
@@ -591,11 +639,11 @@ class StripeBillingService:
             Cents remaining in the account's grant.
         """
         if customer is None:
-            return FREE_GRANT_CENTS
+            return free_grant_cents()
         if customer.grant_remaining is None:
-            customer.grant_remaining = FREE_GRANT_CENTS
+            customer.grant_remaining = free_grant_cents()
             customer.updated_at = now
-            return FREE_GRANT_CENTS
+            return int(customer.grant_remaining)
         return int(customer.grant_remaining)
 
     def _stripe(self) -> Any:
@@ -643,7 +691,7 @@ class StripeBillingService:
         """
         with Session(self._engine) as session:
             row = session.get(BillingCustomerModel, username)
-            if row is None or row.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+            if row is None or _is_customerless(row.stripe_customer_id):
                 return None
             return row.stripe_customer_id
 
@@ -661,7 +709,7 @@ class StripeBillingService:
         """
         with Session(self._engine) as session:
             row = session.get(BillingCustomerModel, username)
-            if row is not None and not row.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+            if row is not None and not _is_customerless(row.stripe_customer_id):
                 return row.stripe_customer_id
         stripe_mod = self._stripe()
         customer = stripe_mod.Customer.create(email=username, metadata={"username": username})
@@ -672,7 +720,7 @@ class StripeBillingService:
                 # A local debit may have created a placeholder row before the
                 # account reached Stripe; upgrade it in place to the real id so the
                 # accrued grant/balance carry over.
-                if existing.stripe_customer_id.startswith(LOCAL_CUSTOMER_PREFIX):
+                if _is_customerless(existing.stripe_customer_id):
                     existing.stripe_customer_id = customer.id
                     existing.updated_at = now
                     session.commit()
@@ -1004,7 +1052,7 @@ class StripeBillingService:
             "price_data": {
                 "currency": "usd",
                 "unit_amount": cents,
-                "product_data": {"name": f"Skynet balance top-up · ${cents / 100:.2f}"},
+                "product_data": {"name": f"{APP_NAME} balance top-up · ${cents / 100:.2f}"},
             },
             "quantity": 1,
         }
@@ -1150,7 +1198,7 @@ class StripeBillingService:
             return WalletSnapshot(
                 paid_balance_cents=customer.balance_cents if customer else 0,
                 free_grant_remaining=grant_remaining,
-                free_grant_total=FREE_GRANT_CENTS,
+                free_grant_total=free_grant_cents(),
                 usage=usage,
                 plan=_plan_snapshot(customer),
             )
@@ -1366,7 +1414,9 @@ class StripeBillingService:
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
                 only); defaults to managed.
             token_sources_by_model: Optional per-model source map for a mixed job.
-            optimization_id: Finishing legacy root job, whose own held ceiling may be consumed.
+            optimization_id: Finishing legacy root job, whose own held ceiling may be
+                consumed; also stamped on the ledger row so the charge is
+                attributable to the job.
             settlement_key: Optional idempotency key stored on the ledger row;
                 a debit whose key is already recorded is a no-op.
 
@@ -1404,7 +1454,7 @@ class StripeBillingService:
                 # real id replaces it the first time the account reaches Stripe.
                 customer = BillingCustomerModel(
                     username=username,
-                    stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}",
+                    stripe_customer_id=local_customer_id(username),
                     balance_cents=0,
                     created_at=now,
                     updated_at=now,
@@ -1433,6 +1483,8 @@ class StripeBillingService:
                     output_tokens=output_tokens,
                     settlement_key=settlement_key,
                     uncollected_cents=uncollected or None,
+                    optimization_id=optimization_id,
+                    from_grant_cents=from_grant,
                 )
             )
             session.commit()
@@ -1649,7 +1701,9 @@ class StripeBillingService:
         if customer is None:
             customer = BillingCustomerModel(
                 username=username,
-                stripe_customer_id=str(obj.get("customer") or ""),
+                # A session without a customer must not store "": the column is
+                # unique, so a second customerless buyer would fail the webhook.
+                stripe_customer_id=_stripe_id(obj.get("customer")) or local_customer_id(username),
                 balance_cents=0,
             )
             session.add(customer)
@@ -1842,7 +1896,7 @@ class StripeBillingService:
         if customer is None:
             customer = BillingCustomerModel(
                 username=username,
-                stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}",
+                stripe_customer_id=local_customer_id(username),
                 balance_cents=0,
                 debt_cents=0,
                 created_at=now,

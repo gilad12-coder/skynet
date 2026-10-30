@@ -16,7 +16,7 @@ Skynet turns "I have a dataset and a task" into an optimized, deployable LLM pro
 - **Agents** — a generalist assistant (Cmd/Ctrl+J) that operates the whole wizard through tools with configurable trust modes, and a code agent that authors signatures, metrics, and multi-step workflow graphs on a visual canvas.
 - **Serving** — every successful run yields a program artifact: inspect the evolved instructions and demos, run inference against it, or export a runnable program.
 - **24 locales, RTL-first** — Hebrew is the base language; Arabic and Persian are first-class; the rest overlay with graceful fallback.
-- **Simple pricing** — a prepaid dollar balance; usage is metered at raw provider cost times a 1.50 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. A "no lift, no charge" guarantee refunds runs that don't beat their baseline. Without Stripe keys, billing is simply off.
+- **Simple pricing** — a prepaid dollar balance; usage is metered at raw provider cost times a 1.15 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. Without Stripe keys, billing is simply off.
 
 ## Quick Start (local)
 
@@ -24,26 +24,42 @@ Prerequisites: Python 3.11, Node 20+ (22.6+ to run the frontend unit tests), Pos
 
 ```bash
 git clone https://github.com/gilad12-coder/skynet.git && cd skynet
+just install-agent
+```
 
-# 1. Database
-createdb skynet
+`just install-agent` runs the setup script (the same as `just setup`), then starts Claude Code with `/install`.
+`just setup` installs the backend and frontend deps and creates
+`backend/.env` and `frontend/.env.local` with fresh auth secrets. It also checks
+Postgres and LiteLLM, runs the migrations and checks i18n. It never overwrites
+an existing env file and never prints a secret. The agent reads the log in
+`.claude/logs/`, fixes known issues, runs the unit tests and tells you which
+secrets to enter. `just install-hil` does the same, but asks you before each
+choice. Without Claude Code, run `just setup` and follow
+`.claude/commands/install.md`.
 
-# 2. Configure
-cp backend/.env.example backend/.env        # set REMOTE_DB_URL + model keys
-cp frontend/.env.example frontend/.env.local
+Then start the app:
 
-# 3. Model gateway (routes all LLM traffic; holds provider keys)
-cd deploy/litellm && docker compose up -d && cd ../..
-
-# 4. Install + run
-just install
+```bash
 just backend    # FastAPI on :8000 — migrations apply automatically at boot
 just frontend   # Next.js on :3000
 ```
 
+<details>
+<summary>Manual install</summary>
+
+```bash
+createdb skynet
+cp backend/.env.example backend/.env        # set REMOTE_DB_URL + model keys
+cp frontend/.env.example frontend/.env.local
+cd deploy/litellm && docker compose up -d && cd ../..   # model gateway
+just install
+```
+
+</details>
+
 Open http://localhost:3000. The API reference lives at http://localhost:8000/scalar.
 
-Useful recipes: `just test`, `just lint`, `just check-i18n`, `just --list` for everything.
+Useful recipes: `just test`, `just lint`, `just check-i18n`, `just maintain` (health report), `just --list` for everything.
 
 ## Architecture
 
@@ -52,7 +68,7 @@ frontend/   Next.js (App Router) · Tailwind v4 · shadcn/radix · SSE streaming
 backend/    FastAPI · SQLAlchemy + Alembic (boot-time migrations) · DSPy 3.3
             └─ worker: multi-pod job fleet over Postgres (SELECT … FOR UPDATE
                SKIP LOCKED leases, orphan recovery, resumable GEPA checkpoints)
-deploy/     litellm proxy (compose) · helm chart for Kubernetes
+deploy/     litellm proxy (compose)
 i18n/       Hebrew base catalog + 23 overlay locales → generated typed catalogs
 docs/       operator guides (Stripe setup, design briefs)
 ```
@@ -81,7 +97,7 @@ WORKER_CONCURRENCY=4                           # parallel background jobs
 # STRIPE_SECRET_KEY=...
 ```
 
-See `backend/.env.example` for the full annotated list (agents' models, tagger assist models, notifications, air-gap gateways, and more).
+See `backend/.env.example` for the full annotated list (agents' models, tagger assist models, notifications, and more).
 
 ### Frontend (`frontend/.env.local`)
 
@@ -89,8 +105,8 @@ See `backend/.env.example` for the full annotated list (agents' models, tagger a
 NEXT_PUBLIC_API_URL=http://localhost:8000
 AUTH_SECRET=generate-with-openssl-rand-base64-32
 
-# Without SSO configured, the login page offers email/password signup.
-# ADFS/OIDC SSO and Google/GitHub OAuth: see frontend/.env.example.
+# The login page offers email/password signup.
+# Google/GitHub OAuth: see frontend/.env.example.
 ```
 
 ## Serving optimized programs
@@ -110,7 +126,6 @@ The job detail page includes a built-in inference playground and a program expor
 ## Deployment
 
 - **Anywhere with Postgres** — the backend migrates its own schema at boot and the worker fleet scales horizontally via DB-lease job claims (no external queue).
-- **Kubernetes** — Helm chart in `deploy/helm`.
 - **Docker** — `cd backend && docker compose up --build` starts API + Postgres.
 - **Billing** — optional; set the Stripe keys in `backend/.env.example` to enable balance top-ups and metered usage.
 

@@ -25,8 +25,8 @@ from typing import Any
 
 from ....constants import PROGRESS_AGENT_RUN
 
-# A run's ``phase``: one of the optimizer's trials, the held-out baseline
-# pass over the starting point, or the held-out pass over the winner.
+# A run's ``phase``: one of the optimizer's trials, or the final run's fresh
+# pass over the starting point or over the winner.
 PHASE_VERSION = "version"
 PHASE_BASELINE = "baseline"
 PHASE_FINAL = "final"

@@ -1,9 +1,12 @@
-"""Tests for the ``/run`` and ``/grid-search`` submission endpoints."""
+"""Tests for the submission router: ``/optimize`` billing gates, engine catalog and spend ceiling.
+
+The unified-run specifics (staged datasets, seeding, overview keys) live in
+``test_unified_submit.py``; the optimizer catalog in ``test_optimizer_catalog.py``.
+Both reuse the fake store and client factory defined here.
+"""
 
 from __future__ import annotations
 
-import copy
-import json
 from typing import Any
 
 import pytest
@@ -12,50 +15,26 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...billing.credential_safety import scrub_model_config
-from ...billing.model_gateway import ROUTE_KEY
-from ...billing.service import committed_spend_cents, cost_ceiling_budget
 from ...config import Settings
-from ...constants import (
-    COMPOSITION_SINGLE,
-    COMPOSITION_WORKFLOW,
-    OPTIMIZATION_TYPE_BLACKBOX,
-    OPTIMIZATION_TYPE_GRID_SEARCH,
-    OPTIMIZATION_TYPE_RUN,
-    PAYLOAD_OVERVIEW_COMPOSITION,
-    PAYLOAD_OVERVIEW_GENERATION_MODELS,
-    PAYLOAD_OVERVIEW_IS_PRIVATE,
-    PAYLOAD_OVERVIEW_MODEL_NAME,
-    PAYLOAD_OVERVIEW_MODULE_NAME,
-    PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
-    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
-    PAYLOAD_OVERVIEW_REFLECTION_MODELS,
-    PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
-    PAYLOAD_OVERVIEW_TOTAL_PAIRS,
-    PAYLOAD_OVERVIEW_USERNAME,
-)
-from ...i18n_keys import I18nKey
-from ...models import BlackboxRunRequest, GridSearchRequest, RunRequest
-from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
-from ...models.results import ModelTokenUsage
-from ...registry import RegistryError
-from ...service_gateway import ServiceError
 from ...service_gateway.optimization.blackbox import service as _bb_service
 from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel, WalletLedgerModel
-from ...storage.preflights import WizardPreflightModel
 from ...storage.remote import RemoteDBJobStore
 from ...storage.usage import StorageUsage
-from .. import preflight_execution
 from ..errors import DomainError
-from ..model_catalog import CatalogModel, ModelCatalogResponse
 from ..routers import submissions as _sub_mod
 from ..routers.submissions import create_submissions_router
 from .conftest import bypass_auth
 from .mocks import fake_background_worker
+
+_RUN_CODE = 'def run(artifact, input):\n    return artifact + input["question"]\n'
+_METRIC_CODE = (
+    "def score(input, output, expected=None):\n"
+    '    return float(output == expected), {"feedback": "compare to the answer"}\n'
+)
 
 
 class _FakeJobStore:
@@ -301,978 +280,6 @@ class _FakeJobStore:
         return True
 
 
-class _FakeService:
-    """Service stub whose validate methods optionally raise a configured error."""
-
-    def __init__(self, *, raise_on_validate: Exception | None = None) -> None:
-        """Capture the exception (if any) to raise from validate methods.
-
-        Args:
-            raise_on_validate: Exception instance to raise from both validate methods.
-        """
-        self._exc = raise_on_validate
-
-    def validate_payload(self, payload: Any) -> None:
-        """Validate a run payload, raising the configured exception if set.
-
-        Args:
-            payload: Run payload (ignored; only the side effect matters).
-
-        Raises:
-            Exception: The configured ``raise_on_validate`` error, if any.
-        """
-        if self._exc:
-            raise self._exc
-
-    def validate_grid_search_payload(self, payload: Any) -> None:
-        """Validate a grid-search payload, raising the configured exception if set.
-
-        Args:
-            payload: Grid-search payload (ignored; only the side effect matters).
-
-        Raises:
-            Exception: The configured ``raise_on_validate`` error, if any.
-        """
-        if self._exc:
-            raise self._exc
-
-
-def _run_payload() -> dict:
-    """Build a minimal valid run payload for ``/run`` tests.
-
-    Returns:
-        A dict matching the run submission schema.
-    """
-    return {
-        "name": "test-run",
-        "username": "alice",
-        "module_name": "predict",
-        "module_kwargs": {},
-        "signature_code": "class Sig(dspy.Signature): q: str = dspy.InputField(); a: str = dspy.OutputField()",
-        "metric_code": "def metric(example, pred, trace=None): return 1.0",
-        "optimizer_name": "gepa",
-        "optimizer_kwargs": {},
-        "compile_kwargs": {},
-        "dataset": [{"question": "Q?", "answer": "A"}],
-        "column_mapping": {"inputs": {"q": "question"}, "outputs": {"a": "answer"}},
-        "split_fractions": {"train": 0.7, "val": 0.15, "test": 0.15},
-        "shuffle": True,
-        "seed": 42,
-        "dataset_filename": "test.csv",
-        "model_settings": {"name": "gpt-4o-mini"},
-    }
-
-
-def _grid_payload() -> dict:
-    """Build a minimal valid grid-search payload for ``/grid-search`` tests.
-
-    Returns:
-        A dict matching the grid-search submission schema.
-    """
-    return {
-        "name": "test-grid",
-        "username": "alice",
-        "module_name": "predict",
-        "module_kwargs": {},
-        "signature_code": "class Sig(dspy.Signature): q: str = dspy.InputField(); a: str = dspy.OutputField()",
-        "metric_code": "def metric(example, pred, trace=None): return 1.0",
-        "optimizer_name": "gepa",
-        "optimizer_kwargs": {},
-        "compile_kwargs": {},
-        "dataset": [{"question": "Q?", "answer": "A"}],
-        "column_mapping": {"inputs": {"q": "question"}, "outputs": {"a": "answer"}},
-        "split_fractions": {"train": 0.7, "val": 0.15, "test": 0.15},
-        "shuffle": True,
-        "seed": None,
-        "dataset_filename": "grid.csv",
-        "generation_models": [{"name": "gpt-4o-mini"}],
-        "reflection_models": [{"name": "gpt-4o"}],
-    }
-
-
-class _TestGateway:
-    """Replace provider I/O while the router retains real funded setup authority."""
-
-    def __init__(self, runtime: Any) -> None:
-        """Keep the real setup authority created by preflight.
-
-        Args:
-            runtime: Generation-fenced budget runtime owned by the API.
-        """
-        self.runtime = runtime
-
-    def protect_payload(self, payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
-        """Replace model credentials with deterministic protected role routes.
-
-        Args:
-            payload: Canonical setup inputs.
-            **_kwargs: Production routing settings unused by this transport fixture.
-
-        Returns:
-            A secret-free copy matching the production guest contract.
-        """
-        result = copy.deepcopy(payload)
-        models: list[tuple[dict[str, Any], str]] = []
-        for key, role in (
-            ("model_config", "task"),
-            ("reflection_model_config", "optimization"),
-            ("task_model_config", "task"),
-        ):
-            if isinstance(result.get(key), dict):
-                models.append((result[key], role))
-        scorer = result.get("scorer")
-        if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
-            models.append((scorer["model"], "judge"))
-        for key, role in (("generation_models", "task"), ("reflection_models", "optimization")):
-            models.extend((config, role) for config in result.get(key, []) if isinstance(config, dict))
-        for config, role in models:
-            model = str(config.get("name") or "").removeprefix("openrouter/")
-            cleaned = scrub_model_config(config)
-            config.clear()
-            config.update(cleaned)
-            config.pop("base_url", None)
-            config["extra"] = dict(config.get("extra") or {})
-            config["extra"][ROUTE_KEY] = {
-                "url": "http://127.0.0.1:1/v1",
-                "token": f"fixture-{role}",
-                "model": model,
-                "role": role,
-            }
-        return result
-
-    def model_routes(self) -> list[dict[str, str]]:
-        """Expose no physical provider routes in these router contract tests."""
-        return []
-
-    def close(self) -> None:
-        """Finish the deterministic adapter without external resources."""
-
-
-def _make_client(
-    service: Any,
-    store: _FakeJobStore,
-    *,
-    monkeypatch: pytest.MonkeyPatch,
-) -> TestClient:
-    """Build a funded router with real preflight persistence and isolated execution adapters.
-
-    Args:
-        service: Service stub used by the router.
-        store: Fake job store wired into the router factory.
-        monkeypatch: Pytest monkeypatch fixture to stub ``get_worker`` and notifier.
-
-    Returns:
-        A ``TestClient`` over a minimal FastAPI app.
-    """
-    worker = fake_background_worker()
-    if not hasattr(store, "engine"):
-        store.engine = _billing_engine()
-        with Session(store.engine) as session:
-            session.add(BillingCustomerModel(username="alice", stripe_customer_id="fixture-alice", balance_cents=10000))
-            session.commit()
-
-    def verify_dspy(payload: dict[str, Any], *, scope: str, identity: str) -> dict:
-        """Run configured payload and vision checks at the replaced executor boundary.
-
-        Args:
-            payload: Canonical run or grid payload received by preflight.
-            scope: Readiness scope, execution for submission.
-            identity: Durable evidence identity owned by the API.
-
-        Returns:
-            Readiness checks from the deterministic fixture executor.
-        """
-        grid = "generation_models" in payload
-        typed = (GridSearchRequest if grid else RunRequest).model_validate(payload)
-        validate = getattr(service, "validate_grid_search_payload" if grid else "validate_payload", None)
-        if callable(validate):
-            validate(typed)
-        if typed.signature_code is not None:
-            _sub_mod._enforce_vision_capability(
-                signature_code=typed.signature_code,
-                candidate_models=typed.generation_models if grid else [typed.model_settings],
-            )
-        return {"checks": [{"key": "execution", "status": "succeeded"}]}
-
-    def verify_anything(gateway: _TestGateway, payload: dict[str, Any], *, scope: str, identity: str) -> dict:
-        """Run the configured black-box validator inside the deterministic executor.
-
-        Args:
-            gateway: Adapter carrying the real setup budget authority.
-            payload: Canonical black-box inputs.
-            scope: Readiness scope, execution for submission.
-            identity: Durable evidence identity owned by the API.
-
-        Returns:
-            Readiness checks from the configured black-box validator.
-        """
-        _sub_mod.validate_blackbox_payload(BlackboxRunRequest.model_validate(payload))
-        return {"checks": [{"key": "execution", "status": "succeeded"}]}
-
-    monkeypatch.setattr(_sub_mod.settings, "worker_enabled", True)
-    monkeypatch.setattr(_sub_mod.settings, "openrouter_api_key", SecretStr("fixture-only"))
-    monkeypatch.setattr(_sub_mod, "get_worker", lambda *a, **kw: worker)
-    monkeypatch.setattr(_sub_mod, "notify_job_started", lambda **_: None)
-    monkeypatch.setattr(preflight_execution, "ModelGateway", _TestGateway)
-    monkeypatch.setattr(preflight_execution, "bind_protected_sandbox", lambda *args, **kwargs: None)
-    monkeypatch.setattr(preflight_execution, "_verify_dspy", verify_dspy)
-    monkeypatch.setattr(preflight_execution, "_verify_anything", verify_anything)
-
-    app = FastAPI()
-    app.include_router(create_submissions_router(service=service, job_store=store))
-    bypass_auth(app)
-
-    @app.exception_handler(HTTPException)
-    async def _http_handler(_request: Request, exc: HTTPException) -> JSONResponse:
-        """Mirror the production HTTPException handler so ``code``/``params`` round-trip."""
-        content: dict[str, object] = {"detail": exc.detail}
-        code = getattr(exc, "code", None)
-        if code:
-            content["code"] = code
-            content["params"] = getattr(exc, "params", None) or {}
-        return JSONResponse(status_code=exc.status_code, content=content, headers=getattr(exc, "headers", None))
-
-    return TestClient(app, raise_server_exceptions=False)
-
-
-def test_submit_run_returns_201_with_optimization_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful run submission returns 201 with a fresh optimization id."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["is_private"] = True
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    body = resp.json()
-    assert "optimization_id" in body
-    assert body["status"] == "pending"
-    assert body["optimization_type"] == "run"
-
-
-def test_submit_run_creates_job_in_store(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful submission creates exactly one matching job in the store."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    created = store.created_ids()
-    assert len(created) == 1
-    assert created[0] == resp.json()["optimization_id"]
-
-
-def test_submit_requires_database_budget_authority(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail closed when an engine-less store cannot fund and attest the submission."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    del store.engine
-
-    response = client.post("/run", json=_run_payload())
-
-    assert response.status_code == 503
-    assert response.json()["code"] == "budget.invalid"
-    assert store.created_ids() == []
-
-
-@pytest.mark.parametrize(
-    ("path", "payload_factory"),
-    [("/run", _run_payload), ("/grid-search", _grid_payload)],
-)
-def test_submit_persists_without_starting_worker_on_api_only_pods(
-    path: str,
-    payload_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """API-only pods persist submissions without constructing a local worker.
-
-    Args:
-        path: Submission endpoint under test.
-        payload_factory: Callable producing a valid endpoint payload.
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(_sub_mod.settings, "worker_enabled", False)
-
-    def _unexpected_worker(*_args: Any, **_kwargs: Any) -> None:
-        """Fail if an API-only submission tries to construct a worker."""
-        pytest.fail("API-only submissions must not construct a worker")
-
-    monkeypatch.setattr(_sub_mod, "get_worker", _unexpected_worker)
-
-    resp = client.post(path, json=payload_factory())
-
-    assert resp.status_code == 201
-    row = store._jobs[resp.json()["optimization_id"]]
-    assert row["payload"]["username"] == "alice"
-    assert row["code_version"] == _sub_mod.settings.code_version
-
-
-def test_submit_run_echoes_name_and_authenticated_username(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The response echoes the payload ``name`` but always uses the auth user's username.
-
-    The submission router overwrites ``payload.username`` from the bearer
-    token, so a forged username in the request body is ignored — the
-    response carries the authenticated identity.
-    """
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["name"] = "my-run"
-    payload["username"] = "bob"
-
-    resp = client.post("/run", json=payload)
-
-    body = resp.json()
-    assert body["name"] == "my-run"
-    assert body["username"] == "alice"
-
-
-def test_submit_run_returns_409_on_failed_service_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse submission when the required service readiness check fails."""
-    svc = _FakeService(raise_on_validate=ServiceError("bad module"))
-    store = _FakeJobStore()
-    client = _make_client(svc, store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "submission.validation_failed"
-
-
-def test_submit_run_returns_409_on_failed_registry_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse submission when the required registry readiness check fails."""
-    svc = _FakeService(raise_on_validate=RegistryError("not registered"))
-    store = _FakeJobStore()
-    client = _make_client(svc, store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "submission.validation_failed"
-
-
-def test_submit_run_returns_409_when_over_storage_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A submission that would exceed the user's storage budget is rejected with 409."""
-    store = _FakeJobStore(storage_quota=0)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "user.storage.quota_exceeded"
-
-
-def test_submit_run_returns_422_on_missing_required_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run payload missing ``signature_code`` returns a 422.
-
-    ``username`` is intentionally optional on the wire — the server overwrites
-    it from the authenticated session — so the contract test instead drops
-    ``signature_code`` to exercise the schema's still-required surface.
-    """
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    del payload["signature_code"]
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 422
-
-
-def test_submit_run_accepts_payload_without_username(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run payload that omits ``username`` succeeds — auth fills it in."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    del payload["username"]
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    assert resp.json()["username"] == "alice"
-
-
-def test_submit_run_accepts_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run payload with ``staged_dataset_id`` hydrates the dataset server-side."""
-    store = _FakeJobStore()
-    rows = [{"q": "q", "a": "a"}]
-    staged_id = store.stage_dataset(username="alice", dataset_filename="x.json", rows=rows)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    del payload["dataset"]
-    payload["staged_dataset_id"] = staged_id
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    assert store.get_staged_dataset(staged_id, "alice") is None
-
-
-def test_submit_run_rejects_unknown_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown ``staged_dataset_id`` produces a 400."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    del payload["dataset"]
-    payload["staged_dataset_id"] = "does-not-exist"
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 400
-
-
-def test_submit_run_retains_staged_dataset_when_validation_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A staged row survives a failed submit so the user can retry without re-uploading.
-
-    Reproduces the chat-flow bug: the agent submits with an invalid payload
-    (e.g. missing reflection_model_config). The materialization step used to
-    delete the staged row eagerly, so a corrected retry then 400'd with
-    staged_dataset_not_found.
-    """
-
-    class _RejectingService:
-        """Service stub whose ``validate_payload`` always rejects."""
-
-        def validate_payload(self, _payload: Any) -> None:
-            """Reject any run payload to simulate a failed submit.
-
-            Raises:
-                ServiceError: Always, mimicking a missing reflection model config.
-            """
-            raise ServiceError("missing reflection_model_config")
-
-    store = _FakeJobStore()
-    rows = [{"q": "q", "a": "a"}]
-    staged_id = store.stage_dataset(username="alice", dataset_filename="x.json", rows=rows)
-    client = _make_client(_RejectingService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    del payload["dataset"]
-    payload["staged_dataset_id"] = staged_id
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 409
-    assert store.get_staged_dataset(staged_id, "alice") == rows
-
-
-def test_submit_run_returns_422_on_invalid_split_fractions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Split fractions that do not sum to 1.0 produce a 422."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["split_fractions"] = {"train": 0.5, "val": 0.5, "test": 0.5}
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 422
-
-
-def test_submit_run_returns_422_on_empty_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty dataset is rejected at the schema layer with a 422."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["dataset"] = []
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 422
-
-
-def test_submit_grid_search_returns_201(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful grid-search submission returns 201 with the right type tag."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/grid-search", json=_grid_payload())
-
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["optimization_type"] == "grid_search"
-    assert body["status"] == "pending"
-
-
-def test_submit_grid_search_seed_assigned_when_null(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ``null`` seed at submit time is replaced by a concrete seed in the overview."""
-    # Reproducibility contract: when caller sends seed=None, the overview must persist a concrete seed.
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["seed"] = None
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    stored = store._jobs[opt_id]["overview"]
-    assert stored.get("seed") is not None
-
-
-def test_submit_grid_search_returns_409_on_failed_service_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse the grid when its required service readiness check fails."""
-    svc = _FakeService(raise_on_validate=ServiceError("bad optimizer"))
-    store = _FakeJobStore()
-    client = _make_client(svc, store, monkeypatch=monkeypatch)
-
-    resp = client.post("/grid-search", json=_grid_payload())
-
-    assert resp.status_code == 409
-
-
-def test_submit_grid_search_returns_422_on_empty_generation_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty ``generation_models`` list is rejected at the schema layer with 422."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["generation_models"] = []
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 422
-
-
-def test_submit_run_overview_contains_expected_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The persisted run overview contains the expected canonical keys."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["is_private"] = True
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE] == OPTIMIZATION_TYPE_RUN
-    assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_SINGLE
-    assert overview[PAYLOAD_OVERVIEW_USERNAME] == "alice"
-    assert overview[PAYLOAD_OVERVIEW_MODULE_NAME] == "predict"
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME] == "gepa"
-    assert overview[PAYLOAD_OVERVIEW_IS_PRIVATE] is True
-    assert PAYLOAD_OVERVIEW_MODEL_NAME in overview
-
-
-def test_submit_grid_search_overview_contains_total_pairs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The grid overview's ``total_pairs`` equals ``len(gen) * len(ref)``."""
-    # Invariant: total_pairs in overview == len(gen) * len(ref).
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["is_private"] = True
-    # 2 generation models × 1 reflection model = 2 pairs
-    payload["generation_models"] = [{"name": "gpt-4o-mini"}, {"name": "gpt-4o"}]
-    payload["reflection_models"] = [{"name": "gpt-4o"}]
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE] == OPTIMIZATION_TYPE_GRID_SEARCH
-    assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_SINGLE
-    assert overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS] == 2
-    assert overview[PAYLOAD_OVERVIEW_IS_PRIVATE] is True
-
-
-def test_submit_grid_search_skips_validation_when_service_lacks_method(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A service without ``validate_grid_search_payload`` is tolerated and the job is enqueued."""
-    # The route uses a hasattr guard so an older service implementation without
-    # validate_grid_search_payload must NOT cause a 500 — the job is enqueued anyway.
-
-    class _ServiceWithoutGridValidation:
-        """Service stub that only implements ``validate_payload``."""
-
-        def validate_payload(self, payload: Any) -> None:
-            """Accept any run payload without raising."""
-
-        # NOTE: no validate_grid_search_payload
-
-    store = _FakeJobStore()
-    client = _make_client(_ServiceWithoutGridValidation(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/grid-search", json=_grid_payload())
-
-    assert resp.status_code == 201
-    assert resp.json()["optimization_type"] == "grid_search"
-
-
-def _fake_catalog(*values: str) -> ModelCatalogResponse:
-    """Build a synthetic catalog from a list of model id strings.
-
-    Args:
-        *values: Model id strings to include in the catalog.
-
-    Returns:
-        A ``ModelCatalogResponse`` containing one entry per id with provider ``openai``.
-    """
-    return ModelCatalogResponse(
-        providers=[],
-        models=[CatalogModel(value=v, label=v, provider="openai", available=True) for v in values],
-    )
-
-
-def test_submit_grid_search_use_all_generation_models_expands_from_catalog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``use_all_available_generation_models`` expands to the catalog's full list."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _fake_catalog("openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-3-5-sonnet"),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload.pop("generation_models")
-    payload["use_all_available_generation_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-    gen_names = [m["name"] for m in overview[PAYLOAD_OVERVIEW_GENERATION_MODELS]]
-    assert gen_names == ["openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-3-5-sonnet"]
-    assert overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS] == 3
-
-
-def test_submit_grid_search_use_all_generation_models_overrides_client_list(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The ``use_all`` flag overrides any explicit client-supplied generation models."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _fake_catalog("openai/gpt-4o-mini"),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["generation_models"] = [{"name": "bogus-legacy-model"}]
-    payload["use_all_available_generation_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-    gen_names = [m["name"] for m in overview[PAYLOAD_OVERVIEW_GENERATION_MODELS]]
-    assert gen_names == ["openai/gpt-4o-mini"]
-
-
-def test_submit_grid_search_use_all_reflection_models_expands_from_catalog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``use_all_available_reflection_models`` expands to the catalog's full list."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _fake_catalog("openai/gpt-4o-mini", "openai/gpt-4o"),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload.pop("reflection_models")
-    payload["use_all_available_reflection_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-    ref_names = [m["name"] for m in overview[PAYLOAD_OVERVIEW_REFLECTION_MODELS]]
-    assert ref_names == ["openai/gpt-4o-mini", "openai/gpt-4o"]
-    assert overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS] == len(payload["generation_models"]) * 2
-
-
-def test_submit_grid_search_use_all_both_sides_multiplies_catalog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Setting both ``use_all`` flags yields a Cartesian product over the catalog."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _fake_catalog("openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-3-5-sonnet"),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload.pop("generation_models")
-    payload.pop("reflection_models")
-    payload["use_all_available_generation_models"] = True
-    payload["use_all_available_reflection_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-    overview = store._jobs[resp.json()["optimization_id"]]["overview"]
-    assert len(overview[PAYLOAD_OVERVIEW_GENERATION_MODELS]) == 3
-    assert len(overview[PAYLOAD_OVERVIEW_REFLECTION_MODELS]) == 3
-    assert overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS] == 9
-
-
-def test_submit_grid_search_use_all_generation_models_returns_400_when_catalog_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty catalog plus the generation ``use_all`` flag returns a 400."""
-    monkeypatch.setattr(_sub_mod, "get_catalog_cached", _fake_catalog)
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload.pop("generation_models")
-    payload["use_all_available_generation_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 400
-    assert resp.json()["code"] == I18nKey.SUBMIT_NO_MODELS_AVAILABLE.value
-
-
-def test_submit_grid_search_use_all_reflection_models_returns_400_when_catalog_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty catalog plus the reflection ``use_all`` flag returns a 400."""
-    monkeypatch.setattr(_sub_mod, "get_catalog_cached", _fake_catalog)
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload.pop("reflection_models")
-    payload["use_all_available_reflection_models"] = True
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 400
-    assert resp.json()["code"] == I18nKey.SUBMIT_NO_MODELS_AVAILABLE.value
-
-
-_VISION_SIG_CODE = (
-    "import dspy\n"
-    "class VisionQA(dspy.Signature):\n"
-    "    picture: dspy.Image = dspy.InputField()\n"
-    "    question: str = dspy.InputField()\n"
-    "    answer: str = dspy.OutputField()\n"
-)
-
-
-def _vision_catalog(*, vision_models: list[str], text_only_models: list[str] | None = None) -> ModelCatalogResponse:
-    """Build a catalog with explicit vision-capable and text-only entries.
-
-    Args:
-        vision_models: Model id strings flagged ``supports_vision=True``.
-        text_only_models: Model id strings flagged ``supports_vision=False``.
-
-    Returns:
-        A ``ModelCatalogResponse`` mixing the two groups.
-    """
-    models: list[CatalogModel] = [
-        CatalogModel(value=v, label=v, provider="openai", available=True, supports_vision=True) for v in vision_models
-    ]
-    models.extend(
-        CatalogModel(value=v, label=v, provider="openai", available=True, supports_vision=False)
-        for v in text_only_models or []
-    )
-    return ModelCatalogResponse(providers=[], models=models)
-
-
-def _failed_setup_message(store: _FakeJobStore) -> str:
-    """Read the durable failed check instead of exposing internal detail on submit.
-
-    Args:
-        store: Isolated database backing this submission test.
-
-    Returns:
-        Message preserved by the failed preflight evidence record.
-    """
-    with Session(store.engine) as session:
-        evidence = session.scalar(select(WizardPreflightModel).where(WizardPreflightModel.status == "failed"))
-        assert evidence is not None
-        return str(evidence.result["checks"][0]["message"])
-
-
-def test_submit_run_rejects_image_signature_with_non_vision_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run with an image signature records its failed setup check without submitting."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _vision_catalog(vision_models=[], text_only_models=["gpt-4o-mini"]),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["signature_code"] = _VISION_SIG_CODE
-    payload["column_mapping"] = {
-        "inputs": {"picture": "img", "question": "q"},
-        "outputs": {"answer": "a"},
-    }
-    payload["dataset"] = [{"img": "https://example.com/cat.png", "q": "what?", "a": "cat"}]
-    payload["model_settings"] = {"name": "gpt-4o-mini"}
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "submission.validation_failed"
-    detail = _failed_setup_message(store)
-    assert "picture" in detail
-    assert "gpt-4o-mini" in detail
-
-
-def test_submit_run_accepts_image_signature_with_vision_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run with an image signature using a vision-capable model is accepted."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _vision_catalog(vision_models=["gpt-4o"]),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _run_payload()
-    payload["signature_code"] = _VISION_SIG_CODE
-    payload["column_mapping"] = {
-        "inputs": {"picture": "img", "question": "q"},
-        "outputs": {"answer": "a"},
-    }
-    payload["dataset"] = [{"img": "https://example.com/cat.png", "q": "what?", "a": "cat"}]
-    payload["model_settings"] = {"name": "gpt-4o"}
-
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-
-
-def test_submit_run_text_signature_skips_vision_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure text signature does not trigger the vision-capable model check."""
-    # Empty catalog — would reject every model if the vision gate ran. It must not.
-    monkeypatch.setattr(_sub_mod, "get_catalog_cached", lambda: _vision_catalog(vision_models=[]))
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-
-
-def test_submit_grid_search_rejects_image_signature_with_any_non_vision_model(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A grid search rejects image signatures if any selected model lacks vision support."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _vision_catalog(vision_models=["gpt-4o"], text_only_models=["text-only-model"]),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["signature_code"] = _VISION_SIG_CODE
-    payload["column_mapping"] = {
-        "inputs": {"picture": "img", "question": "q"},
-        "outputs": {"answer": "a"},
-    }
-    payload["dataset"] = [{"img": "https://example.com/cat.png", "q": "what?", "a": "cat"}]
-    payload["generation_models"] = [{"name": "gpt-4o"}, {"name": "text-only-model"}]
-    payload["reflection_models"] = [{"name": "gpt-4o"}]
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "submission.validation_failed"
-    detail = _failed_setup_message(store)
-    assert "text-only-model" in detail
-    assert "gpt-4o" not in detail.split("text-only-model")[0] or "text-only-model" in detail
-
-
-def test_submit_grid_search_accepts_image_signature_when_all_models_support_vision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A grid search accepts image signatures when every selected model supports vision."""
-    monkeypatch.setattr(
-        _sub_mod,
-        "get_catalog_cached",
-        lambda: _vision_catalog(vision_models=["gpt-4o", "gpt-4o-mini"]),
-    )
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _grid_payload()
-    payload["signature_code"] = _VISION_SIG_CODE
-    payload["column_mapping"] = {
-        "inputs": {"picture": "img", "question": "q"},
-        "outputs": {"answer": "a"},
-    }
-    payload["dataset"] = [{"img": "https://example.com/cat.png", "q": "what?", "a": "cat"}]
-    payload["generation_models"] = [{"name": "gpt-4o"}, {"name": "gpt-4o-mini"}]
-    payload["reflection_models"] = [{"name": "gpt-4o"}]
-
-    resp = client.post("/grid-search", json=payload)
-
-    assert resp.status_code == 201
-
-
-def test_submit_run_returns_402_when_balance_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A managed run is blocked at submit when the account has no spendable balance."""
-    # StaticPool keeps one shared connection so the in-memory schema is visible
-    # from the request threadpool, not just the thread that ran create_all.
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    with Session(engine) as session:
-        session.add(
-            BillingCustomerModel(
-                username="alice",
-                stripe_customer_id="cus_alice",
-                balance_cents=0,
-                grant_remaining=0,
-            )
-        )
-        session.commit()
-
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 402
-    assert resp.json()["code"] == "billing.insufficient_funds"
-    assert store.created_ids() == []
-
-
-def test_submit_run_allowed_with_remaining_balance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A managed run with grant left passes the balance gate and is enqueued."""
-    # StaticPool keeps one shared connection so the in-memory schema is visible
-    # from the request threadpool, not just the thread that ran create_all.
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    with Session(engine) as session:
-        session.add(
-            BillingCustomerModel(
-                username="alice",
-                stripe_customer_id="cus_alice",
-                balance_cents=0,
-                grant_remaining=50,
-            )
-        )
-        session.commit()
-
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-
-
 def _billing_engine() -> Any:
     """Build a StaticPool in-memory engine with the billing schema."""
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -1300,927 +307,239 @@ def _verified_byok_row(monkeypatch: pytest.MonkeyPatch) -> BillingProviderKeyMod
     )
 
 
-def test_submit_run_managed_any_model_allowed_and_ceiling_capped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Any model runs in managed mode; the per-run ceiling is capped to the balance.
+def unified_payload(**overrides: Any) -> dict:
+    """Build a minimal valid ``/optimize`` body: a prompt optimized on six pairs.
 
-    With tier gating gone, a formerly frontier-locked model (gpt-4o) is allowed on
-    the free grant, and the run's ``max_cost_cents`` is clamped down to the
-    account's spendable balance so it can't overspend.
+    Args:
+        **overrides: Top-level keys replacing the defaults.
+
+    Returns:
+        A dict matching ``UnifiedRunRequest``.
+    """
+    body: dict[str, Any] = {
+        "name": "unified-run",
+        "username": "alice",
+        "task": {
+            "objective": "Answer the question in one word.",
+            "background": "",
+            "artifact": {"kind": "prompt", "starting_version": "Answer briefly: "},
+        },
+        "data": {
+            "mode": "pairs",
+            "cases": [{"input": {"question": f"Q{i}?"}, "expected": f"A{i}"} for i in range(6)],
+            "input_fields": ["question"],
+        },
+        "optimizer": {"choice": "gepa"},
+        "models": {"reflection_model": {"name": "openai/gpt-4o-mini"}},
+        "workspace": {"run_code": _RUN_CODE, "metric_code": _METRIC_CODE},
+    }
+    body.update(overrides)
+    return body
+
+
+def make_client(store: _FakeJobStore, *, monkeypatch: pytest.MonkeyPatch, balance_cents: int = 10000) -> TestClient:
+    """Build a funded ``/optimize`` client whose sandbox setup check is replaced.
+
+    The paid execution preflight (budget creation plus a sandboxed contract
+    run) is exercised by ``test_protected_submissions.py``; here it is a
+    no-op so the router's own gates are tested in isolation.
+
+    Args:
+        store: Fake job store wired into the router factory.
+        monkeypatch: Pytest monkeypatch fixture.
+        balance_cents: Wallet balance seeded for ``alice`` when the store has no engine yet.
+
+    Returns:
+        A ``TestClient`` over a minimal FastAPI app.
+    """
+    worker = fake_background_worker()
+    if not hasattr(store, "engine"):
+        store.engine = _billing_engine()
+        with Session(store.engine) as session:
+            session.add(
+                BillingCustomerModel(username="alice", stripe_customer_id="fixture-alice", balance_cents=balance_cents)
+            )
+            session.commit()
+
+    monkeypatch.setattr(_sub_mod.settings, "worker_enabled", True)
+    monkeypatch.setattr(_sub_mod.settings, "openrouter_api_key", SecretStr("fixture-only"))
+    monkeypatch.setattr(_sub_mod, "get_worker", lambda *a, **kw: worker)
+    monkeypatch.setattr(_sub_mod, "_ensure_api_budget", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_sub_mod, "_protected_submission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_sub_mod, "validate_unified_payload", lambda payload: None)
+
+    app = FastAPI()
+    app.include_router(create_submissions_router(service=object(), job_store=store))
+    bypass_auth(app)
+
+    @app.exception_handler(HTTPException)
+    async def _http_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+        """Mirror the production HTTPException handler so ``code``/``params`` round-trip."""
+        content: dict[str, object] = {"detail": exc.detail}
+        code = getattr(exc, "code", None)
+        if code:
+            content["code"] = code
+            content["params"] = getattr(exc, "params", None) or {}
+        return JSONResponse(status_code=exc.status_code, content=content, headers=getattr(exc, "headers", None))
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _funded_store(**customer: Any) -> _FakeJobStore:
+    """Build a fake store whose billing DB holds one ``alice`` customer row.
+
+    Args:
+        **customer: Column overrides for the customer row.
+
+    Returns:
+        The store with its ``engine`` set.
     """
     engine = _billing_engine()
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(
-                username="alice",
-                stripe_customer_id="cus_alice",
-                balance_cents=0,
-                grant_remaining=200,
-            )
+            BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", **{"balance_cents": 0, **customer})
         )
         session.commit()
     store = _FakeJobStore()
     store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    payload = {**_run_payload(), "model_settings": {"name": "openai/gpt-4o"}, "token_source": "managed"}
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    submitted = store._jobs[store.created_ids()[0]]["payload"]
-    assert submitted["max_cost_cents"] == 200
+    return store
 
 
-def test_submit_run_byok_frontier_model_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A BYOK run on a frontier model is never locked (own key), and persists the mode."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        # No free allowance exists, so the account is funded to pass the balance
-        # gate (a BYOK run still spends the platform fee).
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        # BYOK runs now require a saved connection for the model's provider.
-        session.add(_verified_byok_row(monkeypatch))
-        session.commit()
+def test_optimize_returns_201_and_enqueues_one_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A valid unified run is accepted as a pending black-box job and persisted."""
     store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    client = make_client(store, monkeypatch=monkeypatch)
 
-    payload = {
-        **_run_payload(),
-        "model_settings": {"name": "openrouter/openai/gpt-4o"},
-        "token_source": "byok",
-    }
-    resp = client.post("/run", json=payload)
+    resp = client.post("/optimize", json=unified_payload())
 
-    assert resp.status_code == 201
-    row = store._jobs[store.created_ids()[0]]
-    overview = row["overview"]
-    assert overview["token_source"] == "byok"
-    assert overview[PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL] == {"openrouter/openai/gpt-4o": "byok"}
-    assert row["payload"]["model_config"]["token_source"] == "byok"
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["optimization_type"] == "blackbox"
+    assert body["optimizer_name"] == "gepa"
+    assert store.created_ids() == [body["optimization_id"]]
+    assert store._jobs[body["optimization_id"]]["payload"]["payload_kind"] == "unified_v1"
 
 
-def test_submit_run_supports_mixed_per_model_sources_and_strips_inline_connection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Each run model keeps its own source while credentials come only from the vault."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.add(_verified_byok_row(monkeypatch))
-        session.commit()
+def test_optimize_overrides_posted_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stored owner is the authenticated caller, not the posted username."""
     store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = {
-        **_run_payload(),
-        "token_source": "managed",
-        "model_settings": {
-            "name": "openrouter/openai/private-chat",
-            "token_source": "byok",
-            "byok_provider": "openrouter",
-            "base_url": "https://inline.example/v1",
-            "extra": {
-                "api_key": "inline-secret",
-                "base_url": "https://other-inline.example/v1",
-                "reasoning_effort": "medium",
-            },
-        },
-        "reflection_model_settings": {
-            "name": "openrouter/anthropic/claude-3.5-haiku",
-            "token_source": "managed",
-        },
-    }
+    client = make_client(store, monkeypatch=monkeypatch)
 
-    resp = client.post("/run", json=payload)
+    resp = client.post("/optimize", json=unified_payload(username="mallory"))
 
-    assert resp.status_code == 201
-    row = store._jobs[store.created_ids()[0]]
-    assert row["overview"]["token_source"] == "managed"
-    assert row["overview"][PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL] == {
-        "openrouter/openai/private-chat": "byok",
-        "openrouter/anthropic/claude-3.5-haiku": "managed",
-    }
-    stored = row["payload"]["model_config"]
-    assert stored["token_source"] == "byok"
-    assert stored["byok_provider"] == "openrouter"
-    assert stored["base_url"] is None
-    assert stored["extra"] == {"reasoning_effort": "medium"}
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["username"] == "alice"
+    assert store._jobs[store.created_ids()[0]]["username"] == "alice"
 
 
-def test_submit_run_byok_without_connection_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_optimize_returns_402_when_balance_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A managed run is blocked at submit when the account has no spendable balance."""
+    store = _funded_store(balance_cents=0, grant_remaining=0)
+    client = make_client(store, monkeypatch=monkeypatch)
+
+    resp = client.post("/optimize", json=unified_payload())
+
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "billing.insufficient_funds"
+    assert store.created_ids() == []
+
+
+def test_optimize_caps_managed_ceiling_to_balance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A managed run's ``max_cost_cents`` is clamped to the spendable balance."""
+    store = _funded_store(balance_cents=0, grant_remaining=200)
+    client = make_client(store, monkeypatch=monkeypatch)
+
+    resp = client.post("/optimize", json=unified_payload(max_cost_cents=10_000))
+
+    assert resp.status_code == 201, resp.text
+    assert store._jobs[store.created_ids()[0]]["payload"]["max_cost_cents"] == 200
+
+
+def test_optimize_byok_without_connection_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
     """A BYOK run is refused at submit when the account saved no key for the provider."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        # Funded so the balance gate passes and the connection check is what fires.
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    store = _funded_store(balance_cents=500)
+    client = make_client(store, monkeypatch=monkeypatch)
+    body = unified_payload(
+        token_source="byok",
+        models={"reflection_model": {"name": "openrouter/openai/gpt-4o"}},
+    )
 
-    payload = {
-        **_run_payload(),
-        "model_settings": {"name": "openrouter/openai/gpt-4o"},
-        "token_source": "byok",
-    }
-    resp = client.post("/run", json=payload)
+    resp = client.post("/optimize", json=body)
 
     assert resp.status_code == 400
     assert resp.json()["code"] == "billing.byok_missing_connection"
     assert store.created_ids() == []
 
 
-def test_submit_run_managed_user_ceiling_wins_when_below_balance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A user-set cost ceiling tighter than the balance is left untouched.
-
-    The balance clamp only lowers an absent or larger cap; a user's own tighter
-    ``max_cost_cents`` still wins.
-    """
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    payload = {
-        **_run_payload(),
-        "model_settings": {"name": "openai/gpt-4o"},
-        "token_source": "managed",
-        "max_cost_cents": 50,
-    }
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    submitted = store._jobs[store.created_ids()[0]]["payload"]
-    assert submitted["max_cost_cents"] == 50
-
-
-def test_submit_run_byok_blocked_without_balance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A BYOK run is now refused when the account can't cover the platform fee.
-
-    BYOK is no longer free of charge: the run still spends Skynet's platform fee, so a
-    fully depleted account (zero grant, zero balance) is blocked at submit even with
-    a saved provider key.
-    """
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(
-            BillingCustomerModel(
-                username="alice",
-                stripe_customer_id="cus_alice",
-                balance_cents=0,
-                grant_remaining=0,
-            )
-        )
+def test_optimize_byok_with_verified_connection_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A BYOK run with a verified provider key is accepted and stamps the per-model source."""
+    store = _funded_store(balance_cents=500)
+    with Session(store.engine) as session:
         session.add(_verified_byok_row(monkeypatch))
         session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    payload = {
-        **_run_payload(),
-        "model_settings": {"name": "openrouter/openai/gpt-4o"},
-        "token_source": "byok",
-    }
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 402
-    assert resp.json()["code"] == "billing.insufficient_funds"
-    assert store.created_ids() == []
-
-
-def test_submit_run_byok_ceiling_capped_to_fee_aware_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A BYOK run's ceiling is clamped to a fee-aware budget, larger than the balance.
-
-    Because a BYOK run spends only the platform fee, the same balance backs a
-    proportionally larger token budget than a managed run would (see
-    ``cost_ceiling_budget``), so the clamp lands above the raw spendable figure.
-    """
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(
-            BillingCustomerModel(
-                username="alice",
-                stripe_customer_id="cus_alice",
-                balance_cents=0,
-                grant_remaining=200,
-            )
-        )
-        session.add(_verified_byok_row(monkeypatch))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    payload = {
-        **_run_payload(),
-        "model_settings": {"name": "openrouter/openai/gpt-4o"},
-        "token_source": "byok",
-    }
-    resp = client.post("/run", json=payload)
-
-    assert resp.status_code == 201
-    submitted = store._jobs[store.created_ids()[0]]["payload"]
-    assert submitted["max_cost_cents"] == cost_ceiling_budget(200, "byok")
-    assert submitted["max_cost_cents"] > 200
-
-
-def _seed_active_job(
-    store: _FakeJobStore,
-    *,
-    job_id: str,
-    status: str,
-    max_cost_cents: int | None,
-    token_source: str = "managed",
-) -> None:
-    """Seed a pre-existing job row with a stamped overview at a given status.
-
-    Args:
-        store: Fake store to write into.
-        job_id: Identifier for the seeded row.
-        status: Job status the row should report.
-        max_cost_cents: Stamped cost ceiling; ``None`` mimics a legacy row
-            predating the overview stamp.
-        token_source: Billing mode stamped on the overview.
-    """
-    store.create_job(job_id, username="alice")
-    overview: dict[str, Any] = {"token_source": token_source}
-    if max_cost_cents is not None:
-        overview["max_cost_cents"] = max_cost_cents
-    store.set_payload_overview(job_id, overview)
-    store.update_job(job_id, status=status)
-
-
-def test_submit_run_ceiling_reduced_by_active_job_commitment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A new run's ceiling is capped to the balance minus active commitments.
-
-    With 500 cents and a running job already committed to 200, a second
-    submission may only promise the remaining 300.
-    """
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-running", status="running", max_cost_cents=200)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    submitted = store._jobs[resp.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == 300
-
-
-def test_submit_run_blocked_when_balance_fully_committed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A submission is refused when active runs already claim the whole balance."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-committed", status="pending", max_cost_cents=500)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 402
-    assert resp.json()["code"] == "billing.insufficient_funds"
-    assert store.created_ids() == ["job-committed"]
-
-
-def test_submit_run_terminal_jobs_do_not_commit_cents(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Finished runs release their claim: a terminal job leaves the ceiling whole."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-done", status="success", max_cost_cents=400)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    submitted = store._jobs[resp.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == 500
-
-
-def test_submit_run_paused_jobs_commit_cents(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A paused run keeps its claim: resume re-enqueues it without a fresh gate."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-paused", status="paused", max_cost_cents=200)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    submitted = store._jobs[resp.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == 300
-
-
-def test_submit_run_legacy_rows_without_stamp_commit_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An active row predating the overview stamp contributes nothing to the sum."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-legacy", status="running", max_cost_cents=None)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    submitted = store._jobs[resp.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == 500
-
-
-def test_submit_run_byok_commitment_is_fee_sized(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An active BYOK run commits only its platform fee, not its full ceiling."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    _seed_active_job(store, job_id="job-byok", status="running", max_cost_cents=1000, token_source="byok")
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    submitted = store._jobs[resp.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == 500 - committed_spend_cents(1000, "byok")
-
-
-def test_submit_run_overview_stamps_cost_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The clamped ceiling is stamped on the run overview for later commitment sums."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    overview = store._jobs[store.created_ids()[0]]["overview"]
-    assert overview["max_cost_cents"] == 500
-
-
-def test_submit_grid_search_overview_stamps_cost_ceiling(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The grid-search overview carries the same clamped-ceiling stamp as ``/run``."""
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="cus_alice", balance_cents=500))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/grid-search", json=_grid_payload())
-
-    assert resp.status_code == 201
-    overview = store._jobs[store.created_ids()[0]]["overview"]
-    assert overview["max_cost_cents"] == 500
-
-
-def test_submit_run_defaults_token_source_to_managed_in_overview(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An omitted token_source defaults to managed and is persisted on the overview."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_run_payload())
-
-    assert resp.status_code == 201
-    overview = store._jobs[store.created_ids()[0]]["overview"]
-    assert overview["token_source"] == "managed"
-
-
-def test_submit_run_idempotent_retry_returns_same_optimization_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Reposting with the same ``Idempotency-Key`` returns the original id without re-enqueuing."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    headers = {"Idempotency-Key": "run-dedup-1"}
-
-    first = client.post("/run", json=_run_payload(), headers=headers)
-    second = client.post("/run", json=_run_payload(), headers=headers)
-
-    assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["optimization_id"] == second.json()["optimization_id"]
-    assert len(store.created_ids()) == 1
-
-
-def test_budgetless_run_without_idempotency_header_replays_first_job(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Give identical protected legacy posts one synthesized replay identity."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    first = client.post("/run", json=_run_payload())
-    second = client.post("/run", json=_run_payload())
-
-    assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["optimization_id"] == second.json()["optimization_id"]
-    assert len(store.created_ids()) == 1
-
-
-def test_budgetless_run_blank_idempotency_header_uses_synthesized_replay_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Treat whitespace as absent and apply protected legacy replay behavior."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    headers = {"Idempotency-Key": "   "}
-
-    first = client.post("/run", json=_run_payload(), headers=headers)
-    second = client.post("/run", json=_run_payload(), headers=headers)
-
-    assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["optimization_id"] == second.json()["optimization_id"]
-    assert len(store.created_ids()) == 1
-
-
-def test_submit_grid_search_idempotent_retry_returns_same_optimization_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The grid-search route honours ``Idempotency-Key`` the same way ``/run`` does."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    headers = {"Idempotency-Key": "grid-dedup-1"}
-
-    first = client.post("/grid-search", json=_grid_payload(), headers=headers)
-    second = client.post("/grid-search", json=_grid_payload(), headers=headers)
-
-    assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["optimization_id"] == second.json()["optimization_id"]
-    assert len(store.created_ids()) == 1
-
-
-def _workflow_run_payload() -> dict:
-    """Build a minimal valid workflow run payload (no top-level signature).
-
-    Returns:
-        A dict matching the run submission schema with a workflow graph.
-    """
-    payload = _run_payload()
-    payload.pop("signature_code")
-    payload["module_name"] = "workflow"
-    payload["workflow"] = {
-        "nodes": [
-            {"id": "inp", "kind": "input", "fields": [{"name": "q"}]},
-            {
-                "id": "step",
-                "kind": "signature",
-                "signature_code": (
-                    "class Sig(dspy.Signature):\n    q: str = dspy.InputField()\n    a: str = dspy.OutputField()\n"
-                ),
-            },
-            {"id": "out", "kind": "output", "fields": [{"name": "a"}]},
-        ],
-        "edges": [
-            {"source": "inp", "source_port": "q", "target": "step", "target_port": "q"},
-            {"source": "step", "source_port": "a", "target": "out", "target_port": "a"},
-        ],
-    }
-    return payload
-
-
-def test_submit_workflow_run_returns_201_and_persists_spec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A workflow submission succeeds without signature_code and stores the graph on the overview."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/run", json=_workflow_run_payload())
-
-    assert resp.status_code == 201
-    opt_id = resp.json()["optimization_id"]
-    overview = store._jobs[opt_id]["overview"]
-    assert overview["module_name"] == "workflow"
-    assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_WORKFLOW
-    assert overview["workflow"]["nodes"][1]["kind"] == "signature"
-    assert overview["signature_code"] is None
-
-
-def _blackbox_payload() -> dict:
-    """Build a minimal valid black-box payload for ``/blackbox/run`` tests.
-
-    Returns:
-        A dict matching the black-box submission schema.
-    """
-    return {
-        "name": "test-blackbox",
-        "username": "alice",
-        "seed_candidate": "hello world",
-        "objective": "maximize vowel density",
-        "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 1.0"},
-        "cases": [{"target": "aeiou"}],
-        "budget": {"max_scorer_runs": 50},
-        "strategy": {"mode": "auto"},
-        "reflection_model_config": {"name": "gpt-4o"},
-    }
-
-
-@pytest.fixture
-def _skip_scorer_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace the subprocess scorer validation with a no-op.
-
-    The sandbox itself is covered in the service-gateway tests; the router
-    tests only care about what the endpoint does around it.
-    """
-    monkeypatch.setattr(_sub_mod, "validate_blackbox_payload", lambda payload: None)
-
-
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_returns_201_and_persists_overview(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A black-box submission is queued with its own optimization type and overview."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post("/blackbox/run", json=_blackbox_payload())
-
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["optimization_type"] == OPTIMIZATION_TYPE_BLACKBOX
-    assert body["module_name"] == BLACKBOX_MODULE_NAME
-    assert body["optimizer_name"] == "auto"
-    assert body["name"] == "test-blackbox"
-    assert body["status"] == "pending"
-
-    overview = store._jobs[body["optimization_id"]]["overview"]
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE] == OPTIMIZATION_TYPE_BLACKBOX
-    assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_SINGLE
-    assert overview[PAYLOAD_OVERVIEW_MODULE_NAME] == BLACKBOX_MODULE_NAME
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME] == "auto"
-    assert overview[PAYLOAD_OVERVIEW_USERNAME] == body["username"]
-    assert "gpt-4o" in overview[PAYLOAD_OVERVIEW_MODEL_NAME]
-    assert overview[PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL] == {overview[PAYLOAD_OVERVIEW_MODEL_NAME]: "managed"}
-    assert overview[PAYLOAD_OVERVIEW_IS_PRIVATE] is False
-    assert overview["dataset_rows"] == 1
-    assert overview["seed"] is not None
-
-
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_accepts_repository_targets_without_storing_secret_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A repository run is queued and its inline secret values never reach the stored payload."""
-    monkeypatch.setattr(_sub_mod.settings, "byok_vault_key", SecretStr(Fernet.generate_key().decode("utf-8")))
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    staged: list[dict] = []
-    closed: list[str] = []
-
-    class _Staged:
-        """Stand in for the fetched tree without touching GitHub."""
-
-        def close_scorers(self) -> None:
-            """Record that the scoring boxes were stopped."""
-            closed.append("scorers")
-
-        def cleanup(self) -> None:
-            """Record that the tree was removed."""
-            closed.append("tree")
-
-    def stage(payload: dict, **kwargs: object) -> tuple[dict, _Staged]:
-        """Record what the setup check stages and hand the payload back."""
-        staged.append(payload)
-        return payload, _Staged()
-
-    monkeypatch.setattr(preflight_execution, "stage_repository", stage)
-    monkeypatch.setattr(preflight_execution, "bind_repo_scorer", lambda *args, **kwargs: None)
-    payload = {
-        **_blackbox_payload(),
-        "strategy": {"mode": "single", "engine": "autoresearch"},
-        "target": {
-            "kind": "repo",
-            "repo": {
-                "repository": "octo/hello",
-                "editable_paths": ["src"],
-                "secrets": [{"name": "TOKEN", "value": "plaintext"}],
-            },
-        },
-    }
-
-    resp = client.post("/blackbox/run", json=payload)
+    client = make_client(store, monkeypatch=monkeypatch)
+    body = unified_payload(
+        token_source="byok",
+        models={"reflection_model": {"name": "openrouter/openai/gpt-4o"}},
+    )
+
+    resp = client.post("/optimize", json=body)
 
     assert resp.status_code == 201, resp.text
-    assert "plaintext" not in json.dumps(store._jobs, default=str)
-    assert len(staged) == 1
-    assert "plaintext" not in json.dumps(staged[0], default=str)
-    assert closed == ["scorers", "tree"]
+    overview = store._jobs[store.created_ids()[0]]["overview"]
+    assert overview["token_source"] == "byok"
+    assert set(overview["token_sources_by_model"].values()) == {"byok"}
 
 
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_single_engine_is_the_optimizer_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    """In ``single`` mode the chosen engine is recorded as the run's optimizer."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    payload["strategy"] = {"mode": "single", "engine": "best_of_n"}
+def test_optimize_returns_409_when_over_job_quota(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-user job quota refuses a new run before anything is stored."""
+    store = _FakeJobStore(job_count=10_000)
+    client = make_client(store, monkeypatch=monkeypatch)
 
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 201
-    assert resp.json()["optimizer_name"] == "best_of_n"
-    overview = store._jobs[resp.json()["optimization_id"]]["overview"]
-    assert overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME] == "best_of_n"
-
-
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_overrides_posted_username(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The persisted owner is the authenticated caller, whatever the client posted."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    payload["username"] = "mallory"
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 201
-    assert resp.json()["username"] != "mallory"
-
-
-def test_submit_blackbox_run_refuses_claude_code_before_reserving_a_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse a Claude Code proposer with its own translated code, before any budget or job exists."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    def _no_budget(*_args: Any, **_kwargs: Any) -> None:
-        """Fail the test if the refusal comes after budget reservation."""
-        raise AssertionError("Claude Code must be refused before a budget is reserved.")
-
-    monkeypatch.setattr(_sub_mod, "_ensure_api_budget", _no_budget)
-    payload = _blackbox_payload()
-    payload["proposer"] = {"harness": "claude_code"}
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "submission.claude_code_unavailable"
-    assert store.created_ids() == []
-
-
-class _KeyVault:
-    """Stand in for the BYOK vault with a fixed verified-key answer."""
-
-    verified = False
-
-    def __init__(self, engine: Any) -> None:
-        """Accept the store's engine like the real vault.
-
-        Args:
-            engine: Ignored.
-        """
-
-    def has_verified_connection(self, username: str, provider: str) -> bool:
-        """Report the configured answer for Anthropic only.
-
-        Args:
-            username: Ignored.
-            provider: Provider slug checked.
-
-        Returns:
-            Whether a verified key is on file.
-        """
-        return provider == "anthropic" and self.verified
-
-
-@pytest.mark.parametrize(
-    ("model", "verified", "code"),
-    [
-        ("gpt-4o", True, "submission.claude_code_model_unsupported"),
-        ("anthropic/claude-sonnet-4.5", False, "submission.claude_code_needs_anthropic_key"),
-    ],
-)
-def test_submit_blackbox_run_needs_an_anthropic_model_and_key_for_claude_code(
-    monkeypatch: pytest.MonkeyPatch, model: str, verified: bool, code: str
-) -> None:
-    """With direct Anthropic egress on, refuse Claude Code without a Claude model or the user's own key."""
-    monkeypatch.setattr(_sub_mod.settings, "claude_code_byok_egress", True)
-    monkeypatch.setattr(_KeyVault, "verified", verified)
-    monkeypatch.setattr(_sub_mod, "ProviderKeyVault", _KeyVault)
-    store = _FakeJobStore()
-    store.engine = object()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    payload["proposer"] = {"harness": "claude_code"}
-    payload["reflection_model_config"] = {"name": model}
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 400
-    assert resp.json()["code"] == code
-    assert store.created_ids() == []
-
-
-def test_submit_blackbox_run_still_refuses_a_claude_code_agent_target_with_egress_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep refusing a Claude Code agent target, which would bill Skynet's gateway."""
-    monkeypatch.setattr(_sub_mod.settings, "claude_code_byok_egress", True)
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    payload["target"] = {"kind": "agent", "harness": "claude_code", "model": "anthropic/claude-sonnet-4.5"}
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "submission.claude_code_unavailable"
-
-
-def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refuse submission after a failed black-box setup check without exposing internal detail."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    def _reject(payload: Any) -> None:
-        """Fail like an unavailable engine."""
-        raise ServiceError("Engine 'autoresearch' is not available: sandbox missing")
-
-    monkeypatch.setattr(_sub_mod, "validate_blackbox_payload", _reject)
-
-    resp = client.post("/blackbox/run", json=_blackbox_payload())
+    resp = client.post("/optimize", json=unified_payload())
 
     assert resp.status_code == 409
-    assert resp.json()["code"] == "submission.validation_failed"
-    assert "autoresearch" not in resp.text
     assert store.created_ids() == []
 
 
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda p: p.pop("scorer"),
-        lambda p: p.update(seed_candidate=None, objective=None),
-        lambda p: p.update(strategy={"mode": "single"}),
-        lambda p: p.update(scorer={"kind": "python"}),
-        lambda p: p.update(scorer={"kind": "remote"}),
-        lambda p: p.update(budget={"max_scorer_runs": 0}),
-    ],
-)
-def test_submit_blackbox_run_returns_422_on_contract_violations(monkeypatch: pytest.MonkeyPatch, mutate: Any) -> None:
-    """Payloads that break the black-box contract are rejected by the schema.
+def test_optimize_returns_409_when_over_storage_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run whose payload would exceed the storage quota is refused."""
+    store = _FakeJobStore(storage_used=100, storage_quota=100)
+    client = make_client(store, monkeypatch=monkeypatch)
 
-    Args:
-        monkeypatch: Pytest fixture.
-        mutate: Callable that breaks one aspect of a valid payload in place.
-    """
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    mutate(payload)
+    resp = client.post("/optimize", json=unified_payload())
 
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 422
+    assert resp.status_code == 409
     assert store.created_ids() == []
 
 
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_idempotent_retry_returns_same_optimization_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The black-box route honours ``Idempotency-Key`` the same way ``/run`` does."""
+def test_optimize_idempotent_retry_returns_same_optimization_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reusing an ``Idempotency-Key`` returns the original job without enqueuing another."""
     store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    headers = {"Idempotency-Key": "blackbox-dedup-1"}
+    client = make_client(store, monkeypatch=monkeypatch)
+    headers = {"Idempotency-Key": "retry-1"}
 
-    first = client.post("/blackbox/run", json=_blackbox_payload(), headers=headers)
-    second = client.post("/blackbox/run", json=_blackbox_payload(), headers=headers)
+    first = client.post("/optimize", json=unified_payload(), headers=headers)
+    second = client.post("/optimize", json=unified_payload(), headers=headers)
 
-    assert first.status_code == 201
-    assert second.status_code == 201
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
     assert first.json()["optimization_id"] == second.json()["optimization_id"]
     assert len(store.created_ids()) == 1
 
 
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_returns_409_when_over_storage_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The storage byte gate applies to black-box submissions too."""
-    store = _FakeJobStore(storage_quota=0)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+@pytest.mark.parametrize("path", ["/run", "/grid-search", "/blackbox/scorer/dry-run"])
+def test_retired_submit_endpoints_are_gone(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """The per-family submit routes were replaced by ``/optimize``.
 
-    resp = client.post("/blackbox/run", json=_blackbox_payload())
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        path: A retired submit path.
+    """
+    client = make_client(_FakeJobStore(), monkeypatch=monkeypatch)
 
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "user.storage.quota_exceeded"
-
-
-def test_blackbox_scorer_dry_run_returns_the_probe_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The dry-run endpoint returns whatever the scorer probe produced, as a 200."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    seen: list[Any] = []
-
-    def _fake_dry_run(request: Any, **kwargs: Any) -> dict[str, Any]:
-        """Record the request and answer with a canned probe."""
-        seen.append(request)
-        return ScorerDryRunResponse(ok=True, score=0.75, side_info={"vowels": 3}, error=None, elapsed_ms=4).model_dump()
-
-    monkeypatch.setattr(_sub_mod, "run_protected_preview", _fake_dry_run)
-    body = {
-        "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 0.75"},
-        "candidate": "hello",
-        "case": {"target": "aeiou"},
-    }
-
-    resp = client.post("/blackbox/scorer/dry-run", json=body)
-
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "ok": True,
-        "score": 0.75,
-        "side_info": {"vowels": 3},
-        "error": None,
-        "elapsed_ms": 4,
-        "usage_by_model": [],
-        "cents_charged": 0,
-        "budget": None,
-        "preview_status": None,
-        "preflight_id": None,
-    }
-    assert len(seen) == 1
-    assert seen[0]["candidate"] == "hello"
-    assert seen[0]["case"] == {"target": "aeiou"}
-    assert store.created_ids() == []
-
-
-def test_blackbox_scorer_dry_run_reports_scorer_failure_as_200(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A scorer that fails is reported in the body, not as an HTTP error."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(
-        _sub_mod,
-        "run_protected_preview",
-        lambda request, **kwargs: ScorerDryRunResponse(
-            ok=False, score=None, side_info={}, error="ValueError: nope", elapsed_ms=1
-        ).model_dump(),
-    )
-
-    resp = client.post(
-        "/blackbox/scorer/dry-run",
-        json={
-            "scorer": {"kind": "python", "metric_code": "def score(c, case=None): raise ValueError('nope')"},
-            "candidate": "x",
-        },
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is False
-    assert resp.json()["error"] == "ValueError: nope"
-
-
-def test_blackbox_scorer_dry_run_returns_422_without_a_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The dry run needs a version to score."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    resp = client.post(
-        "/blackbox/scorer/dry-run", json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1"}}
-    )
-
-    assert resp.status_code == 422
+    assert client.post(path, json={}).status_code in {404, 405}
 
 
 def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2230,7 +549,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
     """
     store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    client = make_client(store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
     monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
 
@@ -2241,7 +560,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert text.json()["target_kind"] == "text"
     assert text.json()["sandbox_available"] is True
     by_id = {engine["id"]: engine for engine in text.json()["engines"]}
-    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"]
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"]
     assert by_id["gepa"]["available"] is True
     assert by_id["gepa"]["supports_parts"] is True
     assert by_id["gepa"]["checkpoint_recovery_supported"] is True
@@ -2252,8 +571,12 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert "does not expose" in by_id["autoresearch"]["checkpoint_recovery_reason"]
     assert by_id["meta_harness"]["available"] is True
     assert by_id["meta_harness"]["requires_agent_target"] is False
-    assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa", "autosaddler"}
-    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
+    assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {
+        "gepa",
+        "autosaddler",
+        "shinka_evolve",
+    }
+    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"]
     assert text.json()["auto_available"] is True
     assert text.json()["auto_unavailable_reason"] is None
     assert text.json()["auto_checkpoint_recovery_supported"] is False
@@ -2269,7 +592,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
     assert agent_by_id["meta_harness"]["available"] is True
     assert agent_by_id["meta_harness"]["unavailable_reason"] is None
-    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
+    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"]
 
 
 def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2279,7 +602,7 @@ def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
     """
     store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    client = make_client(store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: "no sandbox here")
     monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
 
@@ -2300,7 +623,7 @@ def test_blackbox_engine_catalog_checks_the_managed_sandbox(monkeypatch: pytest.
     Args:
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
     """
-    client = _make_client(_FakeService(), _FakeJobStore(), monkeypatch=monkeypatch)
+    client = make_client(_FakeJobStore(), monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
     monkeypatch.setattr(
         _bb_service,
@@ -2310,7 +633,7 @@ def test_blackbox_engine_catalog_checks_the_managed_sandbox(monkeypatch: pytest.
 
     catalog = client.get("/blackbox/engines").json()
 
-    assert catalog["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
+    assert catalog["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler", "shinka_evolve"]
     assert catalog["auto_available"] is False
     assert "Managed sandbox is missing" in catalog["auto_unavailable_reason"]
     assert catalog["proposer_runtimes"][0]["available"] is False
@@ -2320,135 +643,10 @@ def test_blackbox_engine_catalog_checks_the_managed_sandbox(monkeypatch: pytest.
     assert by_id["meta_harness"]["available"] is False
 
 
-@pytest.mark.parametrize("engine", ["meta_harness", "autoresearch"])
-@pytest.mark.parametrize("runtime", ["worker", "vercel"])
-def test_submit_blackbox_native_engine_accepts_text_target(
-    monkeypatch: pytest.MonkeyPatch, engine: str, runtime: str
-) -> None:
-    """Queue native engines with direct evaluation and either supported proposer runtime.
-
-    Args:
-        monkeypatch: Pytest fixture that isolates runtime checks and scorer validation.
-        engine: Native upstream engine under test.
-        runtime: Selected proposer execution location.
-    """
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
-    monkeypatch.setattr(_bb_service, "validate_scorer_code", lambda _code: None)
-    payload = _blackbox_payload()
-    payload.update(strategy={"mode": "single", "engine": engine}, proposer_runtime=runtime, max_cost_cents=100)
-    payload["split_fractions"] = {"train": 1.0, "val": 0.0, "test": 0.0}
-
-    response = client.post("/blackbox/run", json=payload)
-
-    assert response.status_code == 201, response.text
-    assert response.json()["optimizer_name"] == engine
-    assert len(store.created_ids()) == 1
-
-
-@pytest.mark.parametrize(
-    "override",
-    [
-        {
-            "token_source": "byok",
-            "reflection_model_config": {
-                "name": "gpt-4o",
-                "token_source": "byok",
-                "byok_provider": "openrouter",
-            },
-        },
-        {
-            "token_source": "managed",
-            "scorer": {
-                "kind": "python",
-                "metric_code": "def score(candidate, case=None): return 1.0",
-                "model": {
-                    "name": "gpt-4o-mini",
-                    "token_source": "byok",
-                    "byok_provider": "openrouter",
-                },
-            },
-        },
-        {
-            "token_source": "managed",
-            "target": {
-                "kind": "agent",
-                "harness": "custom",
-                "model": "gpt-4o-mini",
-                "run_command": "run-agent",
-            },
-            "task_model_config": {
-                "name": "gpt-4o-mini",
-                "token_source": "byok",
-                "byok_provider": "openrouter",
-            },
-        },
-    ],
-    ids=["byok-proposer", "byok-scorer", "byok-task"],
-)
-def test_submit_blackbox_native_engine_accepts_byok_model_routes(
-    monkeypatch: pytest.MonkeyPatch, override: dict[str, Any]
-) -> None:
-    """Queue native engines when any model role uses a vaulted provider key.
-
-    Args:
-        monkeypatch: Pytest fixture for deterministic runtime capabilities.
-        override: BYOK modification to a native request.
-    """
-    engine = _billing_engine()
-    with Session(engine) as session:
-        session.add(BillingCustomerModel(username="alice", stripe_customer_id="fixture-alice", balance_cents=10000))
-        session.add(_verified_byok_row(monkeypatch))
-        session.commit()
-    store = _FakeJobStore()
-    store.engine = engine
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
-    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
-    payload = _blackbox_payload()
-    payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_cents=100)
-    payload.update(override)
-
-    response = client.post("/blackbox/run", json=payload)
-
-    assert response.status_code == 201, response.text
-    [job_id] = store.created_ids()
-    stored = store._jobs[job_id]["payload"]
-    if "task_model_config" in override:
-        assert stored["task_model_config"]["token_source"] == "byok"
-        assert stored["task_model_config"]["byok_provider"] == "openrouter"
-        assert stored["target"]["model"] == "gpt-4o-mini"
-    elif "reflection_model_config" in override:
-        assert stored["reflection_model_config"]["token_source"] == "byok"
-        assert stored["reflection_model_config"]["byok_provider"] == "openrouter"
-    else:
-        assert stored["scorer"]["model"]["token_source"] == "byok"
-        assert stored["scorer"]["model"]["byok_provider"] == "openrouter"
-
-
-def test_submit_blackbox_native_engine_auto_creates_a_bounded_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give an older native-engine client the same funded setup path as the wizard."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
-    monkeypatch.setattr(_bb_service, "validate_scorer_code", lambda _code: None)
-    payload = _blackbox_payload()
-    payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_cents=None)
-
-    response = client.post("/blackbox/run", json=payload)
-
-    assert response.status_code == 201
-    submitted = store._jobs[response.json()["optimization_id"]]["payload"]
-    assert submitted["max_cost_cents"] == cost_ceiling_budget(10000, "managed")
-    assert submitted["execution_budget_id"]
-    assert submitted["preflight_id"]
-
-
 def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     """A target kind outside text|agent is a 422, not a silent fallback to text."""
     store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    client = make_client(store, monkeypatch=monkeypatch)
 
     resp = client.get("/blackbox/engines", params={"target": "robot"})
 
@@ -2461,139 +659,12 @@ def test_blackbox_engine_catalog_ignores_retired_runtime_query(monkeypatch: pyte
     Args:
         monkeypatch: Pytest fixture used by the API client factory.
     """
-    client = _make_client(_FakeService(), _FakeJobStore(), monkeypatch=monkeypatch)
+    client = make_client(_FakeJobStore(), monkeypatch=monkeypatch)
 
     response = client.get("/blackbox/engines", params={"proposer_runtime": "local"})
 
     assert response.status_code == 200
     assert [runtime["id"] for runtime in response.json()["proposer_runtimes"]] == ["vercel"]
-
-
-def _alice_billing_engine(*, grant_remaining: int) -> object:
-    """Return an in-memory billing engine holding one ``alice`` account.
-
-    Args:
-        grant_remaining: Free-grant cents left on the account.
-
-    Returns:
-        The SQLAlchemy engine, shared across threads via ``StaticPool``.
-    """
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    with Session(engine) as session:
-        session.add(
-            BillingCustomerModel(
-                username="alice", stripe_customer_id="cus_alice", balance_cents=0, grant_remaining=grant_remaining
-            )
-        )
-        session.commit()
-    return engine
-
-
-_JUDGE_DRY_RUN_BODY = {
-    "scorer": {
-        "kind": "python",
-        "metric_code": "def score(candidate, case=None): return float(llm(candidate))",
-        "model": {"name": "openai/gpt-4o-mini"},
-    },
-    "candidate": "hello",
-}
-
-
-def test_blackbox_scorer_dry_run_requires_funding_for_runtime_and_models(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Require covered sandbox execution even when the scorer does not select a model."""
-    store = _FakeJobStore()
-    store.engine = _alice_billing_engine(grant_remaining=0)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-
-    blocked = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
-    plain = client.post(
-        "/blackbox/scorer/dry-run",
-        json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1.0"}, "candidate": "hello"},
-    )
-
-    assert blocked.status_code == 402
-    assert blocked.json()["code"] == "budget.insufficient"
-    assert plain.status_code == 402
-
-
-def test_blackbox_scorer_dry_run_preserves_authoritative_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Return the protected adapter's confirmed usage and debit without charging a second time."""
-    store = _FakeJobStore()
-    store.engine = _alice_billing_engine(grant_remaining=50)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    usage = [{"model": "openai/gpt-4o-mini", "input_tokens": 12, "output_tokens": 3}]
-    monkeypatch.setattr(
-        _sub_mod,
-        "run_protected_preview",
-        lambda request, **kwargs: ScorerDryRunResponse(
-            ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1, usage_by_model=usage, cents_charged=1
-        ).model_dump(),
-    )
-    metered: list[tuple[Any, ...]] = []
-    monkeypatch.setattr("core.billing.metering.meter_llm_usage", lambda *args, **kwargs: metered.append((args, kwargs)))
-
-    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
-
-    assert resp.status_code == 200
-    assert resp.json()["usage_by_model"] == [ModelTokenUsage(**row).model_dump() for row in usage]
-    assert resp.json()["cents_charged"] == 1
-    assert metered == []
-
-
-def test_blackbox_scorer_dry_run_preserves_sandbox_charge_without_model_usage(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep a confirmed runtime charge even when no model tokens were consumed."""
-    store = _FakeJobStore()
-    store.engine = _alice_billing_engine(grant_remaining=50)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    monkeypatch.setattr(
-        _sub_mod,
-        "run_protected_preview",
-        lambda request, **kwargs: ScorerDryRunResponse(
-            ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1, cents_charged=2
-        ).model_dump(),
-    )
-    metered: list[Any] = []
-    monkeypatch.setattr("core.billing.metering.meter_llm_usage", lambda *args, **kwargs: metered.append(args) or 0)
-
-    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
-
-    assert resp.status_code == 200
-    assert resp.json()["cents_charged"] == 2
-    assert metered == []
-
-
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_resolves_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A by-reference black-box submit scores against the staged rows and keeps them staged."""
-    store = _FakeJobStore()
-    rows = [{"target": "aeiou"}, {"target": "xyz"}]
-    staged_id = store.stage_dataset(username="alice", dataset_filename="cases.json", rows=rows)
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    del payload["cases"]
-    payload["staged_dataset_id"] = staged_id
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 201
-    assert store._jobs[resp.json()["optimization_id"]]["overview"]["dataset_rows"] == 2
-    assert store.get_staged_dataset(staged_id, "alice") == rows
-
-
-@pytest.mark.usefixtures("_skip_scorer_sandbox")
-def test_submit_blackbox_run_rejects_unknown_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unknown ``staged_dataset_id`` is a 400 and queues nothing."""
-    store = _FakeJobStore()
-    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
-    payload = _blackbox_payload()
-    del payload["cases"]
-    payload["staged_dataset_id"] = "does-not-exist"
-
-    resp = client.post("/blackbox/run", json=payload)
-
-    assert resp.status_code == 400
-    assert store._jobs == {}
 
 
 class _EngineStore:

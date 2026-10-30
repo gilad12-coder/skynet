@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import math
-import os
 import re
 import shlex
 import sys
@@ -14,23 +14,25 @@ import tarfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib.metadata import distribution
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from .... import run_log
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
-from ....config import Settings, settings
+from ....billing.usage_tags import CALLER_PROPOSER, KIND_MUTATION, USAGE_TAGS_HEADER, encode_tags, usage_scope
+from ....config import Settings, app_env, settings, with_legacy_env
 from ....exceptions import ServiceError
-from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
+from ....models.blackbox import BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_PI, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
-from . import harness_bridge, native_runner, repo_tree
+from . import harness_bridge, native_runner, repo_tree, sandbox_log
 from .agent_eval import gateway_from_settings
-from .feedback import emit_candidate, emit_case_scored
-from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
+from .feedback import emit_candidate, emit_case_scored, emit_scorer_feedback
+from .harness import ENV_MODEL, GatewayConfig, build_launch, launch_payload, pi_editor_launch, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
@@ -51,11 +53,12 @@ from .upstream import (
     GEPA_REVISION,
     META_HARNESS_REVISION,
     META_HARNESS_SOURCE,
+    SHINKA_SOURCE,
+    SHINKA_VERSION,
 )
 from .upstream import GEPA_SOURCE as GEPA_PACKAGE_SOURCE
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
-CLAUDE_VERSION = "2.1.259"
 # The guest must already carry the parent's exact Python patch version (checkpoint_compat identity),
 # so the native floor only restates pyproject's requires-python. A stricter floor here contradicts
 # any image built to match a host below it and fails every readiness check on that host.
@@ -65,19 +68,50 @@ _INPUT_FILE = "native_input.json"
 _RESULT_FILE = "native_result.json"
 _ARTIFACT_FILE = "native_artifacts.tar.gz.b64"
 _INSTALL_ALLOWANCE = 600.0
+# Sent where the network edge injects the real gateway key; nothing reads its value.
+_INJECTED_KEY_PLACEHOLDER = "app-managed"
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
-_RPC_PREFIX = "SKYNET_NATIVE_RPC "
+logger = logging.getLogger(__name__)
+
+_RPC_PREFIX = "APP_NATIVE_RPC "
+_PROGRESS_PREFIX = "APP_NATIVE_PROGRESS "
+_LOG_PREFIX = "APP_NATIVE_LOG "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
-NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler", "gepa_repo"})
-# ``gepa_repo`` exists only for repositories; AutoResearch takes either kind of task.
-REPO_NATIVE_ENGINES = frozenset({"autoresearch", "gepa_repo"})
+# The only task fields a native box may receive; Task.context, valset and the
+# test split stay with the parent so no proposer can read the metric.
+NATIVE_TASK_FIELDS = frozenset({"name", "seed_candidate", "objective", "background", "train_set"})
+# Error side info is cut to one line of this size before a proposer sees it.
+_ERROR_CHARS = 500
+NATIVE_ENGINES = frozenset(
+    {"meta_harness", "autoresearch", "autosaddler", "shinka_evolve", "gepa_repo", "best_of_n_repo"}
+)
+# ``gepa_repo`` and ``best_of_n_repo`` exist only for repositories; the others take either kind of task.
+REPO_ONLY_NATIVE_ENGINES = frozenset({"gepa_repo", "best_of_n_repo"})
 _UPSTREAMS = {
     "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
     "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_VERSION),
     "gepa_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
+    "best_of_n_repo": (GEPA_PACKAGE_SOURCE, GEPA_REVISION),
     "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
+    "shinka_evolve": (SHINKA_SOURCE, SHINKA_VERSION),
 }
+# Engines that run in their own pinned interpreter instead of the vendored GEPA
+# runner, and take a multi-part starting point.
+_OWN_VENV_ENGINES = frozenset({"autosaddler", "shinka_evolve"})
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
+_SHINKA_RUNNER_FILE = "shinka_runner.py"
+_SHINKA_REQUIREMENTS_FILE = "shinka_requirements.txt"
+_SHINKA_BUNDLE_FILE = "shinka_bundle.py"
+# Each ShinkaEvolve model route's token reaches the guest in its own variable,
+# named by position; the meta-notes model reads its own so its calls are told apart.
+SHINKA_KEY_ENV = "APP_SHINKA_KEY_{index}"
+SHINKA_META_KEY_ENV = "APP_SHINKA_META_KEY"
+# The protected image bakes ShinkaEvolve into its own venv (backend/Dockerfile),
+# because its pinned closure conflicts with the backend's own dependencies.
+SHINKA_IMAGE_PYTHON = "/opt/shinka/venv/bin/python"
+# Duplicate rejection's judge and embeddings read their own variables too.
+SHINKA_NOVELTY_KEY_ENV = "APP_SHINKA_NOVELTY_KEY"
+SHINKA_EMBED_KEY_ENV = "APP_SHINKA_EMBED_KEY"
 _BRIDGE_FILE = "harness_bridge.py"
 _ENGINES_FILE = "native_engines.py"
 _REPO_TREE_FILE = "repo_tree.py"
@@ -95,7 +129,6 @@ _AUTOSADDLER_PINS = (
     "anyio==4.15.1",
     "attrs==26.1.0",
     "cffi==2.1.1",
-    "claude-agent-sdk==0.2.152",
     "click==8.5.0",
     "cryptography==50.0.1",
     "h11==0.16.0",
@@ -133,16 +166,19 @@ class NativeOptions:
     model: str
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
-    timeout_seconds: float = 2400.0
     proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
-    # Claude Code talks to Anthropic on the run owner's key, added at the network
-    # edge by the parent, instead of through the model gateway.
-    direct_anthropic: bool = False
     # A repository run's packed tree: ``chunks`` (files on this machine),
-    # ``editable_paths`` and ``readonly_paths``.
+    # ``editable_paths``, ``readonly_paths`` and ``constrained`` (a
+    # constraints file governs the run).
     repo: dict[str, Any] | None = None
+    # ShinkaEvolve's evolution settings, and its optimization models in bandit
+    # order: each ``{"model", "url", "token"}`` names one scoped gateway route.
+    shinka: dict[str, Any] | None = None
+    shinka_models: tuple[dict[str, str], ...] = field(default=(), repr=False)
+    # The embeddings route ShinkaEvolve's duplicate rejection uses, when it is on.
+    shinka_embedding: dict[str, str] | None = field(default=None, repr=False)
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -213,6 +249,15 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     Returns:
         Relative file paths mapped to their text.
     """
+    if engine_id == "shinka_evolve":
+        runner = Path(native_runner.__file__).with_name(_SHINKA_RUNNER_FILE)
+        return {
+            _SHINKA_RUNNER_FILE: runner.read_text(encoding="utf-8"),
+            _SHINKA_BUNDLE_FILE: runner.with_name(_SHINKA_BUNDLE_FILE).read_text(encoding="utf-8"),
+            _BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8"),
+            _SHINKA_REQUIREMENTS_FILE: runner.with_name(_SHINKA_REQUIREMENTS_FILE).read_text(encoding="utf-8"),
+            _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
+        }
     bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
     if engine_id != "autosaddler":
         engines = Path(native_runner.__file__).with_name(_ENGINES_FILE)
@@ -228,7 +273,11 @@ def _runner_files(engine_id: str) -> dict[str, str]:
         return files
     runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
     plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
-    files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
+    files = {
+        **bridge,
+        _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8"),
+        _REPO_TREE_FILE: Path(repo_tree.__file__).read_text(encoding="utf-8"),
+    }
     for asset in sorted([*plugin_root.rglob("*.md"), plugin_root / "LICENSE"]):
         files[f"{_AUTOSADDLER_PLUGIN_DIR}/{asset.relative_to(plugin_root).as_posix()}"] = asset.read_text(
             encoding="utf-8"
@@ -247,12 +296,6 @@ def _harness_setup(harness: str, install_command: str | None, *, protected: bool
     Returns:
         ``(install, check)`` shell fragments, each ending in ``"; "`` or empty.
     """
-    if harness == BLACKBOX_HARNESS_CLAUDE_CODE:
-        install = (
-            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
-            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
-        )
-        return ("" if protected else install), f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
     check = pinned_harness_check(harness)
     install = f"{install_command}; " if install_command and not protected else ""
     return install, (f"{check}; " if check else "")
@@ -263,8 +306,9 @@ def _bootstrap_command(
     *,
     protected: bool = False,
     engine_id: str = "meta_harness",
-    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE,
+    harness: str = BLACKBOX_HARNESS_CODEX,
     install_command: str | None = None,
+    shinka_agent: bool = False,
 ) -> str:
     """Build installation and preflight commands with immutable package versions.
 
@@ -273,20 +317,27 @@ def _bootstrap_command(
         protected: Require dependencies already present in the immutable offline image.
         engine_id: Native engine whose interpreter and packages are prepared.
         harness: Proposer harness the engine drives.
-        install_command: Install step of a non-Claude proposer harness.
+        install_command: Install step of the proposer harness.
+        shinka_agent: ShinkaEvolve writes versions with Pi (its agent editor),
+            so Pi and Node are prepared as for a Pi proposer.
 
     Returns:
         Shell command that prepares the isolated source and runtime.
     """
-    autosaddler = engine_id == "autosaddler"
-    harness_install, harness_check = _harness_setup(harness, install_command, protected=protected)
-    floor = AUTOSADDLER_PYTHON_FLOOR if autosaddler else PYTHON_FLOOR
+    own_venv = engine_id in _OWN_VENV_ENGINES
+    shinka = engine_id == "shinka_evolve"
+    # ShinkaEvolve calls its models directly unless its agent editor runs Pi.
+    harnessless = shinka and not shinka_agent
+    harness_install, harness_check = (
+        ("", "") if harnessless else _harness_setup(harness, install_command, protected=protected)
+    )
+    floor = AUTOSADDLER_PYTHON_FLOOR if own_venv else PYTHON_FLOOR
     prepare = (
         "set -eu; mkdir -p .claude .cache .local native_vendor rpc; "
         "test -f .claude.json || printf '{}' > .claude.json; "
     )
-    if not protected and autosaddler:
-        pins = " ".join(shlex.quote(pin) for pin in _AUTOSADDLER_PINS)
+    if not protected and own_venv:
+        pins = f"-r {_SHINKA_REQUIREMENTS_FILE}" if shinka else " ".join(shlex.quote(pin) for pin in _AUTOSADDLER_PINS)
         prepare += (
             'export HOME="$PWD"; '
             'export PATH="$HOME/.local/bin:$PATH"; '
@@ -295,7 +346,8 @@ def _bootstrap_command(
             f"uv venv --python {_AUTOSADDLER_PYTHON} native_venv; "
             f"uv pip install --python native_venv/bin/python --no-deps {pins}; "
             'printf "%s\\n" "$PWD/native_venv/bin/python" > native-python.txt; '
-            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
+            + ("" if harnessless else "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; ")
+            + harness_install
         )
     elif not protected:
         prepare += (
@@ -308,6 +360,11 @@ def _bootstrap_command(
             '"$HOME/.local/bin/uv" python find 3.11.9 > native-python.txt; fi; '
             "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
         )
+    elif shinka:
+        prepare += (
+            f"if [ -x {SHINKA_IMAGE_PYTHON} ]; then printf '%s\\n' {SHINKA_IMAGE_PYTHON} > native-python.txt; "
+            "else command -v python3 > native-python.txt; fi; "
+        )
     else:
         prepare += "command -v python3 > native-python.txt; "
     extract = (
@@ -315,7 +372,7 @@ def _bootstrap_command(
         "data=base64.b64decode(pathlib.Path('native_source.tar.gz.b64').read_text()); "
         "tarfile.open(fileobj=io.BytesIO(data),mode='r:gz').extractall('native_vendor',filter='data')"
     )
-    if not autosaddler:
+    if not own_venv:
         prepare += f'"$(cat native-python.txt)" -c {shlex.quote(extract)}; '
     prepare += (
         harness_check
@@ -325,9 +382,11 @@ def _bootstrap_command(
             f"'Native optimizers need Python {'.'.join(map(str, floor))} or newer'"
         )
     )
-    if autosaddler:
+    if engine_id == "autosaddler":
         prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import autosaddler.v2.core.engine")
-    if protected:
+    if shinka:
+        prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import shinka.core.async_runner")
+    if protected and not harnessless:
         prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
 
@@ -374,7 +433,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         options: Actual runtime selection with a scoped parent gateway capability.
 
     Returns:
-        Confirmed immutable source, CLI version, engine imports and runtime selection.
+        Confirmed immutable source, engine imports and runtime selection.
 
     Raises:
         ServiceError: When the managed runtime or its pinned dependencies cannot launch.
@@ -389,31 +448,45 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         SandboxSpec(
             lifetime_seconds=lifetime,
             network_disabled=True,
-            name=unique_sandbox_name("skynet-native-readiness"),
+            name=unique_sandbox_name("app-native-readiness"),
             env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         )
     )
     started = time.monotonic()
     try:
         session.write_files(
-            {**_runner_files("meta_harness"), **_runner_files("autosaddler"), "native_source.tar.gz.b64": source}
+            {
+                **_runner_files("meta_harness"),
+                **_runner_files("autosaddler"),
+                **_runner_files("shinka_evolve"),
+                "native_source.tar.gz.b64": source,
+            }
         )
         install_timeout = min(60, lifetime - 1)
-        installed = session.run(_bootstrap_command(options.runtime, protected=True), timeout_seconds=install_timeout)
+        installed = session.run(
+            _bootstrap_command(options.runtime, protected=True, harness=options.proposer.harness),
+            timeout_seconds=install_timeout,
+        )
         if not installed.ok or installed.timed_out:
             raise ServiceError(
                 "The selected native runtime lacks its required pinned offline dependencies. "
                 + _failure_detail(installed, install_timeout)
             )
         probe = (
-            "import importlib.util,json,subprocess,sys; import native_runner, autosaddler_runner, native_engines; "
+            "import importlib.util,json,os,subprocess,sys; "
+            "import native_runner, autosaddler_runner, shinka_runner, native_engines; "
             "native_engines.check_assets(); "
             f"autosaddler=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
             "and importlib.util.find_spec('autosaddler') is not None; "
-            "prefix=[]; "
-            "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
-            f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "
-            "print(json.dumps({'ready':True,'autosaddler':autosaddler}))"
+            f"shinka_python={SHINKA_IMAGE_PYTHON!r} if os.access({SHINKA_IMAGE_PYTHON!r},os.X_OK) else sys.executable; "
+            "shinka=subprocess.run([shinka_python,'-c',"
+            + repr(
+                "import importlib.util,sys; "
+                f"sys.exit(0 if sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
+                "and importlib.util.find_spec('shinka') else 1)"
+            )
+            + "],capture_output=True,timeout=20).returncode == 0; "
+            "print(json.dumps({'ready':True,'autosaddler':autosaddler,'shinka':shinka}))"
         )
         remaining = lifetime - (time.monotonic() - started) - 1
         if remaining <= 0:
@@ -423,7 +496,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             'export HOME="$PWD"; export PYTHONPATH="$PWD/native_vendor"; '
             f'"$(cat native-python.txt)" -c {shlex.quote(probe)}',
             timeout_seconds=probe_timeout,
-            env={"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CI": "1"},
+            env={"CI": "1"},
         )
         ready = next(
             (json.loads(line) for line in checked.stdout.splitlines() if line.strip().startswith('{"ready": true')),
@@ -441,7 +514,8 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             "autoresearch_version": AUTORESEARCH_VERSION,
             "autosaddler_source": AUTOSADDLER_REVISION,
             "autosaddler_ready": bool(ready.get("autosaddler")),
-            "claude_version": CLAUDE_VERSION,
+            "shinka_version": SHINKA_VERSION,
+            "shinka_ready": bool(ready.get("shinka")),
         }
     finally:
         original_error = sys.exception()
@@ -481,7 +555,13 @@ class _EvaluatorMailbox:
         self.progress_callback = progress_callback
         self.check_budget = check_budget
         self.error: BaseException | None = None
+        self.owner: str | None = getattr(session, "log_owner", None)
+        # Replaced once the run's environment is known, so its secrets are redacted.
+        self.scrub = sandbox_log.Scrubber(())
         self._buffer = ""
+        self._plain = sandbox_log.LineGroups(
+            lambda text: sandbox_log.stream_line(text, owner=self.owner, scrub=self.scrub, label="stdout")
+        )
         self._responses: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -498,18 +578,51 @@ class _EvaluatorMailbox:
             self._buffer += text
             while "\n" in self._buffer:
                 line, self._buffer = self._buffer.split("\n", 1)
+                framed = (
+                    f"{_RPC_PREFIX}{self.nonce} ",
+                    f"{_PROGRESS_PREFIX}{self.nonce} ",
+                    f"{_LOG_PREFIX}{self.nonce} ",
+                )
+                if not line.startswith(framed):
+                    if line.strip():
+                        self._plain.add(line)
+                    continue
+                self._plain.flush()
+                if line.startswith(_LOG_PREFIX):
+                    self._log(line.split(" ", 2)[2])
+                    continue
                 try:
-                    if line.startswith(f"{_RPC_PREFIX}{self.nonce} "):
+                    if line.startswith(_RPC_PREFIX):
                         self._respond(json.loads(line.split(" ", 2)[2]))
-                    elif line.startswith(f"SKYNET_NATIVE_PROGRESS {self.nonce} "):
+                    else:
                         self._progress(json.loads(line.split(" ", 2)[2]))
                 except Exception as exc:
                     # LocalSubprocessRuntime delivers output on a reader thread;
                     # raising there would abandon the child waiting for its reply.
                     self.error = self.error or exc
+            self._plain.flush()
+
+    def _log(self, body: str) -> None:
+        """Relay one structured record from the child into the run log.
+
+        A record the host cannot read is logged as plain output: a broken log
+        line must never stop the run the way a broken evaluation request does.
+
+        Args:
+            body: The JSON after the framing prefix.
+        """
+        try:
+            data = json.loads(body)
+        except ValueError:
+            sandbox_log.stream_line(body, owner=self.owner, scrub=self.scrub, label="stdout")
+            return
+        sandbox_log.forward(data, owner=self.owner, scrub=self.scrub)
 
     def _progress(self, event: dict[str, Any]) -> None:
         """Relay a child checkpoint: one scored case of a sweep, or a completed aggregate.
+
+        An aggregate may name the version it came from (``parent_id``) and its
+        depth (``generation``); engines that do not track lineage omit both.
 
         Args:
             event: Case score or candidate aggregate reported by the child.
@@ -520,6 +633,20 @@ class _EvaluatorMailbox:
             return
         if event.get("event") == "case_scored":
             total = event.get("total")
+            example_id = str(event.get("example_id", "?"))
+            logger.info(
+                "Candidate %s scored %.4f on case %s",
+                candidate_id,
+                float(score),
+                example_id,
+                extra=run_log.event_extra(
+                    source="engine",
+                    event="case.scored",
+                    fields={"score": float(score), "total": total},
+                    candidate=candidate_id,
+                    case=example_id,
+                ),
+            )
             if isinstance(total, int) and not isinstance(total, bool):
                 emit_case_scored(
                     self.progress_callback,
@@ -530,11 +657,33 @@ class _EvaluatorMailbox:
                 )
             return
         per_example = event.get("per_example")
+        parent_id = event.get("parent_id")
+        generation = event.get("generation")
+        fields: dict[str, Any] = {"score": float(score), "total_evals": event.get("total_evals")}
+        tool_calls = event.get("tool_calls")
+        tool_note = ""
+        if isinstance(tool_calls, int) and not isinstance(tool_calls, bool):
+            cap_reached = event.get("tool_cap_reached") is True
+            fields.update(tool_calls=tool_calls, tool_cap_reached=cap_reached)
+            tool_note = f"; the agent used {tool_calls} tool call(s)" + (", hitting the cap" if cap_reached else "")
+        logger.info(
+            "Candidate %s scored %.4f after %s evaluations%s",
+            candidate_id,
+            float(score),
+            event.get("total_evals"),
+            tool_note,
+            extra=run_log.event_extra(
+                source="engine",
+                event="candidate.scored",
+                fields=fields,
+                candidate=candidate_id,
+            ),
+        )
         emit_candidate(
             self.progress_callback,
             candidate_id=str(candidate_id),
-            parent_id=None,
-            generation=0,
+            parent_id=_label(parent_id),
+            generation=generation if isinstance(generation, int) and not isinstance(generation, bool) else 0,
             score=float(score),
             per_example=[
                 (str(example_id), float(value))
@@ -544,6 +693,31 @@ class _EvaluatorMailbox:
             candidate=event["candidate"],
             discovered_at_evals=int(event["total_evals"]),
             iteration=None,
+        )
+
+    def _forward_feedback(self, request: dict[str, Any], score: Any, info: Any) -> None:
+        """Send the scorer's notes on one evaluation to the candidate tree drawer.
+
+        Native engines have no proposal iterations, so each note carries the
+        id of the version it scored instead.
+
+        Args:
+            request: The evaluation request, naming the version and case.
+            score: The score the scorer returned.
+            info: What the scorer returned next to the score.
+        """
+        candidate_id = request.get("candidate_id")
+        if not _finite(score) or not isinstance(info, dict):
+            return
+        if isinstance(candidate_id, bool) or not isinstance(candidate_id, int):
+            return
+        case = request.get("case")
+        emit_scorer_feedback(
+            self.progress_callback,
+            example_id="?" if case is None else str(case),
+            score=float(score),
+            side_info=info,
+            candidate_id=str(candidate_id),
         )
 
     def _respond(self, request: dict[str, Any]) -> None:
@@ -568,10 +742,14 @@ class _EvaluatorMailbox:
                         raise ServiceError("Native evaluator request carries an invalid candidate shape.")
                     if self.check_budget is not None:
                         self.check_budget()
-                    score, info = self.server.evaluate(candidate, request.get("example"))
+                    with sandbox_log.event_scope(
+                        candidate=_label(request.get("candidate_id")), case=_label(request.get("case"))
+                    ):
+                        score, info = self.server.evaluate(candidate, request.get("example"))
                     if self.check_budget is not None:
                         self.check_budget()
-                    response = {"score": score, "info": info}
+                    self._forward_feedback(request, score, info)
+                    response = {"score": score, "info": sanitize_side_info(info)}
                 except (Exception, BudgetReached) as exc:
                     self.error = exc
                     response = {"error": "The parent evaluator stopped this run."}
@@ -583,6 +761,95 @@ class _EvaluatorMailbox:
                 self.error = self.error or exc
                 self._responses[request_id] = json.dumps({"error": "The parent evaluator returned invalid feedback."})
         self.session.write_files({f"rpc/{request_id}.json": self._responses[request_id]})
+
+
+def _plain_case(case: Any) -> Any:
+    """Turn one train case into plain JSON data for the native box.
+
+    Args:
+        case: A task case: a dict, or a model such as ``UnifiedCase``.
+
+    Returns:
+        The case as JSON-plain data.
+    """
+    dump = getattr(case, "model_dump", None)
+    return dump(mode="json") if callable(dump) else case
+
+
+def native_task_payload(engine_id: str, task: Task) -> dict[str, Any]:
+    """Build the task document a native box receives, from the train cases only.
+
+    Args:
+        engine_id: The native engine, used as the task name.
+        task: The engine's task.
+
+    Returns:
+        Exactly the fields in ``NATIVE_TASK_FIELDS``.
+
+    Raises:
+        ServiceError: When the document would hold any other field.
+    """
+    document = {
+        "name": engine_id,
+        "seed_candidate": task.seed_candidate,
+        "objective": task.objective or "",
+        "background": task.background or "",
+        # The guest builds an upstream task, whose train and val sets
+        # form one pool; the cases go in once, as its train set.
+        "train_set": [_plain_case(case) for case in task.cases] or None,
+    }
+    if set(document) != NATIVE_TASK_FIELDS:
+        raise ServiceError("The native optimizer task carries fields it must not.")
+    return document
+
+
+def assert_metric_absent(serialized: str, task: Task) -> None:
+    """Refuse to ship a native document that carries the task's metric source.
+
+    Args:
+        serialized: The document as it would be written into the box.
+        task: The engine's task, whose private context holds the metric.
+
+    Raises:
+        ServiceError: When the metric source appears in the document.
+    """
+    metric = str((getattr(task, "context", None) or {}).get("metric_code") or "").strip()
+    # Documents are JSON, so the source appears with its newlines escaped.
+    if metric and (metric in serialized or json.dumps(metric)[1:-1] in serialized):
+        raise ServiceError("The native optimizer payload would expose the metric source.")
+
+
+def sanitize_side_info(info: Any) -> Any:
+    """Reduce an error result to one ``Type: message`` line before a proposer sees it.
+
+    Scorer errors can carry tracebacks or source lines from the metric; the
+    proposer must learn only that a version failed and why, in one line.
+
+    Args:
+        info: Side information the parent scorer returned.
+
+    Returns:
+        ``{"error": "<line>"}`` for an error result, else ``info`` unchanged.
+    """
+    if not isinstance(info, dict) or "error" not in info:
+        return info
+    lines = [line.strip() for line in str(info.get("error") or "").splitlines() if line.strip()]
+    kept = next((line for line in reversed(lines) if not line.startswith(("File ", "Traceback"))), "")
+    return {"error": kept[:_ERROR_CHARS] or "Evaluation failed."}
+
+
+def _label(value: Any) -> str | None:
+    """Read a child-sent candidate or case label as short text.
+
+    Args:
+        value: The label as the child sent it.
+
+    Returns:
+        A number or text label, or ``None`` for anything else.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return None
+    return run_log.fit(str(value), run_log.CANDIDATE_CHARS)
 
 
 def _finite(value: Any) -> bool:
@@ -662,11 +929,48 @@ def _record_usage(options: NativeOptions, usage: dict[str, Any]) -> None:
                     destination[name] = destination.get(name, 0) + value
 
 
+def _shinka_editor(options: NativeOptions, relay: str | None) -> dict[str, Any]:
+    """Describe the Pi launch ShinkaEvolve's agent editor runs on each optimization model.
+
+    Pi talks to the same scoped route the bandit's model would, so its calls
+    are billed with the run, and tags them as mutation calls the way upstream's
+    own mutation calls are tagged.
+
+    Args:
+        options: The run's ShinkaEvolve routes, proposer settings and protection.
+        relay: The sandbox-local gateway relay, when the run has one.
+
+    Returns:
+        ``{"max_tool_calls", "launches"}``; ``launches`` follows ``shinka_models``
+        order, each a serialized launch with its ``model``, ``key_env`` and ``price``.
+    """
+    headers = {USAGE_TAGS_HEADER: encode_tags({"caller": CALLER_PROPOSER, "kind": KIND_MUTATION})}
+    launches = []
+    for index, route in enumerate(options.shinka_models):
+        launch = pi_editor_launch(
+            str(route["model"]),
+            GatewayConfig(url=relay or route["url"], api_key=harness_bridge.KEY_TOKEN),
+            headers=headers,
+            protected=options.budget_route is not None,
+        )
+        input_price, output_price = model_token_costs(route["model"])
+        launches.append(
+            {
+                **launch_payload(launch),
+                "harness": BLACKBOX_HARNESS_PI,
+                "model": launch.env[ENV_MODEL],
+                "key_env": SHINKA_KEY_ENV.format(index=index),
+                "price": {"input": input_price, "output": output_price},
+            }
+        )
+    return {"max_tool_calls": options.proposer.max_tool_calls, "launches": launches}
+
+
 def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
     """Execute an unchanged upstream agent engine inside the managed sandbox.
 
     Args:
-        engine_id: ``meta_harness``, ``autoresearch`` or ``autosaddler``.
+        engine_id: ``meta_harness``, ``autoresearch``, ``autosaddler`` or ``shinka_evolve``.
         task: Seed and visible training/validation examples.
         server: Skynet evaluator and shared evaluation budget.
         ctx: Run context containing native execution options.
@@ -683,40 +987,41 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native optimizers require the managed Vercel sandbox.")
     if engine_id not in NATIVE_ENGINES:
         raise ServiceError("Unsupported native optimizer.")
-    autosaddler = engine_id == "autosaddler"
-    if not autosaddler and not task.str_mode:
+    own_venv = engine_id in _OWN_VENV_ENGINES
+    shinka = engine_id == "shinka_evolve"
+    if not own_venv and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
-    if options.repo is not None and engine_id not in REPO_NATIVE_ENGINES:
-        raise ServiceError("Only AutoResearch and GEPA drive a coding agent through a repository checkout.")
-    if options.repo is None and engine_id == "gepa_repo":
-        raise ServiceError("GEPA's agent proposer needs a repository checkout.")
-    if autosaddler and task.seed_candidate is None:
-        raise ServiceError("AutoSaddler requires a seed candidate to patch.")
-    if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
-        raise ServiceError("AutoSaddler needs at least two visible examples to diagnose and confirm patches.")
+    if options.repo is None and engine_id in REPO_ONLY_NATIVE_ENGINES:
+        raise ServiceError("This agent proposer needs a repository checkout.")
+    if shinka and not options.shinka_models:
+        raise ServiceError("ShinkaEvolve needs at least one optimization model route.")
+    if own_venv and options.repo is None and task.seed_candidate is None:
+        # A blank run patches an empty starting text rather than refusing.
+        task = replace(task, seed_candidate="")
     if server.remaining <= 0:
         raise BudgetExhaustedError("The native optimizer evaluation budget is exhausted.")
     if not math.isfinite(options.max_token_cost) or options.max_token_cost <= 0:
         raise ServiceError("Native optimizers require a positive proposer cost limit.")
-    if not math.isfinite(options.timeout_seconds) or options.timeout_seconds <= 0:
-        raise ServiceError("Native optimizers require a positive timeout.")
     if not options.gateway.url or not options.gateway.api_key:
         raise ServiceError("Native optimizers require a configured model gateway.")
-    if options.direct_anthropic and options.budget_route is None:
-        raise ServiceError("Claude Code on your own Anthropic key requires the protected sandbox.")
     runtime = _selected_runtime(options)
     nonce = uuid.uuid4().hex
     artifacts_dir = Path(ctx.run_dir) / f"{engine_id}-native-{nonce[:8]}"
     gateway_host = urlsplit(options.gateway.url).hostname
+    # ShinkaEvolve picks among several models, each on its own route token, so
+    # one header added at the network edge cannot authorize its calls; its
+    # tokens travel in the environment instead and are scrubbed from its logs.
     headers = (
         {gateway_host: {"Authorization": f"Bearer {options.gateway.api_key}"}}
-        if runtime.injects_headers and gateway_host
+        if runtime.injects_headers and gateway_host and not shinka
         else {}
     )
-    source = None if autosaddler else _source_archive()
+    source = None if own_venv else _source_archive()
     upstream_source, upstream_revision = _UPSTREAMS[engine_id]
-    runner_file = _AUTOSADDLER_RUNNER_FILE if autosaddler else _RUNNER_FILE
+    runner_file = _SHINKA_RUNNER_FILE if shinka else _AUTOSADDLER_RUNNER_FILE if own_venv else _RUNNER_FILE
+    relay = app_env("APP_BUDGET_RELAY_URL")
     proposer = options.proposer
+    editor = _shinka_editor(options, relay) if shinka and (options.shinka or {}).get("editor") == "agent" else None
     launch = build_launch(
         BlackboxTarget(
             kind="agent",
@@ -729,14 +1034,14 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         protected=options.budget_route is not None,
     )
     input_price, output_price = model_token_costs(options.model)
-    lifetime = options.timeout_seconds + _INSTALL_ALLOWANCE
-    lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
+    # Runs carry no wall-clock cap of their own: the budget and evaluation
+    # limits end them, and only the sandbox's platform lifetime bounds the box.
+    lifetime = settings.vercel_sandbox_max_lifetime_seconds
     spec = SandboxSpec(
         lifetime_seconds=lifetime,
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
-        name=unique_sandbox_name(f"skynet-{engine_id}"),
+        name=unique_sandbox_name(f"app-{engine_id}"),
         inject_headers=headers,
-        allowed_hosts=(harness_bridge.ANTHROPIC_HOST,) if options.direct_anthropic else (),
     )
     session = runtime.open(spec)
     final_result: Result | None = None
@@ -761,27 +1066,39 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "max_concurrency": ctx.concurrency,
             "max_iterations": ctx.max_iterations,
             "stop_at_score": ctx.stop_at_score,
-            "timeout_seconds": options.timeout_seconds,
+            "timeout_seconds": lifetime,
             "proposer": {
                 **launch_payload(launch),
                 "harness": proposer.harness,
                 "model": options.model,
                 "price": {"input": input_price, "output": output_price},
-                "effort": proposer.effort,
-                "max_thinking_tokens": proposer.max_thinking_tokens,
                 "max_candidates_per_iter": proposer.max_candidates_per_iter,
                 "ralph": proposer.ralph,
                 "max_no_eval_seconds": proposer.max_no_eval_seconds,
+                "max_tool_calls": proposer.max_tool_calls,
             },
-            "task": {
-                "name": engine_id,
-                "seed_candidate": task.seed_candidate,
-                "objective": task.objective or "",
-                "background": task.background or "",
-                "train_set": task.train_set or None,
-                "val_set": task.val_set or None,
-            },
+            "task": native_task_payload(engine_id, task),
         }
+        if shinka:
+            payload["shinka"] = dict(options.shinka or {})
+            payload["shinka_models"] = [
+                {
+                    "model": route["model"],
+                    "url": relay or route["url"],
+                    "key_env": SHINKA_KEY_ENV.format(index=index),
+                }
+                for index, route in enumerate(options.shinka_models)
+            ]
+            payload["shinka_meta_key_env"] = SHINKA_META_KEY_ENV
+            if options.shinka_embedding is not None:
+                payload["shinka_embedding"] = {
+                    "model": options.shinka_embedding["model"],
+                    "url": relay or options.shinka_embedding["url"],
+                    "key_env": SHINKA_EMBED_KEY_ENV,
+                }
+                payload["shinka_novelty_key_env"] = SHINKA_NOVELTY_KEY_ENV
+            if editor is not None:
+                payload["shinka_editor"] = editor
         if options.repo is not None:
             chunks = []
             # One upload per chunk: each is close to the per-request size cap.
@@ -792,11 +1109,14 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "chunks": chunks,
                 "editable_paths": list(options.repo["editable_paths"]),
                 "readonly_paths": list(options.repo["readonly_paths"]),
+                "constrained": bool(options.repo.get("constrained")),
             }
+        document_text = json.dumps(payload, default=side_info_json_default)
+        assert_metric_absent(document_text, task)
         session.write_files(
             {
                 **_runner_files(engine_id),
-                _INPUT_FILE: json.dumps(payload, default=side_info_json_default),
+                _INPUT_FILE: document_text,
                 **({} if source is None else {"native_source.tar.gz.b64": source}),
             }
         )
@@ -805,37 +1125,61 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 options.runtime,
                 protected=options.budget_route is not None,
                 engine_id=engine_id,
-                harness=proposer.harness,
-                install_command=launch.install_command,
+                harness=BLACKBOX_HARNESS_PI if editor else proposer.harness,
+                install_command=editor["launches"][0]["install_command"] if editor else launch.install_command,
+                shinka_agent=editor is not None,
             ),
             timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0),
         )
         if not installed.ok or installed.timed_out:
             detail = (installed.stderr or installed.stdout)[-2000:]
             raise ServiceError(f"Native optimizer runtime setup failed: {detail}")
-        relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
         env = {
             "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
-            "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
-            harness_bridge.KEY_ENV: "skynet-managed" if headers else options.gateway.api_key,
+            "ANTHROPIC_AUTH_TOKEN": _INJECTED_KEY_PLACEHOLDER if headers else options.gateway.api_key,
+            harness_bridge.KEY_ENV: _INJECTED_KEY_PLACEHOLDER if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "CI": "1",
             "NO_COLOR": "1",
-            **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
-            **({harness_bridge.DIRECT_ANTHROPIC_ENV: "1"} if options.direct_anthropic else {}),
+            **(with_legacy_env({"APP_BUDGET_RELAY_URL": relay}) if relay else {}),
         }
+        if shinka:
+            env.update(
+                {
+                    SHINKA_KEY_ENV.format(index=index): route["token"]
+                    for index, route in enumerate(options.shinka_models)
+                }
+            )
+            env[SHINKA_META_KEY_ENV] = options.shinka_models[0]["token"]
+            if options.shinka_embedding is not None:
+                env[SHINKA_NOVELTY_KEY_ENV] = options.shinka_models[0]["token"]
+                env[SHINKA_EMBED_KEY_ENV] = options.shinka_embedding["token"]
+            # Upstream prices calls from a bundled catalog unless told not to;
+            # the gateway, not the guest, prices and bills every call.
+            env["SHINKA_PRICING_MODE"] = "offline"
         command = (
             'export HOME="$PWD"; export PATH="$HOME/.local/bin:$PATH"; '
             'export PYTHONPATH="$PWD/native_vendor"; '
             f'exec "$(cat native-python.txt)" {runner_file} {_INPUT_FILE}'
         )
-        timeout = min(options.timeout_seconds, lifetime - (time.monotonic() - opened) - 1.0)
+        timeout = lifetime - (time.monotonic() - opened) - 1.0
         if timeout <= 0:
             raise ServiceError("Native optimizer runtime expired while preparing dependencies.")
         payload["timeout_seconds"] = timeout
-        session.write_files({_INPUT_FILE: json.dumps(payload, default=side_info_json_default)})
-        completed = session.run(command, env=env, timeout_seconds=timeout, on_output=mailbox.on_output)
+        document_text = json.dumps(payload, default=side_info_json_default)
+        assert_metric_absent(document_text, task)
+        session.write_files({_INPUT_FILE: document_text})
+        session_env = getattr(session, "_env", None)
+        mailbox.scrub = sandbox_log.Scrubber(
+            [
+                *env.values(),
+                options.gateway.api_key,
+                *(session_env.values() if isinstance(session_env, dict) else ()),
+            ]
+        )
+        # The proposer CLI shares the optimization route with GEPA reflection in auto mode.
+        with usage_scope(caller=CALLER_PROPOSER):
+            completed = session.run(command, env=env, timeout_seconds=timeout, on_output=mailbox.on_output)
         text = session.read_file(_RESULT_FILE)
         document = json.loads(text) if text else {}
         usage = document.get("usage_by_model", {})
@@ -867,7 +1211,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         if artifact_error is not None:
             raise artifact_error
         if completed.timed_out:
-            raise ServiceError("Native optimizer exceeded its runtime limit.")
+            raise ServiceError(f"Native optimizer exceeded its runtime limit: the sandbox's {lifetime:.0f}s lifetime.")
         if options.budget_route is not None:
             try:
                 raise_gateway_stop(options.budget_route)

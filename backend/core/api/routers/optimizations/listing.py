@@ -33,7 +33,14 @@ from ...auth import AuthenticatedUser, get_authenticated_user, is_admin
 from ...converters import parse_overview, parse_timestamp
 from ...errors import DomainError
 from ...response_limits import AGENT_DEFAULT_LIST, AGENT_MAX_LIST, clamp_limit
-from .._helpers import build_summary, grant_roles_for, pausable_id_flags, resumable_id_flags, run_folder_ids
+from .._helpers import (
+    automated_run_ids,
+    build_summary,
+    grant_roles_for,
+    pausable_id_flags,
+    resumable_id_flags,
+    run_folder_ids,
+)
 from ..constants import VALID_OPTIMIZATION_TYPES, VALID_STATUSES
 from .schemas import SidebarJobItem, SidebarJobsResponse
 
@@ -70,6 +77,7 @@ def build_sidebar_item(
     *,
     role: str | None = None,
     folder_id: str | None = None,
+    automated: bool = False,
 ) -> SidebarJobItem:
     """Build the compact sidebar entry for one job row.
 
@@ -79,6 +87,7 @@ def build_sidebar_item(
         pausable_ids: Ids that can offer Pause (see ``pausable_id_flags``).
         role: Caller's share role when the run is not their own.
         folder_id: Folder the run is filed in, if any.
+        automated: Whether the run belongs to a continuous plan.
 
     Returns:
         The populated :class:`SidebarJobItem`.
@@ -100,6 +109,7 @@ def build_sidebar_item(
         pausable=row["optimization_id"] in pausable_ids,
         role=role,
         folder_id=folder_id,
+        automated=automated,
     )
 
 
@@ -363,9 +373,17 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
         rows = job_store.list_jobs(username=scoped_username, limit=limit, offset=offset)
         resumable_ids = resumable_id_flags(job_store, rows)
         pausable_ids = pausable_id_flags(job_store, rows)
-        folder_ids = run_folder_ids(job_store, [row["optimization_id"] for row in rows])
+        row_ids = [row["optimization_id"] for row in rows]
+        folder_ids = run_folder_ids(job_store, row_ids)
+        automated_ids = automated_run_ids(job_store, row_ids)
         items = [
-            build_sidebar_item(row, resumable_ids, pausable_ids, folder_id=folder_ids.get(row["optimization_id"]))
+            build_sidebar_item(
+                row,
+                resumable_ids,
+                pausable_ids,
+                folder_id=folder_ids.get(row["optimization_id"]),
+                automated=row["optimization_id"] in automated_ids,
+            )
             for row in rows
         ]
         return SidebarJobsResponse(items=items, total=total)

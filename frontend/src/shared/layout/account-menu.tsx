@@ -48,7 +48,7 @@ function Avatar({ image, label, size }: { image?: string | null; label: string; 
   return (
     <span
       aria-hidden="true"
-      className="grid shrink-0 place-items-center rounded-full bg-[#3D2E22] font-semibold text-[#FAF8F5]"
+      className="grid shrink-0 place-items-center rounded-full bg-primary-fill font-semibold text-primary-foreground"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
       {initials(label)}
@@ -104,7 +104,7 @@ export function AccountMenu({
     <button
       type="button"
       aria-label={msg("app.shell.account.aria")}
-      className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+      className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
       <Avatar image={session.user.image} label={name} size={28} />
     </button>
@@ -112,7 +112,7 @@ export function AccountMenu({
     <button
       type="button"
       aria-label={msg("app.shell.account.aria")}
-      className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+      className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
       <Avatar image={session.user.image} label={name} size={28} />
       {/* Physical edge from the UI dir, not logical `text-start`: the name keeps

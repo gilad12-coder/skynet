@@ -26,7 +26,6 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             "/v1/chat/completions",
             "/v1/responses",
             "/v1/_budget/state",
-            "/v1/_budget/recovery-seed-complete",
         }
     )
 
@@ -59,11 +58,14 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
     scorer = payload.get("scorer")
     if isinstance(scorer, dict):
         configs.append(scorer.get("model"))
-    for key in ("generation_models", "reflection_models"):
+    for key in ("generation_models", "reflection_models", "extra_reflection_model_configs"):
         configs.extend(payload.get(key) or [])
     for config in configs:
         if isinstance(config, dict) and isinstance(config.get("extra"), dict):
-            register(config["extra"].get("_skynet_budget_route"), model_paths)
+            route = config["extra"].get("_skynet_budget_route")
+            register(route, model_paths)
+            if isinstance(route, dict):
+                register(route.get("embedding"), frozenset({"/v1/embeddings", "/v1/_budget/state"}))
     register(payload.get("_skynet_target_route"), model_paths)
     register(payload.get("_skynet_tools_route"), frozenset({"/v1/_mcp", "/v1/_budget/state"}))
     register(payload.get("_skynet_packages_route"), frozenset({"/v1/_packages"}))

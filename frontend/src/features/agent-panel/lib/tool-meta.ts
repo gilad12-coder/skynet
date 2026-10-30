@@ -96,28 +96,6 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     severity: "warning",
     icon: Square,
   },
-  submit_job_run_post: {
-    title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.6", {
-      p1: TERMS.optimization,
-    }),
-    description: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.7", {
-      p1: TERMS.optimizationTypeRun,
-    }),
-    confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.8"),
-    severity: "warning",
-    icon: Play,
-  },
-  submit_grid_search_grid_search_post: {
-    title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.8", {
-      p1: TERMS.optimizationTypeGrid,
-    }),
-    description: () => msg("auto.features.agent.panel.lib.tool.meta.template.9"),
-    confirmLabel: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.10", {
-      p1: TERMS.optimizationTypeGrid,
-    }),
-    severity: "warning",
-    icon: Play,
-  },
   rename_job_optimizations: {
     title: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.11", {
       p1: TERMS.optimization,
@@ -137,18 +115,6 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     icon: PushPin,
   },
   edit_code_optimizations_edit_code_post: {
-    title: () => msg("auto.features.agent.panel.lib.tool.meta.literal.18"),
-    description: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.14", {
-      p1: TERMS.signature,
-      p2: TERMS.metric,
-    }),
-    confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.19"),
-    severity: "info",
-    icon: Code,
-  },
-  // The generalist's only code-writing tool; the edit_code entry above stays
-  // for older transcripts that still carry it.
-  request_code_authoring: {
     title: () => msg("auto.features.agent.panel.lib.tool.meta.literal.18"),
     description: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.14", {
       p1: TERMS.signature,
@@ -317,7 +283,7 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     severity: "warning",
     icon: ArrowsClockwise,
   },
-  submit_blackbox_run_blackbox_run_post: {
+  submit_unified_run_optimize_post: {
     title: () => formatMsg("agent.tool.submit_blackbox.title", { p1: TERMS.optimization }),
     description: () => msg("agent.tool.submit_blackbox.description"),
     confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.8"),
@@ -330,13 +296,6 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     confirmLabel: () => msg("agent.tool.stage_sample.confirm"),
     severity: "info",
     icon: Database,
-  },
-  blackbox_scorer_dry_run_blackbox_scorer_dry_run_post: {
-    title: () => msg("agent.tool.scorer_dry_run.title"),
-    description: () => msg("agent.tool.scorer_dry_run.description"),
-    confirmLabel: () => msg("agent.tool.scorer_dry_run.confirm"),
-    severity: "info",
-    icon: Code,
   },
   request_user_dataset_from_library: {
     title: () => msg("auto.features.agent.panel.components.librarydatasetcard.title"),
@@ -388,6 +347,9 @@ const TOOL_TITLES: Record<string, LocaleString> = {
   ),
   list_sample_datasets_datasets_samples_get: () => msg("agent.tool.list_samples.title"),
   validate_datasets_validate_post: () => msg("agent.tool.validate_datasets.title"),
+  web_search: () => msg("agent.tool.web_search.title"),
+  fetch_url: () => msg("agent.tool.fetch_url.title"),
+  crawl_site: () => msg("agent.tool.crawl_site.title"),
   blackbox_engines_blackbox_engines_get: () => msg("agent.tool.blackbox_engines.title"),
   serve_info_serve: () => msg("auto.features.agent.panel.lib.tool.meta.literal.74"),
   serve_pair_info_serve: () => msg("auto.features.agent.panel.lib.tool.meta.literal.75"),

@@ -2,12 +2,29 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { readPref } from "@/features/settings";
+import {
+  localAgentModel,
+  localModelRefusalMessage,
+  useLocalStatus,
+} from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
+import {
+  appendReasoning,
+  closeThinking,
+  lastEventAt,
+  reopenThinking,
+  startThinking,
+  summarizeThinking,
+  type ThinkingSegment,
+} from "@/shared/lib/thinking-segments";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
 import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
+import { midTurnOf, SteerQueue, type MidTurnQueue } from "@/shared/ui/agent/steer-queue";
+import { agentSteerChannel, newSteerKey } from "@/shared/ui/agent/use-steer-queue";
 
 import { confirmGeneralistApproval, streamGeneralistAgent } from "../lib/stream";
 import type {
@@ -31,10 +48,9 @@ export interface GeneralistAgentState {
   status: AgentStatus;
   statusLabel: string;
   messages: AgentMessage[];
-  reasoning: string;
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
   conversationId: string | null;
   /** LiteLLM id of the composer menu's chosen model; null runs the default. */
@@ -43,7 +59,15 @@ export interface GeneralistAgentState {
   /** Reasoning-effort level for the chosen model; null runs its default. */
   reasoningEffort: string | null;
   setReasoningEffort: (effort: string | null) => void;
-  send: (message: string, wizardStateOverride?: WizardState) => void;
+  /** Send a chat turn; ``hidden`` sends it without a user bubble (a kickoff the app started). */
+  send: (
+    message: string,
+    wizardStateOverride?: WizardState,
+    options?: { hidden?: boolean },
+  ) => void;
+  /** The displayed chat's messages sent mid-turn: steered into the running
+   *  turn or queued to run after it. */
+  midTurn: MidTurnQueue;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
   stop: () => void;
@@ -83,8 +107,7 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "bulk_delete_jobs_optimizations_bulk_delete_post",
   "cancel_job_optimizations",
   "bulk_cancel_jobs_optimizations_bulk_cancel_post",
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
+  "submit_unified_run_optimize_post",
   "rename_job_optimizations",
   "toggle_pin_job_optimizations",
   "clone_job_optimizations",
@@ -93,17 +116,12 @@ const OPTIMIZATION_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "pause_job_optimizations",
   "resume_job_optimizations",
   "restart_job_optimizations",
-  "submit_blackbox_run_blackbox_run_post",
 ]);
 
 // Submit tools whose success consumes the staged dataset + readiness. After
 // one fires we drop the sticky wizard overlay so the next turn starts clean
 // rather than re-carrying the just-submitted run's dataset id and flags.
-const SUBMIT_TOOLS: ReadonlySet<string> = new Set([
-  "submit_job_run_post",
-  "submit_grid_search_grid_search_post",
-  "submit_blackbox_run_blackbox_run_post",
-]);
+const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
 
 // Cap on each prior tool result echoed back in chat history; the backend
 // bounds it again, this just keeps the request body small.
@@ -140,10 +158,9 @@ interface SessionView {
   status: AgentStatus;
   statusLabel: string;
   messages: AgentMessage[];
-  reasoning: string;
-  reasoningStartedAt: number | null;
-  reasoningEndedAt: number | null;
   error: string | null;
+  /** Machine code of the error, e.g. the balance gate's, so the panel can offer its way out. */
+  errorCode: string | null;
   pendingApproval: PendingApprovalPayload | null;
 }
 
@@ -159,7 +176,6 @@ interface PendingRun {
 /** Per-session mutable machinery that must never trigger a render. */
 interface SessionRuntime {
   controller: AbortController | null;
-  reasoningBuf: string;
   replyBuf: string;
   // Sticky overlay of wizard fields derived synchronously this session
   // (e.g. ``staged_dataset_id`` from an in-panel upload). The panel-only
@@ -168,6 +184,8 @@ interface SessionRuntime {
   // ask the user to re-upload.
   persistentExtras: Partial<WizardState>;
   pendingRun: PendingRun | null;
+  /** Index of the running turn's first assistant message; a steer adds more after it. */
+  turnStart: number;
 }
 
 function blankSession(key: string): SessionView {
@@ -177,10 +195,8 @@ function blankSession(key: string): SessionView {
     status: "idle",
     statusLabel: "",
     messages: [],
-    reasoning: "",
-    reasoningStartedAt: null,
-    reasoningEndedAt: null,
     error: null,
+    errorCode: null,
     pendingApproval: null,
   };
 }
@@ -188,10 +204,10 @@ function blankSession(key: string): SessionView {
 function blankRuntime(): SessionRuntime {
   return {
     controller: null,
-    reasoningBuf: "",
     replyBuf: "",
     persistentExtras: {},
     pendingRun: null,
+    turnStart: 0,
   };
 }
 
@@ -224,6 +240,31 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   const runtimesRef = React.useRef(new Map<string, SessionRuntime>());
   const streamingKeysRef = React.useRef(new Set<string>());
   const queueRef = React.useRef<string[]>([]);
+
+  // Each chat's follow-ups sent mid-turn. Separate from the parallel-stream
+  // queue above: these wait for their own chat's turn to end, then run in it.
+  // Each queue's sender is attached by the effect further down.
+  const [steerQueues] = React.useState(() => new Map<string, SteerQueue>());
+  // Loads the CLI list a role set to run locally maps its model onto.
+  useLocalStatus();
+  const steerQueueFor = React.useCallback(
+    (key: string): SteerQueue => {
+      let queue = steerQueues.get(key);
+      if (!queue) {
+        queue = new SteerQueue();
+        steerQueues.set(key, queue);
+      }
+      return queue;
+    },
+    [steerQueues],
+  );
+  const dropSteerQueue = React.useCallback(
+    (key: string) => {
+      steerQueues.get(key)?.clear();
+      steerQueues.delete(key);
+    },
+    [steerQueues],
+  );
 
   // Seeded from the settings-modal default; the panel is client-only
   // (ssr:false), so the localStorage read is hydration-safe.
@@ -273,15 +314,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
 
   // The ref is updated synchronously with every commit so stream callbacks and
   // same-tick sends always read post-mutation state, never a stale render.
-  const commit = React.useCallback(
-    (mutate: (draft: Map<string, SessionView>) => void) => {
-      const next = new Map(sessionsRef.current);
-      mutate(next);
-      sessionsRef.current = next;
-      setSessions(next);
-    },
-    [],
-  );
+  const commit = React.useCallback((mutate: (draft: Map<string, SessionView>) => void) => {
+    const next = new Map(sessionsRef.current);
+    mutate(next);
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
 
   const patchSession = React.useCallback(
     (key: string, patch: Partial<SessionView>) => {
@@ -345,6 +383,35 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     [patchMessages],
   );
 
+  // The turn's thinking lives on its newest assistant message, so a steer's
+  // fresh bubble starts its own segments.
+  const patchThinking = React.useCallback(
+    (
+      key: string,
+      update: (
+        segments: readonly ThinkingSegment[],
+        toolCount: number,
+        since: number | null,
+      ) => readonly ThinkingSegment[],
+    ) => {
+      patchMessages(key, (prev) => {
+        const last = prev[prev.length - 1];
+        if (!last || last.role !== "assistant") return prev;
+        const segments = last.thinkingSegments ?? [];
+        const nextSegments = update(
+          segments,
+          last.toolCalls?.length ?? 0,
+          lastEventAt(segments, last.toolCalls ?? []),
+        );
+        if (nextSegments === segments) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...last, thinkingSegments: nextSegments };
+        return next;
+      });
+    },
+    [patchMessages],
+  );
+
   const finishToolCall = React.useCallback(
     (key: string, id: string, nextStatus: "done" | "error", result?: unknown) => {
       patchMessages(key, (prev) => {
@@ -390,195 +457,296 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const rt = getRuntime(key);
       const controller = new AbortController();
       rt.controller = controller;
-      rt.reasoningBuf = "";
       rt.replyBuf = "";
+      rt.turnStart = Math.max(0, (sessionsRef.current.get(key)?.messages.length ?? 1) - 1);
+      // Labels can land after `done`, when the next turn may have moved rt on.
+      const turnStart = rt.turnStart;
+      // The reply `done` landed on; stats that arrive after it belong there.
+      let replyAt: number | null = null;
       streamingKeysRef.current.add(key);
 
       patchSession(key, {
         status: "streaming",
         statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
-        reasoning: "",
-        reasoningStartedAt: Date.now(),
-        reasoningEndedAt: null,
         error: null,
+        errorCode: null,
         pendingApproval: null,
       });
+      patchThinking(key, (segments, toolCount) => startThinking(segments, Date.now(), toolCount));
 
       const releaseSlot = () => {
         rt.controller = null;
         if (streamingKeysRef.current.delete(key)) requestPump();
       };
 
+      const steerKey = newSteerKey();
+      const steerQueue = steerQueueFor(key);
+      steerQueue.openTurn(agentSteerChannel(steerKey));
+      // The reply bubble closed by the latest applied steer, which the
+      // finished turn's `assistant_message` may repeat.
+      let replyBeforeSteer: string | null = null;
+
       // Every stream callback short-circuits on ``controller.signal.aborted``
       // so a slow stream replaced by a fresh ``send`` (or by the unmount-time
       // abort) cannot leak state writes or window events into the live view.
-      void streamGeneralistAgent(
-        {
-          user_message: run.message,
-          chat_history: run.chatHistory,
-          wizard_state: run.wizardState,
-          trust_mode: run.trustMode,
-          conversation_id: sessionsRef.current.get(key)?.conversationId ?? null,
-          regenerate: run.regenerate,
-          locale: getActiveLocale(),
-          model: modelRef.current ?? undefined,
-          reasoning_effort: effortRef.current ?? undefined,
-        },
-        {
-          signal: controller.signal,
-          onConversationMeta: (ev) => {
-            if (controller.signal.aborted) return;
-            if (!ev.conversation_id) return;
-            patchSession(key, { conversationId: ev.conversation_id });
-            callbacksRef.current.onConversationMeta?.(ev.conversation_id, ev.title, eventContext(key));
+      void localAgentModel(modelRef.current, agentSubscriptionFor("generalist")).then((sentModel) =>
+        streamGeneralistAgent(
+          {
+            user_message: run.message,
+            chat_history: run.chatHistory,
+            wizard_state: run.wizardState,
+            trust_mode: run.trustMode,
+            conversation_id: sessionsRef.current.get(key)?.conversationId ?? null,
+            regenerate: run.regenerate,
+            locale: getActiveLocale(),
+            model: sentModel ?? undefined,
+            reasoning_effort: effortRef.current ?? undefined,
+            steer_key: steerKey,
           },
-          onReasoningPatch: (chunk) => {
-            if (controller.signal.aborted) return;
-            if (rt.reasoningBuf === "") {
-              patchSession(key, { reasoningStartedAt: Date.now() });
-            }
-            rt.reasoningBuf += chunk;
-            patchSession(key, { reasoning: rt.reasoningBuf });
-          },
-          onToolStart: (ev) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              statusLabel: formatMsg(
-                "auto.features.agent.panel.hooks.use.generalist.agent.template.1",
-                { p1: ev.tool },
-              ),
-            });
-            pushToolCall(key, {
-              id: ev.id,
-              tool: ev.tool,
-              reason: ev.reason,
-              status: "running",
-              startedAt: Date.now(),
-              endedAt: null,
-              payload: { arguments: ev.arguments },
-            });
-            callbacksRef.current.onToolStart?.(ev, eventContext(key));
-          },
-          onToolEnd: (ev) => {
-            if (controller.signal.aborted) return;
-            finishToolCall(key, ev.id, ev.status === "ok" ? "done" : "error", ev.result);
-            patchSession(key, {
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
-            });
-            if (ev.status === "ok") {
-              if (OPTIMIZATION_MUTATING_TOOLS.has(ev.tool)) {
-                window.dispatchEvent(new Event("optimizations-changed"));
-              }
-              if (SUBMIT_TOOLS.has(ev.tool)) {
-                rt.persistentExtras = {};
-              }
-            }
-            callbacksRef.current.onToolEnd?.(ev, eventContext(key));
-          },
-          onPendingApproval: (ev) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              pendingApproval: ev,
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.2"),
-            });
-          },
-          onApprovalResolved: () => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              pendingApproval: null,
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.3"),
-            });
-          },
-          onMessagePatch: (chunk) => {
-            if (controller.signal.aborted) return;
-            if (rt.replyBuf === "") {
-              patchSession(key, {
-                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
-                ...(rt.reasoningBuf ? { reasoningEndedAt: Date.now() } : {}),
+          {
+            signal: controller.signal,
+            onSteerApplied: ({ ids, text }) => {
+              if (controller.signal.aborted) return;
+              steerQueue.applied(ids);
+              if (!text.trim()) return;
+              replyBeforeSteer = (replyBeforeSteer ?? "") + rt.replyBuf;
+              rt.replyBuf = "";
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              // The reply so far stays as its own bubble, tool activity and
+              // all; the rest of the turn streams into a new one after the
+              // user's message.
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                const kept =
+                  last &&
+                  last.role === "assistant" &&
+                  !last.content &&
+                  !last.toolCalls?.length &&
+                  !last.thinkingSegments?.length &&
+                  !last.plan
+                    ? prev.slice(0, -1)
+                    : prev;
+                return [
+                  ...kept,
+                  { role: "user", content: text },
+                  { role: "assistant", content: "", toolCalls: [] },
+                ];
               });
-            }
-            rt.replyBuf += chunk;
-            appendReply(key, chunk);
-          },
-          onMessageReset: () => {
-            if (controller.signal.aborted) return;
-            rt.replyBuf = "";
-            patchSession(key, { reasoningEndedAt: null });
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant" || last.content === "") return prev;
-              const next = prev.slice();
-              next[next.length - 1] = { ...last, content: "" };
-              return next;
-            });
-          },
-          onDone: (result) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              status: "done",
-              statusLabel: "",
-              ...(rt.reasoningBuf ? { reasoningEndedAt: Date.now() } : {}),
-            });
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              const fallback =
-                last.content ||
-                (last.toolCalls?.length
-                  ? ""
-                  : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
-              const next = prev.slice();
-              next[next.length - 1] = {
-                ...last,
-                content: result.assistant_message || fallback,
-                model: result.model,
-                servedModel: result.served_model,
-                stats: parseTurnStats(result.stats),
-              };
-              return next;
-            });
-            releaseSlot();
-          },
-          onError: (message, code) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              status: "error",
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.6"),
-              // Known machine codes get a localized message; anything else
-              // shows the backend's text as-is.
-              error:
-                code === "context_too_long" ? msg("agent.error.context_too_long") : message,
-            });
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              if (!last.content && !last.toolCalls?.length) {
-                // Nothing rendered yet — drop the empty assistant placeholder.
-                return prev.slice(0, -1);
-              }
-              // Mark any in-flight tool pills as errored so they stop
-              // spinning forever when the SSE socket dies mid-tool (e.g.
-              // backend restart, network drop). Without this the chip
-              // sits at "פועל כעת" indefinitely with no recovery path.
-              const hasRunning = last.toolCalls?.some((t) => t.status === "running");
-              if (!hasRunning) return prev;
-              const next = prev.slice();
-              next[next.length - 1] = {
-                ...last,
-                toolCalls: last.toolCalls?.map((t) =>
-                  t.status === "running"
-                    ? { ...t, status: "error", endedAt: Date.now() }
-                    : t,
+            },
+            onConversationMeta: (ev) => {
+              if (controller.signal.aborted) return;
+              if (!ev.conversation_id) return;
+              patchSession(key, { conversationId: ev.conversation_id });
+              callbacksRef.current.onConversationMeta?.(
+                ev.conversation_id,
+                ev.title,
+                eventContext(key),
+              );
+            },
+            onReasoningPatch: (chunk) => {
+              if (controller.signal.aborted) return;
+              patchThinking(key, (segments, toolCount, since) =>
+                appendReasoning(segments, chunk, Date.now(), toolCount, since),
+              );
+            },
+            onThinkingSummary: ({ index, text }) => {
+              if (controller.signal.aborted) return;
+              patchMessages(key, (prev) => summarizeThinking(prev, turnStart, index, text));
+            },
+            onPlan: (text) => {
+              if (controller.signal.aborted) return;
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                const next = prev.slice();
+                next[next.length - 1] = { ...last, plan: text };
+                return next;
+              });
+            },
+            onToolStart: (ev) => {
+              if (controller.signal.aborted) return;
+              // A tool call ends the current stretch of thinking; reasoning
+              // after it opens a new "Thought for" row below the tool.
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              patchSession(key, {
+                statusLabel: formatMsg(
+                  "auto.features.agent.panel.hooks.use.generalist.agent.template.1",
+                  { p1: ev.tool },
                 ),
-              };
-              return next;
-            });
-            releaseSlot();
+              });
+              pushToolCall(key, {
+                id: ev.id,
+                tool: ev.tool,
+                reason: ev.reason,
+                status: "running",
+                startedAt: Date.now(),
+                endedAt: null,
+                payload: { arguments: ev.arguments },
+              });
+              callbacksRef.current.onToolStart?.(ev, eventContext(key));
+            },
+            onToolEnd: (ev) => {
+              if (controller.signal.aborted) return;
+              finishToolCall(key, ev.id, ev.status === "ok" ? "done" : "error", ev.result);
+              patchSession(key, {
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
+              });
+              if (ev.status === "ok") {
+                if (OPTIMIZATION_MUTATING_TOOLS.has(ev.tool)) {
+                  window.dispatchEvent(new Event("optimizations-changed"));
+                }
+                if (SUBMIT_TOOLS.has(ev.tool)) {
+                  rt.persistentExtras = {};
+                }
+              }
+              callbacksRef.current.onToolEnd?.(ev, eventContext(key));
+            },
+            onPendingApproval: (ev) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                pendingApproval: ev,
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.2"),
+              });
+            },
+            onApprovalResolved: () => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                pendingApproval: null,
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.3"),
+              });
+            },
+            onMessagePatch: (chunk) => {
+              if (controller.signal.aborted) return;
+              if (rt.replyBuf === "") {
+                patchSession(key, {
+                  statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
+                });
+                patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              }
+              rt.replyBuf += chunk;
+              appendReply(key, chunk);
+            },
+            onMessageReset: () => {
+              if (controller.signal.aborted) return;
+              rt.replyBuf = "";
+              patchThinking(key, reopenThinking);
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant" || last.content === "") return prev;
+                const next = prev.slice();
+                next[next.length - 1] = { ...last, content: "" };
+                return next;
+              });
+            },
+            onDone: (result) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                status: "done",
+                statusLabel: "",
+              });
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                let reply = result.assistant_message;
+                if (replyBeforeSteer !== null) {
+                  if (replyBeforeSteer && reply.startsWith(replyBeforeSteer)) {
+                    reply = reply.slice(replyBeforeSteer.length).trimStart();
+                  }
+                  reply = last.content || reply;
+                  // Nothing came after the steer: no hollow bubble.
+                  if (!reply && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                    return prev.slice(0, -1);
+                  }
+                }
+                const fallback =
+                  last.content ||
+                  (last.toolCalls?.length
+                    ? ""
+                    : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
+                const next = prev.slice();
+                replyAt = next.length - 1;
+                next[replyAt] = {
+                  ...last,
+                  content: reply || fallback,
+                  model: result.model,
+                  servedModel: result.served_model,
+                  stats: parseTurnStats(result.stats),
+                };
+                return next;
+              });
+              releaseSlot();
+            },
+            onTurnStats: (raw) => {
+              if (controller.signal.aborted) return;
+              const stats = parseTurnStats(raw);
+              if (!stats) return;
+              patchMessages(key, (prev) => {
+                const at = replyAt;
+                const reply = at === null ? undefined : prev[at];
+                if (at === null || !reply || reply.role !== "assistant") return prev;
+                const next = prev.slice();
+                next[at] = { ...reply, stats };
+                return next;
+              });
+            },
+            onError: (message, code) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                status: "error",
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.6"),
+                // Known machine codes get a localized message; anything else
+                // shows the backend's text as-is.
+                error:
+                  localModelRefusalMessage(code) ??
+                  (code === "context_too_long"
+                    ? msg("agent.error.context_too_long")
+                    : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                      ? msg("agent.error.insufficient_funds")
+                      : message),
+                errorCode: code ?? null,
+              });
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                if (!last.content && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                  // Nothing rendered yet — drop the empty assistant placeholder.
+                  return prev.slice(0, -1);
+                }
+                // Mark any in-flight tool pills as errored so they stop
+                // spinning forever when the SSE socket dies mid-tool (e.g.
+                // backend restart, network drop). Without this the chip
+                // sits at "פועל כעת" indefinitely with no recovery path.
+                const hasRunning = last.toolCalls?.some((t) => t.status === "running");
+                if (!hasRunning) return prev;
+                const next = prev.slice();
+                next[next.length - 1] = {
+                  ...last,
+                  toolCalls: last.toolCalls?.map((t) =>
+                    t.status === "running" ? { ...t, status: "error", endedAt: Date.now() } : t,
+                  ),
+                };
+                return next;
+              });
+              releaseSlot();
+            },
           },
-        },
+      ),
       );
     },
-    [appendReply, eventContext, finishToolCall, getRuntime, patchMessages, patchSession, pushToolCall, requestPump],
+    [
+      appendReply,
+      eventContext,
+      finishToolCall,
+      getRuntime,
+      patchMessages,
+      patchSession,
+      patchThinking,
+      pushToolCall,
+      requestPump,
+      steerQueueFor,
+    ],
   );
 
   // The pump is idempotent, so the mount-time effect run and
@@ -636,19 +804,23 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       history: AgentMessage[],
       wizardStateOverride?: WizardState,
       regenerate = false,
+      hidden = false,
     ) => {
       // A resend within the same session replaces its own in-flight or queued
       // turn — other sessions' streams are untouched.
       abortSession(key);
       const rt = getRuntime(key);
-      rt.reasoningBuf = "";
       rt.replyBuf = "";
 
       const chatHistory: ChatTurn[] = history
         .filter((m) => m.content.trim().length > 0)
         .map((m) => {
           const toolCalls = historyToolCalls(m);
-          return { role: m.role, content: m.content, ...(toolCalls ? { tool_calls: toolCalls } : {}) };
+          return {
+            role: m.role,
+            content: m.content,
+            ...(toolCalls ? { tool_calls: toolCalls } : {}),
+          };
         });
       // Merge order: snapshot (from wizardCtx if mounted) <- sticky extras
       // (accumulated across turns from panel-side derivations like
@@ -675,13 +847,11 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           ...cur,
           messages: [
             ...history,
-            { role: "user", content: userMessage },
+            { role: "user", content: userMessage, ...(hidden ? { hidden } : {}) },
             { role: "assistant", content: "", toolCalls: [] },
           ],
-          reasoning: "",
-          reasoningStartedAt: null,
-          reasoningEndedAt: null,
           error: null,
+          errorCode: null,
           pendingApproval: null,
         });
       });
@@ -701,7 +871,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   );
 
   const send = React.useCallback(
-    (message: string, wizardStateOverride?: WizardState) => {
+    (message: string, wizardStateOverride?: WizardState, options?: { hidden?: boolean }) => {
       const trimmed = message.trim();
       if (!trimmed) return;
       const key = activeKeyRef.current;
@@ -713,10 +883,24 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         };
       }
       const history = sessionsRef.current.get(key)?.messages ?? [];
-      requestRun(key, trimmed, history, wizardStateOverride);
+      requestRun(key, trimmed, history, wizardStateOverride, false, options?.hidden ?? false);
     },
     [getRuntime, requestRun],
   );
+
+  // A follow-up runs in the chat it was sent from, displayed or not. Ending
+  // a turn (done, error, stop) settles its unread steers and lets the chat's
+  // queue run its next follow-up.
+  React.useEffect(() => {
+    for (const [key, queue] of steerQueues) {
+      queue.setSend((text) => {
+        const session = sessionsRef.current.get(key);
+        if (session) requestRun(key, text, session.messages);
+      });
+      const session = sessions.get(key);
+      queue.setBusy(session ? isBusy(session) : false);
+    }
+  }, [sessions, steerQueues, requestRun, activeKey]);
 
   const editAndResend = React.useCallback(
     (messageIndex: number, content: string) => {
@@ -746,7 +930,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     const lastUser = current[lastUserIndex];
     if (!lastUser) return;
     const truncated = current.slice(0, lastUserIndex);
-    requestRun(key, lastUser.content, truncated, undefined, true);
+    requestRun(key, lastUser.content, truncated, undefined, true, lastUser.hidden ?? false);
   }, [requestRun]);
 
   const stop = React.useCallback(() => {
@@ -754,6 +938,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     const wasQueued = sessionsRef.current.get(key)?.status === "queued";
     abortSession(key);
     patchSession(key, { status: "idle", statusLabel: "" });
+    patchThinking(key, (segments) => closeThinking(segments, Date.now()));
     if (wasQueued) {
       // Nothing streamed yet — drop the empty assistant placeholder so the
       // transcript doesn't keep a hollow bubble for a turn that never ran.
@@ -765,7 +950,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         return prev;
       });
     }
-  }, [abortSession, patchMessages, patchSession]);
+  }, [abortSession, patchMessages, patchSession, patchThinking]);
 
   /**
    * Drop background sessions that are safely re-openable: idle/done ones whose
@@ -778,11 +963,13 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         if (key === keepKey) continue;
         if (isBusy(session) || session.status === "error") continue;
         if (session.conversationId === null && session.messages.length > 0) continue;
+        if (steerQueues.get(key)?.hasPending()) continue;
         draft.delete(key);
         runtimesRef.current.delete(key);
+        dropSteerQueue(key);
       }
     },
-    [],
+    [dropSteerQueue, steerQueues],
   );
 
   const newSession = React.useCallback(() => {
@@ -841,6 +1028,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       const key = found;
       abortSession(key);
       runtimesRef.current.delete(key);
+      dropSteerQueue(key);
       const wasActive = activeKeyRef.current === key;
       if (wasActive) {
         const freshKey = nextKey();
@@ -855,10 +1043,21 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         });
       }
     },
-    [abortSession, commit, nextKey, setActive],
+    [abortSession, commit, nextKey, setActive, dropSteerQueue],
   );
 
   const active = sessions.get(activeKey) ?? blankSession(activeKey);
+
+  const activeSteerQueue = steerQueueFor(activeKey);
+  const steerSnapshot = React.useSyncExternalStore(
+    activeSteerQueue.subscribe,
+    activeSteerQueue.getSnapshot,
+    activeSteerQueue.getSnapshot,
+  );
+  const midTurn = React.useMemo(
+    () => midTurnOf(() => activeSteerQueue, steerSnapshot),
+    [activeSteerQueue, steerSnapshot],
+  );
 
   const confirmApproval = React.useCallback(
     async (approved: boolean) => {
@@ -898,10 +1097,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     status: active.status,
     statusLabel: active.statusLabel,
     messages: active.messages,
-    reasoning: active.reasoning,
-    reasoningStartedAt: active.reasoningStartedAt,
-    reasoningEndedAt: active.reasoningEndedAt,
     error: active.error,
+    errorCode: active.errorCode,
     pendingApproval: active.pendingApproval,
     conversationId: active.conversationId,
     model,
@@ -909,6 +1106,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     reasoningEffort,
     setReasoningEffort,
     send,
+    midTurn,
     editAndResend,
     retry,
     stop,

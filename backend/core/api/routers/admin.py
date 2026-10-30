@@ -10,8 +10,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...storage.models import UserModel
 from ..auth import AuthenticatedUser, get_authenticated_user, require_admin_user
 from ..directory_client import DirectoryClient, NullDirectoryClient
 from ..errors import DomainError
@@ -81,6 +83,19 @@ class StorageQuotaOverrideListResponse(BaseModel):
 
     default_bytes: int
     overrides: list[StorageQuotaOverrideResponse]
+
+
+class UserInternalFlagRequest(BaseModel):
+    """Request body for marking an account as internal/test."""
+
+    is_internal: bool
+
+
+class UserInternalFlagResponse(BaseModel):
+    """Account internal/test flag after an admin update."""
+
+    email: str
+    is_internal: bool
 
 
 class DirectoryUserMatch(BaseModel):
@@ -400,6 +415,42 @@ def create_admin_router(
             },
             job_store=job_store,
         )
+
+    @router.put(
+        "/users/{email}/internal",
+        response_model=UserInternalFlagResponse,
+        status_code=200,
+        summary="Mark an account as internal/test",
+    )
+    def set_user_internal_flag(
+        email: str,
+        payload: UserInternalFlagRequest,
+        admin_user: AdminUserDep,
+    ) -> UserInternalFlagResponse:
+        """Set whether an account is internal, so metrics exclude it.
+
+        Args:
+            email: Account email (the cross-app identity), matched case-insensitively.
+            payload: The new flag value.
+            admin_user: Authenticated admin user from the signed bearer token.
+
+        Returns:
+            The account email and its saved flag.
+
+        Raises:
+            DomainError: 400 for a blank email, 404 when no account has it.
+        """
+        del admin_user
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            raise DomainError("admin.invalid_username", status=400)
+        with Session(job_store.engine) as session:
+            row = session.get(UserModel, normalized_email)
+            if row is None:
+                raise DomainError("admin.user_not_found", status=404, email=normalized_email)
+            row.is_internal = payload.is_internal
+            session.commit()
+            return UserInternalFlagResponse(email=row.email, is_internal=bool(row.is_internal))
 
     @router.get(
         "/users/search",

@@ -1,4 +1,4 @@
-"""Password acceptance policy for Skynet-native accounts.
+"""Password acceptance policy for native (email/password) accounts.
 
 Follows NIST SP 800-63B §5.1.1: length-first, no composition rules, no
 rotation. The checks that actually blunt online guessing are a minimum
@@ -13,6 +13,7 @@ from __future__ import annotations
 from functools import cache
 from pathlib import Path
 
+from ..brand import APP_NAME
 from .errors import DomainError
 
 MIN_LENGTH = 8
@@ -20,7 +21,7 @@ MIN_LENGTH = 8
 # attempt while leaving real passphrases room (800-63B asks for 64+).
 MAX_LENGTH = 128
 
-_SERVICE_NAME = "skynet"
+_SERVICE_NAME = APP_NAME.lower()
 # Local parts shorter than this are too generic to treat as a signal
 # (e.g. "il" for il@example.com matching inside "nailbiter").
 _MIN_LOCAL_PART = 4

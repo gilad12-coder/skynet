@@ -23,7 +23,7 @@ function RecordedSystemNote({ role, content }: ChatMessage) {
   return (
     <div className="flex justify-center">
       <div
-        className="max-w-[92%] rounded-lg border border-[#DDD4C8]/50 bg-background/60 px-3 py-1.5 text-[0.6875rem] leading-relaxed text-muted-foreground"
+        className="max-w-[92%] rounded-lg border border-border/50 bg-background/60 px-3 py-1.5 text-[0.6875rem] leading-relaxed text-muted-foreground"
         dir="auto"
         style={{ wordBreak: "break-word" }}
       >
@@ -46,11 +46,11 @@ function RecordedSystemNote({ role, content }: ChatMessage) {
  */
 export function RecordedChatTranscript({ messages }: { messages: readonly ChatMessage[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-[#FBF7F1]/60 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
+    <div className="overflow-hidden rounded-lg border border-border/60 bg-[#FBF7F1]/60 dark:bg-[#3f382c]/60">
       <HelpTip text={msg("trajectory.chat.recorded_label.explain")} className="w-full">
-        <div className="flex w-full items-center gap-1.5 border-b border-[#DDD4C8]/50 bg-[#F4ECE0]/70 px-3 py-1.5">
-          <ClockCounterClockwise className="size-3 text-[#7A6A52]" aria-hidden="true" />
-          <span className="min-w-0 truncate text-[9px] font-semibold uppercase tracking-wider text-[#7A6A52]">
+        <div className="flex w-full items-center gap-1.5 border-b border-border/50 bg-[#F4ECE0]/70 dark:bg-[#443d31]/70 px-3 py-1.5">
+          <ClockCounterClockwise className="size-3 text-[#7A6A52] dark:text-[#cdbba1]" aria-hidden="true" />
+          <span className="min-w-0 truncate text-[9px] font-semibold uppercase tracking-wider text-[#7A6A52] dark:text-[#cdbba1]">
             {msg("trajectory.chat.recorded_label")}
           </span>
           <span className="ms-auto shrink-0 text-[9px] tabular-nums text-muted-foreground/70">

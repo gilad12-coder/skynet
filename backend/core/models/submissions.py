@@ -1,4 +1,4 @@
-"""Inbound payloads for POST /run and POST /grid-search plus the initial ack."""
+"""Inbound optimization payloads plus the initial submission ack."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from ..brand import APP_NAME
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
 from .results import ModelTokenUsage
 from .serve import WorkflowNodeTrace
@@ -110,8 +111,8 @@ class _OptimizationRequestBase(BaseModel):
     token_source: Literal["managed", "byok"] = Field(
         default="managed",
         description=(
-            "How model calls are billed: 'managed' charges the marked-up provider cost to the Skynet balance; "
-            "'byok' sends calls through the user's provider key and charges only Skynet's platform fee to "
+            f"How model calls are billed: 'managed' charges the marked-up provider cost to the {APP_NAME} balance; "
+            f"'byok' sends calls through the user's provider key and charges only {APP_NAME}'s platform fee to "
             "the balance. Billable sandbox usage is charged at marked-up provider cost in both modes."
         ),
     )
@@ -282,54 +283,6 @@ class RunRequest(_OptimizationRequestBase):
             tool_users = workflow_tool_users(self.workflow)
             if tool_users:
                 raise ValueError(f"tool_source is required — these workflow nodes use tools: {tool_users}.")
-        return self
-
-
-class GridSearchRequest(_OptimizationRequestBase):
-    """Payload for the /grid-search endpoint — sweep over model pairs."""
-
-    generation_models: list[ModelConfig] = Field(default_factory=list)
-    reflection_models: list[ModelConfig] = Field(default_factory=list)
-    use_all_available_generation_models: bool = Field(
-        default=False,
-        description=(
-            "Populate generation_models from every available model in the catalog. "
-            "When true, generation_models may be omitted and is replaced server-side."
-        ),
-    )
-    use_all_available_reflection_models: bool = Field(
-        default=False,
-        description=(
-            "Populate reflection_models from every available model in the catalog. "
-            "When true, reflection_models may be omitted and is replaced server-side."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _validate_model_lists(self) -> GridSearchRequest:
-        """Reject requests missing required model lists.
-
-        Each side (``generation_models``, ``reflection_models``) must either be
-        non-empty or be marked for server-side expansion via its matching
-        ``use_all_available_*`` flag.
-
-        Returns:
-            The validated request instance.
-
-        Raises:
-            ValueError: When ``metric_code`` is missing, when ``generation_models``
-                is empty and ``use_all_available_generation_models`` is false, or
-                when ``reflection_models`` is empty and
-                ``use_all_available_reflection_models`` is false.
-        """
-        if self.module_name.lower() == WORKFLOW_MODULE_NAME:
-            raise ValueError("Grid search does not support workflow modules yet — submit via /run.")
-        if self.metric_code is None:
-            raise ValueError("metric_code is required.")
-        if not self.use_all_available_generation_models and not self.generation_models:
-            raise ValueError("At least one generation model is required.")
-        if not self.use_all_available_reflection_models and not self.reflection_models:
-            raise ValueError("At least one reflection model is required.")
         return self
 
 

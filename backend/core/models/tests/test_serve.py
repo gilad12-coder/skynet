@@ -5,16 +5,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.models.common import ModelConfig
 from core.models.serve import ServeInfoResponse, ServeRequest, ServeResponse
 
 
 def test_serve_request_accepts_non_empty_inputs() -> None:
-    """Verify ServeRequest accepts a non-empty inputs dict and defaults override to None."""
+    """Verify ServeRequest accepts a non-empty inputs dict."""
     req = ServeRequest(inputs={"question": "What is 2+2?"})
 
     assert req.inputs == {"question": "What is 2+2?"}
-    assert req.model_config_override is None
 
 
 def test_serve_request_rejects_empty_inputs() -> None:
@@ -23,22 +21,10 @@ def test_serve_request_rejects_empty_inputs() -> None:
         ServeRequest(inputs={})
 
 
-def test_serve_request_accepts_model_config_override() -> None:
-    """Verify ServeRequest accepts and exposes a ModelConfig override."""
-    req = ServeRequest(
-        inputs={"q": "hi"},
-        model_config_override=ModelConfig(name="gpt-4o"),
-    )
-
-    assert req.model_config_override is not None
-    assert req.model_config_override.name == "gpt-4o"
-
-
-def test_serve_request_model_config_override_defaults_none() -> None:
-    """Verify ServeRequest leaves model_config_override unset by default."""
-    req = ServeRequest(inputs={"q": "hi"})
-
-    assert req.model_config_override is None
+def test_serve_request_rejects_model_config_override() -> None:
+    """Verify ServeRequest refuses a caller-chosen model."""
+    with pytest.raises(ValidationError, match="model settings it was optimized with"):
+        ServeRequest.model_validate({"inputs": {"q": "hi"}, "model_config_override": {"name": "gpt-4o"}})
 
 
 def test_serve_request_multiple_inputs_accepted() -> None:

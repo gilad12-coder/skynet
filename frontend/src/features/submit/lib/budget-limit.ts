@@ -1,7 +1,3 @@
-import type { TokenSourceMode } from "@/features/billing";
-
-import { chargeableBracket, runtimeStartHold, type CostBracket } from "./cost-bracket";
-
 export interface BudgetChoice {
   uncapped: boolean;
   /** The spending limit, or null while it is unset. */
@@ -13,34 +9,74 @@ export interface BudgetChoice {
 export interface BudgetShortfall {
   /** Which figure falls short: the spending limit, or the account's balance. */
   kind: "limit" | "balance";
-  /** The least that figure has to be. */
+  /** The least that figure has to be, in whole cents. */
   needed: number;
 }
 
 /**
- * The least a spending limit can be: the low end of the projected usage,
- * which starts at the hold the run's box takes the moment it opens.
- */
-export function limitFloor(bracket: CostBracket, mode: TokenSourceMode): number {
-  return chargeableBracket(bracket, mode).lowCents;
-}
-
-/**
- * Why the budget step cannot be left yet, or null when it can. A limit under
- * the floor would be refused at the run's first step or almost surely stop it
- * early; without a limit the account has to cover the opening hold instead.
+ * Why the run cannot start as set, or null when it can. A limit under the
+ * floor (`runFloor`) cannot open the run's boxes and fund its first calls;
+ * the account has to fund that same floor whether or not the run is capped.
  * An unset limit is left to stage validation, and a balance that has not
  * loaded to the server.
  */
 export function budgetShortfall(
-  bracket: CostBracket,
-  mode: TokenSourceMode,
+  floorCents: number,
   { uncapped, limit, balance }: BudgetChoice,
 ): BudgetShortfall | null {
-  if (uncapped) {
-    const hold = runtimeStartHold(bracket);
-    return balance != null && balance < hold ? { kind: "balance", needed: hold } : null;
+  const needed = Math.ceil(floorCents);
+  if (!uncapped && limit != null && limit < needed) return { kind: "limit", needed };
+  if (balance != null && balance < needed) return { kind: "balance", needed };
+  return null;
+}
+
+/** The wizard screens that set the spending limit. */
+const LIMIT_SCREENS: ReadonlySet<string> = new Set(["budget", "plan"]);
+
+/**
+ * What holds Continue on `screen`, or null when nothing does. The screens
+ * that set the limit hold it, and so does `gate`, the last screen before the
+ * metric step: past it the user would write code and run checks for a run
+ * that cannot start. No floor yet holds nothing.
+ */
+export function budgetContinueBlock(
+  screen: string,
+  floorCents: number | null,
+  choice: BudgetChoice,
+  gate = false,
+): BudgetShortfall | null {
+  if (floorCents == null || (!gate && !LIMIT_SCREENS.has(screen))) return null;
+  return budgetShortfall(floorCents, choice);
+}
+
+/** A saved setup's spending limit: the draft slice fields a reload restores. */
+export interface SavedLimit {
+  maxCostCents: number | null;
+  budgetUncapped: boolean;
+}
+
+/** Where a restored limit is written back. */
+export interface LimitTargets {
+  /** The page-load server budget the run enforces. */
+  budget: {
+    setMaxCostCents: (cents: number | null) => void;
+    setBudgetUncapped: (uncapped: boolean) => void;
+  };
+  /** The draft slice the next reload reads. */
+  patchSaved: (patch: Partial<SavedLimit>) => void;
+}
+
+/**
+ * Put a reloaded setup's saved limit back on the server budget and on the
+ * draft. The limit card's mount effect runs before the wizard's and fills its
+ * default into both while the page-load budget is still unset, so restoring
+ * only the budget would show the saved limit but save the default, and the
+ * next reload would read the default.
+ */
+export function restoreSavedLimit(saved: SavedLimit, { budget, patchSaved }: LimitTargets): void {
+  if (saved.budgetUncapped) budget.setBudgetUncapped(true);
+  else if (saved.maxCostCents != null) {
+    budget.setMaxCostCents(saved.maxCostCents);
+    patchSaved({ maxCostCents: saved.maxCostCents });
   }
-  const floor = limitFloor(bracket, mode);
-  return limit != null && limit < floor ? { kind: "limit", needed: floor } : null;
 }

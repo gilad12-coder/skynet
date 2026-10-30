@@ -11,13 +11,14 @@ const panelClass = cn(
   "origin-(--radix-context-menu-content-transform-origin)",
   "animate-in fade-in-0 zoom-in-95",
   "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
-  "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-lg",
+  "rounded-xl border border-border/60 bg-background/95 py-1.5 backdrop-blur-xl shadow-[var(--shadow-float)]",
   "outline-none",
+  "max-h-(--radix-context-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain",
 );
 
 const rowClass = cn(
   "flex min-h-[44px] w-full cursor-pointer select-none items-center gap-2 px-3 py-2 text-start text-sm",
-  "outline-none data-[highlighted]:bg-accent/60 lg:min-h-0",
+  "outline-none data-[highlighted]:bg-accent/60 lg:min-h-0 any-pointer-coarse:min-h-[44px]",
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
 );
 

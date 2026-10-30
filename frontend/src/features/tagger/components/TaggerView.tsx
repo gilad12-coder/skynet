@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { registerTutorialHook } from "@/features/tutorial";
+import { useEffect, useState } from "react";
 import type { TaggerSessionDetail } from "@/shared/lib/api";
 import { DataHubTabs } from "@/shared/ui/data-hub-tabs";
 import { PageContainer } from "@/shared/layout/page-container";
@@ -52,27 +51,6 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
   // an effect (not the state initializer) so SSR and first client paint agree.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("dataset")) setStartingNew(true);
-  }, []);
-
-  // Remember that the guide (not the user) opened setup, so it can hand the
-  // page back to the chooser when the guide ends.
-  const tourOpenedSetupRef = useRef(false);
-  useEffect(
-    () =>
-      registerTutorialHook("setTaggerStartingNew", (value) => {
-        tourOpenedSetupRef.current = value;
-        setStartingNew(value);
-      }),
-    [],
-  );
-  useEffect(() => {
-    const onExit = () => {
-      if (!tourOpenedSetupRef.current) return;
-      tourOpenedSetupRef.current = false;
-      setStartingNew(false);
-    };
-    window.addEventListener("tutorial-exited", onExit);
-    return () => window.removeEventListener("tutorial-exited", onExit);
   }, []);
 
   if (!initialSession && !startingNew) {
@@ -388,7 +366,8 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
               onAccept={tagger.acceptPrediction}
               onGoTo={tagger.goTo}
               onFinishRound={tagger.finishRound}
-              predictError={tagger.assistError === "predict"}
+              predictError={tagger.assistError === "predict" || tagger.assistError === "local_key"}
+              localKeyError={tagger.assistError === "local_key"}
             />
           ) : (
             <TaggerReviewGate

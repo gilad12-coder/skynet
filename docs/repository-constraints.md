@@ -1,0 +1,118 @@
+# Repository constraints: `optimize.toml`
+
+A repository run reads an `optimize.toml` file at the root of the repository,
+at the pinned commit. The file can only narrow the settings that the run's
+owner approved. It cannot widen them, and it cannot grant services.
+
+```toml
+version = 1
+
+[paths]
+# Optional. Each path must be inside an approved editable path.
+editable = ["bot/geocode"]
+# Optional. No version may change these, even inside an editable path.
+protected = ["bot/geocode/eval", "data/labels.csv"]
+
+[setup]
+# Optional. Used only when the run has no setup command of its own.
+command = "pip install -r requirements.txt"
+
+[instructions]
+# Optional. The optimization agent reads these as guidance. They are not enforced.
+intent = "Return the coordinates of the place the sender most likely means."
+invariants = ["Keep the reply format unchanged."]
+
+[rules]
+# Optional. Plain-language illegal approaches. Judge models enforce them.
+illegal = [
+  "Do not hardcode answers for dataset cases.",
+  "Do not call an outside geocoding service.",
+]
+```
+
+## What is enforced
+
+| Setting | Enforcement |
+| --- | --- |
+| `[paths] editable` | The parent checks every version before it is scored or published. A path outside the approved editable paths fails the setup check. |
+| `[paths] protected` | The parent rejects a version that changes a protected path, in its patch or while its code runs. A write that the code undoes before it exits also counts. The rejection names the path and the rule, with secret values hidden. `optimize.toml` itself is always protected. |
+| `[setup] command` | Runs once on the starting commit, with package-registry network and no secrets. The box goes offline before any version runs. |
+| `[instructions]` | Not enforced. The agent reads them in its brief. The scorer decides the score. |
+| `[rules] illegal` | Enforced by judge models. See "Plain-language rules" below. |
+
+## What fails the setup check
+
+- A `[services]` section. Repository runs cannot reach outside services yet,
+  and a repository file can never grant them.
+- An unknown section or setting, a `version` other than `1`, or invalid TOML.
+- A path that leaves the repository, names `.git`, or protects the whole tree.
+- A path with `*`, `?` or `[`. Paths are literal; patterns are not supported,
+  so name the files or folders.
+- An empty `[paths] editable` list, or protected paths that cover every
+  editable path. Such a run could not change anything. This includes a run
+  without the file whose only approved editable path is `optimize.toml`,
+  because `optimize.toml` is always protected.
+- An `optimize.toml` that is a link or a folder, or a file larger than 64 KiB.
+
+## Where the effective environment is recorded
+
+The setup check response includes `environment`. The run saves the same
+record under `target.repo.environment`. It holds the commit, the editable,
+protected and read-only paths, the secret names (never values), the setup
+command, the network for setup and for versions, and the services (none).
+A resumed run that arrives at different rules fails instead of continuing.
+
+## Plain-language rules
+
+`[rules] illegal` lists up to 50 rules, each up to 500 characters. The
+agent's brief lists every rule at the start as "Rule 1", "Rule 2" and so on.
+Skynet enforces them in three places:
+
+1. **Blocked versions.** When the path rules refuse a version, the agent gets
+   this text and continues: "Illegal action. Read the constraints file. You
+   cannot do this action. Do not repeat it, because it wastes time." This is
+   the same for the parent's check and for the sandbox's early checks:
+   AutoResearch `eval.sh`, Meta-Harness `save.sh` and its candidate check, the
+   AutoSaddler verifier, and the ShinkaEvolve file-edit check (model and agent
+   editors). A blocked version uses no scoring budget.
+2. **Judge during the run.** About every 15 agent actions, a fast judge model
+   reads the recent actions and the current diff against the rules. When it
+   sees work that goes toward a violation, the agent's next scoring reply
+   carries this note: "Check the constraints file. You are probably about to
+   violate rule X." The agent may continue.
+3. **Judge on each version.** Before the scorer runs, a stronger judge reads
+   the full diff of the version. When the diff breaks a rule, the version is
+   an "illegal approach": it gets a score of 0 and the judge's reason as its
+   feedback, and the scorer does not run. The version stays in the run
+   history with its score of 0, so later versions can learn from it. This is
+   the same for every optimizer.
+
+Each block, note and rejection is a run-log event (`rule.block`,
+`rule.note`, `rule.rejection`) that names the rule and the reason. The run's
+Logs tab shows them. A block from the parent has the source `host`. A block
+from a sandbox check has the source `engine`. The judges read only the rules, the agent's actions and
+the diff. They never read the scorer's data or the test labels. Their model
+calls go through the run's metered model gateway on the managed key, so the
+run budget pays for them. Only the parent can call the judge routes.
+
+The judge models default to the model catalog's best-value model (fast
+judge) and strongest model (final judge). Operators can set
+`RULE_WATCH_MODEL` and `RULE_JUDGE_MODEL` to override them. When a file has
+rules but the server has no managed model key, the setup check fails. When
+the final judge cannot give a clear answer, or a diff is longer than 400,000
+characters, the version gets a scoring error. It is not marked illegal.
+
+Limits:
+
+- A Meta-Harness `save.sh` block reaches the run log when the agent's
+  session turn ends, not at the moment of the block.
+- A ShinkaEvolve agent-editor block also arrives when the agent's session
+  ends. The whole version is refused, and the block text is the version's
+  error, which ShinkaEvolve keeps as the failed attempt's message.
+- Without a constraints file, the ShinkaEvolve agent editor still drops
+  changes outside the editable paths without a message, as before.
+- Without a constraints file, the sandbox checks keep their earlier messages,
+  which name the refused paths, and they write no `rule.block` event.
+- The fast judge counts each answered model call of the agent as one action.
+  Its note arrives with the next scoring reply, not in the middle of a turn.
+- A version with no changes (the starting point) is not judged.

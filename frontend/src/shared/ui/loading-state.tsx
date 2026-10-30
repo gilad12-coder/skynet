@@ -19,7 +19,7 @@ export function LoadingState({ label, srLabel, fullPage = false, className }: Lo
       role="status"
       className={cn(
         "flex flex-col items-center justify-center gap-2 py-10",
-        fullPage && "min-h-[60vh]",
+        fullPage && "min-h-[60dvh]",
         className,
       )}
     >

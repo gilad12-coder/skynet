@@ -157,6 +157,7 @@ class FakeJobStore:
         message: str,
         timestamp: datetime | None = None,
         pair_index: int | None = None,
+        **run_log_fields: Any,
     ) -> None:
         """Append a log entry to the in-memory log list."""
         self._logs.setdefault(optimization_id, []).append(
@@ -166,8 +167,21 @@ class FakeJobStore:
                 "message": message,
                 "timestamp": (timestamp or datetime.now(UTC)).isoformat(),
                 "pair_index": pair_index,
+                **run_log_fields,
             }
         )
+
+    def append_logs(self, optimization_id: str, entries: list[dict[str, Any]]) -> None:
+        """Append several log entries to the in-memory log list."""
+        for entry in entries:
+            fields = dict(entry)
+            self.append_log(
+                optimization_id,
+                level=fields.pop("level"),
+                logger_name=fields.pop("logger"),
+                message=fields.pop("message"),
+                **fields,
+            )
 
     def get_logs(
         self,
@@ -176,6 +190,7 @@ class FakeJobStore:
         limit: int | None = None,
         offset: int = 0,
         level: str | None = None,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return log entries for the job, optionally filtered/paginated."""
         entries = list(self._logs.get(optimization_id, []))
@@ -235,7 +250,7 @@ class FakeJobStore:
         )
 
     def recover_orphaned_jobs(self) -> int:
-        """Reclaim in-flight jobs whose lease has expired."""
+        """Fail in-flight jobs whose lease has expired."""
         now = datetime.now(UTC)
         recovered = 0
         for job in self._jobs.values():
@@ -245,9 +260,7 @@ class FakeJobStore:
             lease_dt = datetime.fromisoformat(lease_iso) if isinstance(lease_iso, str) else None
             if lease_dt is None or lease_dt < now:
                 job["status"] = "failed"
-                job["attempts"] = int(job.get("attempts") or 0) + 1
-                job["message"] = f"Re-queued after pod failure (attempt {job['attempts']})"
-                job["status"] = "pending"
+                job["stop_reason"] = "interrupted"
                 job["claimed_by"] = None
                 job["claimed_at"] = None
                 job["lease_expires_at"] = None

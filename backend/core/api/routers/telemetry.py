@@ -12,19 +12,19 @@ the table into the "how is Skynet actually used" figures.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import Connection, func, text
 from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...storage.models import TelemetryEventModel
 from ..auth import AuthenticatedUser, get_authenticated_user, require_admin_user
 from ..errors import DomainError
-from ..posthog import export_telemetry_events
 
 # Hard caps the public ingest endpoint enforces so a single request can't be
 # used to bulk-load the table or smuggle large blobs in through ``properties``.
@@ -33,6 +33,92 @@ MAX_PROPERTY_BYTES = 4096
 MAX_EVENT_NAME = 80
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
+
+# A run_completed row is a "lift" only when all of these hold. Each cast sits
+# behind a CASE on the JSON type because Postgres does not promise to evaluate
+# AND operands left to right, so a stray non-numeric value must not abort the
+# whole view.
+_QUALIFYING_RUN = """
+    CASE WHEN jsonb_typeof({p} -> 'lift') = 'number' THEN ({p} ->> 'lift')::numeric END >= 0.02
+    AND {p} -> 'held_out' = 'true'::jsonb
+    AND CASE WHEN jsonb_typeof({p} -> 'held_out_rows') = 'number'
+        THEN ({p} ->> 'held_out_rows')::numeric END >= 20
+    AND {p} -> 'from_sample' = 'false'::jsonb
+"""
+
+# Weeks are UTC calendar weeks starting Monday, returned as plain dates so the
+# figures do not move with the database session's time zone.
+METRIC_VIEW_DDL: Mapping[str, str] = {
+    "metric_first_lifts_weekly": f"""
+CREATE OR REPLACE VIEW metric_first_lifts_weekly AS
+WITH first_runs AS (
+    SELECT DISTINCT ON (e.username) e.username, e.received_at, e.properties
+    FROM telemetry_events e
+    WHERE e.event_name = 'run_completed' AND e.username IS NOT NULL
+    ORDER BY e.username, e.received_at, e.id
+)
+SELECT
+    date_trunc('week', u.created_at AT TIME ZONE 'UTC')::date AS signup_week,
+    count(*) AS signups,
+    count(*) FILTER (
+        WHERE f.username IS NOT NULL
+        AND f.received_at <= u.created_at + interval '48 hours'
+        AND {_QUALIFYING_RUN.format(p="f.properties")}
+    ) AS first_lifts
+FROM users u
+LEFT JOIN first_runs f ON f.username = u.email
+WHERE NOT u.is_internal
+GROUP BY 1
+""",
+    "metric_lifted_users_weekly": f"""
+CREATE OR REPLACE VIEW metric_lifted_users_weekly AS
+WITH lifted AS (
+    SELECT DISTINCT e.username, date_trunc('week', e.received_at AT TIME ZONE 'UTC')::date AS week
+    FROM telemetry_events e
+    JOIN users u ON u.email = e.username AND NOT u.is_internal
+    WHERE e.event_name = 'run_completed' AND {_QUALIFYING_RUN.format(p="e.properties")}
+),
+first_weeks AS (
+    SELECT username, min(week) AS first_week FROM lifted GROUP BY username
+)
+SELECT
+    l.week,
+    count(*) FILTER (WHERE l.week = f.first_week) AS new_lifted,
+    count(*) FILTER (WHERE l.week > f.first_week) AS returning_lifted
+FROM lifted l
+JOIN first_weeks f ON f.username = l.username
+GROUP BY l.week
+""",
+    # run_completed carries no optimization_id, so "has a qualifying run" is
+    # judged per owner: the served program's owner must have lifted some run
+    # before the week ended.
+    "metric_lifted_in_use_weekly": f"""
+CREATE OR REPLACE VIEW metric_lifted_in_use_weekly AS
+WITH program_days AS (
+    SELECT
+        j.username,
+        date_trunc('week', e.received_at AT TIME ZONE 'UTC')::date AS week,
+        count(DISTINCT (e.received_at AT TIME ZONE 'UTC')::date) AS days
+    FROM telemetry_events e
+    JOIN jobs j ON j.optimization_id = e.properties ->> 'optimization_id'
+    JOIN users u ON u.email = j.username AND NOT u.is_internal
+    WHERE e.event_name = 'serve_inference'
+    AND e.properties ->> 'channel' IN ('api_token', 'share_link')
+    GROUP BY j.optimization_id, j.username, 2
+)
+SELECT d.week, count(DISTINCT d.username) AS users_in_use
+FROM program_days d
+WHERE d.days >= 2
+AND EXISTS (
+    SELECT 1 FROM telemetry_events r
+    WHERE r.event_name = 'run_completed'
+    AND r.username = d.username
+    AND r.received_at < ((d.week + 7)::timestamp AT TIME ZONE 'UTC')
+    AND {_QUALIFYING_RUN.format(p="r.properties")}
+)
+GROUP BY d.week
+""",
+}
 
 
 def _optional_user(request: Request, authorization: str | None = Header(default=None)) -> AuthenticatedUser | None:
@@ -142,6 +228,123 @@ class TelemetryRecentResponse(BaseModel):
     events: list[TelemetryRecentEvent]
 
 
+class NorthStarFirstLiftsWeek(BaseModel):
+    """First Lifts for one signup week: signups and how many lifted within 48h."""
+
+    signup_week: date
+    signups: int
+    first_lifts: int
+
+
+class NorthStarLiftedUsersWeek(BaseModel):
+    """Users with a qualifying lifted run in one week, split new vs returning."""
+
+    week: date
+    new_lifted: int
+    returning_lifted: int
+
+
+class NorthStarInUseWeek(BaseModel):
+    """Owners whose lifted program was served externally on 2+ days in one week."""
+
+    week: date
+    users_in_use: int
+
+
+class NorthStarMetricsResponse(BaseModel):
+    """The north-star series for the trailing ``weeks`` UTC weeks, newest first.
+
+    Every series holds exactly ``weeks`` rows, one per week (zero-filled), so
+    the three line up row for row.
+    """
+
+    weeks: int
+    first_lifts: list[NorthStarFirstLiftsWeek]
+    lifted_users: list[NorthStarLiftedUsersWeek]
+    lifted_in_use: list[NorthStarInUseWeek]
+
+
+def _week_start(day: date) -> date:
+    """Return the Monday that starts ``day``'s week, matching ``date_trunc('week')``.
+
+    Args:
+        day: Any calendar date.
+
+    Returns:
+        The Monday on or before ``day``.
+    """
+    return day - timedelta(days=day.weekday())
+
+
+def ensure_metric_views(conn: Connection) -> None:
+    """Create any missing metric view on a Postgres connection.
+
+    A brand-new database is built by ``create_all`` and stamped at head without
+    replaying migrations, so it never runs the migration that creates these
+    views; this fills that gap on first read.
+
+    Args:
+        conn: A live Postgres connection inside a transaction.
+    """
+    for name, ddl in METRIC_VIEW_DDL.items():
+        if conn.execute(text("SELECT to_regclass(:name)"), {"name": name}).scalar() is None:
+            conn.execute(text(ddl))
+
+
+def read_north_star(conn: Connection, *, weeks: int, today: date) -> NorthStarMetricsResponse:
+    """Read the three metric views for the trailing ``weeks`` weeks.
+
+    Off Postgres (the SQLite test stores) the views cannot exist, so every week
+    reads as zero.
+
+    Args:
+        conn: A live connection inside a transaction.
+        weeks: Number of UTC weeks to return, including the current one.
+        today: The current UTC date.
+
+    Returns:
+        The zero-filled series, newest week first.
+    """
+    newest = _week_start(today)
+    days = [newest - timedelta(weeks=offset) for offset in range(weeks)]
+    first: dict[date, tuple[int, int]] = {}
+    lifted: dict[date, tuple[int, int]] = {}
+    in_use: dict[date, int] = {}
+    if conn.dialect.name == "postgresql":
+        ensure_metric_views(conn)
+        start = {"start": days[-1]}
+        for week, signups, first_lifts in conn.execute(
+            text("SELECT signup_week, signups, first_lifts FROM metric_first_lifts_weekly WHERE signup_week >= :start"),
+            start,
+        ):
+            first[week] = (int(signups), int(first_lifts))
+        for week, new, returning in conn.execute(
+            text("SELECT week, new_lifted, returning_lifted FROM metric_lifted_users_weekly WHERE week >= :start"),
+            start,
+        ):
+            lifted[week] = (int(new), int(returning))
+        for week, users in conn.execute(
+            text("SELECT week, users_in_use FROM metric_lifted_in_use_weekly WHERE week >= :start"), start
+        ):
+            in_use[week] = int(users)
+    return NorthStarMetricsResponse(
+        weeks=weeks,
+        first_lifts=[
+            NorthStarFirstLiftsWeek(
+                signup_week=day, signups=first.get(day, (0, 0))[0], first_lifts=first.get(day, (0, 0))[1]
+            )
+            for day in days
+        ],
+        lifted_users=[
+            NorthStarLiftedUsersWeek(
+                week=day, new_lifted=lifted.get(day, (0, 0))[0], returning_lifted=lifted.get(day, (0, 0))[1]
+            )
+            for day in days
+        ],
+        lifted_in_use=[NorthStarInUseWeek(week=day, users_in_use=in_use.get(day, 0)) for day in days],
+    )
+
+
 def _occurred_at(ts_millis: int | None) -> datetime | None:
     """Convert a client epoch-millis timestamp to an aware UTC datetime.
 
@@ -204,7 +407,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
     )
     def ingest_events(
         batch: TelemetryBatchIn,
-        background_tasks: BackgroundTasks,
         current_user: OptionalUserDep,
     ) -> TelemetryIngestResponse:
         """Persist a batch of interaction events, attributing the caller server-side.
@@ -217,7 +419,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
 
         Args:
             batch: The session-scoped batch of events from the browser SDK.
-            background_tasks: Post-response task queue for optional PostHog export.
             current_user: The token-resolved caller, or ``None`` when anonymous.
 
         Returns:
@@ -247,26 +448,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
         with Session(job_store.engine) as session:
             session.add_all(rows)
             session.commit()
-        if settings.posthog_project_api_key is not None:
-            export_events = [
-                {
-                    "name": event.name,
-                    "timestamp": (_occurred_at(event.ts) or received_at).isoformat(),
-                    "path": event.path,
-                    "locale": event.locale,
-                    "app_version": event.app_version,
-                    "properties": _clip(event.properties),
-                    "context": _clip(event.context),
-                }
-                for event in batch.events
-            ]
-            background_tasks.add_task(
-                export_telemetry_events,
-                username=username,
-                anonymous_id=batch.anonymous_id,
-                session_id=batch.session_id,
-                events=export_events,
-            )
         return TelemetryIngestResponse(accepted=len(rows))
 
     @router.get(
@@ -373,5 +554,30 @@ def create_telemetry_router(*, job_store) -> APIRouter:
                 for row in rows
             ]
         )
+
+    @router.get(
+        "/telemetry/metrics/north-star",
+        response_model=NorthStarMetricsResponse,
+        summary="Admin: First Lifts per week, new/returning lifted users, lifted programs in use",
+    )
+    def get_north_star(
+        current_user: AuthenticatedUserDep,
+        weeks: Annotated[int, Query(ge=1, le=104)] = 12,
+    ) -> NorthStarMetricsResponse:
+        """Return the north-star metric series from the Postgres metric views.
+
+        Args:
+            current_user: Authenticated caller; must be a backend admin.
+            weeks: Trailing UTC weeks to return, clamped to ``1..104``.
+
+        Returns:
+            A :class:`NorthStarMetricsResponse`, newest week first.
+
+        Raises:
+            DomainError: 403 when the caller is not a backend admin.
+        """
+        require_admin_user(current_user)
+        with job_store.engine.begin() as conn:
+            return read_north_star(conn, weeks=weeks, today=datetime.now(UTC).date())
 
     return router

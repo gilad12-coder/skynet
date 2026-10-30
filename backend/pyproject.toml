@@ -16,6 +16,7 @@ include = ["core*"]
     "static/scalar/fonts/OFL.txt",
 ]
 "core.i18n_locales" = ["*.json"]
+"core.service_gateway.optimization.blackbox" = ["shinka_requirements.txt"]
 
 [project]
 name = "skynet"
@@ -79,6 +80,9 @@ dependencies = [
     "pip==26.2.1",
     "pyarrow>=17",
     "pymysql>=1.1",
+    # Browser web push (VAPID) for the Chrome notification channel
+    # (core.notifications.channels.ChromeChannel).
+    "pywebpush>=2.0",
 ]
 
 [project.optional-dependencies]

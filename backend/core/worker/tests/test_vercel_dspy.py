@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
 import logging
 import queue
-import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,7 +15,7 @@ import pytest
 from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult
 from core.worker import vercel_dspy
-from core.worker.checkpoint_compat import runtime_identity, source_digest
+from core.worker.isolated_runner import SANDBOX_PROTOCOL
 
 
 class FakeSession:
@@ -34,14 +32,17 @@ class FakeSession:
         self.files.update(files)
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
-        """Emit fragmented checkpoint and successful optimizer frames."""
+        """Answer the protocol probe, then emit fragmented checkpoint and optimizer frames."""
+        if command == vercel_dspy.PROTOCOL_PROBE:
+            assert not self.files
+            return CommandResult(0, stdout=f"{SANDBOX_PROTOCOL}\n")
         [request_path] = [path for path in self.files if path.endswith("/request.json")]
-        [archive_path] = [path for path in self.files if path.endswith("/source.tgz.b64")]
-        assert command.index(f"base64 -d {archive_path} | tar -xzf -") < command.index("core.worker.isolated_runner")
-        assert 'PYTHONSAFEPATH=1 PYTHONPATH="$PWD"/' in command
+        assert list(self.files) == [request_path]
+        assert command.startswith("PYTHONPATH=/app python3 -m core.worker.isolated_runner")
         request = json.loads(self.files[request_path])
         assert "_budget_gateway_descriptor" not in request["payload"]
-        assert request["runtime_identity"]["gepa_revision"] == "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
+        assert "runtime_identity" not in request
+        assert request["protocol"] == SANDBOX_PROTOCOL
         prefix = f"{vercel_dspy.EVENT_PREFIX}{request['nonce']} "
         events = []
         if request["export_checkpoints"]:
@@ -137,22 +138,6 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
     assert events.get_nowait()["type"] == "result"
 
 
-def test_parent_ships_the_source_its_identity_covers(tmp_path: Path) -> None:
-    """Unpack the staged archive and hash it the way a guest does.
-
-    Args:
-        tmp_path: Stand-in for the guest's session directory.
-    """
-    archive = base64.b64decode(vercel_dspy._source_archive())
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        tar.extractall(tmp_path, filter="data")
-    assert source_digest(tmp_path / "core") == runtime_identity()["source_sha256"]
-    assert (tmp_path / "core/worker/isolated_runner.py").is_file()
-    assert (tmp_path / "core/i18n_locales/he.json").is_file()
-    assert not list((tmp_path / "core").rglob("tests"))
-    assert not list((tmp_path / "core").rglob("__pycache__"))
-
-
 class CrashingSession(FakeSession):
     """Die before the entrypoint, the way an image missing this revision's modules does."""
 
@@ -162,7 +147,9 @@ class CrashingSession(FakeSession):
         self.stderr = stderr
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
-        """Stream only stderr and exit 1 without framing any event."""
+        """Pass the protocol probe, then stream only stderr and exit 1 without framing any event."""
+        if command == vercel_dspy.PROTOCOL_PROBE:
+            return CommandResult(0, stdout=f"{SANDBOX_PROTOCOL}\n")
         kwargs["on_output"]("stderr", self.stderr)
         return CommandResult(1, stderr=self.stderr)
 
@@ -175,7 +162,7 @@ class CrashingSession(FakeSession):
             '  File "/app/core/worker/isolated_runner.py", line 26, in <module>\n'
             "    from core.worker.preflight import run_dspy_preflight\n"
             "ModuleNotFoundError: No module named 'core.service_gateway.datasets.split_counts'\n",
-            "The sandbox backend image is incompatible with this worker revision and runtime. "
+            f"{vercel_dspy.BROKEN_IMAGE_MESSAGE} "
             "ModuleNotFoundError: No module named 'core.service_gateway.datasets.split_counts'",
             DETERMINISTIC_FAILURE,
         ),
@@ -216,6 +203,71 @@ def test_guest_crash_names_its_cause(
     assert event["error"] == expected
     assert event["failure_kind"] == kind
     assert "Traceback (most recent call last):" in caplog.text
+    assert events.empty()
+
+
+class ProbedSession(FakeSession):
+    """Answer the protocol probe the way a given image would and record every command."""
+
+    def __init__(self, probe: CommandResult) -> None:
+        """Keep the image's probe answer."""
+        super().__init__()
+        self.probe = probe
+        self.commands: list[str] = []
+
+    def run(self, command: str, **kwargs: Any) -> CommandResult:
+        """Return the probe answer; any later command means the request was sent."""
+        self.commands.append(command)
+        return self.probe
+
+
+@pytest.mark.parametrize(
+    ("probe", "expected"),
+    [
+        (
+            CommandResult(
+                1,
+                stderr="Traceback (most recent call last):\n"
+                '  File "<string>", line 1, in <module>\n'
+                "ModuleNotFoundError: No module named 'core.worker.sandbox_protocol'\n",
+            ),
+            vercel_dspy.OUTDATED_IMAGE_MESSAGE,
+        ),
+        (
+            CommandResult(0, stdout=f"{SANDBOX_PROTOCOL + 1}\n"),
+            f"The sandbox image speaks protocol {SANDBOX_PROTOCOL + 1}, but this worker speaks {SANDBOX_PROTOCOL};"
+            " rebuild and re-pin the sandbox image.",
+        ),
+    ],
+)
+def test_incompatible_image_is_refused_before_the_request_is_sent(
+    probe: CommandResult, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Name the stale image instead of letting its older models reject the request."""
+    session = ProbedSession(probe)
+    monkeypatch.setattr(vercel_dspy, "RemoteSandboxRuntime", lambda *_args: SimpleNamespace(open=lambda _spec: session))
+    events: queue.Queue = queue.Queue()
+    vercel_dspy.run_vercel_dspy(
+        {
+            "_preflight": {"scope": "evaluation"},
+            "_budget_gateway_descriptor": {
+                "url": "http://127.0.0.1:9876",
+                "control_token": "control",
+                "image": "backend@sha256:" + "a" * 64,
+                "lifetime_seconds": 600,
+            },
+        },
+        "setup",
+        events,
+        "spawn",
+    )
+    assert session.commands == [vercel_dspy.PROTOCOL_PROBE]
+    assert session.files == {}
+    assert session.closed
+    event = events.get_nowait()
+    assert event["type"] == "error"
+    assert event["error"] == expected
+    assert event["failure_kind"] == DETERMINISTIC_FAILURE
     assert events.empty()
 
 

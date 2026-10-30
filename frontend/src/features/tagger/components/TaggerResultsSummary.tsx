@@ -21,14 +21,14 @@ interface Props {
   onFlaggedPass?: () => void;
 }
 
-// A dark-brand → brass → light-brass ramp: the human's own work reads as the
-// brand tone, and the two AI provenances share the brass accent (deeper for the
+// A brand → lighter-brand ramp: the human's own work reads as the brand tone,
+// and the two AI provenances share the chart ramp's next steps (deeper for the
 // rows you verified, lighter for the ones left on autopilot). The same three
 // colours key the icons, the count labels, and the proportion bar's segments.
 const SOURCE_COLOR = {
   human: "var(--primary)",
-  ai_confirmed: "#a68b6b",
-  ai_auto: "#c8a882",
+  ai_confirmed: "var(--chart-2)",
+  ai_auto: "var(--chart-3)",
 } as const;
 
 /**

@@ -3,9 +3,21 @@
 import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
 import { toast } from "react-toastify";
-import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, SignIn, Trash, X } from "@/shared/ui/icons";
+import {
+  ArrowSquareOut,
+  CircleNotch,
+  Cube,
+  Database,
+  FileText,
+  FloppyDisk,
+  FolderOpen,
+  Key,
+  Pulse,
+  SignIn,
+  Trash,
+  X,
+} from "@/shared/ui/icons";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
-import { StatusPill } from "@/shared/ui/status-badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -21,19 +33,43 @@ import {
   categoryLabel,
   providerMeta,
   type CredentialField,
+  type ProviderCategory,
   type ProviderMeta,
 } from "./providers";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
 import { KeyFormActions } from "@/shared/ui/key-form-actions";
 import { Textarea } from "@/shared/ui/primitives/textarea";
 
-/** The status pill next to a linked account. Green when healthy, failed when it needs a reconnect. */
-function ConnectorStatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
+// This tab lives in the Settings modal, whose card forms put Save key near the
+// bottom-right corner where the app's toasts stack; top-center only overlaps
+// the modal's title, which has nothing to click.
+const TOAST_OPTIONS = { position: "top-center" } as const;
+
+const CATEGORY_ICONS: Record<ProviderCategory, React.ElementType> = {
+  hubs: Cube,
+  files: FolderOpen,
+  docs: FileText,
+  databases: Database,
+  traces: Pulse,
+};
+
+/**
+ * A linked account's status as a dot on the logo's corner: green when healthy,
+ * red when it needs a reconnect. The label is read out but not shown.
+ */
+function ConnectorStatusDot({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
   const healthy = status === "connected";
+  const label = healthy ? msg("connectors.status.connected") : msg("connectors.status.invalid");
   return (
-    <StatusPill tone={healthy ? "success" : "failed"}>
-      {healthy ? msg("connectors.status.connected") : msg("connectors.status.invalid")}
-    </StatusPill>
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={cn(
+        "absolute -bottom-0.5 -end-0.5 size-2.5 rounded-full ring-2 ring-background",
+        healthy ? "bg-[var(--success)]" : "bg-[var(--danger)]",
+      )}
+    />
   );
 }
 
@@ -46,7 +82,7 @@ function useConnectorErrorParam() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("connector_error");
     if (!code) return;
-    toast.error(tI18n(code));
+    toast.error(tI18n(code), TOAST_OPTIONS);
     url.searchParams.delete("connector_error");
     window.history.replaceState(
       window.history.state,
@@ -180,7 +216,7 @@ function ProviderCard({
       const { authorize_url } = await meta.startOAuth(oauthValues);
       window.location.assign(authorize_url);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
       setStarting(false);
     }
   };
@@ -196,9 +232,9 @@ function ProviderCard({
       const res = await meta.saveCredentials(trimmedValues());
       onChange(res.connectors);
       closeForm();
-      toast.success(meta.toastConnected);
+      toast.success(meta.toastConnected, TOAST_OPTIONS);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
     } finally {
       setSaving(false);
     }
@@ -210,9 +246,9 @@ function ProviderCard({
     try {
       const res = await meta.remove();
       onChange(res.connectors);
-      toast.success(meta.toastDisconnected);
+      toast.success(meta.toastDisconnected, TOAST_OPTIONS);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
+      toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"), TOAST_OPTIONS);
     } finally {
       setRemoving(false);
     }
@@ -223,26 +259,20 @@ function ProviderCard({
       ref={cardRef}
       className={cn(
         "rounded-lg border border-border/50 px-3 py-2.5",
-        focused && "border-[#C8A882] ring-[3px] ring-[#C8A882]/25",
+        focused && "border-primary-fill ring-[3px] ring-primary/25",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <meta.Avatar size={28} />
+          <span className="relative inline-flex shrink-0">
+            <meta.Avatar size={28} />
+            {connected && status?.status && <ConnectorStatusDot status={status.status} />}
+          </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm font-medium text-foreground">{meta.name}</span>
-            {connected ? (
-              <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                {status?.status && <ConnectorStatusPill status={status.status} />}
-                <span className="truncate">
-                  {status?.account_label
-                    ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
-                    : msg("connectors.status.connected")}
-                </span>
-              </span>
-            ) : (
-              <span className="text-xs text-muted-foreground">{meta.blurb}</span>
-            )}
+            <span className="min-w-0 break-words text-xs text-muted-foreground">
+              {connected && status?.account_label ? status.account_label : meta.blurb}
+            </span>
           </div>
         </div>
 
@@ -293,28 +323,24 @@ function ProviderCard({
             </span>
           )}
           {connected && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleRemove}
-                  disabled={removing}
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={msg("connectors.disconnect")}
-                >
-                  {removing ? (
-                    <CircleNotch
-                      className="animate-spin motion-reduce:animate-none"
-                      aria-hidden="true"
-                    />
-                  ) : (
-                    <Trash className="size-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{msg("connectors.disconnect")}</TooltipContent>
-            </Tooltip>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleRemove}
+              disabled={removing}
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              autoTooltip={false}
+              aria-label={msg("connectors.disconnect")}
+            >
+              {removing ? (
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Trash className="size-4" />
+              )}
+            </Button>
           )}
         </div>
       </div>
@@ -358,7 +384,7 @@ function ProviderCard({
                   href={meta.helpUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-0.5 rounded-sm font-medium text-[#8A6D44] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+                  className="inline-flex items-center gap-0.5 rounded-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
                 >
                   {meta.helpUrlLabel}
                   <ArrowSquareOut className="size-3" />
@@ -404,7 +430,7 @@ export function ConnectorsTab() {
   useConnectorErrorParam();
 
   return (
-    <div className="space-y-4">
+    <div data-setup="connectors" className="space-y-4">
       <p className="text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
 
       {loading ? (
@@ -418,7 +444,11 @@ export function ConnectorsTab() {
         <div className="flex flex-col gap-5">
           {PROVIDER_GROUPS.map((group) => (
             <section key={group.category} className="flex flex-col gap-2.5">
-              <h4 className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
+              <h4 className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                {React.createElement(CATEGORY_ICONS[group.category], {
+                  className: "size-3.5 shrink-0",
+                  "aria-hidden": true,
+                })}
                 {categoryLabel(group.category)}
               </h4>
               {group.providers.map((id: ConnectorProvider) => (

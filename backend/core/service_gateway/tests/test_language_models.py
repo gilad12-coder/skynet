@@ -9,12 +9,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from core.api import model_catalog
+from core.api.model_catalog import CatalogModel, ModelCatalogResponse
 from core.config import settings
-from core.exceptions import InfrastructureInterruptionError, ServiceError
+from core.exceptions import ServiceError
 from core.models import ModelConfig
 from core.service_gateway.language_models import (
     CustomStreamWrapper,
-    GepaRecoverySeedBoundary,
     MeteredLM,
     _apply_managed_gateway,
     _translate_gateway_reasoning,
@@ -54,39 +55,6 @@ class _FakeLM:
         """
         self.history = history
         self.model = model
-
-
-def test_recovery_seed_boundary_marks_exact_iteration_zero_once() -> None:
-    """Publish once after GEPA reports its completed seed valset evaluation."""
-    boundary = GepaRecoverySeedBoundary(object())
-
-    with patch("core.service_gateway.language_models.finish_recovery_seed") as finish:
-        boundary.on_valset_evaluated({"iteration": 1, "candidate_idx": 0})
-        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
-        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
-
-    finish.assert_called_once()
-    assert boundary(object()) is False
-
-
-def test_recovery_seed_boundary_surfaces_marker_failure_at_stopper() -> None:
-    """Carry a swallowed GEPA callback failure through its next stop check."""
-    failure = InfrastructureInterruptionError("relay interrupted")
-    boundary = GepaRecoverySeedBoundary(object())
-
-    with patch("core.service_gateway.language_models.finish_recovery_seed", side_effect=failure):
-        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
-
-    with pytest.raises(InfrastructureInterruptionError, match="relay interrupted"):
-        boundary(object())
-
-
-def test_recovery_seed_boundary_rejects_missing_upstream_callback() -> None:
-    """Fail closed when pinned GEPA reaches its stopper without the seed event."""
-    boundary = GepaRecoverySeedBoundary(object())
-
-    with pytest.raises(ServiceError, match="did not publish"):
-        boundary(object())
 
 
 def test_total_tokens_from_history_sums_total_tokens() -> None:
@@ -253,6 +221,59 @@ def test_build_language_model_extra_overrides_num_retries() -> None:
 
     call_kwargs = mock_cls.call_args[1]
     assert call_kwargs["num_retries"] == 5
+
+
+def _haiku_catalog() -> ModelCatalogResponse:
+    """Build a catalog with one opt-in thinker, one default-on thinker and one non-thinker."""
+    return ModelCatalogResponse(
+        providers=[],
+        models=[
+            CatalogModel(
+                value="openrouter/anthropic/claude-haiku-5.5", label="Haiku", provider="openrouter",
+                available=True, reasoning_efforts=["minimal", "low", "medium", "high"],
+                default_reasoning_effort="medium", reasoning_default_enabled=False,
+            ),
+            CatalogModel(
+                value="openrouter/openai/gpt-6-luna", label="Luna", provider="openrouter",
+                available=True, reasoning_efforts=["low", "medium", "high"],
+                default_reasoning_effort="medium", reasoning_default_enabled=True,
+            ),
+            CatalogModel(
+                value="openrouter/acme/chat", label="Chat", provider="openrouter",
+                available=True, reasoning_efforts=[], reasoning_default_enabled=False,
+            ),
+        ],
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("openrouter/anthropic/claude-haiku-5.5", "low"),
+        ("openrouter/openai/gpt-6-luna", "medium"),
+        ("openrouter/acme/chat", None),
+        ("openrouter/unknown/model", None),
+    ],
+)
+def test_build_language_model_sends_the_unpicked_effort(
+    monkeypatch: pytest.MonkeyPatch, model: str, expected: str | None
+) -> None:
+    """With no effort set, an opt-in thinker gets low effort so Auto never turns its thinking off."""
+    monkeypatch.setattr(model_catalog, "_cached_response", _haiku_catalog())
+    with patch("core.service_gateway.language_models.MeteredLM") as mock_cls:
+        build_language_model(_cfg(name=model))
+
+    assert mock_cls.call_args[1].get("reasoning_effort") == expected
+
+
+def test_build_language_model_keeps_an_explicit_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller's effort wins over the unpicked default."""
+    monkeypatch.setattr(model_catalog, "_cached_response", _haiku_catalog())
+    config = apply_reasoning_effort(_cfg(name="openrouter/anthropic/claude-haiku-5.5"), "high")
+    with patch("core.service_gateway.language_models.MeteredLM") as mock_cls:
+        build_language_model(config)
+
+    assert mock_cls.call_args[1]["reasoning_effort"] == "high"
 
 
 def test_build_language_model_merges_extra_kwargs() -> None:

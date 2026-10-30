@@ -19,6 +19,7 @@ from collections.abc import AsyncIterable, AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ...billing import StripeBillingService
@@ -54,6 +55,7 @@ from ...models import (
     RunResponse,
     WorkflowSpec,
 )
+from ...models.results import result_scores
 from ...models.serve import WorkflowNodeTrace
 from ...registry import ResolverError, resolve_module_factory
 from ...service_gateway.language_models import usage_by_model_from_history
@@ -69,6 +71,7 @@ from ...service_gateway.optimization.training_ground.run_react import (
     resolve_react_tools,
 )
 from ...service_gateway.optimization.workflow import build_workflow_program, workflow_tool_users
+from ...storage.models import ContinuousCycleModel, ContinuousPlanModel
 from ..auth import AuthenticatedUser, is_admin
 from ..converters import (
     compute_elapsed,
@@ -225,19 +228,29 @@ async def stream_with_llm_metering(
 
     Yields:
         The upstream events; a ``done`` event gains a ``stats`` block with the
-        turn's token usage, cost and timing.
+        turn's token usage, cost and timing. When model calls made after
+        ``done`` (late thinking labels) changed the usage, one last
+        ``turn_stats`` event carries the full block, so the shown cost is
+        what gets debited.
     """
     started = time.monotonic()
     first_token_at: float | None = None
+    done_stats: dict[str, Any] | None = None
     try:
         async for event in source:
             name = event.get("event")
             if name == "message_patch" and first_token_at is None:
                 first_token_at = time.monotonic()
             elif name == "done" and isinstance(event.get("data"), dict):
-                stats = _turn_stats(usage_sink, token_source, started, first_token_at)
-                event = {**event, "data": {**event["data"], "stats": stats}}
+                done_stats = _turn_stats(usage_sink, token_source, started, first_token_at)
+                event = {**event, "data": {**event["data"], "stats": done_stats}}
             yield event
+        if done_stats is not None:
+            final = _turn_stats(usage_sink, token_source, started, first_token_at)
+            usage = ("input_tokens", "output_tokens", "cents")
+            if any(final[key] != done_stats[key] for key in usage):
+                # Timings stay as of ``done``: the reply was over by then.
+                yield {"event": "turn_stats", "data": {"stats": {**done_stats, **{k: final[k] for k in usage}}}}
     finally:
         engine = getattr(job_store, "engine", None)
         if engine is not None and usage_sink:
@@ -270,14 +283,19 @@ def _turn_stats(
 
     Returns:
         Token counts (``None`` when untracked), cents and millisecond timings.
+        ``reply_output_tokens`` leaves out LMs marked ``side_call`` (such as
+        thinking labels), which run beside the reply and would inflate its speed.
     """
     now = time.monotonic()
     breakdown = usage_by_model_from_history(*usage_sink) if usage_sink else None
     input_tokens = sum(pair[0] for pair in breakdown.values()) if breakdown else None
     output_tokens = sum(pair[1] for pair in breakdown.values()) if breakdown else None
+    reply_lms = [lm for lm in usage_sink if not getattr(lm, "side_call", False)]
+    reply_breakdown = usage_by_model_from_history(*reply_lms) if reply_lms else None
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "reply_output_tokens": sum(pair[1] for pair in reply_breakdown.values()) if reply_breakdown else None,
         "cents": estimate_run_cents(usage_sink, token_source) if breakdown else None,
         "duration_ms": round((now - started) * 1000),
         "ttft_ms": round((first_token_at - started) * 1000) if first_token_at is not None else None,
@@ -305,8 +323,12 @@ async def sse_from_events(
     otherwise leaves the connection idle long enough for an intermediary
     (ingress/LB idle timeout) to silently drop it mid-turn.
 
+    A mapping that also carries an ``id`` gets an ``id: <id>`` line, which a
+    resumable stream's client echoes back to resume after that event.
+
     Args:
-        source: Async iterable yielding ``{"event": str, "data": dict}`` mappings.
+        source: Async iterable yielding ``{"event": str, "data": dict}``
+            mappings, optionally with an ``id``.
 
     Yields:
         SSE-formatted strings ready for ``StreamingResponse``.
@@ -329,7 +351,9 @@ async def sse_from_events(
             next_event = None
             name = event["event"]
             payload = json.dumps(event["data"], ensure_ascii=False, default=str)
-            yield f"event: {name}\ndata: {payload}\n\n"
+            event_id = event.get("id")
+            prefix = f"id: {event_id}\n" if event_id is not None else ""
+            yield f"{prefix}event: {name}\ndata: {payload}\n\n"
     finally:
         if next_event is not None:
             next_event.cancel()
@@ -587,6 +611,38 @@ def run_folder_ids(job_store, optimization_ids: list[str]) -> dict[str, str]:
         return folder_ids_for_runs(session, optimization_ids)
 
 
+def automated_run_ids(job_store, optimization_ids: list[str]) -> set[str]:
+    """Return the runs that belong to a continuous plan.
+
+    A run belongs when a plan was enabled from it, it is a plan's current
+    version, or a plan's scheduled check started it.
+
+    Args:
+        job_store: Job-store whose ``engine`` backs the plan tables.
+        optimization_ids: Runs to look up.
+
+    Returns:
+        The ids among ``optimization_ids`` that belong to a plan; empty for stores without an engine.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None or not optimization_ids:
+        return set()
+    wanted = set(optimization_ids)
+    with Session(engine) as session:
+        plans = session.execute(
+            select(ContinuousPlanModel.source_optimization_id, ContinuousPlanModel.incumbent_optimization_id).where(
+                or_(
+                    ContinuousPlanModel.source_optimization_id.in_(wanted),
+                    ContinuousPlanModel.incumbent_optimization_id.in_(wanted),
+                )
+            )
+        ).all()
+        started = session.scalars(
+            select(ContinuousCycleModel.optimization_id).where(ContinuousCycleModel.optimization_id.in_(wanted))
+        ).all()
+    return wanted & ({run for pair in plans for run in pair} | set(started))
+
+
 def get_job_no_payload(job_store, optimization_id: str) -> dict[str, Any]:
     """Read a job row without materializing its payload when the store can.
 
@@ -759,8 +815,7 @@ def _resume_candidate_id(job_data: dict) -> str | None:
     resumable_status = status in {OptimizationStatus.failed, OptimizationStatus.cancelled, OptimizationStatus.paused}
     if not resumable_status and not budget_stop:
         return None
-    # A grid is resumed per pair (in its results), not via a whole-job button, so
-    # the top-level flag stays False for grids — see ``grid_resumable_pairs``.
+    # Grid searches are retired: a stored grid stays readable but never resumes.
     if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
         return None
     # A manual pause or a budget stop is user-driven, not failure recovery, so it is
@@ -893,27 +948,6 @@ def _has_resumable_state(job_store: Any, optimization_id: str) -> bool:
     return bool(callable(has_pairs) and has_pairs(optimization_id))
 
 
-def grid_resumable_pairs(job_store: Any, optimization_id: str) -> list[int]:
-    """Return the grid pair indices that have a saved checkpoint to resume from.
-
-    Drives the per-pair control in the grid results: a failed pair whose index is
-    here crashed mid-GEPA and offers Resume; a failed pair not here failed without
-    state and offers Restart. Successful pairs have no checkpoint (dropped when
-    they finished), so they never appear.
-
-    Args:
-        job_store: The job store to query.
-        optimization_id: The grid job id.
-
-    Returns:
-        Sorted pair indices with a checkpoint (empty when none or unsupported).
-    """
-    lister = getattr(job_store, "list_gepa_checkpoints", None)
-    if not callable(lister):
-        return []
-    return sorted(cp.pair_index for cp in lister(optimization_id) if cp.pair_index >= 0)
-
-
 def build_summary(job_data: dict) -> OptimizationSummaryResponse:
     """Build a compact dashboard-card summary from a raw job dict.
 
@@ -958,8 +992,7 @@ def build_summary(job_data: dict) -> OptimizationSummaryResponse:
             completed_pairs = result_data.get("completed_pairs")
             failed_pairs = result_data.get("failed_pairs")
         else:
-            baseline = result_data.get("baseline_test_metric")
-            optimized = result_data.get("optimized_test_metric")
+            baseline, optimized = result_scores(result_data)
 
     # For grid search, pull live counters from latest_metrics if result not yet available
     if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:

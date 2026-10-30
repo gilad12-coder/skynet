@@ -178,7 +178,6 @@ def test_sweep_releases_a_refusal_that_earlier_runtimes_parked_as_pending(databa
             operation_key="parked",
             cost_kind="model",
             role="task",
-            recovery_headroom=False,
         )
     assert runtime.service.get(runtime.budget_id, "alice").pending_operations == 1
     reconciler = OpenRouterUsageReconciler(runtime.service, lambda owner, digest: None)

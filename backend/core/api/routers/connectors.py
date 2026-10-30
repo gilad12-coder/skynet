@@ -17,7 +17,7 @@ storage quota apply exactly as they do to an upload.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -25,9 +25,9 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from ...config import settings
+from ...connectors import github, registry
 from ...connectors import huggingface as hf
 from ...connectors import oauth as generic_oauth
-from ...connectors import registry
 from ...connectors.pruning import browse_importable
 from ...connectors.transport import label
 from ...connectors.vault import ConnectorSecret, ConnectorVault
@@ -38,6 +38,7 @@ from ..errors import DomainError
 from .dataset_library import SaveDatasetResponse, _summary, save_rows_gated
 
 SEARCH_LIMIT_MAX = 100
+GITHUB_FILE_MAX_BYTES = 1024 * 1024
 
 # Some providers resolve a folder's web link with its own API call (OneDrive),
 # so it runs beside the listing instead of after it.
@@ -172,6 +173,87 @@ class RefImportRequest(BaseModel):
 
     ref: str = Field(min_length=1, max_length=2048)
     name: str | None = Field(default=None, max_length=255)
+
+
+class GithubRepository(BaseModel):
+    """One repository the GitHub picker offers."""
+
+    full_name: str
+    private: bool = False
+    description: str | None = None
+    language: str | None = None
+    default_branch: str | None = None
+    pushed_at: str | None = None
+
+
+class GithubRepositoriesResponse(BaseModel):
+    """Envelope for ``GET /connectors/github/repos``."""
+
+    repositories: list[GithubRepository]
+
+
+class GithubBranchesResponse(BaseModel):
+    """A repository's branch names and its default branch."""
+
+    default_branch: str | None = None
+    branches: list[str]
+
+
+class GithubTreeEntry(BaseModel):
+    """One file or folder of a repository tree."""
+
+    path: str
+    type: Literal["file", "dir"]
+
+
+class GithubTreeResponse(BaseModel):
+    """Every file and folder of a repository at one branch."""
+
+    entries: list[GithubTreeEntry]
+    truncated: bool = Field(default=False, description="GitHub listed only part of a very large tree.")
+
+
+class GithubFileResponse(BaseModel):
+    """One repository file's text, or why it has none."""
+
+    path: str
+    text: str | None = Field(
+        default=None, description="The file as UTF-8 text; empty for a binary, oversized or missing file."
+    )
+    binary: bool = Field(default=False, description="The content holds a NUL byte or is not valid UTF-8.")
+    too_large: bool = Field(default=False, description="The file is over the 1 MiB read cap.")
+    missing: bool = Field(default=False, description="No regular file exists at this path and ref.")
+
+
+def connector_secret(vault: ConnectorVault, username: str, provider: str) -> ConnectorSecret:
+    """Load an account's credential for a generic provider, refreshing OAuth tokens.
+
+    Args:
+        vault: Encrypted connector credential store.
+        username: The account owner.
+        provider: Provider slug.
+
+    Returns:
+        The decrypted credential.
+
+    Raises:
+        DomainError: 404 for an unknown provider; 409 when unlinked or
+            the OAuth grant expired.
+    """
+    module = registry.get_provider(provider)
+    secret = vault.resolve(username, provider)
+    if secret is None:
+        raise DomainError("connectors.not_connected", status=409, provider=label(provider))
+    if secret.auth_method == "oauth":
+        token = generic_oauth.current_oauth_token(module.oauth_app(), vault, username)
+        secret = ConnectorSecret(
+            access_token=token,
+            refresh_token=secret.refresh_token,
+            expires_at=secret.expires_at,
+            auth_method=secret.auth_method,
+            account_label=secret.account_label,
+        )
+    return secret
 
 
 def create_connectors_router(*, job_store) -> APIRouter:
@@ -507,33 +589,102 @@ def create_connectors_router(*, job_store) -> APIRouter:
         return configured or str(request.url_for("connector_oauth_callback", provider=provider))
 
     def _secret(username: str, provider: str) -> ConnectorSecret:
-        """Load the caller's credential for a generic provider, refreshing OAuth tokens.
+        """Load the caller's credential for a generic provider; see :func:`connector_secret`."""
+        return connector_secret(vault, username, provider)
+
+    @router.get(
+        "/connectors/github/repos",
+        response_model=GithubRepositoriesResponse,
+        summary="List the caller's GitHub repositories for the repository picker",
+    )
+    def list_github_repositories(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        search: str = Query(default="", max_length=200),
+    ) -> GithubRepositoriesResponse:
+        """List repositories the linked account can see, most recently pushed first.
 
         Args:
-            username: The caller.
-            provider: Provider slug.
+            user: Authenticated caller.
+            search: Optional ``owner/name`` filter; a full ``owner/name`` also
+                offers that public repository when the account lacks it.
 
         Returns:
-            The decrypted credential.
+            The repositories with their visibility, description, language,
+            default branch and last push.
+        """
+        repos = github.list_repositories(_secret(user.username, github.PROVIDER), search)
+        return GithubRepositoriesResponse(repositories=[GithubRepository(**r) for r in repos])
+
+    @router.get(
+        "/connectors/github/branches",
+        response_model=GithubBranchesResponse,
+        summary="List a GitHub repository's branches",
+    )
+    def list_github_branches(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+    ) -> GithubBranchesResponse:
+        """List a repository's branch names with its default branch.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+
+        Returns:
+            The default branch and up to 300 branch names.
+        """
+        return GithubBranchesResponse(**github.list_branches(_secret(user.username, github.PROVIDER), repo))
+
+    @router.get(
+        "/connectors/github/tree",
+        response_model=GithubTreeResponse,
+        summary="List every file and folder of a GitHub repository at a branch",
+    )
+    def github_repository_tree(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+        branch: str = Query(default="", max_length=255),
+    ) -> GithubTreeResponse:
+        """List a repository's whole tree, for choosing the paths an agent may edit.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+            branch: Branch name or commit id; empty for the default branch.
+
+        Returns:
+            Every file and folder path, and whether GitHub truncated the tree.
+        """
+        return GithubTreeResponse(**github.repository_tree(_secret(user.username, github.PROVIDER), repo, branch))
+
+    @router.get(
+        "/connectors/github/file",
+        response_model=GithubFileResponse,
+        summary="Read one file of a GitHub repository at a branch or commit",
+    )
+    def github_repository_file(
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        repo: str = Query(min_length=3, max_length=201),
+        path: str = Query(min_length=1, max_length=github.FILE_PATH_MAX),
+        ref: str = Query(default="", max_length=255),
+    ) -> GithubFileResponse:
+        """Read one repository file for the read-only code view, opened lazily per file.
+
+        Args:
+            user: Authenticated caller.
+            repo: The repository as ``owner/name``.
+            path: File path inside the repository.
+            ref: Branch name or commit id; empty for the default branch.
+
+        Returns:
+            The file's text, or flags for a binary, oversized or missing file.
 
         Raises:
-            DomainError: 404 for an unknown provider; 409 when unlinked or
-                the OAuth grant expired.
+            DomainError: 400 ``connectors.invalid_ref`` for a path that is
+                absolute, walks out with ``..`` or points into ``.git``.
         """
-        module = registry.get_provider(provider)
-        secret = vault.resolve(username, provider)
-        if secret is None:
-            raise DomainError("connectors.not_connected", status=409, provider=label(provider))
-        if secret.auth_method == "oauth":
-            token = generic_oauth.current_oauth_token(module.oauth_app(), vault, username)
-            secret = ConnectorSecret(
-                access_token=token,
-                refresh_token=secret.refresh_token,
-                expires_at=secret.expires_at,
-                auth_method=secret.auth_method,
-                account_label=secret.account_label,
-            )
-        return secret
+        secret = _secret(user.username, github.PROVIDER)
+        return GithubFileResponse(**github.read_repo_file(secret.access_token, repo, ref, path, GITHUB_FILE_MAX_BYTES))
 
     @router.put(
         "/connectors/{provider}/credentials",

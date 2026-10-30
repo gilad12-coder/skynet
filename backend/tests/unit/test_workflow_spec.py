@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.models import WorkflowSpec, workflow_topological_order
-from core.models.submissions import GridSearchRequest, RunRequest
+from core.models.submissions import RunRequest
 
 _SIG = (
     "import dspy\n"
@@ -46,7 +46,10 @@ def _spec(nodes: list[dict] | None = None, edges: list[dict] | None = None) -> W
         The parsed ``WorkflowSpec``.
     """
     return WorkflowSpec.model_validate(
-        {"nodes": nodes if nodes is not None else _linear_nodes(), "edges": edges if edges is not None else _linear_edges()}
+        {
+            "nodes": nodes if nodes is not None else _linear_nodes(),
+            "edges": edges if edges is not None else _linear_edges(),
+        }
     )
 
 
@@ -132,7 +135,11 @@ def test_multiple_producers_for_one_port_rejected():
     """Two edges feeding the same input port fail validation."""
     nodes = _linear_nodes()
     nodes.insert(2, {"id": "second", "kind": "signature", "signature_code": _SIG})
-    edges = [*_linear_edges(), {"source": "inp", "source_port": "text", "target": "second", "target_port": "text"}, {"source": "second", "source_port": "summary", "target": "out", "target_port": "summary"}]
+    edges = [
+        *_linear_edges(),
+        {"source": "inp", "source_port": "text", "target": "second", "target_port": "text"},
+        {"source": "second", "source_port": "summary", "target": "out", "target_port": "summary"},
+    ]
     with pytest.raises(ValidationError, match="fed by more than one edge"):
         _spec(nodes, edges)
 
@@ -162,7 +169,10 @@ def test_declared_port_existence_checked():
 
 def test_anchor_direction_enforced():
     """Edges into the input anchor or out of the output anchor fail."""
-    edges = [*_linear_edges(), {"source": "summarize", "source_port": "summary", "target": "inp", "target_port": "text"}]
+    edges = [
+        *_linear_edges(),
+        {"source": "summarize", "source_port": "summary", "target": "inp", "target_port": "text"},
+    ]
     with pytest.raises(ValidationError, match="input node cannot be an edge target"):
         _spec(edges=edges)
 
@@ -257,13 +267,3 @@ def test_run_request_tool_source_follows_the_flex_node_opt_in():
     payload = _run_request_payload(workflow={"nodes": nodes, "edges": _linear_edges()})
     with pytest.raises(ValidationError, match="tool_source is required"):
         RunRequest.model_validate(payload)
-
-
-def test_grid_search_rejects_workflow_module():
-    """Grid search does not support workflow modules in v1."""
-    payload = _run_request_payload()
-    payload.pop("model_config")
-    payload["generation_models"] = [_MODEL_CFG]
-    payload["reflection_models"] = [_MODEL_CFG]
-    with pytest.raises(ValidationError, match="Grid search does not support workflow"):
-        GridSearchRequest.model_validate(payload)

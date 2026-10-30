@@ -11,14 +11,14 @@ import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import type { SplitPlan } from "@/shared/types/api";
 
-import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
-
-// Both wizards drive the card — a structural pick keeps the blackbox context
-// compatible without tying the card to the whole standard context.
-export type SplitPlanControls = Pick<
-  SubmitWizardContext,
-  "splitPlan" | "splitMode" | "setSplitMode" | "profileLoading"
->;
+// Plain controls rather than a wizard context, so any wizard (or a card that
+// builds its own plan) can drive it.
+export interface SplitPlanControls {
+  splitPlan: SplitPlan | null;
+  splitMode: "auto" | "manual";
+  setSplitMode: (mode: "auto" | "manual") => void;
+  profileLoading: boolean;
+}
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -59,7 +59,7 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
   if (!splitPlan) {
     if (profileLoading) {
       return (
-        <div className="flex items-center gap-2 rounded-xl border border-[#DDD6CC]/60 bg-[#FAF8F5]/70 px-3.5 py-2.5 text-xs text-[#8C7A6B]">
+        <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/70 px-3.5 py-2.5 text-xs text-muted-foreground">
           <PingDot size="sm" tone="agent" />
           {msg("submit.split.recommended_title")}…
         </div>
@@ -79,11 +79,11 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
   const hasRationale = total > 0;
 
   return (
-    <div className="rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] shadow-[0_1px_2px_rgba(61,46,34,0.04)] overflow-hidden">
+    <div className="rounded-xl border border-[#C8B9A8]/50 dark:border-[#6c6256]/50 bg-background overflow-hidden">
       <div className="px-3.5 pt-3 pb-2.5">
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-[#3D2E22]">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+          <div className="flex items-center gap-2 text-primary">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary-fill text-primary-foreground">
               <Sparkle className="h-3 w-3" />
             </span>
             <span className="text-[13px] font-semibold tracking-tight">
@@ -95,7 +95,7 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
                   <button
                     type="button"
                     aria-label={msg("submit.split.rationale_aria")}
-                    className="-my-3 inline-flex size-[44px] items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:my-0 lg:size-6"
+                    className="-my-3 inline-flex size-[44px] items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 lg:my-0 lg:size-6"
                   >
                     <Info className="size-3.5" />
                   </button>
@@ -104,15 +104,15 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
                   side="bottom"
                   sideOffset={8}
                   dir={dir}
-                  className="max-w-[min(320px,92vw)] rounded-xl border border-[#C8B9A8]/60 bg-[#FAF8F5] px-4 py-3 text-start text-[#3D2E22] shadow-[0_8px_24px_-8px_rgba(61,46,34,0.2)] [&>span]:hidden"
+                  className="max-w-[min(320px,92vw)] rounded-xl border border-[#C8B9A8]/60 dark:border-[#6c6256]/60 bg-background px-4 py-3 text-start text-primary shadow-[var(--shadow-float)] [&>span]:hidden"
                 >
-                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#8C7A6B]">
-                    <Sparkle className="h-3 w-3 text-[#C8A882]" />
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <Sparkle className="h-3 w-3 text-primary" />
                     {msg("submit.split.rationale_title")}
                   </div>
-                  <ul className="space-y-1.5 text-[12px] leading-relaxed text-[#3D2E22]">
+                  <ul className="space-y-1.5 text-[12px] leading-relaxed text-primary">
                     <li className="flex gap-2">
-                      <span className="mt-[7px] inline-block h-1 w-1 shrink-0 rounded-full bg-[#C8A882]" />
+                      <span className="mt-[7px] inline-block h-1 w-1 shrink-0 rounded-full bg-primary-fill" />
                       <span>{rationaleText}</span>
                     </li>
                   </ul>
@@ -132,35 +132,35 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
       >
         <div className="overflow-hidden">
           <div className="px-3.5 pb-3 space-y-2.5">
-            <div className="flex h-2.5 overflow-hidden rounded-full bg-[#EFE7DC]">
+            <div className="flex h-2.5 overflow-hidden rounded-full bg-muted">
               <div
-                className="bg-[#3D2E22] transition-[width] duration-300 ease-out"
+                className="bg-primary-fill transition-[width] duration-300 ease-out"
                 style={{ width: `${fractions.train * 100}%` }}
               />
               <div
-                className="bg-[#C8A882] transition-[width] duration-300 ease-out"
+                className="bg-chart-3 transition-[width] duration-300 ease-out"
                 style={{ width: `${fractions.val * 100}%` }}
               />
               <div
-                className="bg-[#8C7A6B] transition-[width] duration-300 ease-out"
+                className="bg-muted-foreground transition-[width] duration-300 ease-out"
                 style={{ width: `${fractions.test * 100}%` }}
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <PlanChip
-                color="#3D2E22"
+                color="var(--primary)"
                 label={msg("submit.split.label_train")}
                 percent={percent(fractions.train)}
                 count={counts.train}
               />
               <PlanChip
-                color="#C8A882"
+                color="var(--chart-3)"
                 label={msg("submit.split.label_val")}
                 percent={percent(fractions.val)}
                 count={counts.val}
               />
               <PlanChip
-                color="#8C7A6B"
+                color="var(--muted-foreground)"
                 label={msg("submit.split.label_test")}
                 percent={percent(fractions.test)}
                 count={counts.test}
@@ -206,24 +206,24 @@ function PlanChip({
   count: number;
 }) {
   return (
-    <div className="rounded-lg bg-white/70 px-2.5 py-1.5">
+    <div className="rounded-lg bg-white/70 dark:bg-white/5 px-2.5 py-1.5">
       <div className="flex items-center gap-1.5">
         <span
           className="inline-block w-1.5 h-1.5 rounded-full"
           style={{ backgroundColor: color }}
         />
-        <span className="text-[10.5px] font-medium uppercase tracking-wide text-[#8C7A6B]">
+        <span className="text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
           {label}
         </span>
       </div>
-      <div className="mt-1 flex items-baseline gap-1.5 text-[#3D2E22]">
+      <div className="mt-1 flex items-baseline gap-1.5 text-primary">
         <span
           className="font-semibold tabular-nums tracking-tight text-[17px] leading-none"
           dir="ltr"
         >
           {percent}
         </span>
-        <span className="text-[10.5px] tabular-nums text-[#8C7A6B]" dir="ltr">
+        <span className="text-[10.5px] tabular-nums text-muted-foreground" dir="ltr">
           {count.toLocaleString(getActiveIntlLocale())}
         </span>
       </div>

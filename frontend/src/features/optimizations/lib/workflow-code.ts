@@ -213,7 +213,7 @@ export function compileWorkflowToCode(spec: WorkflowSpec): string {
   }
 
   const lines: string[] = [
-    '"""Workflow program compiled from this run\'s graph spec.',
+    '"""Workflow program compiled from this optimization\'s graph spec.',
     "",
     "Auto-generated rendering: each signature class appears exactly as",
     "submitted (its docstring is the initial prompt GEPA optimizes), and",
@@ -225,7 +225,7 @@ export function compileWorkflowToCode(spec: WorkflowSpec): string {
   ];
 
   if (toolFns.size > 0) {
-    lines.push("", "# Tools resolve at runtime from the run's MCP tool source, matched by name:");
+    lines.push("", "# Tools resolve at runtime from the optimization's MCP tool source, matched by name:");
     for (const [name, fn] of toolFns) {
       lines.push(`#   ${fn}${fn === name ? "" : `  (tool "${name}")`}`);
     }

@@ -2,8 +2,8 @@
 
 A composer that names no model runs the catalog's best-value default (see
 :func:`default_model_id`), which moves with OpenRouter's live prices and
-benchmarks. Deployments whose catalog flags no default (air-gapped gateways)
-degrade to the engine's configured server default.
+benchmarks. When the catalog flags no default (for example a gateway with no live
+prices), the composer degrades to the engine's configured server default.
 """
 
 from __future__ import annotations
@@ -12,12 +12,14 @@ import logging
 
 from ..config import settings
 from ..models import ModelConfig
+from .interview_model import interview_model_id
 from .model_catalog import (
     REASONING_EFFORTS,
     agent_model_id,
     get_catalog_cached,
     is_removed_model,
     require_known_model,
+    unpicked_effort,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,8 +83,8 @@ def effective_reasoning_effort(model: str | None, requested: str | None) -> str 
 
     Returns:
         The requested effort, snapped onto the model's ladder when the
-        catalog knows one; otherwise the model's catalog default effort when
-        it thinks by default, else ``None``.
+        catalog knows one; otherwise :func:`unpicked_effort` of the model
+        (its default effort, or low for an opt-in thinker).
     """
     if not model:
         return requested
@@ -95,9 +97,7 @@ def effective_reasoning_effort(model: str | None, requested: str | None) -> str 
         return requested
     if requested:
         return _nearest_effort(requested, entry.reasoning_efforts)
-    if not entry.reasoning_default_enabled:
-        return None
-    return entry.default_reasoning_effort
+    return unpicked_effort(entry)
 
 
 def _nearest_effort(requested: str, ladder: list[str] | None) -> str:
@@ -143,3 +143,22 @@ def route_menu_model(model: str | None) -> str | None:
         require_known_model(name)
         return name
     return default_model_id()
+
+
+def route_interview_model(model: str | None) -> str | None:
+    """Resolve an agent interview's model field, defaulting to the interview pick.
+
+    Args:
+        model: Raw ``model`` value from the request.
+
+    Returns:
+        The validated catalog id when one was picked, else the measured
+        interview model (see :mod:`core.api.interview_model`).
+
+    Raises:
+        DomainError: 422 when an explicit id is not a catalog model.
+    """
+    name = str(model or "").strip()
+    if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
+        return route_menu_model(name)
+    return interview_model_id()

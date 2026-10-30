@@ -1,127 +1,265 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  cloneBasics,
-  cloneColumnRoles,
-  cloneReactToolFilter,
-  cloneRows,
-  cloneSourceRecipe,
-  cloneWorkflowSpec,
-} from "./clone-payload.ts";
+import { cloneToSlices } from "./clone-payload.ts";
 
-const programPayload = {
-  name: "spam-filter",
-  description: "flags spam",
-  is_private: 1,
-  dataset: [
-    { category: "spam", email_text: "Win $1000", note: "x" },
-    { category: "ok", email_text: "Standup notes", note: "y" },
-  ],
-  column_order: ["email_text", "category", "stale_column"],
-  column_mapping: { inputs: { email_text: "str" }, outputs: { category: "str" } },
-  split_fractions: { train: 0.6, val: 0.2, test: 0.2 },
-  shuffle: 0,
-  seed: "7",
-};
-
-const anythingPayload = {
-  name: "copy-tuner",
-  cases: [
-    { brief: "launch email", tone: "warm" },
-    { brief: "renewal nudge", tone: "direct" },
-  ],
-  seed_candidate: "Write a short email.",
-  split_fractions: { train: 1, val: 0, test: 0 },
-};
-
-test("cloneSourceRecipe maps blackbox jobs to the Anything recipe", () => {
-  assert.equal(cloneSourceRecipe("blackbox"), "anything");
-  assert.equal(cloneSourceRecipe("run"), "program");
-  assert.equal(cloneSourceRecipe("grid_search"), "program");
-});
-
-test("cloneRows restores a Program run's column order and appends uncovered columns", () => {
-  const rows = cloneRows(programPayload);
-  assert.deepEqual(rows?.columns, ["email_text", "category", "note"]);
-  assert.equal(rows?.rowCount, 2);
-  assert.equal(rows?.rows[1].email_text, "Standup notes");
-});
-
-test("cloneRows reads an Anything run's cases in their own key order", () => {
-  const rows = cloneRows(anythingPayload);
-  assert.deepEqual(rows?.columns, ["brief", "tone"]);
-  assert.equal(rows?.rowCount, 2);
-});
-
-test("cloneRows is null without usable rows", () => {
-  assert.equal(cloneRows({}), null);
-  assert.equal(cloneRows({ dataset: [] }), null);
-  assert.equal(cloneRows({ cases: ["not a row", 3, null] }), null);
-});
-
-test("cloneColumnRoles overlays the persisted mapping on all-ignore defaults", () => {
-  assert.deepEqual(cloneColumnRoles(programPayload, ["email_text", "category", "note"]), {
-    email_text: "input",
-    category: "output",
-    note: "ignore",
-  });
-});
-
-test("cloneColumnRoles leaves an Anything run's cases for the user to map", () => {
-  assert.deepEqual(cloneColumnRoles(anythingPayload, ["brief", "tone"]), {
-    brief: "ignore",
-    tone: "ignore",
-  });
-});
-
-test("cloneBasics prefers the job's display name and coerces the shared fields", () => {
-  assert.deepEqual(cloneBasics(programPayload, "spam-filter (copy)"), {
-    name: "spam-filter (copy)",
-    description: "flags spam",
-    isPrivate: true,
-    split: { train: 0.6, val: 0.2, test: 0.2 },
-    shuffle: false,
-    seed: 7,
-  });
-});
-
-test("cloneBasics reports absent fields as null", () => {
-  assert.deepEqual(cloneBasics({ name: "" }), {
-    name: null,
-    description: null,
-    isPrivate: null,
-    split: null,
-    shuffle: null,
-    seed: null,
-  });
-});
-
-test("cloneReactToolFilter preserves explicit MCP permissions exactly", () => {
-  assert.deepEqual(
-    cloneReactToolFilter({ tool_source: { kind: "live_mcp", tool_filter: ["lookup", "search"] } }),
-    ["lookup", "search"],
+test("a unified run clones every slice it stored", () => {
+  const slices = cloneToSlices(
+    "blackbox",
+    {
+      payload_kind: "unified_v1",
+      name: "stored-name",
+      is_private: true,
+      task: {
+        objective: "Summarize tickets",
+        background: "Support queue",
+        artifact: { kind: "prompt", starting_version: "Summarize:" },
+      },
+      data: {
+        mode: "pairs",
+        cases: [
+          { input: { ticket: "a" }, expected: "x" },
+          { input: { ticket: "b" }, expected: "y" },
+        ],
+        input_fields: ["ticket"],
+        split: { train: 0.6, val: 0.2, test: 0.2 },
+        shuffle: false,
+      },
+      optimizer: { choice: "gepa", budget: { max_scorer_runs: 50 } },
+      models: {
+        reflection_model: { name: "gpt-x" },
+        metric_model: { name: "judge-y" },
+      },
+      workspace: { run_code: "def run(a, i): ...", metric_code: "def score(i, o): ..." },
+    },
+    "Job name",
   );
-  assert.deepEqual(cloneReactToolFilter({ tool_source: { tool_filter: [] } }), []);
+  assert.equal(slices.meta.name, "Job name");
+  assert.equal(slices.meta.isPrivate, true);
+  assert.equal(slices.task.artifactKind, "prompt");
+  assert.equal(slices.task.startingVersion, "Summarize:");
+  assert.equal(slices.inputs.mode, "pairs");
+  assert.equal(slices.inputs.cases?.length, 2);
+  assert.deepEqual(slices.inputs.inputFields, ["ticket"]);
+  assert.deepEqual(slices.inputs.split, { train: 0.6, val: 0.2, test: 0.2 });
+  assert.equal(slices.inputs.shuffle, false);
+  assert.equal(slices.optimizer.choice, "gepa");
+  assert.equal(slices.optimizer.reflectionModel?.name, "gpt-x");
+  assert.equal(slices.workspace.metricModelMode, "explicit");
+  assert.equal(slices.workspace.metricModel?.name, "judge-y");
+  assert.equal(slices.workspace.runCode, "def run(a, i): ...");
 });
 
-test("cloneReactToolFilter keeps the legacy full-roster contract distinct from no source", () => {
-  assert.equal(cloneReactToolFilter({ tool_source: { kind: "live_mcp" } }), null);
-  assert.equal(cloneReactToolFilter({ tool_source: { tool_filter: null } }), null);
-  assert.equal(cloneReactToolFilter({}), undefined);
+test("a metric model equal to the reflection model clones as inherited", () => {
+  const slices = cloneToSlices("blackbox", {
+    payload_kind: "unified_v1",
+    models: { reflection_model: { name: "same" }, metric_model: { name: "same" } },
+  });
+  assert.equal(slices.workspace.metricModelMode, "inherit");
+  assert.equal(slices.workspace.metricModel, null);
 });
 
-test("cloneWorkflowSpec returns a stored workflow graph and nothing else", () => {
-  const graph = { nodes: [{ id: "n1", kind: "signature" }], edges: [] };
-  assert.equal(cloneWorkflowSpec({ workflow: graph }), graph);
-  assert.equal(cloneWorkflowSpec({ workflow: { nodes: [], edges: [] } })?.nodes.length, 0);
+test("a legacy black-box run maps objective, seed, cases and scorer", () => {
+  const slices = cloneToSlices("blackbox", {
+    objective: "Write emails",
+    background: "B2B",
+    seed_candidate: { system: "Be brief", user: "{brief}" },
+    cases: [
+      { brief: "launch", expected: "Hi" },
+      { brief: "renewal" },
+    ],
+    scorer: { kind: "python", metric_code: "def score(c, o): ...", model: { name: "judge" } },
+    reflection_model_config: { name: "refl" },
+  });
+  assert.equal(slices.task.objective, "Write emails");
+  assert.deepEqual(slices.task.startingVersion, { system: "Be brief", user: "{brief}" });
+  assert.equal(slices.inputs.mode, "pairs");
+  assert.deepEqual(slices.inputs.cases?.[0], { input: { brief: "launch" }, expected: "Hi" });
+  assert.deepEqual(slices.inputs.cases?.[1], { input: { brief: "renewal" }, expected: null });
+  assert.equal(slices.workspace.metricCode, "def score(c, o): ...");
+  assert.equal(slices.workspace.metricModelMode, "explicit");
+  assert.equal(slices.optimizer.reflectionModel?.name, "refl");
 });
 
-test("cloneWorkflowSpec rejects a missing or malformed graph", () => {
-  assert.equal(cloneWorkflowSpec(programPayload), null);
-  assert.equal(cloneWorkflowSpec({}), null);
-  assert.equal(cloneWorkflowSpec({ workflow: null }), null);
-  assert.equal(cloneWorkflowSpec({ workflow: [] }), null);
-  assert.equal(cloneWorkflowSpec({ workflow: { nodes: [] } }), null);
-  assert.equal(cloneWorkflowSpec({ workflow: { nodes: "x", edges: [] } }), null);
+test("a legacy DSPy run maps rows by the column mapping and keeps metric_code", () => {
+  const slices = cloneToSlices("run", {
+    dataset: [
+      { email_text: "Win $1000", category: "spam", note: "x" },
+      { email_text: "Standup", category: "ok", note: "y" },
+    ],
+    column_mapping: { inputs: { email_text: "str" }, outputs: { category: "str" } },
+    metric_code: "def metric(gold, pred, trace=None): ...",
+    model_config: { name: "task-m" },
+  });
+  assert.equal(slices.task.artifactKind, "dspy_program");
+  assert.deepEqual(slices.inputs.cases?.[0], {
+    input: { email_text: "Win $1000" },
+    expected: { category: "spam" },
+  });
+  assert.deepEqual(slices.inputs.inputFields, ["email_text"]);
+  assert.equal(slices.inputs.expectedField, "category");
+  assert.equal(slices.workspace.metricCode, "def metric(gold, pred, trace=None): ...");
+  assert.equal(slices.optimizer.taskModel?.name, "task-m");
+});
+
+test("an unmapped legacy DSPy run leaves the inputs empty", () => {
+  const slices = cloneToSlices("grid_search", { dataset: [{ a: 1 }] });
+  assert.deepEqual(slices.inputs, {});
+});
+
+// Sanitized copy of a stored legacy repository run (staging run 52923146): ids,
+// account, repository, objective and metric body replaced, every key and
+// engine setting kept as stored.
+const LEGACY_REPO_RUN = {
+  name: "Repo check: CV (ShinkaEvolve)",
+  seed: 1348863440,
+  cases: null,
+  budget: { stop_at_score: null, max_iterations: 4, max_scorer_runs: 8 },
+  recipe: "repo",
+  scorer: {
+    url: null,
+    kind: "python",
+    model: null,
+    metric_code: "def score(candidate, example):\n    return 1.0",
+    dependency_lock: null,
+    install_command: null,
+    timeout_seconds: 300.0,
+  },
+  shinka: {
+    editor: "agent",
+    novelty: false,
+    num_beams: 5,
+    meta_notes: true,
+    patch_diff: 0.6,
+    patch_full: 0.3,
+    num_islands: 2,
+    patch_cross: 0.1,
+    archive_size: 40,
+    migration_rate: 0.0,
+    parent_selection: "weighted",
+    meta_rec_interval: 10,
+    use_text_feedback: true,
+    exploitation_alpha: 1.0,
+    exploitation_ratio: 0.2,
+    max_patch_attempts: 1,
+    migration_interval: 10,
+    max_patch_resamples: 3,
+    max_novelty_attempts: 3,
+    elite_selection_ratio: 0.3,
+    max_parallel_proposals: 2,
+    num_top_k_inspirations: 1,
+    parent_selection_lambda: 10.0,
+    code_embed_sim_threshold: 0.99,
+    max_parallel_evaluations: 2,
+    meta_max_recommendations: 5,
+    num_archive_inspirations: 1,
+  },
+  target: {
+    kind: "repo",
+    repo: {
+      branch: null,
+      commit: "0000000000000000000000000000000000000000",
+      secrets: [],
+      provider: "github",
+      repository: "example/site",
+      editable_paths: ["."],
+    },
+    model: null,
+    harness: "pi",
+    concurrency: 2,
+    run_command: null,
+    setup_command: "npm ci && npm run build",
+    install_command: null,
+    timeout_seconds: 600.0,
+  },
+  proposer: {
+    ralph: true,
+    harness: "codex",
+    run_command: null,
+    max_tool_calls: 100,
+    install_command: null,
+    max_no_eval_seconds: null,
+    max_candidates_per_iter: null,
+  },
+  strategy: { mode: "single", engine: "shinka_evolve" },
+  objective: "Make the CV stronger.",
+  background: null,
+  is_private: true,
+  description: null,
+  economy_mode: false,
+  max_cost_cents: 448,
+  seed_candidate: "",
+  proposer_runtime: "vercel",
+  staged_dataset_id: null,
+  task_model_config: null,
+  reflection_model_config: { name: "openrouter/openai/gpt-5.6-luna", base_url: null },
+  extra_reflection_model_configs: [],
+};
+
+test("a stored legacy repository run clones every setting the wizard holds", () => {
+  const slices = cloneToSlices("blackbox", LEGACY_REPO_RUN, "Repo check: CV (ShinkaEvolve)");
+  assert.equal(slices.meta.name, "Repo check: CV (ShinkaEvolve)");
+  assert.equal(slices.meta.isPrivate, true);
+  assert.equal(slices.task.objective, "Make the CV stronger.");
+  assert.equal(slices.workspace.metricCode, LEGACY_REPO_RUN.scorer.metric_code);
+  assert.equal(slices.workspace.metricTimeoutSeconds, 300);
+  assert.equal(slices.optimizer.reflectionModel?.name, "openrouter/openai/gpt-5.6-luna");
+  assert.equal(slices.optimizer.taskModel, null);
+  assert.deepEqual(slices.optimizer.extraReflectionModels, []);
+  assert.equal(slices.optimizer.choice, "shinka_evolve");
+  assert.deepEqual(slices.optimizer.budget, LEGACY_REPO_RUN.budget);
+  assert.deepEqual(slices.optimizer.shinka, LEGACY_REPO_RUN.shinka);
+  assert.deepEqual(slices.optimizer.proposer, LEGACY_REPO_RUN.proposer);
+  assert.equal(slices.optimizer.maxCostCents, 448);
+  assert.deepEqual(slices.task.repo, {
+    repository: "example/site",
+    branch: "",
+    commit: "0000000000000000000000000000000000000000",
+    editablePaths: ["."],
+    setupCommand: "npm ci && npm run build",
+  });
+  assert.equal(slices.task.artifactKind, "code");
+  assert.deepEqual(slices.inputs, { mode: "single" });
+});
+
+test("a legacy text run clones without a repository", () => {
+  const slices = cloneToSlices("blackbox", {
+    target: { kind: "text" },
+    cases: [{ question: "q" }],
+  });
+  assert.equal(slices.task.repo, undefined);
+  assert.equal(slices.inputs.rowCount, 1);
+});
+
+test("a legacy Auto-mode run keeps the default engine", () => {
+  const slices = cloneToSlices("blackbox", {
+    strategy: { mode: "auto", engine: "gepa" },
+    reflection_model_config: { name: "refl" },
+  });
+  assert.equal(slices.optimizer.choice, undefined);
+});
+
+test("a clone restores the extra workspace files; an old payload has none", () => {
+  const base = {
+    payload_kind: "unified_v1",
+    task: { objective: "o", artifact: { kind: "prompt", starting_version: "s" } },
+    data: { mode: "single", cases: [{ input: {} }], input_fields: [] },
+    optimizer: { choice: "auto", budget: { max_scorer_runs: 10 } },
+    models: { reflection_model: { name: "m" } },
+  };
+  const withFiles = cloneToSlices("blackbox", {
+    ...base,
+    workspace: {
+      run_code: "from helpers import f",
+      metric_code: "def score(i, o): ...",
+      files: { "helpers.py": "def f(): ...", "run.py": "ignored", bad: 3 },
+    },
+  } as never);
+  assert.equal(withFiles.workspace.runCode, "from helpers import f");
+  assert.deepEqual(withFiles.workspace.files, { "helpers.py": "def f(): ..." });
+  const old = cloneToSlices("blackbox", {
+    ...base,
+    workspace: { run_code: "def run(a, i): ...", metric_code: "def score(i, o): ..." },
+  } as never);
+  assert.deepEqual(old.workspace.files, {});
 });

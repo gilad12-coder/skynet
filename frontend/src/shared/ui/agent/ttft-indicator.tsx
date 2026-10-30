@@ -34,12 +34,12 @@ export function TtftIndicator() {
 
   return (
     <div
-      className="inline-flex items-center gap-2.5 rounded-[22px] rounded-ee-[4px] bg-muted/60 px-4 py-3 shadow-sm"
+      className="inline-flex items-center gap-2.5 rounded-[22px] rounded-ee-[4px] bg-muted/60 px-4 py-3"
       role="status"
       aria-live="polite"
     >
       <EmberGlyph reduce={Boolean(shouldReduceMotion)} />
-      <span className="text-xs font-medium text-[#3D2E22]">{msg("shared.agent.thinking")}</span>
+      <span className="text-xs font-medium text-primary">{msg("shared.agent.thinking")}</span>
       {showTimer && (
         <motion.span
           initial={shouldReduceMotion ? false : { opacity: 0 }}
@@ -58,16 +58,15 @@ export function TtftIndicator() {
 }
 
 // The glyph: a warm-tan double ripple radiating from a brand-ink core that
-// breathes with a soft gold glow. It replaces the panel's flat `animate-ping`
-// halo (see ThinkingSection's ThinkingIndicator, which now reuses this) so the
-// whole pre-first-token wait — pure gap *and* reasoning — reads as one distinct,
-// premium Skynet moment rather than a plain pulsing dot.
+// breathes with a soft brand glow. It replaces the panel's flat `animate-ping`
+// halo so the pre-first-token wait reads as one distinct, premium Skynet moment
+// rather than a plain pulsing dot.
 export function EmberGlyph({ reduce }: { reduce: boolean }) {
   if (reduce) {
     return (
       <span className="relative inline-flex size-4 items-center justify-center shrink-0" aria-hidden="true">
-        <span className="absolute inset-0 rounded-full bg-[#C8A882]/20" />
-        <span className="relative size-2 rounded-full bg-[#3D2E22]" />
+        <span className="absolute inset-0 rounded-full bg-primary-fill/12" />
+        <span className="relative size-2 rounded-full bg-primary-fill" />
       </span>
     );
   }
@@ -76,20 +75,20 @@ export function EmberGlyph({ reduce }: { reduce: boolean }) {
       {[0, 0.8].map((delay) => (
         <motion.span
           key={delay}
-          className="absolute inset-0 rounded-full border border-[#C8A882]"
+          className="absolute inset-0 rounded-full border border-primary-fill"
           initial={{ scale: 0.6, opacity: 0.55 }}
           animate={{ scale: 1.9, opacity: 0 }}
           transition={{ duration: 1.6, ease: "easeOut", repeat: Infinity, delay }}
         />
       ))}
       <motion.span
-        className="relative size-2 rounded-full bg-[#3D2E22]"
+        className="relative size-2 rounded-full bg-primary-fill"
         animate={{
           scale: [1, 1.18, 1],
           boxShadow: [
-            "0 0 0px rgba(200,168,130,0)",
-            "0 0 7px rgba(200,168,130,0.65)",
-            "0 0 0px rgba(200,168,130,0)",
+            "0 0 0px rgba(63,138,112,0)",
+            "0 0 7px rgba(63,138,112,0.55)",
+            "0 0 0px rgba(63,138,112,0)",
           ],
         }}
         transition={{ duration: 1.6, ease: "easeInOut", repeat: Infinity }}

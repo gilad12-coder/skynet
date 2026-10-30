@@ -250,15 +250,15 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 
     wrapped = box.runs[0]["args"][1]
     assert box.runs[0]["args"][0] == "-lc"
-    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99' > /tmp/.skynet-output-")
-    assert "; echo $? > /tmp/.skynet-exit-" in wrapped
+    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99' > /tmp/.app-output-")
+    assert "; echo $? > /tmp/.app-exit-" in wrapped
     assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
 
 
 def test_run_caps_the_kill_timer_at_the_vercel_maximum() -> None:
-    """A command given a full five-hour box keeps its grace inside the timeout Vercel accepts."""
+    """A command given a full 24-hour box asks Vercel for no more than its five-hour kill timer."""
     box = _FakeBox(returncode=0)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
@@ -266,7 +266,7 @@ def test_run_caps_the_kill_timer_at_the_vercel_maximum() -> None:
 
     wrapped = box.runs[0]["args"][1]
     assert wrapped.startswith(f"timeout --signal=KILL {VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS}s bash -lc")
-    assert box.runs[0]["kill_after"] == VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+    assert box.runs[0]["kill_after"] == 18_000
 
 
 def test_run_without_timeout_has_no_kill_timer() -> None:
@@ -276,7 +276,7 @@ def test_run_without_timeout_has_no_kill_timer() -> None:
 
     result = session.run("echo hi")
 
-    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi' > /tmp/.skynet-output-")
+    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi' > /tmp/.app-output-")
     assert box.runs[0]["kill_after"] is None
     assert result.timed_out is False
     assert result.exit_code == 124
@@ -295,8 +295,8 @@ def test_run_uses_a_fresh_exit_file_per_command() -> None:
 
 
 def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A slow command is watched with doubling sleeps until its exit file lands, then its logs are read."""
-    box = _FakeBox(returncode=0, stdout="out", stderr="err", polls_to_finish=3)
+    """A slow, silent command is watched with doubling sleeps until its exit file lands."""
+    box = _FakeBox(returncode=0, polls_to_finish=3)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     clock = _FakeTime()
     monkeypatch.setattr(sandbox_mod, "time", clock)
@@ -304,17 +304,16 @@ def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyP
     result = session.run("make things")
 
     assert box.fs.polls == 3
-    assert clock.sleeps == [1.0, 2.0, 4.0]
+    assert clock.sleeps == [0.5, 1.0, 2.0]
     assert result.exit_code == 0
-    assert result.stdout == "out"
-    assert result.stderr == "err"
 
 
 def test_run_streams_output_as_the_files_grow(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each poll forwards whatever the box has written since the last one, in order."""
     box = _FakeBox(returncode=0, polls_to_finish=3)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
-    monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
+    clock = _FakeTime()
+    monkeypatch.setattr(sandbox_mod, "time", clock)
     chunks = ["one\n", "two\n", "three\n"]
     stored_read = box.fs.read_text
 
@@ -330,6 +329,9 @@ def test_run_streams_output_as_the_files_grow(monkeypatch: pytest.MonkeyPatch) -
     result = session.run("chatty", on_output=lambda stream, text: seen.append((stream, text)))
 
     assert seen == [("stdout", "one\n"), ("stdout", "two\n"), ("stdout", "three\n")]
+    # Output moved on every poll, so the backoff never left the floor: a chatty
+    # command is usually waiting on the answer only the next poll can deliver.
+    assert clock.sleeps == [0.5, 0.5, 0.5]
     assert result.stdout == "one\ntwo\nthree\n"
     assert result.exit_code == 0
 
@@ -360,7 +362,15 @@ def test_run_waits_for_the_exit_code_to_be_written(monkeypatch: pytest.MonkeyPat
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
     reads: list[str] = ["", "3\n"]
-    monkeypatch.setattr(box.fs, "read_text", lambda path, cwd=None: reads.pop(0))
+    stored_read = box.fs.read_text
+
+    def read_text(path: str, cwd: str | None = None) -> str:
+        """Answer the exit file slowly; the output files read through."""
+        if ".app-exit-" in path:
+            return reads.pop(0)
+        return stored_read(path, cwd)
+
+    monkeypatch.setattr(box.fs, "read_text", read_text)
 
     result = session.run("exit 3")
 
@@ -672,3 +682,58 @@ def test_command_result_ok() -> None:
     """``ok`` is exit code zero."""
     assert CommandResult(exit_code=0).ok is True
     assert CommandResult(exit_code=1).ok is False
+
+
+class _PolicyBox(_FakeBox):
+    """Fake box whose session echoes a configured network policy after an update."""
+
+    def __init__(self, echoed: Any) -> None:
+        """Choose the policy Vercel reports back.
+
+        Args:
+            echoed: The policy the update returns, or an exception to raise.
+        """
+        super().__init__()
+        self._echoed = echoed
+        self.requested: list[Any] = []
+        self.network_policy: Any = None
+
+    def update_network_policy(self, policy: Any) -> _PolicyBox:
+        """Record the request and report the configured outcome."""
+        self.requested.append(policy)
+        if isinstance(self._echoed, Exception):
+            raise self._echoed
+        self.network_policy = self._echoed
+        return self
+
+
+@_needs_sdk
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        sandbox_mod.NetworkPolicy.deny_all() if _SDK_PRESENT else None,
+        sandbox_mod.NetworkPolicy.custom(allow={}) if _SDK_PRESENT else None,
+    ],
+)
+def test_disable_network_accepts_only_a_confirmed_deny_all(echoed: Any) -> None:
+    """Ask Vercel for deny-all and accept either form it reports with no host allowed."""
+    box = _PolicyBox(echoed)
+    VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context()).disable_network()
+    assert box.requested[0].mode == "deny-all"
+
+
+@_needs_sdk
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        None,
+        sandbox_mod.NetworkPolicy.allow_all() if _SDK_PRESENT else None,
+        sandbox_mod.NetworkPolicy.custom(allow={"pypi.org": ()}) if _SDK_PRESENT else None,
+        ServiceError("policy update failed"),
+    ],
+)
+def test_disable_network_fails_closed_without_confirmation(echoed: Any) -> None:
+    """Raise when Vercel refuses the switch or reports any host still reachable."""
+    session = VercelSandboxSession(_PolicyBox(echoed), _FakeApiSession(), contextvars.copy_context())
+    with pytest.raises(ServiceError):
+        session.disable_network()

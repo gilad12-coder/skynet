@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
-import { ChartTable } from "@/shared/charts/chart-table";
 import {
   CHART_TOOLTIP_CARD_CLASS,
   CHART_TOOLTIP_ROW_CLASS,
@@ -15,8 +14,9 @@ import {
   CHART_TOOLTIP_VALUE_CLASS,
 } from "@/shared/charts/chart-utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
-import { useLiteMode } from "@/features/settings";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
+import { TERMINAL_STATUSES } from "@/shared/constants/job-status";
+import { GridEmptyState } from "./grid-overview-helpers";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 type PairSnapshot = {
@@ -117,12 +117,7 @@ function LiveTip({
   );
 }
 
-function formatLivePct(value: unknown): string {
-  return typeof value === "number" ? `${value}%` : "—";
-}
-
 export function GridLiveChart({ job }: { job: OptimizationStatusResponse }) {
-  const lite = useLiteMode();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   // Recompute only when new progress events land, not on every parent tick —
   // this chart lives under the live-updating OverviewTab.
@@ -135,7 +130,9 @@ export function GridLiveChart({ job }: { job: OptimizationStatusResponse }) {
     }
     return null;
   }, [job.progress_events]);
-  if (pairs.length === 0) return null;
+  // A running grid with no pair yet just has nothing to chart; a finished one
+  // never will, so say so instead of leaving Overview blank.
+  if (pairs.length === 0) return TERMINAL_STATUSES.has(job.status) ? <GridEmptyState /> : null;
   const toggle = (key: string) => {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -160,91 +157,65 @@ export function GridLiveChart({ job }: { job: OptimizationStatusResponse }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        {lite ? (
-          <div className="h-[220px] min-w-0">
-            <ChartTable
-              rows={pairs}
-              columns={[
-                {
-                  key: "name",
-                  label: msg("auto.features.optimizations.components.gridlivechart.literal.1"),
-                },
-                {
-                  key: "baselineScore",
-                  label: msg("auto.features.optimizations.components.gridlivechart.literal.3"),
-                  align: "end",
-                  format: formatLivePct,
-                },
-                {
-                  key: "optimizedScore",
-                  label: msg("auto.features.optimizations.components.gridlivechart.literal.5"),
-                  align: "end",
-                  format: formatLivePct,
-                },
-              ]}
-            />
-          </div>
-        ) : (
-          <div className="h-[220px] min-w-0" dir="ltr">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={pairs}
-                layout="vertical"
-                margin={{ left: 10, right: 20, top: 5, bottom: 5 }}
-              >
-                <CartesianGrid horizontal={false} strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  type="number"
-                  domain={[0, 105]}
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 10 }}
-                  className="fill-muted-foreground"
-                  label={{
-                    value: msg("auto.features.optimizations.components.gridlivechart.literal.1"),
-                    position: "insideBottom",
-                    offset: -2,
-                    fontSize: 10,
-                  }}
+        <div className="h-[220px] min-w-0" dir="ltr">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={pairs}
+              layout="vertical"
+              margin={{ left: 10, right: 20, top: 5, bottom: 5 }}
+            >
+              <CartesianGrid horizontal={false} strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis
+                type="number"
+                domain={[0, 105]}
+                tickLine={false}
+                axisLine={false}
+                tick={{ fontSize: 10 }}
+                className="fill-muted-foreground"
+                label={{
+                  value: msg("auto.features.optimizations.components.gridlivechart.literal.1"),
+                  position: "insideBottom",
+                  offset: -2,
+                  fontSize: 10,
+                }}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                width={100}
+                className="fill-muted-foreground"
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip content={<LiveTip />} />
+              {!hidden.has(
+                msg("auto.features.optimizations.components.gridlivechart.literal.2"),
+              ) && (
+                <Bar
+                  dataKey="baselineScore"
+                  name={msg("auto.features.optimizations.components.gridlivechart.literal.3")}
+                  fill="var(--color-chart-4)"
+                  radius={[0, 3, 3, 0]}
+                  barSize={12}
+                  isAnimationActive={false}
                 />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ fontSize: 10 }}
-                  width={100}
-                  className="fill-muted-foreground"
-                  tickLine={false}
-                  axisLine={false}
+              )}
+              {!hidden.has(
+                msg("auto.features.optimizations.components.gridlivechart.literal.4"),
+              ) && (
+                <Bar
+                  dataKey="optimizedScore"
+                  name={msg("auto.features.optimizations.components.gridlivechart.literal.5")}
+                  fill="var(--color-chart-2)"
+                  radius={[0, 3, 3, 0]}
+                  barSize={12}
+                  isAnimationActive={false}
                 />
-                <Tooltip content={<LiveTip />} />
-                {!hidden.has(
-                  msg("auto.features.optimizations.components.gridlivechart.literal.2"),
-                ) && (
-                  <Bar
-                    dataKey="baselineScore"
-                    name={msg("auto.features.optimizations.components.gridlivechart.literal.3")}
-                    fill="var(--color-chart-4)"
-                    radius={[0, 3, 3, 0]}
-                    barSize={12}
-                    isAnimationActive={false}
-                  />
-                )}
-                {!hidden.has(
-                  msg("auto.features.optimizations.components.gridlivechart.literal.4"),
-                ) && (
-                  <Bar
-                    dataKey="optimizedScore"
-                    name={msg("auto.features.optimizations.components.gridlivechart.literal.5")}
-                    fill="var(--color-chart-2)"
-                    radius={[0, 3, 3, 0]}
-                    barSize={12}
-                    isAnimationActive={false}
-                  />
-                )}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+              )}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
         <div className="flex justify-center gap-4 mt-1">
           {[
             {

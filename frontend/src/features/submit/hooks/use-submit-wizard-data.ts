@@ -1,30 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getModelCallHolds } from "@/shared/lib/api";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
-import { profileDataset } from "@/shared/lib/api";
-import type {
-  ColumnMapping,
-  DatasetProfile,
-  ModelCatalogResponse,
-  ModelConfig,
-  SplitFractions,
-  SplitPlan,
-  BlackboxEngineId,
-} from "@/shared/types/api";
-import type { ParsedDataset } from "@/shared/lib/parse-dataset";
+import type { ModelCatalogResponse, ModelConfig } from "@/shared/types/api";
 import { MAX_RECENT, RECENT_KEY } from "../constants";
-import type { ColumnRole } from "../constants";
-
-export function buildColumnMapping(columnRoles: Record<string, ColumnRole>): ColumnMapping {
-  const inputs: Record<string, string> = {};
-  const outputs: Record<string, string> = {};
-  Object.entries(columnRoles).forEach(([col, role]) => {
-    if (role === "input") inputs[col] = col;
-    else if (role === "output") outputs[col] = col;
-  });
-  return { inputs, outputs };
-}
+import { callHoldKey } from "../lib/run-floor";
 
 export function useRecentModelConfigs() {
   // Initial state must be empty: this hook is client-only but Next.js still
@@ -114,95 +95,73 @@ export function useModelCatalog() {
   return catalog;
 }
 
-export function useDatasetProfiling({
-  parsedDataset,
-  columnRoles,
-  splitModeRef,
-  setDatasetProfile,
-  setSplitPlan,
-  setProfileLoading,
-  setSplit,
-  setShuffle,
-  setSeed,
-  engine = null,
-}: {
-  parsedDataset: ParsedDataset | null;
-  columnRoles: Record<string, ColumnRole>;
-  splitModeRef: MutableRefObject<"auto" | "manual">;
-  setDatasetProfile?: (profile: DatasetProfile | null) => void;
-  setSplitPlan: (plan: SplitPlan | null) => void;
-  setProfileLoading: (loading: boolean) => void;
-  setSplit: (split: SplitFractions) => void;
-  setShuffle: (shuffle: boolean) => void;
-  setSeed: (seed: number | undefined) => void;
-  // Black-box engine the split will feed; the planner sizes the sets for it.
-  engine?: BlackboxEngineId | null;
-}) {
-  // A new dataset resets the shuffle/seed to the plan's; a re-profile of the same
-  // dataset (engine or column change) only refreshes the fractions, so the user's
-  // shuffle choice survives.
-  const profiledDatasetRef = useRef<ParsedDataset | null>(null);
-  // The wizard reads only the input columns' kinds and a plan sized by row
-  // count, so outputs never reach the request. Re-posting every column on each
-  // role click serialized megabytes on the main thread; an output-only change
-  // now sends nothing and an input change sends just the input columns.
-  const inputsKey = JSON.stringify(
-    Object.entries(buildColumnMapping(columnRoles).inputs).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
+const callHoldCache = new Map<string, number | null>();
+let boxHoldCache: number | null = null;
+
+export interface ModelCallHolds {
+  /** One call's hold per model, keyed by `callHoldKey`. */
+  holds: ReadonlyMap<string, number>;
+  /** What the boxes hold before the first model call; null until it loads. */
+  boxHoldCents: number | null;
+  /** The box hold and every named model's hold have loaded, or the request failed. */
+  settled: boolean;
+}
+
+/**
+ * The server's one-call hold for each named model, keyed by `callHoldKey`,
+ * and the boxes' hold that comes before any call. Prices load once per
+ * model and token source; an unpriced model, or one still loading, is absent.
+ */
+export function useModelCallHolds(
+  models: ReadonlyArray<{ name: string; token_source?: "managed" | "byok" }>,
+): ModelCallHolds {
+  const wanted = [
+    ...new Set(
+      models
+        .filter((model) => model.name.trim())
+        .map((model) => callHoldKey(model.name, model.token_source ?? "managed")),
     ),
-  );
+  ].sort();
+  const signature = wanted.join("\n");
+  const [loaded, setLoaded] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!parsedDataset || parsedDataset.rowCount === 0) return;
-    const inputs = Object.fromEntries(JSON.parse(inputsKey) as Array<[string, string]>);
-    const columns = Object.values(inputs);
-    if (columns.length === 0) return;
-
-    let cancelled = false;
-    const handle = setTimeout(() => {
-      setProfileLoading(true);
-      profileDataset({
-        dataset: parsedDataset.rows.map((row) =>
-          Object.fromEntries(columns.map((column) => [column, row[column]])),
-        ),
-        column_mapping: { inputs, outputs: {} },
-        engine,
+    const missing = signature ? signature.split("\n").filter((key) => !callHoldCache.has(key)) : [];
+    // The box hold is the floor's base, so it loads even before any model is named.
+    if (missing.length === 0 && boxHoldCache !== null) return;
+    const controller = new AbortController();
+    const request = missing.map((key) => {
+      const [source, ...name] = key.split(":");
+      return {
+        name: name.join(":"),
+        token_source: source === "byok" ? "byok" : "managed",
+      } as const;
+    });
+    getModelCallHolds(request, controller.signal)
+      .then(({ holds, box_hold_cents }) => {
+        for (const hold of holds)
+          callHoldCache.set(callHoldKey(hold.name, hold.token_source), hold.cents);
+        if (typeof box_hold_cents === "number") boxHoldCache = box_hold_cents;
+        setLoaded((count) => count + 1);
       })
-        .then((response) => {
-          if (cancelled) return;
-          const datasetChanged = profiledDatasetRef.current !== parsedDataset;
-          profiledDatasetRef.current = parsedDataset;
-          setDatasetProfile?.(response.profile);
-          setSplitPlan(response.plan);
-          if (splitModeRef.current === "auto") {
-            setSplit(response.plan.fractions);
-            if (datasetChanged) {
-              setShuffle(response.plan.shuffle);
-              setSeed(response.plan.seed);
-            }
-          }
-        })
-        .catch(() => {
-          /* non-blocking: manual controls still work */
-        })
-        .finally(() => {
-          if (!cancelled) setProfileLoading(false);
-        });
-    }, 400);
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(signature);
+      });
+    return () => controller.abort();
+  }, [signature]);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [
-    inputsKey,
-    engine,
-    parsedDataset,
-    setDatasetProfile,
-    setProfileLoading,
-    setSeed,
-    setShuffle,
-    setSplit,
-    setSplitPlan,
-    splitModeRef,
-  ]);
+  return useMemo(() => {
+    const holds = new Map<string, number>();
+    const keys = signature ? signature.split("\n") : [];
+    for (const key of keys) {
+      const cents = callHoldCache.get(key);
+      if (typeof cents === "number") holds.set(key, cents);
+    }
+    const settled =
+      failed === signature ||
+      (boxHoldCache !== null && keys.every((key) => callHoldCache.has(key)));
+    return { holds, boxHoldCents: boxHoldCache, settled };
+    // `loaded` re-reads the module cache once a fetch lands.
+  }, [signature, loaded, failed]);
 }

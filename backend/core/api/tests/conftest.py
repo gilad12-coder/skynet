@@ -10,8 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from .. import artificial_analysis, model_catalog
 from .. import auth as auth_mod
-from .. import model_catalog
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers.analytics import create_analytics_router
 from ..routers.models import create_models_router
@@ -28,6 +28,24 @@ TEST_USER = AuthenticatedUser(username="alice", role="admin", groups=("skynet-ad
 def _offline_zero_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep ``/models`` from fetching OpenRouter's live ZDR endpoint list during tests."""
     monkeypatch.setattr(model_catalog, "zero_retention_models", lambda: frozenset({"openai/gpt-4o"}))
+
+
+def _offline_page(url: str) -> tuple[int, str, str]:
+    """Stand in for an Artificial Analysis fetch with no network.
+
+    Args:
+        url: The page URL.
+
+    Raises:
+        OSError: Always.
+    """
+    raise OSError(f"offline test: {url}")
+
+
+@pytest.fixture(autouse=True)
+def _offline_artificial_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``/models`` from fetching Artificial Analysis pages during tests."""
+    monkeypatch.setattr(artificial_analysis, "_fetch_head", _offline_page)
 
 
 @pytest.fixture(autouse=True)

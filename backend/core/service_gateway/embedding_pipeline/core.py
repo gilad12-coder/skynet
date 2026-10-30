@@ -46,6 +46,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     TOKEN_SOURCE_MANAGED,
 )
+from ...models.results import result_scores
 from ...storage.models import JobEmbeddingModel
 from .embeddings import get_embedder
 from .summarizer import summarize_blackbox_task, summarize_task
@@ -121,10 +122,11 @@ def _extract_scores(job: dict[str, Any]) -> tuple[float | None, float | None]:
             baseline = best.get("baseline_test_metric", baseline)
             optimized = best.get("optimized_test_metric", optimized)
     else:
+        stored_baseline, stored_optimized = result_scores(result)
         if baseline is None:
-            baseline = result.get("baseline_test_metric")
+            baseline = stored_baseline
         if optimized is None:
-            optimized = result.get("optimized_test_metric")
+            optimized = stored_optimized
     try:
         baseline_f = float(baseline) if baseline is not None else None
     except (TypeError, ValueError):
@@ -233,7 +235,7 @@ def _owner_can_fund_summary(engine: Any, owner: str | None) -> bool:
     if engine is None or not owner:
         return False
     try:
-        return StripeBillingService(engine).spendable_cents(owner) > 0
+        return StripeBillingService(engine=engine).spendable_cents(owner) > 0
     except Exception as exc:
         logger.warning("Summary balance check failed for %s: %s", owner, exc)
         return False
@@ -281,6 +283,12 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     signature_code = payload.get("signature_code")
     task_title = overview.get("name") or payload.get("name")
     task_description = overview.get(PAYLOAD_OVERVIEW_DESCRIPTION) or payload.get("description")
+    task = payload.get("task") or {}
+    workspace = payload.get("workspace") or {}
+    data = payload.get("data") or {}
+    scorer = payload.get("scorer") or {}
+    task_objective = task.get("objective") or payload.get("objective")
+    task_metric = workspace.get("metric_code") or scorer.get("metric_code") or payload.get("metric_code")
     owner = overview.get(PAYLOAD_OVERVIEW_USERNAME)
     engine = getattr(job_store, "engine", None)
     use_llm = _owner_can_fund_summary(engine, owner)
@@ -289,7 +297,9 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
         summary_text = summarize_blackbox_task(
             title=task_title,
             description=task_description,
-            cases_sample=payload.get("cases") or [],
+            objective=task_objective,
+            metric=task_metric,
+            cases_sample=data.get("cases") or payload.get("cases") or [],
             use_llm=use_llm,
             usage_sink=summary_lms,
         )
@@ -297,6 +307,8 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
         summary_text = summarize_task(
             title=task_title,
             description=task_description,
+            objective=task_objective,
+            metric=task_metric,
             dataset_sample=payload.get("dataset") or [],
             use_llm=use_llm,
             usage_sink=summary_lms,

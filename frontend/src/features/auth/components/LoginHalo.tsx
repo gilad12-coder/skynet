@@ -47,7 +47,11 @@ function HaloChip({
     <div className={wrapperClassName} style={pos}>
       <motion.div
         className="pointer-events-auto cursor-default"
-        initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.9, y: 10 }}
+        // Constant, not keyed on `reduce`: useReducedMotion() is null during SSR
+        // but already true on the first client render, so a reduce-dependent
+        // `initial` serialized different inline styles and failed hydration.
+        // Reduced motion still settles instantly via the zero-duration transition.
+        initial={{ opacity: 0, scale: 0.9, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={
           reduce ? { duration: 0 } : { duration: 0.7, delay: 0.15 + i * 0.03, ease: EASE_OUT_EXPO }
@@ -55,7 +59,7 @@ function HaloChip({
       >
         <motion.div
           dir={dir}
-          className="flex w-max max-w-[14rem] items-center rounded-xl border border-border/50 bg-card px-3 py-2 shadow-[0_8px_24px_-14px_rgba(28,22,18,0.28)]"
+          className="flex w-max max-w-[14rem] items-center rounded-xl border border-border/50 bg-card px-3 py-2 shadow-[var(--shadow-float)]"
           animate={
             reduce
               ? { rotate: card.rot }
@@ -83,9 +87,6 @@ function HaloChip({
                     delay: fdelay,
                   },
                 }
-          }
-          whileHover={
-            reduce ? undefined : { scale: 1.1, transition: { duration: 0.35, ease: EASE_OUT_EXPO } }
           }
         >
           <span className="truncate text-[0.72rem] font-medium text-foreground/85">{title}</span>

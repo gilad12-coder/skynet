@@ -1,4 +1,4 @@
-"""Tests for ``DspyService.run`` and ``DspyService.run_grid_search``."""
+"""Tests for ``DspyService.run``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import dspy
 import pytest
 
 from core.billing.signals import BudgetReached
-from core.constants import PROGRESS_GRID_PAIR_FAILED, PROGRESS_SPLITS_READY
+from core.constants import PROGRESS_SPLITS_READY
 from core.exceptions import ServiceError
 from core.models import (
     ColumnMapping,
@@ -19,8 +19,7 @@ from core.models import (
     ToolSource,
 )
 from core.models.artifacts import ProgramArtifact, ReactOverlay
-from core.models.results import GridSearchResponse, LMActivity, PairResult
-from core.models.submissions import GridSearchRequest
+from core.models.results import LMActivity
 from core.registry import ServiceRegistry
 from core.service_gateway.optimization.core import DspyService, _resolve_max_metric_calls
 from core.service_gateway.optimization.training_ground import run_react
@@ -89,25 +88,6 @@ def _run_request_with_test(**overrides) -> RunRequest:
     return RunRequest(**base)
 
 
-def _grid_request(**overrides) -> GridSearchRequest:
-    """Build a ``GridSearchRequest`` with two generation models and one reflection model."""
-    base: dict = {
-        "username": "tester",
-        "module_name": "cot",
-        "signature_code": _VALID_SIG,
-        "metric_code": _VALID_METRIC,
-        "optimizer_name": "dspy.BootstrapFewShot",
-        "dataset": _DATASET * 10,
-        "column_mapping": _MAPPING,
-        "split_fractions": SplitFractions(train=0.7, val=0.0, test=0.3),
-        "shuffle": False,
-        "generation_models": [ModelConfig(name="openai/gpt-4o-mini"), ModelConfig(name="openai/gpt-4o")],
-        "reflection_models": [ModelConfig(name="openai/gpt-4o-mini")],
-    }
-    base.update(overrides)
-    return GridSearchRequest(**base)
-
-
 def test_run_happy_path_returns_run_response() -> None:
     """A valid run returns a ``RunResponse`` with module/optimizer fields set."""
     service = _service()
@@ -150,55 +130,129 @@ def test_run_calls_progress_callback_for_splits_ready() -> None:
     assert PROGRESS_SPLITS_READY in events
 
 
-def test_run_returns_baseline_program_when_optimized_worse() -> None:
-    """When the optimized program scores worse, the service keeps the baseline."""
-    service = _service()
-    payload = _run_request_with_test()
+def _run_request_with_val_and_test(**overrides) -> RunRequest:
+    """Build a ``RunRequest`` with an unshuffled 60/20/20 train/val/test split."""
+    return _run_request_with_test(split_fractions=SplitFractions(train=0.6, val=0.2, test=0.2), **overrides)
 
+
+def _split_scorer(original_program, scores: dict[tuple[str, str], float], seen: list[tuple[str, str]]):
+    """Build an ``evaluate_on_test`` stand-in scoring by (program, split) role.
+
+    Args:
+        original_program: The baseline program instance.
+        scores: Score per ``("baseline"|"compiled", "selection"|"test")``.
+        seen: Receives each ``(program role, split role)`` evaluated.
+
+    Returns:
+        A side effect that returns a float for selection evaluations and a
+        ``(score, rows)`` tuple for per-example test evaluations.
+    """
+
+    def _evaluate(program, examples, metric, collect_per_example=False):
+        """Score one program on one split by role."""
+        role = "baseline" if program is original_program else "compiled"
+        split = "test" if collect_per_example else "selection"
+        seen.append((role, split))
+        score = scores[(role, split)]
+        return (score, [{"score": score}]) if collect_per_example else score
+
+    return _evaluate
+
+
+def test_run_returns_baseline_program_when_optimized_worse_on_validation() -> None:
+    """The guard keeps the baseline when it wins on validation, even if it loses on test."""
+    service = _service()
+    payload = _run_request_with_val_and_test()
     original_program = fake_original_program()
     compiled_program = fake_compiled_program()
-
-    # Baseline score = 0.9, optimized score = 0.5 → service should keep baseline
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Score the baseline above the compiled program."""
-        if program is original_program:
-            return (0.9, [])
-        return (0.5, [])
+    seen: list[tuple[str, str]] = []
+    scores = {
+        ("baseline", "selection"): 0.9,
+        ("compiled", "selection"): 0.5,
+        ("baseline", "test"): 0.2,
+        ("compiled", "test"): 0.8,
+    }
 
     with (
-        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
+        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program) as deps,
+        patch(
+            "core.service_gateway.optimization.core.evaluate_on_test",
+            side_effect=_split_scorer(original_program, scores, seen),
+        ),
         patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
     ):
         result = service.run(payload)
 
-    assert result.optimized_test_metric == pytest.approx(0.9)
+    assert deps.persist_program_mock.call_args.args[0] is original_program
+    assert result.optimized_test_metric == pytest.approx(0.2)
     assert result.metric_improvement == pytest.approx(0.0)
+    assert ("compiled", "test") not in seen
+    assert result.optimization_metadata["selection_scope"] == "validation"
 
 
-def test_run_keeps_compiled_program_when_optimized_better() -> None:
-    """When the optimized program scores better, that score is reported."""
+def test_run_keeps_compiled_program_when_better_on_validation_even_if_worse_on_test() -> None:
+    """The test split reports the val winner's score; it never picks the winner."""
     service = _service()
-    payload = _run_request_with_test()
-
+    payload = _run_request_with_val_and_test()
     original_program = fake_original_program()
     compiled_program = fake_compiled_program()
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Score the compiled program above the baseline."""
-        if program is original_program:
-            return (0.5, [])
-        return (0.9, [])
+    seen: list[tuple[str, str]] = []
+    scores = {
+        ("baseline", "selection"): 0.5,
+        ("compiled", "selection"): 0.9,
+        ("baseline", "test"): 0.7,
+        ("compiled", "test"): 0.4,
+    }
 
     with (
-        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
+        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program) as deps,
+        patch(
+            "core.service_gateway.optimization.core.evaluate_on_test",
+            side_effect=_split_scorer(original_program, scores, seen),
+        ),
         patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
     ):
         result = service.run(payload)
 
-    assert result.optimized_test_metric == pytest.approx(0.9)
-    assert result.metric_improvement == pytest.approx(0.4)
+    assert deps.persist_program_mock.call_args.args[0] is compiled_program
+    assert result.baseline_test_metric == pytest.approx(0.7)
+    assert result.optimized_test_metric == pytest.approx(0.4)
+    assert result.metric_improvement == pytest.approx(-0.3)
+
+
+def test_run_guard_selects_on_train_when_no_validation_split() -> None:
+    """Without a validation split the guard compares on train, never on test."""
+    service = _service()
+    payload = _run_request_with_test()
+    original_program = fake_original_program()
+    compiled_program = fake_compiled_program()
+    seen: list[tuple[str, str]] = []
+    selection_sizes: list[int] = []
+    scores = {
+        ("baseline", "selection"): 0.3,
+        ("compiled", "selection"): 0.6,
+        ("baseline", "test"): 0.9,
+        ("compiled", "test"): 0.1,
+    }
+    scorer = _split_scorer(original_program, scores, seen)
+
+    def _evaluate(program, examples, metric, collect_per_example=False):
+        """Record the selection split size, then score by role."""
+        if not collect_per_example:
+            selection_sizes.append(len(examples))
+        return scorer(program, examples, metric, collect_per_example=collect_per_example)
+
+    with (
+        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program) as deps,
+        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_evaluate),
+        patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
+    ):
+        result = service.run(payload)
+
+    assert deps.persist_program_mock.call_args.args[0] is compiled_program
+    assert selection_sizes == [14, 14]
+    assert result.optimized_test_metric == pytest.approx(0.1)
+    assert result.optimization_metadata["selection_scope"] == "training"
 
 
 def test_run_budget_stop_after_baseline_preserves_original_program() -> None:
@@ -208,10 +262,12 @@ def test_run_budget_stop_after_baseline_preserves_original_program() -> None:
     original_program = fake_original_program()
     evaluations: list[object] = []
 
-    def _evaluate(program, *_args, **_kwargs):
+    def _evaluate(program, *_args, collect_per_example=False, **_kwargs):
         """Record and complete only the original program's baseline."""
         evaluations.append(program)
-        return (0.4, [{"score": 0.4}])
+        if collect_per_example:
+            return (0.4, [{"score": 0.4}])
+        return 0.6
 
     with (
         patch_core_dependencies(fake_lm=fake_language_model()),
@@ -226,10 +282,10 @@ def test_run_budget_stop_after_baseline_preserves_original_program() -> None:
     assert response.baseline_test_metric == pytest.approx(0.4)
     assert response.optimized_test_metric is None
     assert response.baseline_test_results == [{"score": 0.4}]
-    assert evaluations == [original_program]
+    assert evaluations == [original_program, original_program]
     assert caught.value.evidence == {
-        "selection_scope": "test",
-        "selection_score": 0.4,
+        "selection_scope": "training",
+        "selection_score": 0.6,
         "candidate_origin": "seed",
         "final_evaluation_completed": False,
         "final_evaluation_reason": "budget_reached",
@@ -280,271 +336,6 @@ def test_run_avg_response_time_is_none_when_no_real_lm_calls() -> None:
 
     assert result.num_lm_calls == 4
     assert result.avg_response_time_ms is None
-
-
-def test_run_grid_search_happy_path_returns_two_pair_results() -> None:
-    """A 2-gen × 1-ref grid produces 2 completed pair results."""
-    service = _service()
-    payload = _grid_request()  # 2 gen models × 1 ref model = 2 pairs
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Return the deterministic grid-search score."""
-        return (0.8, [])
-
-    with (
-        patch_core_dependencies(),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload)
-
-    assert isinstance(result, GridSearchResponse)
-    assert result.total_pairs == 2
-    assert len(result.pair_results) == 2
-    assert result.completed_pairs == 2
-    assert result.failed_pairs == 0
-
-
-def test_grid_budget_stop_after_baseline_preserves_original_program() -> None:
-    """Publish a stopped/evaluated pair when its seed test pass completed."""
-    service = _service()
-    payload = _grid_request(
-        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
-        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
-    )
-    original_program = fake_original_program()
-    evaluations: list[object] = []
-
-    def _evaluate(program, *_args, **_kwargs):
-        """Record and complete only the original program's baseline."""
-        evaluations.append(program)
-        return (0.4, [{"score": 0.4}])
-
-    with (
-        patch_core_dependencies(fake_lm=fake_language_model()),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_evaluate),
-        patch("core.service_gateway.optimization.core.compile_program", side_effect=BudgetReached()),
-        patch("core.worker.log_handler.set_current_pair_index"),
-        patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
-        pytest.raises(BudgetReached) as caught,
-    ):
-        service.run_grid_search(payload)
-
-    result = caught.value.result
-    pair = result.pair_results[0]
-    assert pair.stop_reason == "budget_reached"
-    assert pair.result_availability == "evaluated"
-    assert pair.baseline_test_metric == pytest.approx(0.4)
-    assert pair.baseline_test_results == [{"score": 0.4}]
-    assert pair.optimized_test_metric is None
-    assert pair.terminal_evidence == {
-        "candidate_origin": "seed",
-        "final_evaluation_completed": False,
-        "final_evaluation_reason": "budget_reached",
-        "selection_scope": "test",
-        "selection_score": 0.4,
-    }
-    assert evaluations == [original_program]
-
-
-def test_grid_budget_stop_during_baseline_has_no_result() -> None:
-    """Keep a partially evaluated grid seed out of terminal results."""
-    service = _service()
-    payload = _grid_request(
-        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
-        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
-    )
-
-    with (
-        patch_core_dependencies() as dependencies,
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=BudgetReached()),
-        patch("core.worker.log_handler.set_current_pair_index"),
-        pytest.raises(BudgetReached) as caught,
-    ):
-        service.run_grid_search(payload)
-
-    assert caught.value.result is None
-    assert caught.value.evidence["pair_results"][0]["result_availability"] == "none"
-    dependencies.compile_program_mock.assert_not_called()
-
-
-def test_run_grid_search_skips_completed_pairs_on_resume() -> None:
-    """Resume seeds already-finished pairs verbatim and runs only the rest."""
-    service = _service()
-    payload = _grid_request()  # 2 pairs (indices 0, 1)
-    completed = {
-        0: {
-            "pair_index": 0,
-            "generation_model": "openai/gpt-4o-mini",
-            "reflection_model": "openai/gpt-4o-mini",
-            "optimized_test_metric": 0.9,
-        }
-    }
-    ran: list[int] = []
-
-    def _fake_pair(ctx, i, gen_cfg, ref_cfg):
-        """Stand-in pair worker that records which indices actually ran."""
-        ran.append(i)
-        return PairResult(
-            pair_index=i,
-            generation_model=gen_cfg.name,
-            reflection_model=ref_cfg.name,
-            optimized_test_metric=0.5,
-        )
-
-    with (
-        patch_core_dependencies(),
-        patch("core.service_gateway.optimization.core._run_grid_pair", side_effect=_fake_pair),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload, completed_pairs=completed)
-
-    assert ran == [1]  # pair 0 was skipped, only the pending pair ran
-    assert result.total_pairs == 2
-    assert result.completed_pairs == 2
-    assert result.pair_results[0].optimized_test_metric == 0.9  # seeded result kept verbatim
-    assert result.pair_results[1].optimized_test_metric == 0.5  # freshly run
-
-
-def test_run_grid_search_best_pair_has_highest_score() -> None:
-    """``best_pair`` is selected by the highest optimized metric across pairs."""
-    service = _service()
-    payload = _grid_request()
-
-    call_count = [0]
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Return deterministic scores for pair selection."""
-        # baseline always 0.5; optimized alternates 0.6 and 0.9
-        call_count[0] += 1
-        if call_count[0] % 2 == 1:
-            return (0.5, [])  # baseline
-        return (0.6 if call_count[0] <= 4 else 0.9, [])  # optimized
-
-    with (
-        patch_core_dependencies(),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload)
-
-    assert result.best_pair is not None
-    assert result.best_pair.optimized_test_metric is not None
-
-
-def test_run_grid_search_per_pair_swaps_when_optimized_worse() -> None:
-    """Per-pair selection keeps the baseline when the optimized score is worse."""
-    service = _service()
-    # 1 gen × 1 ref = 1 pair to keep things simple
-    payload = _grid_request(
-        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
-        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
-    )
-
-    original_program = fake_original_program()
-    compiled_program = fake_compiled_program()
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Score the baseline above the compiled program."""
-        # baseline > optimized to trigger swap
-        if program is original_program:
-            return (0.9, [])
-        return (0.3, [])
-
-    with (
-        patch_core_dependencies(fake_lm=fake_language_model(), compiled_program=compiled_program),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
-        patch("core.worker.log_handler.set_current_pair_index"),
-        patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
-    ):
-        result = service.run_grid_search(payload)
-
-    pair = result.pair_results[0]
-    assert pair.error is None
-    assert pair.optimized_test_metric == pytest.approx(0.9)
-
-
-def test_run_grid_search_pair_exception_fires_failed_callback_and_increments_count() -> None:
-    """A pair exception fires ``PROGRESS_GRID_PAIR_FAILED`` and bumps ``failed_pairs``."""
-    service = _service()
-    payload = _grid_request()  # 2 pairs
-
-    events: list[str] = []
-
-    def _cb(event: str, data: dict) -> None:
-        """Record each reported progress event."""
-        events.append(event)
-
-    surviving_program = fake_compiled_program()
-    compile_call_count = [0]
-
-    def _failing_compile(**kwargs):
-        """Fail the first compilation and return the survivor thereafter."""
-        compile_call_count[0] += 1
-        if compile_call_count[0] == 1:
-            raise RuntimeError("optimizer blew up")
-        return surviving_program
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Return the deterministic surviving-pair score."""
-        return (0.8, [])
-
-    with (
-        patch_core_dependencies(fake_lm=fake_language_model()),
-        patch("core.service_gateway.optimization.core.compile_program", side_effect=_failing_compile),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload, progress_callback=_cb)
-
-    assert PROGRESS_GRID_PAIR_FAILED in events
-    assert result.failed_pairs >= 1
-    assert result.completed_pairs >= 1
-
-
-def test_run_grid_search_pair_exception_sets_error_field_on_pair_result() -> None:
-    """A pair exception is captured in the pair result's ``error`` field."""
-    service = _service()
-    payload = _grid_request(
-        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
-        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
-    )
-
-    def _failing_compile(**kwargs):
-        """Raise the compilation failure under test."""
-        raise RuntimeError("boom")
-
-    with (
-        patch_core_dependencies(fake_lm=fake_language_model()),
-        patch("core.service_gateway.optimization.core.compile_program", side_effect=_failing_compile),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload)
-
-    pair = result.pair_results[0]
-    assert pair.error is not None
-    assert "boom" in pair.error
-
-
-def test_run_grid_search_best_pair_is_none_when_all_pairs_fail() -> None:
-    """When every pair fails, ``best_pair`` stays ``None``."""
-    service = _service()
-    payload = _grid_request()  # 2 pairs — both will fail
-
-    def _always_fail(**kwargs):
-        """Raise the compilation failure for every pair."""
-        raise RuntimeError("total failure")
-
-    with (
-        patch_core_dependencies(fake_lm=fake_language_model()),
-        patch("core.service_gateway.optimization.core.compile_program", side_effect=_always_fail),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload)
-
-    assert result.best_pair is None
-    assert result.failed_pairs == 2
-    assert result.completed_pairs == 0
 
 
 def test_get_module_factory_resolver_error_raises_service_error() -> None:
@@ -612,27 +403,6 @@ def test_run_lm_activity_reflection_empty_when_no_reflection_model() -> None:
 
     assert result.lm_activity is not None
     assert result.lm_activity.reflection == {}
-
-
-def test_run_grid_search_pair_results_carry_lm_activity() -> None:
-    """Each successful ``PairResult`` carries an ``LMActivity`` payload."""
-    service = _service()
-    payload = _grid_request()
-
-    def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
-        """Return the deterministic per-pair score."""
-        return (0.8, [])
-
-    with (
-        patch_core_dependencies(),
-        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_eval_side_effect),
-        patch("core.worker.log_handler.set_current_pair_index"),
-    ):
-        result = service.run_grid_search(payload)
-
-    for pair in result.pair_results:
-        assert pair.error is None
-        assert isinstance(pair.lm_activity, LMActivity)
 
 
 _REACT_DATASET = [

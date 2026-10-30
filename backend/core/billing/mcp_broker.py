@@ -225,7 +225,7 @@ class McpToolsBroker:
             result = {
                 "protocolVersion": types.LATEST_PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "skynet-scoped-tools", "version": "1"},
+                "serverInfo": {"name": "app-scoped-tools", "version": "1"},
             }
         elif method == "tools/list":
             result = self._list()

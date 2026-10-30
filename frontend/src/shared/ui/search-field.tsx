@@ -25,7 +25,7 @@ export function SearchField({ value, onValueChange, placeholder, className }: Se
   return (
     <div
       className={cn(
-        "group relative flex h-11 items-center gap-1 rounded-2xl border border-border bg-background ps-4 pe-1 transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-foreground/40 focus-within:shadow-[0_2px_24px_-12px_oklch(0.25_0.04_45/.18)]",
+        "group relative flex h-11 items-center gap-1 rounded-2xl border border-border bg-background ps-4 pe-1 transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-foreground/40",
         isActive && "border-foreground/25",
         className,
       )}
@@ -57,7 +57,7 @@ export function SearchField({ value, onValueChange, placeholder, className }: Se
             inputRef.current?.focus();
           }}
           aria-label={msg("search.clear")}
-          className="inline-flex shrink-0 max-lg:size-[44px] lg:size-8 items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] cursor-pointer hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+          className="inline-flex shrink-0 max-lg:size-[44px] lg:size-8 items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] cursor-pointer hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
         >
           <X className="size-4" aria-hidden="true" />
         </button>

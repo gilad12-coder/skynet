@@ -21,7 +21,7 @@ def test_autosaddler_forwards_text_and_named_parts_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed: str | dict[str, str]
 ) -> None:
     """Preserve the task, including a parts candidate, and the upstream winner."""
-    task = Task(seed_candidate=seed, objective="improve", train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    task = Task(seed_candidate=seed, objective="improve", cases=[{"id": "a"}, {"id": "b"}])
     server = EvalServer(vowel_scorer, max_evals=10)
     incumbent = Result(best_candidate=seed, best_score=0.4, total_evals=5)
     native_run = MagicMock(return_value=incumbent)
@@ -39,7 +39,7 @@ def test_autosaddler_requires_a_native_runtime(tmp_path: Path) -> None:
     lm = MagicMock()
     with pytest.raises(ServiceError, match="managed Vercel sandbox"):
         AutoSaddlerEngine().run(
-            Task(seed_candidate="seed", train_set=[{"id": "a"}, {"id": "b"}]),
+            Task(seed_candidate="seed", cases=[{"id": "a"}, {"id": "b"}]),
             EvalServer(vowel_scorer, max_evals=5),
             make_ctx(str(tmp_path), lm),
         )
@@ -52,7 +52,7 @@ def test_autosaddler_propagates_native_failure(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(autosaddler_mod, "run_native_engine", native_run)
     with pytest.raises(ServiceError, match="upstream proposer unavailable"):
         AutoSaddlerEngine().run(
-            Task(seed_candidate="seed", train_set=[{"id": "a"}, {"id": "b"}]),
+            Task(seed_candidate="seed", cases=[{"id": "a"}, {"id": "b"}]),
             EvalServer(vowel_scorer, max_evals=5),
             make_ctx(str(tmp_path)),
         )

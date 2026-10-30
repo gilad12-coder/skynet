@@ -1,4 +1,5 @@
 import type { WorkflowSpec } from "@/shared/types/api";
+import type { ArtifactKind, DataMode, OptimizerChoice } from "@/shared/types/unified-run";
 
 /** Trust mode — how much the agent must ask before acting. */
 export type TrustMode = "ask" | "auto_safe" | "yolo";
@@ -15,52 +16,58 @@ export interface ChatTurn {
 /**
  * Snapshot of the submit wizard exposed to the generalist agent.
  *
- * The backend's phased-exposure gate reads five boolean-ish keys
- * (dataset_ready, columns_configured, signature_code, metric_code,
- * model_configured) to decide which MCP tools are callable on each turn.
- * The remaining fields are diagnostic for the agent's context and form
- * the write surface for ``update_wizard_state`` — every editable wizard
- * field lives here so agent patches flow 1:1 into local wizard state.
+ * Mirrors the backend ``WizardState``: the keys ``tools_for`` reads to
+ * phase tool exposure, and the write surface for ``update_wizard_state`` —
+ * every field the agent may patch flows 1:1 into the wizard's own state.
  */
 export interface WizardState {
+  job_name?: string;
+  job_description?: string;
+  is_private?: boolean;
+  task_objective?: string;
+  task_background?: string;
+  artifact_kind?: ArtifactKind;
+  starting_version?: string | Record<string, string>;
+  data_mode?: DataMode;
   dataset_ready?: boolean;
   columns_configured?: boolean;
-  signature_code?: string;
-  metric_code?: string;
-  model_configured?: boolean;
   staged_dataset_id?: string;
   // Id of a saved library dataset the run submits by reference (durable),
   // set when the user picks from the library instead of uploading. Mutually
   // exclusive with staged_dataset_id.
   source_dataset_id?: string;
-  job_name?: string;
-  job_description?: string;
-  job_type?: "run" | "grid_search" | "blackbox";
-  optimizer_name?: string;
-  module_name?: string;
-  // Authored graph for a ``workflow`` (multi-module) run — carried in place of
-  // signature_code and injected into the run request on submit.
-  workflow?: WorkflowSpec;
-  // React (ReAct-agent) run config — the live tool source. Excludes the secret
-  // mcp_auth_header, which is never shared.
-  react_config?: Record<string, unknown>;
   dataset_columns?: string[];
-  column_roles?: Record<string, string>;
-  model_config?: Record<string, unknown>;
-  reflection_model_config?: Record<string, unknown>;
-  generation_models?: Array<Record<string, unknown>>;
-  reflection_models?: Array<Record<string, unknown>>;
+  input_fields?: string[];
+  expected_field?: string;
   split_fractions?: { train: number; val: number; test: number };
-  split_mode?: "auto" | "manual";
-  seed?: number;
   shuffle?: boolean;
-  is_private?: boolean;
-  optimizer_kwargs?: Record<string, unknown>;
-  target_score?: number;
-  // Black-box ("optimize anything") wizard fields the agent can read and write.
-  blackbox_objective?: string;
-  blackbox_seed?: string;
-  blackbox_scorer_code?: string;
+  seed?: number;
+  optimizer_choice?: OptimizerChoice;
+  // The code agent still authors through these until it moves to the
+  // unified workspace; the backend ignores them.
+  optimizer_name?: string;
+  workflow?: WorkflowSpec;
+  model_config?: Record<string, unknown>;
+  model_configured?: boolean;
+  reflection_model_config?: Record<string, unknown>;
+  /** The run's spending limit in cents; null = no cap. */
+  max_cost_cents?: number | null;
+  /** The least the spending limit may be: the low end of the run's estimate, in cents. */
+  spending_floor_cents?: number;
+  run_code?: string;
+  metric_code?: string;
+  /** The wizard screen on view; the agent may edit only the fields on it. */
+  wizard_screen?: string;
+  /** Notes screen agents left for later screens, oldest first. */
+  screen_notes?: ScreenNote[];
+  /** What the Continue button refuses on the screen on view. */
+  screen_issue?: string;
+}
+
+/** A note one wizard screen's agent left for the screens after it. */
+export interface ScreenNote {
+  screen: string;
+  note: string;
 }
 
 export interface ToolStartPayload {

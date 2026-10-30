@@ -22,8 +22,11 @@ and ``backend/THIRD_PARTY_NOTICES.md``.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
+import math
 import os
 import re
 import shutil
@@ -53,8 +56,79 @@ except ImportError:  # In the sandbox the runner loads ``repo_tree`` as a top-le
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
 AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
-# harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
-_DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
+# Mirrors core.run_log.RECORD_ATTR: this module runs in the sandbox without Skynet's code.
+RUN_LOG_ATTR = "run_log"
+run_log = logging.getLogger("app.engine")
+
+
+def log_event(
+    event: str,
+    message: str,
+    *,
+    level: int = logging.INFO,
+    source: str = "engine",
+    candidate: Any = None,
+    case: Any = None,
+    **fields: Any,
+) -> None:
+    """Log one typed run event, which the runner streams to the job's run log.
+
+    Args:
+        event: Event name, such as ``proposer.done``.
+        message: Human-readable line.
+        level: Logging level.
+        source: ``engine`` or ``proposer``.
+        candidate: Candidate the event belongs to.
+        case: Case the event belongs to.
+        **fields: JSON-serializable event payload.
+    """
+    run_log.log(
+        level,
+        "%s",
+        message,
+        extra={
+            RUN_LOG_ATTR: {
+                "source": source,
+                "event": event,
+                "fields": fields or None,
+                "candidate": None if candidate is None else str(candidate),
+                "case": None if case is None else str(case),
+            }
+        },
+    )
+
+
+def blocked_patch(repo: dict[str, Any], patch: str) -> str | None:
+    """Refuse a version that breaks the path rules of a run with a constraints file.
+
+    The agent reads only the fixed illegal-action message; the run log keeps the
+    reason. A run without a constraints file is not checked here: its guest
+    gates keep naming the refused paths to the agent.
+
+    Args:
+        repo: Repository settings holding ``editable_paths``, ``readonly_paths``
+            and ``constrained``.
+        patch: The version's diff against the starting commit.
+
+    Returns:
+        The illegal-action message for a refused version, else ``None``.
+    """
+    if not repo.get("constrained"):
+        return None
+    problems = repo_tree.patch_violations(patch, repo["editable_paths"], repo["readonly_paths"])
+    if not problems:
+        return None
+    reason = " ".join(problems)
+    log_event(
+        repo_tree.RULE_BLOCK_EVENT,
+        f"Illegal action blocked: {repo_tree.PATH_RULE}. {reason}",
+        level=logging.WARNING,
+        rule=repo_tree.PATH_RULE,
+        reason=reason,
+    )
+    return repo_tree.ILLEGAL_ACTION_MESSAGE
+
+
 ASSET_CHECKSUMS = {
     "meta_harness/SKILL.md": "fce9a51d2e95d8a2d59c60b91106adc0309232a8d6b2fe0fa0785395dcb78d1c",
 }
@@ -63,6 +137,8 @@ BUDGET_EXHAUSTED_MARKER = "BUDGET_EXHAUSTED"
 META_HARNESS_TOOLS = "Read,Glob,Grep,Agent,Write,Edit,Bash"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
 _SESSION_POLL_SECONDS = 0.2
+# The CLI stderr tail carried into a failed run's error and its run log.
+_FAILURE_TAIL_CHARS = 2000
 
 # AutoResearch tuning: frontier and dossier sizes keep STATE.md readable; the
 # stale-round thresholds decide when to change tack and when to stop paying for
@@ -74,6 +150,8 @@ _FEEDBACK_CHARS = 600
 _PIVOT_AFTER = 2
 _STOP_AFTER = 4
 _PLANNED_ROUNDS = 6
+# A named score's Pareto column is keyed apart from example ids.
+NAMED_PREFIX = "score:"
 # Once a round spends its allowance the agent still gets time to write up the notebook.
 _WRITE_UP_GRACE_SECONDS = 90
 
@@ -107,8 +185,9 @@ if [ "$HTTP_CODE" != "200" ]; then echo "evaluator returned HTTP $HTTP_CODE" >&2
 # Repository mode: the candidate is the diff between the lab's ``repo/`` checkout
 # and the commit it started from. The rules file and the shared ``repo_tree``
 # module reject a diff the trusted scorer would refuse anyway, without spending
-# budget; the scorer still enforces the same rules on its own. Example ids are
-# probes, as in text mode.
+# budget; the scorer still enforces the same rules on its own. Under a
+# constraints file the engine's evaluator wrapper refuses it instead, so the
+# block reaches the run log. Example ids are probes, as in text mode.
 REPO_EVAL_SCRIPT = """\
 #!/usr/bin/env bash
 # Usage: ./eval.sh [example_id ...]
@@ -127,7 +206,9 @@ try:
 except UnicodeDecodeError:
     sys.exit("Not evaluated: a changed text file is not UTF-8.")
 rules = json.load(open(".repo-rules.json", encoding="utf-8"))
-problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+problems = [] if rules["constrained"] else repo_tree.patch_violations(
+    patch, rules["editable_paths"], rules["readonly_paths"]
+)
 if problems:
     sys.exit("Not evaluated:\\n" + "\\n".join(problems))
 body = {{"candidate": patch}}
@@ -159,6 +240,66 @@ if [ "$VERSION" != "base" ] && [ -s "archive/$VERSION.patch" ]; then
     git -C repo apply --binary --whitespace=nowarn "$PWD/archive/$VERSION.patch"
 fi
 echo "repo/ is now $VERSION"
+"""
+
+# Meta-Harness repository mode: a candidate is ``agents/<name>.patch``, the diff
+# of ``repo/`` against the starting commit when the proposer saved it. The same
+# rules check as ``eval.sh`` refuses a diff the trusted scorer would refuse, so
+# a bad candidate fails here instead of costing a benchmark. Under a
+# constraints file a refused diff moves to the blocks folder, which the engine
+# reads after each proposer turn to log the block.
+MH_SAVE_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./save.sh <name>   (writes repo/'s changes against the starting commit to agents/<name>.patch)
+set -euo pipefail
+cd "$(dirname "$0")"
+NAME="${{1:?usage: ./save.sh <name>}}"
+case "$NAME" in .*|*[!A-Za-z0-9_.-]*) echo "invalid candidate name: $NAME" >&2; exit 2;; esac
+PATCH_FILE="agents/$NAME.patch"
+git -C repo add --all
+git -C repo diff --cached --binary --no-color --no-ext-diff {base} > "$PATCH_FILE"
+PATCH_FILE="$PATCH_FILE" PYTHONPATH="{tools}" "{python}" -c 'import json, os, sys, time
+import repo_tree
+path = os.environ["PATCH_FILE"]
+try:
+    patch = open(path, encoding="utf-8").read()
+except UnicodeDecodeError:
+    os.remove(path)
+    sys.exit("Not saved: a changed text file is not UTF-8.")
+rules = json.load(open(".repo-rules.json", encoding="utf-8"))
+problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+if problems and rules["constrained"]:
+    os.makedirs("{blocks}", exist_ok=True)
+    os.replace(path, os.path.join("{blocks}", f"{{time.time_ns()}}.patch"))
+    sys.exit(repo_tree.ILLEGAL_ACTION_MESSAGE)
+if not patch.strip():
+    problems.append("repo/ has no changes against the starting commit.")
+if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+    problems.append("The change is larger than a version may be.")
+if problems:
+    os.remove(path)
+    sys.exit("Not saved:\\n" + "\\n".join(problems))'
+echo "saved $PATCH_FILE"
+"""
+
+MH_RULE_BLOCKS_DIR = ".rule-blocks"
+
+MH_CHECKOUT_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./checkout.sh <name>   (a saved candidate such as seed, or "base" for the starting commit)
+set -euo pipefail
+cd "$(dirname "$0")"
+NAME="${{1:?usage: ./checkout.sh <name|base>}}"
+case "$NAME" in .*|*[!A-Za-z0-9_.-]*) echo "unknown candidate: $NAME" >&2; exit 2;; esac
+if [ "$NAME" != "base" ] && [ ! -f "agents/$NAME.patch" ]; then
+    echo "unknown candidate: $NAME" >&2; exit 2
+fi
+git -C repo reset --quiet --hard {base}
+git -C repo clean --quiet -fd
+if [ "$NAME" != "base" ] && [ -s "agents/$NAME.patch" ]; then
+    git -C repo apply --binary --whitespace=nowarn "$PWD/agents/$NAME.patch"
+fi
+echo "repo/ is now $NAME"
 """
 
 
@@ -268,6 +409,10 @@ def best_aggregate_candidate(server: EvalServer) -> tuple[str, float] | None:
     return best
 
 
+class ProposerFailedError(RuntimeError):
+    """The proposer CLI failed on its own, so the run cannot continue."""
+
+
 @dataclass
 class ProposerOutcome:
     """One ``claude --print`` invocation's parsed result."""
@@ -278,6 +423,52 @@ class ProposerOutcome:
     text: str
     budget_exhausted: bool
     killed: bool
+    returncode: int | None = None
+    stderr_tail: str = ""
+
+    def raise_if_failed(self, name: str) -> None:
+        """Fail the run when the CLI errored without the engine stopping it or the budget running out.
+
+        Before this, an errored session was treated as a session that found
+        nothing, so a CLI that could not start ended the run as a success built
+        from the seed alone.
+
+        Args:
+            name: Session label used in the message, such as ``round1``.
+
+        Raises:
+            ProposerFailedError: When the session failed on its own.
+        """
+        if not self.is_error or self.killed or self.budget_exhausted:
+            return
+        detail = self.stderr_tail.strip() or self.text.strip() or "no output"
+        raise ProposerFailedError(
+            f"The proposer CLI session {name} failed (exit {self.returncode}): {detail[-_FAILURE_TAIL_CHARS:]}"
+        )
+
+
+# Variables a proposer never inherits. The raw provider key and nested-session
+# flag follow upstream; the scorer/metric names keep any path or key the
+# parent's scorer uses out of the agent's reach.
+_PROPOSER_ENV_DROP = frozenset({"CLAUDECODE", "ANTHROPIC_API_KEY"})
+# The legacy spellings stay listed: an older control plane may still set them.
+_PROPOSER_ENV_DROP_PREFIXES = ("APP_SCORER", "APP_METRIC", "SKYNET_SCORER", "SKYNET_METRIC")
+
+
+def proposer_environment(environ: dict[str, str]) -> dict[str, str]:
+    """Copy the box environment for a proposer, without what it must not see.
+
+    Args:
+        environ: The runner's environment.
+
+    Returns:
+        The environment the proposer CLI runs with.
+    """
+    return {
+        name: value
+        for name, value in environ.items()
+        if name not in _PROPOSER_ENV_DROP and not name.startswith(_PROPOSER_ENV_DROP_PREFIXES)
+    }
 
 
 def run_proposer(
@@ -289,8 +480,6 @@ def run_proposer(
     model: str,
     session_id: str,
     resume: bool = False,
-    effort: str | None = None,
-    max_thinking_tokens: int | None = None,
     max_budget_usd: float | None = None,
     tools: str | None = None,
     append_system_prompt: str | None = None,
@@ -298,8 +487,8 @@ def run_proposer(
 ) -> ProposerOutcome:
     """Run the proposer through the ``claude`` command, exactly as the upstream drivers do.
 
-    The configured harness stands behind ``claude`` when it is not Claude Code,
-    so this is the single invocation shape every proposer must answer.
+    The harness bridge answers to ``claude`` for the configured harness, so this
+    is the single invocation shape every proposer must answer.
 
     Args:
         prompt: Task prompt for this session.
@@ -309,8 +498,6 @@ def run_proposer(
         model: Model identifier passed to the CLI.
         session_id: Session to create or, with ``resume``, to continue.
         resume: Whether to continue ``session_id`` instead of starting it.
-        effort: ``--effort`` value, or ``None``.
-        max_thinking_tokens: Fixed thinking budget, or ``None`` for adaptive.
         max_budget_usd: Remaining proposer spend passed as ``--max-budget-usd``.
         tools: Comma-separated tool whitelist, or ``None`` for the CLI default.
         append_system_prompt: Extra system prompt (the Meta-Harness skill).
@@ -325,24 +512,22 @@ def run_proposer(
         cmd.extend(["--tools", tools, "--allowedTools", tools])
     if append_system_prompt:
         cmd.extend(["--append-system-prompt", append_system_prompt])
-    if effort is not None and max_thinking_tokens is None:
-        cmd.extend(["--effort", str(effort)])
     if max_budget_usd is not None:
         cmd.extend(["--max-budget-usd", f"{max(0.0, max_budget_usd):.6f}"])
     cmd.append(prompt)
-    env = {**os.environ}
-    # Upstream: a nested CLI must not believe it is already inside Claude Code,
-    # and the proposer must authenticate through the harness, not a raw key. A
-    # direct Claude Code run keeps its key: a placeholder the network edge replaces.
-    env.pop("CLAUDECODE", None)
-    if env.get(_DIRECT_ANTHROPIC_ENV) != "1":
-        env.pop("ANTHROPIC_API_KEY", None)
-    if max_thinking_tokens is not None:
-        env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "1"
-        env["MAX_THINKING_TOKENS"] = str(max_thinking_tokens)
+    env = proposer_environment(dict(os.environ))
     log_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     killed = False
+    log_event(
+        "proposer.start",
+        f"Proposer session {name} started" + (" (resumed)" if resume else ""),
+        source="proposer",
+        session=name,
+        model=model,
+        resume=resume,
+        max_budget_usd=max_budget_usd,
+    )
     with (
         (log_dir / f"{name}_stdout.json").open("w", encoding="utf-8") as stdout_file,
         (log_dir / f"{name}_stderr.txt").open("w", encoding="utf-8") as stderr_file,
@@ -371,7 +556,31 @@ def run_proposer(
         text=str(document.get("result") or ""),
         budget_exhausted=BUDGET_EXHAUSTED_MARKER in stdout or BUDGET_EXHAUSTED_MARKER in stderr,
         killed=killed,
+        returncode=process.returncode,
+        stderr_tail=stderr[-_FAILURE_TAIL_CHARS:],
     )
+    duration = round(time.monotonic() - started, 1)
+    log_event(
+        "proposer.done",
+        f"Proposer session {name} {'failed' if outcome.is_error else 'finished'} in {duration}s, "
+        f"spent {outcome.cost_usd:.4f} dollars",
+        level=logging.WARNING if outcome.is_error and not killed else logging.INFO,
+        source="proposer",
+        session=name,
+        duration_s=duration,
+        cost_usd=outcome.cost_usd,
+        returncode=process.returncode,
+        killed=killed,
+        budget_exhausted=outcome.budget_exhausted,
+    )
+    if outcome.is_error:
+        # The runner's stderr reaches the job's run log; the CLI's own files die with the sandbox.
+        print(
+            f"[{name}] proposer CLI exited {process.returncode}"
+            f"{' after being stopped' if killed else ''}: {(stderr.strip() or outcome.text.strip())[-_FAILURE_TAIL_CHARS:]}",
+            file=sys.stderr,
+            flush=True,
+        )
     (log_dir / f"{name}_meta.json").write_text(
         json.dumps(
             {
@@ -451,15 +660,25 @@ def task_brief(task: Task, example_ids: list[str]) -> str:
     lines += ["## Evaluation", ""]
     if example_ids:
         lines += [
-            f"The evaluator scores a candidate on {_plural(len(example_ids), 'visible example')} and reports the "
+            f"The evaluator scores a candidate on {_plural(len(example_ids), 'example')} and reports the "
             "average score (higher is better) together with per-example scores and feedback.",
             "",
             "Example ids: " + ", ".join(f"`{eid}`" for eid in example_ids),
             "",
-            "Held-out test cases exist and are never exposed; do not overfit the visible ones.",
+            "The final result is measured afresh on these examples; a change that only helps by special-casing "
+            "one of them is not an improvement.",
         ]
     else:
-        lines += ["The evaluator scores the candidate as a whole and reports a single score (higher is better)."]
+        lines += [
+            "The evaluator scores the candidate as a whole and reports a score (higher is better) with feedback "
+            "explaining it."
+        ]
+    lines += [
+        "",
+        "The evaluator may also report named scores, each with its own feedback. Each named score is a column "
+        f"(`{NAMED_PREFIX}<name>`) of the per-example scores and an axis of the Pareto front, so a candidate that "
+        "wins on one of them is worth keeping even when its average is lower.",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -468,6 +687,9 @@ class Observation:
     """One evaluator call the research agent made, as the server answered it."""
 
     candidate: str
+    # The candidate's score, the mean over the examples it was scored on.
+    score: float
+    # Pareto columns: per-example scores, then named scores as ``score:<name>``.
     scores: dict[str, float]
     feedback: dict[str, str]
     full: bool
@@ -492,22 +714,93 @@ def _feedback_text(info: Any) -> str:
     return text if len(text) <= _FEEDBACK_CHARS else text[:_FEEDBACK_CHARS] + " …"
 
 
-def pareto_front(table: dict[str, dict[str, float]]) -> list[str]:
-    """Return the candidates no other candidate beats on every example.
+def named_score_columns(infos: list[Any]) -> tuple[dict[str, float], dict[str, str]]:
+    """Average a scorer's named scores over the examples into Pareto columns.
 
     Args:
-        table: Per-example scores of each fully evaluated candidate.
+        infos: The scorer's side info for each example scored (one item without examples).
 
     Returns:
-        The non-dominated candidates, highest mean first.
+        ``(scores, feedback)`` keyed ``score:<name>``: each name's mean score,
+        and its feedback from every example joined into one note.
+    """
+    collected: dict[str, list[tuple[float, str]]] = {}
+    for info in infos:
+        raw = info.get("scores") if isinstance(info, dict) else None
+        if not isinstance(raw, dict):
+            continue
+        for name, entry in raw.items():
+            value = entry.get("score") if isinstance(entry, dict) else entry
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            note = str(entry.get("feedback") or "") if isinstance(entry, dict) else ""
+            collected.setdefault(f"{NAMED_PREFIX}{name}", []).append((float(value), note))
+    scores = {column: sum(value for value, _ in entries) / len(entries) for column, entries in collected.items()}
+    feedback = {
+        column: _feedback_text({"feedback": " | ".join(note for _, note in entries if note)})
+        for column, entries in collected.items()
+    }
+    return scores, feedback
+
+
+def gepa_named_scores(side_info: Any) -> Any:
+    """Shape side info for GEPA: numeric named scores for its frontier, their feedback beside them.
+
+    Args:
+        side_info: What the scorer returned next to the score.
+
+    Returns:
+        A copy whose ``scores`` maps each name to its number, with each named
+        score's feedback under ``Feedback per score``; anything else unchanged.
+    """
+    raw = side_info.get("scores") if isinstance(side_info, dict) else None
+    if not isinstance(raw, dict) or not any(isinstance(entry, dict) for entry in raw.values()):
+        return side_info
+    numbers = {name: entry.get("score") if isinstance(entry, dict) else entry for name, entry in raw.items()}
+    notes = {name: entry.get("feedback") for name, entry in raw.items() if isinstance(entry, dict)}
+    return {**side_info, "scores": numbers, "Feedback per score": {k: v for k, v in notes.items() if v}}
+
+
+def record_text(record: Any) -> str:
+    """Render one GEPA reflective record: the feedback, then each named score with its own feedback.
+
+    Args:
+        record: A record from GEPA's reflective dataset.
+
+    Returns:
+        A short readable note.
+    """
+    if not isinstance(record, dict):
+        return _feedback_text(record)
+    numbers = record.get("Scores (Higher is Better)")
+    notes = record.get("Feedback per score")
+    lines = [_feedback_text({"feedback": record["feedback"]}) if isinstance(record.get("feedback"), str) else ""]
+    if isinstance(numbers, dict):
+        notes = notes if isinstance(notes, dict) else {}
+        for name, value in numbers.items():
+            note = notes.get(name)
+            lines.append(f"   - {name}: {value}" + (f" — {_feedback_text({'feedback': note})}" if note else ""))
+    text = "\n".join(line for line in lines if line)
+    return text or _feedback_text(record)
+
+
+def pareto_front(table: dict[str, dict[str, float]], ranking: dict[str, float]) -> list[str]:
+    """Return the candidates no other candidate beats on every column.
+
+    Args:
+        table: Per-example and named-score columns of each fully evaluated candidate.
+        ranking: Each candidate's overall score, to order the front.
+
+    Returns:
+        The non-dominated candidates, highest overall score first.
     """
 
     def dominates(a: dict[str, float], b: dict[str, float]) -> bool:
         """Tell whether ``a`` is at least as good as ``b`` everywhere and better somewhere."""
-        return all(a[k] >= b[k] for k in b) and any(a[k] > b[k] for k in b)
+        return all(a.get(k, 0.0) >= b[k] for k in b) and any(a.get(k, 0.0) > b[k] for k in b)
 
     front = [c for c, row in table.items() if not any(dominates(other, row) for d, other in table.items() if d != c)]
-    return sorted(front, key=lambda c: -_mean(table[c]))
+    return sorted(front, key=lambda c: -ranking.get(c, _mean(table[c])))
 
 
 def _mean(row: dict[str, float]) -> float:
@@ -520,6 +813,23 @@ def _mean(row: dict[str, float]) -> float:
         The mean, or 0.0 for an empty row.
     """
     return sum(row.values()) / len(row) if row else 0.0
+
+
+def repo_rules(repo: dict[str, Any]) -> str:
+    """Describe which parts of the repository a version may change.
+
+    Args:
+        repo: Repository settings holding ``editable_paths`` and ``readonly_paths``.
+
+    Returns:
+        Markdown appended to the task brief.
+    """
+    editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in repo["editable_paths"])
+    lines = ["", "## Repository", "", f"You may change: {editable}. Everything else is read-only context."]
+    if repo["readonly_paths"]:
+        lines += ["", "Submodules and Git LFS files stay as fetched:"]
+        lines += [f"- `{path}`" for path in repo["readonly_paths"]]
+    return "\n".join(lines) + "\n"
 
 
 class AutoResearchEngine:
@@ -547,11 +857,9 @@ class AutoResearchEngine:
         self.multi_round = bool(engine_config.pop("ralph", True))
         no_eval = engine_config.pop("max_no_eval_seconds", None)
         self.max_no_eval_seconds = None if no_eval is None else float(no_eval)
-        self.effort = engine_config.pop("effort", None)
-        thinking = engine_config.pop("max_thinking_tokens", None)
-        self.max_thinking_tokens = None if thinking is None else int(thinking)
-        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
-        # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths``,
+        # ``constrained`` (a constraints file governs the run) and ``tools``
+        # (the folder holding ``repo_tree.py``) for a repository run.
         self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
         self.suffix = ".patch" if self.repo else ".txt"
         self.max_token_cost = config.max_token_cost
@@ -579,6 +887,7 @@ class AutoResearchEngine:
 
         Raises:
             RuntimeError: When the agent finished without scoring any candidate.
+            ProposerFailedError: When a round's CLI session failed on its own.
         """
         self.example_ids = visible_example_ids(server)
         self._layout(task, server)
@@ -599,6 +908,7 @@ class AutoResearchEngine:
                 outcome = self._session(server, directive, max_budget_usd=remaining)
                 self.cost_usd += outcome.cost_usd
                 self.session_ids.append(outcome.session_id)
+                outcome.raise_if_failed(f"round{self.round}")
                 after = self._leader_score()
                 improved = after is not None and (before is None or after > before)
                 stale = 0 if improved else stale + 1
@@ -638,6 +948,20 @@ class AutoResearchEngine:
         if notebook.is_file():
             shutil.copyfile(notebook, target / "notebook.md")
 
+    def _refuse_blocked(self, candidate: str) -> None:
+        """Stop a version the constraints file refuses before it uses any budget.
+
+        Args:
+            candidate: The version's diff.
+
+        Raises:
+            RuntimeError: With the illegal-action message, which the evaluation
+                server returns to ``eval.sh``.
+        """
+        refusal = blocked_patch(self.repo, candidate) if self.repo else None
+        if refusal:
+            raise RuntimeError(refusal)
+
     def _record(self, server: EvalServer) -> Callable[[], None]:
         """Capture every evaluator answer the agent receives, per example.
 
@@ -657,12 +981,18 @@ class AutoResearchEngine:
 
             def evaluate_examples(candidate: str, example_ids: Any = None, split: Any = None) -> Any:
                 """Score through the server, then log the per-example answer."""
+                self._refuse_blocked(candidate)
                 score, info = original(candidate, example_ids=example_ids, split=split)
                 scores = {str(k): float(v) for k, v in (info.get("scores") or {}).items()}
                 feedback = {str(k): _feedback_text(v) for k, v in (info.get("infos") or {}).items()}
                 for eid, error in (info.get("errors") or {}).items():
                     feedback[str(eid)] = _feedback_text(f"error: {error}")
-                self._observe(Observation(candidate, scores, feedback, set(scores) == visible, self.round))
+                full = set(scores) == visible
+                mean = _mean(scores)
+                named, named_feedback = named_score_columns(list((info.get("infos") or {}).values()))
+                scores.update(named)
+                feedback.update(named_feedback)
+                self._observe(Observation(candidate, mean, scores, feedback, full, self.round))
                 return score, info
 
             server.evaluate_examples = evaluate_examples  # type: ignore[method-assign]
@@ -671,10 +1001,18 @@ class AutoResearchEngine:
 
         def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> Any:
             """Score through the server, then log the whole-candidate answer."""
+            self._refuse_blocked(candidate)
             score, info = original_single(candidate, example, **kwargs)
-            self._observe(
-                Observation(candidate, {"_single": float(score)}, {"_single": _feedback_text(info)}, True, self.round)
-            )
+            # Upstream checkpoints only dataset sweeps; without one the run
+            # view would never see a version, so each answer is its checkpoint.
+            if math.isfinite(float(score)):
+                server.log_progress(float(score), candidate=candidate)
+            named, named_feedback = named_score_columns([info])
+            # Without examples the named scores are the Pareto axes; the score
+            # alone is one when the scorer names none.
+            columns = named or {"_single": float(score)}
+            feedback = {"_single": _feedback_text(info), **named_feedback}
+            self._observe(Observation(candidate, float(score), columns, feedback, True, self.round))
             return score, info
 
         server.evaluate = evaluate  # type: ignore[method-assign]
@@ -694,10 +1032,10 @@ class AutoResearchEngine:
             self._ids[observation.candidate] = cid
             (self.work_dir / "archive" / f"{cid}{self.suffix}").write_text(observation.candidate, encoding="utf-8")
             with (self.work_dir / "archive" / "index.tsv").open("a", encoding="utf-8") as index:
-                index.write(f"{cid}\t{_mean(observation.scores):.6f}\t{observation.round}\n")
+                index.write(f"{cid}\t{observation.score:.6f}\t{observation.round}\n")
 
     def _table(self) -> dict[str, dict[str, float]]:
-        """Per-example scores of every fully evaluated candidate, latest answer winning.
+        """Per-example and named-score columns of every fully evaluated candidate, latest answer winning.
 
         Returns:
             Rows keyed by candidate text.
@@ -705,14 +1043,36 @@ class AutoResearchEngine:
         with self._lock:
             return {o.candidate: o.scores for o in self.observations if o.full}
 
+    def _ranking(self) -> dict[str, float]:
+        """Overall score of every fully evaluated candidate, latest answer winning.
+
+        Returns:
+            Scores keyed by candidate text.
+        """
+        with self._lock:
+            return {o.candidate: o.score for o in self.observations if o.full}
+
+    def _columns(self, table: dict[str, dict[str, float]]) -> list[str]:
+        """List the Pareto columns worth showing: examples, then named scores.
+
+        Args:
+            table: Per-example and named-score columns of fully evaluated candidates.
+
+        Returns:
+            Column ids in first-seen order, without the single-score placeholder.
+        """
+        columns = list(self.example_ids)
+        for row in table.values():
+            columns += [column for column in row if column not in columns and column != "_single"]
+        return columns
+
     def _leader_score(self) -> float | None:
-        """Return the best mean score among fully evaluated candidates.
+        """Return the best overall score among fully evaluated candidates.
 
         Returns:
             The score, or ``None`` before any full evaluation.
         """
-        table = self._table()
-        return max((_mean(row) for row in table.values()), default=None)
+        return max(self._ranking().values(), default=None)
 
     def _directive(self, stale: int, improved: bool) -> str:
         """Pick this round's research directive from the evidence so far.
@@ -740,7 +1100,7 @@ class AutoResearchEngine:
             frontier member wins anywhere the leader loses.
         """
         table = self._table()
-        front = pareto_front(table)
+        front = pareto_front(table, self._ranking())
         if len(front) < 2:
             return None
         leader = table[front[0]]
@@ -783,9 +1143,13 @@ class AutoResearchEngine:
         route = "evaluate_examples" if self.example_ids else "evaluate"
         brief = task_brief(task, self.example_ids)
         if self.repo:
-            brief += self._repo_rules()
+            brief += repo_rules(self.repo)
             (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
-            rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
+            rules = {
+                "editable_paths": self.repo["editable_paths"],
+                "readonly_paths": self.repo["readonly_paths"],
+                "constrained": bool(self.repo.get("constrained")),
+            }
             (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
             script = REPO_EVAL_SCRIPT.format(
                 server_url=server.url,
@@ -813,20 +1177,6 @@ class AutoResearchEngine:
             encoding="utf-8",
         )
         (self.work_dir / "archive" / "index.tsv").write_text("id\tscore\tround\n", encoding="utf-8")
-
-    def _repo_rules(self) -> str:
-        """Describe which parts of the repository a version may change.
-
-        Returns:
-            Markdown appended to ``TASK.md``.
-        """
-        repo = self.repo or {}
-        editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in repo["editable_paths"])
-        lines = ["", "## Repository", "", f"You may change: {editable}. Everything else is read-only context."]
-        if repo["readonly_paths"]:
-            lines += ["", "Submodules and Git LFS files stay as fetched:"]
-            lines += [f"- `{path}`" for path in repo["readonly_paths"]]
-        return "\n".join(lines) + "\n"
 
     def _repo_brief(self) -> str:
         """Write the standing research method for a repository run.
@@ -894,8 +1244,8 @@ class AutoResearchEngine:
             "evaluation before the round's allowance runs out.\n\n"
             "## Standards\n\n"
             "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
-            "- Keep the repository working. Held-out test cases exist, so a change that only helps because it "
-            "special-cases a visible example, or weakens the checks that judge it, is not an improvement.\n"
+            "- Keep the repository working. The final result is measured afresh, so a change that only helps "
+            "because it special-cases an example, or weakens the checks that judge it, is not an improvement.\n"
             "- Between two versions with the same score, the smaller diff is better. A change that deletes code "
             "and keeps the score is a win.\n"
             "- There is no human to ask. End the session once the allowance is spent or the directive is done; "
@@ -959,7 +1309,7 @@ class AutoResearchEngine:
             "before the round's allowance runs out.\n\n"
             "## Standards\n\n"
             "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
-            "- Keep every candidate valid for `TASK.md`. Held-out test cases exist, so a change that only helps "
+            "- Keep every candidate valid for `TASK.md`. The final result is measured afresh, so a change that only helps "
             "because it names or special-cases a visible example is not an improvement.\n"
             "- Between two candidates with the same score, the shorter and simpler one is better. A change that "
             "deletes text and keeps the score is a win.\n"
@@ -975,7 +1325,8 @@ class AutoResearchEngine:
             directive: This round's directive.
         """
         table = self._table()
-        front = pareto_front(table)[:_FRONTIER_SIZE]
+        ranking = self._ranking()
+        front = pareto_front(table, ranking)[:_FRONTIER_SIZE]
         frontier_dir = self.work_dir / "frontier"
         for stale_file in frontier_dir.iterdir():
             stale_file.unlink()
@@ -995,18 +1346,19 @@ class AutoResearchEngine:
             lines.append(f"- Your own model spend left for the run: ${left:.2f}.")
         lines += ["", "## Leaderboard", ""]
         if table:
-            ranked = sorted(table, key=lambda c: -_mean(table[c]))[:_LEADERBOARD_SIZE]
+            ranked = sorted(table, key=lambda c: -ranking[c])[:_LEADERBOARD_SIZE]
             lines += ["| id | score | on frontier |", "| --- | --- | --- |"]
-            lines += [f"| {self._ids[c]} | {_mean(table[c]):.4f} | {'yes' if c in front else ''} |" for c in ranked]
+            lines += [f"| {self._ids[c]} | {ranking[c]:.4f} | {'yes' if c in front else ''} |" for c in ranked]
         else:
             lines.append("Nothing has been fully evaluated yet.")
-        if table and self.example_ids:
-            lines += ["", "## Per-example scores on the frontier", ""]
-            lines += ["| example | " + " | ".join(self._ids[c] for c in front) + " |"]
+        columns = self._columns(table)
+        if table and columns:
+            lines += ["", "## Per-example and named scores on the frontier", ""]
+            lines += ["| column | " + " | ".join(self._ids[c] for c in front) + " |"]
             lines += ["| --- " * (len(front) + 1) + "|"]
-            for eid in self.example_ids:
-                cells = " | ".join(f"{table[c].get(eid, 0.0):.3f}" for c in front)
-                lines.append(f"| `{eid}` | {cells} |")
+            for column in columns:
+                cells = " | ".join(f"{table[c].get(column, 0.0):.3f}" for c in front)
+                lines.append(f"| `{column}` | {cells} |")
         lines += ["", "## Failure dossier", ""]
         lines += self._dossier(table, front)
         (self.work_dir / "STATE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1076,17 +1428,22 @@ class AutoResearchEngine:
         leader = front[0]
         with self._lock:
             feedback = next((o.feedback for o in reversed(self.observations) if o.full and o.candidate == leader), {})
+        columns = self._columns(table)
+        lines: list[str] = []
         if not self.example_ids:
             note = feedback.get("_single") or "(no feedback)"
-            return [f"Leader `{self._ids[leader]}` feedback:", "", "```", note, "```"]
-        best_anywhere = {eid: max(row.get(eid, 0.0) for row in table.values()) for eid in self.example_ids}
-        hard = sorted(self.example_ids, key=lambda eid: best_anywhere[eid])[:_DOSSIER_EXAMPLES]
-        weakest = sorted(self.example_ids, key=lambda eid: table[leader].get(eid, 0.0))[:_DOSSIER_EXAMPLES]
-        lines = [
-            "Hardest examples (best score any candidate reached): "
-            + ", ".join(f"`{eid}` {best_anywhere[eid]:.3f}" for eid in hard),
+            lines += [f"Leader `{self._ids[leader]}` feedback:", "", "```", note, "```"]
+            if not columns:
+                return lines
+            lines.append("")
+        best_anywhere = {column: max(row.get(column, 0.0) for row in table.values()) for column in columns}
+        hard = sorted(columns, key=lambda column: best_anywhere[column])[:_DOSSIER_EXAMPLES]
+        weakest = sorted(columns, key=lambda column: table[leader].get(column, 0.0))[:_DOSSIER_EXAMPLES]
+        lines += [
+            "Hardest examples and named scores (best score any candidate reached): "
+            + ", ".join(f"`{column}` {best_anywhere[column]:.3f}" for column in hard),
             "",
-            f"Leader `{self._ids[leader]}` on its weakest examples:",
+            f"Leader `{self._ids[leader]}` where it is weakest:",
             "",
         ]
         for eid in weakest:
@@ -1135,8 +1492,6 @@ class AutoResearchEngine:
             name=f"round{self.round}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=max_budget_usd,
             should_kill=should_kill,
         )
@@ -1180,6 +1535,7 @@ class AutoResearchEngine:
             raise RuntimeError("The research agent finished without scoring any candidate through eval.sh.")
         candidate, score = best
         table = self._table()
+        ranking = self._ranking()
         return Result(
             best_candidate=candidate,
             best_score=score,
@@ -1193,7 +1549,7 @@ class AutoResearchEngine:
                 "session_ids": list(self.session_ids),
                 "proposer_cost_usd": round(self.cost_usd, 6),
                 "candidates_evaluated": len(table),
-                "frontier": [{"id": self._ids[c], "score": round(_mean(table[c]), 6)} for c in pareto_front(table)],
+                "frontier": [{"id": self._ids[c], "score": round(ranking[c], 6)} for c in pareto_front(table, ranking)],
                 "work_dir": str(self.work_dir),
                 "seed_len": len(seed_as_text(task.seed_candidate)),
                 **({"repository": True} if self.repo else {}),
@@ -1223,11 +1579,13 @@ class MetaHarnessEngine:
         # Upstream CLI default: ``--iterations 20``.
         self.max_iterations = int(engine_config.pop("max_iterations", 20))
         self.candidates_per_iter = max(1, int(engine_config.pop("max_candidates_per_iter", 3)))
-        self.effort = engine_config.pop("effort", None)
-        thinking = engine_config.pop("max_thinking_tokens", None)
-        self.max_thinking_tokens = None if thinking is None else int(thinking)
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths``,
+        # ``constrained`` (a constraints file governs the run) and ``tools``
+        # (the folder holding ``repo_tree.py``) for a repository run.
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        self.suffix = ".patch" if self.repo else ".txt"
         self.run_dir = Path(config.run_dir or "meta-harness-run").resolve()
         self.work_dir = self.run_dir / "meta_harness"
         self.logs_dir = self.work_dir / "logs" / "run"
@@ -1292,7 +1650,7 @@ class MetaHarnessEngine:
         """
         target = Path(output_dir) / self.name
         target.mkdir(parents=True, exist_ok=True)
-        (target / "best_candidate.txt").write_text(result.best_candidate, encoding="utf-8")
+        (target / f"best_candidate{self.suffix}").write_text(result.best_candidate, encoding="utf-8")
         (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
 
     def _layout(self, task: Task) -> None:
@@ -1305,8 +1663,29 @@ class MetaHarnessEngine:
             shutil.rmtree(self.work_dir)
         for sub in ("agents", "logs/run/reports", "logs/run/claude_sessions", "logs/run/results"):
             (self.work_dir / sub).mkdir(parents=True)
-        (self.work_dir / "agents" / "seed.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
-        (self.work_dir / "task.md").write_text(task_brief(task, self.example_ids), encoding="utf-8")
+        seed = seed_as_text(task.seed_candidate) if task.seed_candidate is not None else ""
+        (self.work_dir / "agents" / f"seed{self.suffix}").write_text(seed, encoding="utf-8")
+        brief = task_brief(task, self.example_ids)
+        if self.repo:
+            brief += repo_rules(self.repo)
+            (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
+            rules = {
+                "editable_paths": self.repo["editable_paths"],
+                "readonly_paths": self.repo["readonly_paths"],
+                "constrained": bool(self.repo.get("constrained")),
+            }
+            (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
+            scripts = {
+                "save.sh": MH_SAVE_SCRIPT.format(
+                    base=self.repo["base"], tools=self.repo["tools"], python=sys.executable, blocks=MH_RULE_BLOCKS_DIR
+                ),
+                "checkout.sh": MH_CHECKOUT_SCRIPT.format(base=self.repo["base"]),
+            }
+            for name, text in scripts.items():
+                (self.work_dir / name).write_text(text, encoding="utf-8")
+                (self.work_dir / name).chmod(0o755)
+            subprocess.run(["./checkout.sh", "seed"], cwd=self.work_dir, check=True, capture_output=True)
+        (self.work_dir / "task.md").write_text(brief, encoding="utf-8")
         skill_dir = self.work_dir / ".claude" / "skills" / "meta-harness"
         skill_dir.mkdir(parents=True)
         skill_dir.joinpath("SKILL.md").write_text(self.skill(), encoding="utf-8")
@@ -1408,7 +1787,10 @@ class MetaHarnessEngine:
             (
                 "1. Copy a top-performing base system to `agents/<name>.py`, then make targeted modifications. This "
                 "copy-then-edit approach ensures correct imports and proven patterns.",
-                "1. Copy a top-performing base candidate to `agents/<name>.txt`, then make targeted modifications. "
+                "1. Run `./checkout.sh <base>` to reset `repo/` to a top-performing candidate, then make targeted "
+                "changes to the code in `repo/`. This checkout-then-edit approach keeps proven patterns."
+                if self.repo
+                else "1. Copy a top-performing base candidate to `agents/<name>.txt`, then make targeted modifications. "
                 "This copy-then-edit approach keeps proven patterns.",
             ),
             (
@@ -1419,29 +1801,54 @@ class MetaHarnessEngine:
                 "4. Validate: `uv run python -c \"from text_classification.agents.<name> import *; print('OK')\"`\n\n"
                 "Do not edit `config.yaml` just to register candidates. The benchmark auto-discovers files in "
                 "`agents/`.",
-                "After writing, re-read the file and check: does this candidate introduce a genuinely NEW "
+                (
+                    "After implementing, re-read your diff and check: does this candidate introduce a genuinely NEW "
+                    "mechanism, or is it just a parameter variant? If the code is identical to the base except for "
+                    "constants, REWRITE with a truly novel mechanism.\n"
+                    "4. Save: `./save.sh <name>` writes `repo/`'s whole change against the starting commit to "
+                    "`agents/<name>.patch` and checks it only touches files you may change; it must print `saved`. "
+                    "Then move on to the next candidate with `./checkout.sh`.\n\n"
+                    "Do not edit `task.md` or write patch files by hand. The benchmark applies exactly the patches "
+                    "listed in `pending_eval.json` to a fresh checkout of the starting commit."
+                )
+                if self.repo
+                else "After writing, re-read the file and check: does this candidate introduce a genuinely NEW "
                 "mechanism, or is it just a cosmetic variant? If it is identical to the base except for a few "
                 "words or numbers, REWRITE with a truly novel mechanism.\n"
                 "4. Validate: `test -s agents/<name>.txt && echo OK` — the file must exist and be non-empty; its "
                 "whole content is what gets evaluated.\n\n"
                 "Do not edit `task.md`. The benchmark reads exactly the files listed in `pending_eval.json`.",
             ),
-            ('"file": "agents/<name>.py",', '"file": "agents/<name>.txt",'),
+            ('"file": "agents/<name>.py",', f'"file": "agents/<name>{self.suffix}",'),
             ("Output: `CANDIDATES: <name1>, <name2>, <name3>`", f"Output: `CANDIDATES: {names}`"),
             (
                 "## MemorySystem Interface",
                 "- Test results: `results/<dataset>/<memory>/<model>/test.json` (separate dir, never exposed during "
                 "evolution)",
-                "## Candidate Format\n\n"
-                "- Each candidate is a plain text file under `agents/`; its whole content is submitted to the "
-                "evaluator.\n"
-                "- `task.md` says what the candidate is for and how it is judged.\n"
-                "- `agents/seed.txt` is the starting candidate the run began from.\n\n"
-                "## Directory Structure\n\n"
+                (
+                    "## Candidate Format\n\n"
+                    "- `repo/` is a git checkout of the repository under optimization; edit its code in place.\n"
+                    "- Each candidate is a patch `agents/<name>.patch` made by `./save.sh <name>`: `repo/`'s change "
+                    "against the starting commit. The evaluator applies it to a fresh checkout, runs the "
+                    "repository's setup and scorer, which you cannot run here.\n"
+                    "- `./checkout.sh <name>` resets `repo/` to a saved candidate, and `./checkout.sh base` to the "
+                    "starting commit. It throws away unsaved work in `repo/`.\n"
+                    "- `task.md` says what the repository is for, how it is judged and which paths you may change.\n"
+                    "- `agents/seed.patch` is the starting candidate the run began from.\n\n"
+                    if self.repo
+                    else "## Candidate Format\n\n"
+                    "- Each candidate is a plain text file under `agents/`; its whole content is submitted to the "
+                    "evaluator.\n"
+                    "- `task.md` says what the candidate is for and how it is judged.\n"
+                    "- `agents/seed.txt` is the starting candidate the run began from.\n\n"
+                )
+                + "## Directory Structure\n\n"
                 "- Val results: `results/<candidate>/val.json` (`avg_val` plus per-example `scores` and evaluator "
                 "`infos`)\n"
-                "- Frontier: `frontier_val.json` (`_pareto` ranks candidates by average score)\n"
-                "- Test results are held out and never exposed during evolution",
+                "- Frontier: `frontier_val.json` (`_pareto` ranks candidates by average score; every other key "
+                "is an example or a named score `score:<name>` with the candidate that leads it)\n"
+                "- Named scores: `results/<candidate>/val.json` `named_scores` maps each to its score and "
+                "feedback; a candidate that leads one is worth building on",
             ),
             (
                 '{"iteration": 1, "system": "example_system", "avg_val": 45.0, "axis": "exploitation", '
@@ -1480,7 +1887,13 @@ class MetaHarnessEngine:
             f"- `{logs / 'reports'}/` — post-eval reports\n"
             f"- `{logs / 'results'}/<candidate>/val.json` — per-example scores and evaluator feedback\n"
             f"- Write pending_eval.json to: `{logs / 'pending_eval.json'}`\n\n"
-            "Follow the meta-harness skill in `.claude/skills/meta-harness/SKILL.md`."
+            + (
+                "Each candidate is a change to the repository checked out in `repo/`: edit it in place and save "
+                "each candidate with `./save.sh <name>`.\n\n"
+                if self.repo
+                else ""
+            )
+            + "Follow the meta-harness skill in `.claude/skills/meta-harness/SKILL.md`."
         )
 
     def _iteration(self, server: EvalServer, iteration: int, remaining_cost: float | None) -> None:
@@ -1490,10 +1903,18 @@ class MetaHarnessEngine:
             server: Evaluation server that benchmarks candidates.
             iteration: One-based iteration number.
             remaining_cost: Proposer spend still allowed, or ``None``.
+
+        Raises:
+            ProposerFailedError: When the iteration's CLI session failed on its own.
         """
         best = self._best()
-        print(
-            f"[iter {iteration}] frontier: {best[1]:.4f}" if best else f"[iter {iteration}] frontier: none", flush=True
+        log_event(
+            "iteration.start",
+            f"Iteration {iteration} started, frontier {best[1]:.4f}"
+            if best
+            else f"Iteration {iteration} started, no frontier yet",
+            iteration=iteration,
+            frontier=best[1] if best else None,
         )
         pending = self.logs_dir / "pending_eval.json"
         pending.unlink(missing_ok=True)
@@ -1505,8 +1926,6 @@ class MetaHarnessEngine:
             name=f"iter{iteration}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=remaining_cost,
             tools=META_HARNESS_TOOLS,
             append_system_prompt=self.skill(),
@@ -1514,9 +1933,13 @@ class MetaHarnessEngine:
         propose_seconds = time.monotonic() - started
         self.cost_usd += outcome.cost_usd
         self.session_ids.append(outcome.session_id)
+        self._log_save_blocks()
+        outcome.raise_if_failed(f"iter{iteration}")
         candidates = self._read_pending(pending)
         if not candidates:
-            print(f"[iter {iteration}] no candidates produced", flush=True)
+            log_event(
+                "iteration.end", f"Iteration {iteration} produced no candidates", iteration=iteration, candidates=0
+            )
             return
         previous_best = best[1] if best else None
         rows: list[dict[str, Any]] = []
@@ -1557,10 +1980,31 @@ class MetaHarnessEngine:
                 handle.write(json.dumps(row) + "\n")
         self._write_frontier()
         new_best = self._best()
-        if new_best and (previous_best is None or new_best[1] > previous_best):
-            print(f"[iter {iteration}] NEW BEST: {new_best[1]:.4f}", flush=True)
-        else:
-            print(f"[iter {iteration}] no improvement", flush=True)
+        improved = bool(new_best and (previous_best is None or new_best[1] > previous_best))
+        log_event(
+            "iteration.end",
+            f"Iteration {iteration} new best {new_best[1]:.4f}"
+            if improved and new_best
+            else f"Iteration {iteration} brought no improvement",
+            iteration=iteration,
+            candidates=len(rows),
+            improved=improved,
+            best=new_best[1] if new_best else None,
+        )
+
+    def _log_save_blocks(self) -> None:
+        """Log each diff ``save.sh`` refused under the constraints file, then drop it.
+
+        The diffs are checked again here, so a file the agent wrote into the
+        folder becomes an event only when it truly breaks the path rules.
+        """
+        blocks = self.work_dir / MH_RULE_BLOCKS_DIR
+        if not self.repo or not blocks.is_dir():
+            return
+        for path in sorted(blocks.glob("*.patch")):
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                blocked_patch(self.repo, path.read_text(encoding="utf-8"))
+            path.unlink(missing_ok=True)
 
     def _read_pending(self, pending: Path) -> list[dict[str, Any]]:
         """Read the proposer's ``pending_eval.json`` candidate list.
@@ -1601,8 +2045,23 @@ class MetaHarnessEngine:
         agents = (self.work_dir / "agents").resolve()
         if not path.is_relative_to(agents) or not path.is_file():
             return "candidate file must exist under agents/"
-        if not path.read_text(encoding="utf-8").strip():
+        if self.repo and path.suffix != self.suffix:
+            return "candidate file must be a patch saved by save.sh"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return "candidate file is not UTF-8 text"
+        if not text.strip():
             return "candidate file is empty"
+        if self.repo:
+            if len(text.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+                return "patch is larger than a version may be"
+            refusal = blocked_patch(self.repo, text)
+            if refusal:
+                return refusal
+            problems = repo_tree.patch_violations(text, self.repo["editable_paths"], self.repo["readonly_paths"])
+            if problems:
+                return "; ".join(problems)
         return None
 
     def _benchmark(self, server: EvalServer, name: str, candidate: str) -> float:
@@ -1620,8 +2079,19 @@ class MetaHarnessEngine:
         avg, info = server.evaluate_examples(candidate, example_ids=ids)
         avg = float(avg)
         server.log_progress(avg, candidate=candidate)
-        record = {"system": name, "avg_val": avg, "scores": info.get("scores", {}), "infos": info.get("infos", {})}
-        self.results[name] = {"avg_val": avg, "scores": dict(record["scores"]), "candidate": candidate}
+        infos = info.get("infos", {})
+        named, named_feedback = named_score_columns(list(infos.values()) if isinstance(infos, dict) else [info])
+        record = {
+            "system": name,
+            "avg_val": avg,
+            "scores": info.get("scores", {}),
+            "infos": infos,
+            "named_scores": {
+                column.removeprefix(NAMED_PREFIX): {"score": value, "feedback": named_feedback[column]}
+                for column, value in named.items()
+            },
+        }
+        self.results[name] = {"avg_val": avg, "scores": {**record["scores"], **named}, "candidate": candidate}
         target = self.logs_dir / "results" / name
         target.mkdir(parents=True, exist_ok=True)
         (target / "val.json").write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
@@ -1633,7 +2103,10 @@ class MetaHarnessEngine:
         frontier: dict[str, Any] = {
             "_pareto": [{"system": name, "val_accuracy": entry["avg_val"]} for name, entry in ranked]
         }
-        for eid in self.example_ids or ["_single"]:
+        named = [
+            column for entry in self.results.values() for column in entry["scores"] if column.startswith(NAMED_PREFIX)
+        ]
+        for eid in [*(self.example_ids or ["_single"]), *dict.fromkeys(named)]:
             leader = max(
                 ((name, entry["scores"].get(eid)) for name, entry in ranked if entry["scores"].get(eid) is not None),
                 key=lambda item: item[1],
@@ -1745,8 +2218,6 @@ class GepaRepoEngine:
             editable_paths=list(self.repo["editable_paths"]),
             readonly_paths=list(self.repo["readonly_paths"]),
             log_dir=Path(config.run_dir or "gepa-repo-run").resolve() / "sessions",
-            effort=engine_config.pop("effort", None),
-            max_thinking_tokens=engine_config.pop("max_thinking_tokens", None),
             max_token_cost=config.max_token_cost,
         )
         self.max_token_cost = config.max_token_cost
@@ -1766,6 +2237,7 @@ class GepaRepoEngine:
 
         Raises:
             RuntimeError: When nothing was scored at all.
+            ProposerFailedError: When the proposer CLI failed on its own.
         """
         self.proposer.objective = task.objective
         self.proposer.background = task.background
@@ -1782,18 +2254,27 @@ class GepaRepoEngine:
                 display_progress_bar=False,
             ),
             reflection=ReflectionConfig(reflection_lm=None, custom_candidate_proposer=self.proposer),
-            stop_callbacks=[ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else None,
+            stop_callbacks=[
+                lambda _state: self.proposer.failure is not None,
+                *([ScoreThresholdStopper(self.stop_at_score)] if self.stop_at_score is not None else []),
+            ],
             callbacks=[tracker],
         )
+
+        def evaluate(candidate: Any, example: Any = None) -> tuple[float, Any]:
+            """Score through the server, named scores reshaped for GEPA's objective frontier."""
+            score, info = server.evaluate(candidate, example)
+            return score, gepa_named_scores(info)
+
         kwargs: dict[str, Any] = {
             "seed_candidate": seed_as_text(task.seed_candidate) if task.seed_candidate is not None else "",
-            "evaluator": server.evaluate,
+            "evaluator": evaluate,
             "config": config,
         }
+        # Every case both drives reflection and ranks versions.
         if task.train_set:
             kwargs["dataset"] = task.train_set
-        if task.val_set:
-            kwargs["valset"] = task.val_set
+            kwargs["valset"] = task.train_set
         if task.objective:
             kwargs["objective"] = task.objective
         if task.background:
@@ -1802,6 +2283,8 @@ class GepaRepoEngine:
             gepa_result = optimize_anything(**kwargs)
         except BudgetExhausted:
             gepa_result = None
+        if self.proposer.failure is not None:
+            raise self.proposer.failure
         metadata: dict[str, Any] = {
             "proposals": self.proposer.proposals,
             "proposer_cost_usd": self.proposer.total_cost,
@@ -1853,8 +2336,6 @@ class AgentProposer:
         editable_paths: list[str],
         readonly_paths: list[str],
         log_dir: Path,
-        effort: str | None,
-        max_thinking_tokens: int | None,
         max_token_cost: float | None,
     ) -> None:
         """Record where the agent works and what it may spend.
@@ -1865,8 +2346,6 @@ class AgentProposer:
             editable_paths: Repository paths a version may change.
             readonly_paths: Submodule and Git LFS paths that stay as fetched.
             log_dir: Where each session's output lands.
-            effort: ``--effort`` value, or ``None``.
-            max_thinking_tokens: Fixed thinking budget, or ``None`` for adaptive.
             max_token_cost: Proposer spend cap in dollars, or ``None``.
         """
         self.model = model
@@ -1874,14 +2353,13 @@ class AgentProposer:
         self.editable_paths = editable_paths
         self.readonly_paths = readonly_paths
         self.log_dir = log_dir
-        self.effort = effort
-        self.max_thinking_tokens = None if max_thinking_tokens is None else int(max_thinking_tokens)
         self.max_token_cost = max_token_cost
         self.objective = ""
         self.background = ""
         self.total_cost = 0.0
         self.proposals = 0
         self.session_ids: list[str] = []
+        self.failure: ProposerFailedError | None = None
 
     def __call__(
         self,
@@ -1899,7 +2377,13 @@ class AgentProposer:
         Returns:
             The new version under the same component key; the parent itself when
             the agent's diff is too large to ship.
+
+        Raises:
+            ProposerFailedError: When this or an earlier CLI session failed on its own.
         """
+        # GEPA can ask again within the same iteration before its stop check runs.
+        if self.failure is not None:
+            raise self.failure
         key = components_to_update[0] if components_to_update else next(iter(candidate))
         parent = candidate[key]
         repo_tree.reset_tree(self.checkout)
@@ -1912,12 +2396,17 @@ class AgentProposer:
             name=f"proposal{self.proposals}",
             model=self.model,
             session_id=str(uuid.uuid4()),
-            effort=self.effort,
-            max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=_remaining_cost(self.max_token_cost, self.total_cost),
         )
         self.total_cost += outcome.cost_usd
         self.session_ids.append(outcome.session_id)
+        try:
+            outcome.raise_if_failed(f"proposal{self.proposals}")
+        except ProposerFailedError as error:
+            # GEPA logs a proposer exception and keeps iterating, so the engine
+            # reads this back to stop the run and fail it.
+            self.failure = error
+            raise
         patch = repo_tree.version_patch(self.checkout)
         repo_tree.reset_tree(self.checkout)
         if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
@@ -1944,11 +2433,11 @@ class AgentProposer:
         lines += ["", f"You may change: {editable}. Leave everything else as it is."]
         if self.readonly_paths:
             lines.append("Submodules and Git LFS files stay as fetched: " + ", ".join(self.readonly_paths) + ".")
-        lines += ["", "How this version scored on the cases to improve:"]
+        lines += ["", "How this version scored, with the scorer's feedback and each named score's own feedback:"]
         for index, record in enumerate(records[:_DOSSIER_EXAMPLES], start=1):
-            lines.append(f"{index}. " + _feedback_text(record))
+            lines.append(f"{index}. " + record_text(record))
         if not records:
-            lines.append("No per-case feedback was recorded.")
+            lines.append("No feedback was recorded.")
         lines += [
             "",
             "Make one focused change that should raise the score, and leave it in the working tree. You cannot run "
@@ -1958,10 +2447,135 @@ class AgentProposer:
         return "\n".join(lines)
 
 
+class BestOfNRepoEngine:
+    """Upstream Best-of-N's sample-and-keep-best loop over repository versions.
+
+    Each sample is one coding-agent session in a fresh checkout of the starting
+    version, briefed the same way every time and never shown earlier samples,
+    exactly as upstream draws independent samples from one fixed prompt. Each
+    sample is scored on the cases upstream scores (training, else validation)
+    through the parent, and the best full score wins.
+    """
+
+    name = "best_of_n_repo"
+
+    def __init__(self, config: OptimizeAnythingConfig) -> None:
+        """Pop the engine knobs from the shared config.
+
+        Args:
+            config: Cross-engine run configuration; ``engine_config`` must hold ``repo``.
+
+        Raises:
+            ValueError: When no repository checkout was configured.
+        """
+        engine_config = dict(config.engine_config)
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        if self.repo is None:
+            raise ValueError("Best-of-N's agent sampler needs a repository checkout.")
+        self.run_dir = Path(config.run_dir or "best-of-n-repo-run").resolve()
+        self.proposer = AgentProposer(
+            model=str(engine_config.pop("model")),
+            checkout=Path(self.repo["checkout"]),
+            editable_paths=list(self.repo["editable_paths"]),
+            readonly_paths=list(self.repo["readonly_paths"]),
+            log_dir=self.run_dir / "sessions",
+            max_token_cost=config.max_token_cost,
+        )
+        self.max_token_cost = config.max_token_cost
+        self.stop_at_score = config.stop_at_score
+        self.samples: list[dict[str, Any]] = []
+        self.best: tuple[str, float] | None = None
+
+    def run(self, task: Task, server: EvalServer) -> Result:
+        """Draw and score samples until a budget or the target score stops the loop.
+
+        Args:
+            task: Task whose seed is the starting patch (empty for the commit as fetched).
+            server: Evaluation server that scores each version through the parent.
+
+        Returns:
+            The best fully scored sample.
+
+        Raises:
+            RuntimeError: When no sample was fully scored.
+        """
+        self.proposer.objective = task.objective
+        self.proposer.background = task.background
+        seed = seed_as_text(task.seed_candidate) if task.seed_candidate is not None else ""
+        split = "train" if task.train_set else ("val" if task.val_set else None)
+        cases = len(task.train_set or task.val_set or []) or 1
+        while True:
+            if self.max_token_cost is not None and self.proposer.total_cost >= self.max_token_cost:
+                break
+            # A sample the budget cannot fully score would waste an agent session.
+            if server.budget.remaining is not None and server.budget.remaining < cases:
+                break
+            patch = self.proposer({"candidate": seed}, {}, ["candidate"])
+            sample = {"sample": len(self.samples) + 1, "proposer_cost_usd": round(self.proposer.total_cost, 6)}
+            self.samples.append(sample)
+            try:
+                if split is None:
+                    score, _ = server.evaluate(patch["candidate"])
+                else:
+                    score, _ = server.evaluate_examples(patch["candidate"], split=split)
+            except BudgetExhausted:
+                # Upstream discards a sample the budget cut short and keeps the best complete one.
+                sample["outcome"] = "budget_exhausted"
+                break
+            score = float(score)
+            server.log_progress(score, candidate=patch["candidate"])
+            sample["score"] = score
+            if self.best is None or score > self.best[1]:
+                self.best = (patch["candidate"], score)
+            if _reached(self.stop_at_score, self.best[1]):
+                break
+        if self.best is None:
+            raise RuntimeError("Best-of-N stopped before any repository version was fully scored.")
+        return Result(
+            best_candidate=self.best[0],
+            best_score=self.best[1],
+            total_evals=server.budget.used,
+            eval_log=list(server.eval_log),
+            metadata={
+                "engine": self.name,
+                "n_samples": len(self.samples),
+                "samples": list(self.samples),
+                "proposer_cost_usd": round(self.proposer.total_cost, 6),
+                "session_ids": list(self.proposer.session_ids),
+                "repository": True,
+            },
+        )
+
+    def incumbent(self, server: EvalServer) -> tuple[str, float] | None:
+        """Return the best fully scored sample so far.
+
+        Args:
+            server: Unused; samples are the engine's own verified record.
+
+        Returns:
+            ``(patch, score)`` or ``None`` before any sample was scored.
+        """
+        del server
+        return self.best
+
+    def process_result(self, result: Result, output_dir: str | Path) -> None:
+        """Write the best patch and run metadata beside the evaluator artifacts.
+
+        Args:
+            result: Result returned by ``run``.
+            output_dir: Evaluator output directory.
+        """
+        target = Path(output_dir) / self.name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "best_candidate.patch").write_text(result.best_candidate, encoding="utf-8")
+        (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
+
+
 ENGINES: dict[str, type] = {
     AutoResearchEngine.name: AutoResearchEngine,
     MetaHarnessEngine.name: MetaHarnessEngine,
     GepaRepoEngine.name: GepaRepoEngine,
+    BestOfNRepoEngine.name: BestOfNRepoEngine,
 }
 
 

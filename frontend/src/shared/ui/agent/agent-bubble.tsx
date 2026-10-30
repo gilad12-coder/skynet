@@ -2,10 +2,15 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { cn } from "@/shared/lib/utils";
+import type { ActivityKind } from "@/shared/lib/activity-summary";
 
+import { RevealText } from "./reveal-text";
 import { ThinkingSection } from "./thinking-section";
+import { TurnActivity, type TurnThinking } from "./turn-activity";
+import { turnStart, visibleThinking } from "./turn-timing";
 import type { AgentMessage, AgentThinking, AgentToolCall } from "./types";
 
 // react-markdown + remark-gfm (the micromark/mdast/hast tree, ~40-60 KB gzip)
@@ -20,24 +25,48 @@ const MessageMarkdown = dynamic(
 interface AgentBubbleProps {
   msg: AgentMessage;
   thinking?: AgentThinking;
+  /** This turn is still running; defaults to the live thinking's flag. */
+  streaming?: boolean;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
+  /**
+   * Calls that render as plain one-line steps in the turn's foldable
+   * history; every other call keeps its rich card there.
+   */
+  isStepCall?: (call: AgentToolCall) => boolean;
+  /** What kind of step a call is, for the summary line over the turn's steps. */
+  stepKind?: (call: AgentToolCall) => ActivityKind;
   onRunCode?: (code: string, language: string) => void;
   toolCallsBeforeContent?: boolean;
+  /**
+   * Shown after the turn's text: the coding tool finishes after the reply was
+   * written, so its closing outcome comes last, as in Codex.
+   */
+  afterContent?: React.ReactNode;
   className?: string;
 }
 
 export function AgentBubble({
   msg,
-  thinking,
+  thinking: liveThinking,
+  streaming,
   renderToolCall,
+  isStepCall,
+  stepKind,
   onRunCode,
   toolCallsBeforeContent = false,
+  afterContent,
   className,
 }: AgentBubbleProps) {
-  const visibleToolCalls = React.useMemo<Array<{ call: AgentToolCall; isRetry: boolean }>>(() => {
+  const reduce = useReducedMotion();
+  // A plan there on mount belongs to a reopened chat and shows at once; one
+  // that streams in opens its line smoothly and writes itself in.
+  const [planOnMount] = React.useState(msg.plan);
+  const visibleToolCalls = React.useMemo<
+    Array<{ call: AgentToolCall; isRetry: boolean; index: number }>
+  >(() => {
     const calls = msg.toolCalls;
     if (!calls?.length) return [];
-    const result: Array<{ call: AgentToolCall; isRetry: boolean }> = [];
+    const result: Array<{ call: AgentToolCall; isRetry: boolean; index: number }> = [];
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
       if (!call) continue;
@@ -53,57 +82,113 @@ export function AgentBubble({
       const isRetry = calls
         .slice(0, i)
         .some((prior) => prior.tool === call.tool && prior.status === "error");
-      result.push({ call, isRetry });
+      result.push({ call, isRetry, index: i });
     }
     return result;
   }, [msg.toolCalls]);
 
-  const hasTools = visibleToolCalls.length > 0 && Boolean(renderToolCall);
+  const turnStreaming = streaming ?? Boolean(liveThinking?.streaming);
+  // Segments saved on the message win: they stream live and outlast the
+  // turn. Chats that only keep one live thinking state show it as one row.
+  const allThinking = React.useMemo<TurnThinking[]>(
+    () =>
+      msg.thinkingSegments
+        ? msg.thinkingSegments.map((s) => ({ ...s, streaming: turnStreaming }))
+        : liveThinking
+          ? [{ ...liveThinking, toolsBefore: 0 }]
+          : [],
+    [msg.thinkingSegments, liveThinking, turnStreaming],
+  );
+  // A segment with no reasoning yet is no row: it showed as "Thinking" for a
+  // second and then vanished with the turn's header.
+  const thinking = React.useMemo(() => visibleThinking(allThinking), [allThinking]);
+
+  const stepCalls =
+    renderToolCall && isStepCall ? visibleToolCalls.filter(({ call }) => isStepCall(call)) : [];
+  const cardCalls = stepCalls.length
+    ? visibleToolCalls.filter(({ call }) => !isStepCall?.(call))
+    : visibleToolCalls;
+  const hasTools = cardCalls.length > 0 && Boolean(renderToolCall);
   const hasText = msg.content.trim().length > 0;
-  const hasThinking = Boolean(
-    thinking && (thinking.reasoning || (thinking.streaming && thinking.startedAt)),
+  const hasThinking = thinking.length > 0;
+  const withHistory = Boolean(renderToolCall && isStepCall);
+  // With a history, a card call (the coding tool) is activity too; without
+  // it, a turn whose only call is that card had no header, and the header
+  // vanished once its reasoning-less thinking row dropped out.
+  const hasActivity = hasThinking || (withHistory ? visibleToolCalls.length > 0 : stepCalls.length > 0);
+
+  const plan = msg.plan?.trim();
+  const answer = hasText && (
+    <div className="text-sm leading-relaxed text-foreground">
+      <React.Suspense fallback={<span className="whitespace-pre-wrap">{msg.content}</span>}>
+        <MessageMarkdown content={msg.content} onRunCode={onRunCode} />
+      </React.Suspense>
+    </div>
   );
 
-  if (!hasTools && !hasText && !hasThinking) return null;
+  // With a turn history, the plan and every call (cards too) sit in it in
+  // the order they ran, and the answer comes last, as in Codex. ReActV2
+  // takes back prose written before a tool (message_reset), so the
+  // message's text is the turn's final answer.
+  if (withHistory && renderToolCall) {
+    if (!turnStreaming && !hasText && !hasActivity && !plan) return null;
+    return (
+      <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
+        <TurnActivity
+          thinking={allThinking}
+          steps={visibleToolCalls.map((v) => ({ ...v, card: !isStepCall?.(v.call) }))}
+          streaming={turnStreaming}
+          answering={hasText}
+          plan={plan}
+          animatePlan={msg.plan !== planOnMount}
+          renderStep={renderToolCall}
+          stepKind={stepKind}
+          durationMs={msg.stats?.durationMs}
+          startedAt={turnStart(allThinking, [])}
+        />
+        {answer}
+        {afterContent}
+      </div>
+    );
+  }
 
+  if (!hasTools && !hasText && !hasActivity && !plan) return null;
   const toolCalls = hasTools && renderToolCall && (
-    <div
-      className={cn(
-        "flex flex-col gap-1.5 px-2.5 py-2",
-        (hasThinking || (!toolCallsBeforeContent && hasText)) && "border-t border-[#3D2E22]/[0.08]",
-      )}
-    >
-      {visibleToolCalls.map(({ call, isRetry }) => (
+    <div className="flex flex-col gap-1.5">
+      {cardCalls.map(({ call, isRetry }) => (
         <React.Fragment key={call.id}>{renderToolCall(call, { isRetry })}</React.Fragment>
       ))}
     </div>
   );
 
+  // No bubble around the agent's side, as in Codex: the cards and the
+  // answer sit straight on the panel at full width.
   return (
-    <div
-      className={cn(
-        "max-w-[88%] overflow-hidden rounded-[22px] rounded-ee-[4px] bg-muted/60 shadow-sm",
-        className,
-      )}
-    >
-      {hasThinking && thinking && <ThinkingSection thinking={thinking} />}
-      {toolCallsBeforeContent && toolCalls}
-      {hasText && (
-        <div
-          className={cn(
-            "px-4 py-3 text-sm leading-relaxed text-foreground",
-            (hasThinking || (toolCallsBeforeContent && hasTools)) &&
-              "border-t border-[#3D2E22]/[0.08]",
-          )}
-        >
-          <React.Suspense
-            fallback={<span className="whitespace-pre-wrap">{msg.content}</span>}
+    <div className={cn("flex w-full min-w-0 flex-col gap-3", className)}>
+      <AnimatePresence initial={false}>
+        {plan && (
+          <motion.div
+            key="plan"
+            initial={reduce ? false : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
           >
-            <MessageMarkdown content={msg.content} onRunCode={onRunCode} />
-          </React.Suspense>
-        </div>
-      )}
+            <RevealText
+              text={plan}
+              animate={msg.plan !== planOnMount}
+              className="block text-sm leading-relaxed text-foreground/80"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {thinking.map((t, i) => (
+        <ThinkingSection key={i} thinking={t} compact />
+      ))}
+      {toolCallsBeforeContent && toolCalls}
+      {answer}
       {!toolCallsBeforeContent && toolCalls}
+      {afterContent}
     </div>
   );
 }

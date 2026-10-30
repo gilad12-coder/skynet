@@ -26,7 +26,7 @@ from ...constants import (
 )
 from ...exceptions import ServiceError
 from ...models import ModelConfig
-from ..language_models import GepaRecoverySeedBoundary, build_language_model
+from ..language_models import build_language_model
 from .data import DatasetSplits
 from .logged_scores import LoggedScoreRecorder, reset_logged_metrics
 
@@ -172,8 +172,10 @@ def compile_program(
 ) -> Any:
     """Run optimizer.compile() with the derived trainset/valset.
 
-    Passes ``valset`` only when the optimizer's compile signature accepts it,
-    preventing TypeError on optimizers like BootstrapFewShot that do not.
+    Passes ``valset`` only when it is non-empty and the optimizer's compile
+    signature accepts it, preventing TypeError on optimizers like
+    BootstrapFewShot that do not. :func:`compile_selection_scope` names the
+    split the optimizer then selects on.
 
     Args:
         optimizer: An instantiated DSPy optimizer.
@@ -197,13 +199,37 @@ def compile_program(
     if COMPILE_TRAINSET_KEY not in kwargs:
         kwargs[COMPILE_TRAINSET_KEY] = splits.train
 
-    if splits.val and _compile_accepts_valset(optimizer):
-        kwargs.setdefault(COMPILE_VALSET_KEY, splits.val)
+    # An empty valset makes DSPy GEPA fall back to the trainset without
+    # saying so; drop it so the caller's recorded selection scope is honest.
+    if not kwargs.get(COMPILE_VALSET_KEY):
+        kwargs.pop(COMPILE_VALSET_KEY, None)
+        if splits.val and _compile_accepts_valset(optimizer):
+            kwargs[COMPILE_VALSET_KEY] = splits.val
+    logger.info("Optimizer selects on the %s split", compile_selection_scope(optimizer, splits, compile_kwargs))
 
     try:
         return optimizer.compile(program, **kwargs)
     except TypeError as exc:
         raise ServiceError(f"Optimizer.compile rejected the provided arguments; update compile_kwargs: {exc}") from exc
+
+
+def compile_selection_scope(optimizer: Any, splits: DatasetSplits, compile_kwargs: dict[str, Any] | None = None) -> str:
+    """Name the split :func:`compile_program` lets the optimizer select on.
+
+    Args:
+        optimizer: An instantiated DSPy optimizer.
+        splits: Train/val/test partitions.
+        compile_kwargs: User-supplied kwargs forwarded to ``optimizer.compile``.
+
+    Returns:
+        ``"validation"`` when a non-empty valset reaches ``compile``, otherwise
+        ``"training"``.
+    """
+    if (compile_kwargs or {}).get(COMPILE_VALSET_KEY):
+        return "validation"
+    if splits.val and _compile_accepts_valset(optimizer):
+        return "validation"
+    return "training"
 
 
 def _compile_accepts_valset(optimizer: Any) -> bool:
@@ -494,7 +520,6 @@ def instantiate_optimizer(
     log_dir: str | None = None,
     target_score: float | None = None,
     stop_state: dict[str, Any] | None = None,
-    recovery_seed_model: object | None = None,
 ) -> Any:
     """Instantiate an optimizer, injecting language models and metrics as needed.
 
@@ -537,8 +562,6 @@ def instantiate_optimizer(
         stop_state: Optional mutable mapping that receives the stateful target
             stopper under ``target_score_stopper`` so callers can report
             whether the target actually triggered.
-        recovery_seed_model: Protected task model used to publish GEPA's exact
-            seed-evaluation boundary to the trusted parent.
 
     Returns:
         An instantiated optimizer ready for ``compile``.
@@ -593,28 +616,6 @@ def instantiate_optimizer(
             kwargs["gepa_kwargs"] = gepa_kwargs
             if stop_state is not None:
                 stop_state["target_score_stopper"] = target_stopper
-    if optimizer_key == OPTIMIZER_NAME_GEPA and recovery_seed_model is not None:
-        boundary = GepaRecoverySeedBoundary(recovery_seed_model)
-        gepa_kwargs = _gepa_kwargs_copy(kwargs)
-        existing_observers = gepa_kwargs.get("callbacks")
-        if existing_observers is None:
-            observers: list[Any] = []
-        elif isinstance(existing_observers, list | tuple):
-            observers = list(existing_observers)
-        else:
-            raise ServiceError("GEPA callbacks must be a list or tuple.")
-        existing_stoppers = gepa_kwargs.get("stop_callbacks")
-        if existing_stoppers is None:
-            stoppers: list[Any] = []
-        elif isinstance(existing_stoppers, list | tuple):
-            stoppers = list(existing_stoppers)
-        else:
-            stoppers = [existing_stoppers]
-        if any(not callable(stopper) for stopper in stoppers):
-            raise ServiceError("GEPA stop_callbacks must contain callable stopping conditions.")
-        gepa_kwargs["callbacks"] = [boundary, *observers]
-        gepa_kwargs["stop_callbacks"] = [boundary, *stoppers]
-        kwargs["gepa_kwargs"] = gepa_kwargs
     # GEPA proposal sampling: p distinct parents x n mutations per reflective
     # iteration (PxNSampling), batched so proposals run in parallel and the
     # optimizer generalizes better than the classic one-parent-one-mutation

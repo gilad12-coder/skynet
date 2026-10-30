@@ -1,32 +1,47 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, CaretDown } from "@/shared/ui/icons";
+import { Brain, CaretRight } from "@/shared/ui/icons";
 
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { splitSummary, thoughtSeconds } from "@/shared/lib/thinking-segments";
 
+import { RevealText } from "./reveal-text";
 import type { AgentThinking } from "./types";
-import { EmberGlyph } from "./ttft-indicator";
+
+// Lazy for the same reason as in agent-bubble: the parser stays out of the
+// first-load chunk until a trace is opened.
+const MessageMarkdown = dynamic(() => import("./message-markdown").then((m) => m.MessageMarkdown), {
+  ssr: false,
+});
 
 // Within this many px of the bottom still counts as "at the bottom", so
 // momentum scrolling and fractional positions don't break follow mode.
 const STICKY_BOTTOM_SLACK_PX = 48;
 
-export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
-  const { reasoning, startedAt, endedAt, streaming } = thinking;
+interface ThinkingSectionProps {
+  thinking: AgentThinking;
+  /** A plain step row inside a turn's activity, which owns the padding. */
+  compact?: boolean;
+}
+
+// Raw reasoning never shows on its own, as in Codex: the row reads
+// "Thinking" while the model reasons and "<summary> · Thought for Ns" after,
+// and the text itself only opens on request.
+export function ThinkingSection({ thinking, compact = false }: ThinkingSectionProps) {
+  const { reasoning, startedAt, endedAt, streaming, summary } = thinking;
   const isThinking = streaming && !endedAt && Boolean(startedAt);
-  const hasFinished = Boolean(endedAt && startedAt);
-  const [open, setOpen] = React.useState(true);
-  // While the body animates closed, the header must not show the tail yet —
-  // truncated preview over a still-visible body reads as overlapping ghost
-  // text. The exit animation's completion clears this.
-  const [collapsing, setCollapsing] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
   const [nowTs, setNowTs] = React.useState(() => Date.now());
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const autoCollapsedRef = React.useRef(false);
-  const shouldReduceMotion = useReducedMotion();
+  const stickToBottomRef = React.useRef(true);
+  const reduce = useReducedMotion();
+  // A summary there on mount belongs to a reopened chat and shows at once;
+  // one that lands while the panel watches writes itself in.
+  const [summaryOnMount] = React.useState(summary);
 
   React.useEffect(() => {
     if (!isThinking) return;
@@ -34,27 +49,8 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
     return () => clearInterval(id);
   }, [isThinking]);
 
-  // Under reduced motion the exit is instant and may skip onExitComplete, so
-  // the collapsing flag is only armed when the animation actually runs.
-  const beginCollapse = React.useCallback(() => {
-    if (reasoning && !shouldReduceMotion) setCollapsing(true);
-    setOpen(false);
-  }, [reasoning, shouldReduceMotion]);
-
-  React.useEffect(() => {
-    if (hasFinished && !autoCollapsedRef.current) {
-      autoCollapsedRef.current = true;
-      beginCollapse();
-    }
-  }, [hasFinished, beginCollapse]);
-
-  // Follow the stream only while the user is at the bottom. Once they scroll
-  // up to read earlier reasoning their position persists — new tokens must
-  // not yank them back down. Scrolling back to the bottom (or collapsing and
-  // reopening) re-engages following. The programmatic pin lands at distance
-  // 0, so it keeps the flag true rather than fighting the user.
-  const stickToBottomRef = React.useRef(true);
-
+  // Follow the stream only while the reader is at the bottom, so scrolling
+  // up to read earlier reasoning isn't yanked back down by new tokens.
   const handleScroll = React.useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -71,103 +67,108 @@ export function ThinkingSection({ thinking }: { thinking: AgentThinking }) {
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [reasoning, open]);
 
-  const tail = React.useMemo(() => {
-    if (!reasoning) return "";
-    // The tail is a prose preview. Structured turns usually end their
-    // reasoning by drafting the payload, so fenced blocks and JSON-shaped
-    // lines are dropped — the preview shows thought, never raw config.
-    const prose = reasoning
-      .replace(/```[\s\S]*?(?:```|$)/g, " ")
-      .split("\n")
-      .filter((line) => !/^\s*[{}[\]"'`]|"\s*:|:\s*[{["']/.test(line))
-      .join(" ");
-    const cleaned = prose.replace(/\s+/g, " ").trim();
-    return cleaned.length > 90 ? `…${cleaned.slice(-89)}` : cleaned;
-  }, [reasoning]);
-
   if (!reasoning && !isThinking) return null;
 
   const elapsedMs = startedAt ? (endedAt ?? nowTs) - startedAt : 0;
   const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10);
+  const thought = thoughtSeconds(startedAt, endedAt ?? nowTs);
+  const showSummary = Boolean(summary) && !isThinking;
+  const { heading, detail } = splitSummary(summary ?? "");
   const label = isThinking
     ? msg("shared.agent.thinking")
-    : formatMsg("shared.agent.thought_seconds", { seconds: elapsedSec.toFixed(1) });
+    : thought === null
+      ? msg("shared.agent.thought_briefly")
+      : formatMsg("shared.agent.thought_seconds", { seconds: thought.toFixed(1) });
 
   return (
-    <div>
+    <div className={cn(!compact && "px-4 py-2")}>
       <button
         type="button"
-        onClick={() => (open ? beginCollapse() : setOpen(true))}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start hover:bg-[#3D2E22]/[0.035] transition-colors cursor-pointer"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!reasoning}
         aria-expanded={open}
+        className="group relative flex w-full items-start gap-2 py-1 text-start text-[0.8125rem] leading-5 text-muted-foreground transition-colors enabled:cursor-pointer enabled:hover:text-foreground"
       >
-        <ThinkingIndicator active={isThinking} reduce={Boolean(shouldReduceMotion)} />
-        <div className="flex items-baseline gap-2 shrink-0">
-          <span
+        {/* Rows align to the first line: a summary wraps in full, never cut. */}
+        <Brain className="mt-[3px] size-3.5 shrink-0" aria-hidden />
+        {showSummary && summary && (
+          <>
+            <RevealText
+              text={detail}
+              lead={heading}
+              leadClassName="font-medium text-foreground"
+              animate={summary !== summaryOnMount}
+              className="min-w-0 break-words text-foreground/80"
+            />
+            <motion.span
+              aria-hidden
+              className="shrink-0"
+              initial={reduce || summary === summaryOnMount ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              ·
+            </motion.span>
+          </>
+        )}
+        {/* "Thinking" fades into "Thought for Ns" instead of snapping, and
+            slides over when a summary lands in front of it. */}
+        {/* popLayout lets the new label fade in while the old one fades out,
+            so the row is never left with only its icon. */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={isThinking ? "thinking" : "thought"}
+            layout={reduce ? false : "position"}
+            initial={reduce ? false : { opacity: 0, filter: "blur(2px)" }}
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            exit={reduce ? undefined : { opacity: 0, filter: "blur(2px)" }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             className={cn(
-              "text-xs font-medium",
-              isThinking
-                ? "text-[#3D2E22] animate-pulse motion-reduce:animate-none"
-                : "text-foreground/70",
+              showSummary ? "shrink-0" : "truncate",
+              isThinking && "agent-shimmer-text",
             )}
           >
             {label}
-          </span>
-          {isThinking && (
-            <span className="font-mono tabular-nums text-[0.625rem] text-muted-foreground/55">
-              {elapsedSec.toFixed(1)}
-              {msg("shared.agent.seconds_short")}
-            </span>
-          )}
-        </div>
-        {!open && !collapsing && tail && (
-          <span
-            className="flex-1 min-w-0 text-[0.6875rem] text-muted-foreground/45 font-mono truncate"
-            dir="ltr"
-          >
-            {tail}
+          </motion.span>
+        </AnimatePresence>
+        {isThinking && !compact && (
+          <span className="font-mono tabular-nums text-[0.6875rem] text-muted-foreground/60">
+            {elapsedSec.toFixed(1)}
+            {msg("shared.agent.seconds_short")}
           </span>
         )}
-        <CaretDown
-          className={cn(
-            "ms-auto size-3.5 text-muted-foreground/50 transition-transform shrink-0",
-            open ? "rotate-0" : "rotate-90",
-          )}
-        />
+        {reasoning && (
+          <CaretRight
+            className={cn(
+              "mt-1 size-3 shrink-0 transition-[transform,opacity] duration-150",
+              open ? "rotate-90" : "rtl:-scale-x-100 opacity-0 group-hover:opacity-100",
+            )}
+            aria-hidden
+          />
+        )}
       </button>
-      <AnimatePresence initial={false} onExitComplete={() => setCollapsing(false)}>
+      <AnimatePresence initial={false}>
         {open && reasoning && (
           <motion.div
-            initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
+            initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={shouldReduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={
-              shouldReduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }
-            }
+            exit={reduce ? undefined : { height: 0, opacity: 0 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
             className="overflow-hidden"
           >
             <div
               ref={scrollRef}
               onScroll={handleScroll}
-              dir="ltr"
-              className="max-h-44 overflow-y-auto border-t border-[#3D2E22]/[0.08] px-4 py-3 text-[0.6875rem] leading-[1.65] text-[#5C4D40]/80 font-mono whitespace-pre-wrap break-words"
+              dir="auto"
+              className="mb-1.5 max-h-48 overflow-y-auto ps-5.5 pe-2 text-[0.8125rem] leading-relaxed text-muted-foreground/80 break-words"
             >
-              {reasoning}
+              <React.Suspense fallback={<span className="whitespace-pre-wrap">{reasoning}</span>}>
+                <MessageMarkdown content={reasoning} />
+              </React.Suspense>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function ThinkingIndicator({ active, reduce }: { active: boolean; reduce: boolean }) {
-  if (active) {
-    return <EmberGlyph reduce={reduce} />;
-  }
-  return (
-    <span className="inline-flex size-4 items-center justify-center rounded-full bg-[#3D2E22]/15 shrink-0">
-      <Check className="size-2.5 text-[#3D2E22]" />
-    </span>
   );
 }

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { CircleNotch, GithubLogo, Fingerprint } from "@/shared/ui/icons";
+import { GoogleMark } from "@/shared/ui/google-mark";
 import {
   browserSupportsWebAuthn,
   browserSupportsWebAuthnAutofill,
@@ -23,6 +24,7 @@ import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { BackLink } from "@/shared/ui/back-link";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import {
   getPasskeyRegistrationOptions,
   getSecurityStatus,
@@ -100,39 +102,15 @@ function oauthReturnUrl(): string {
 }
 
 /**
- * Oversized SKYNET wordmark shared by every login state, so the SSO redirect
- * moment and the credential form read as the same place. It fills the column
- * width and morphs continuously as an ambient "alive" signal.
+ * Oversized wordmark shared by every login state, so the loading moment
+ * and the credential form read as the same place. It fills the column width
+ * and morphs continuously as an ambient "alive" signal.
  */
 function LoginHeader() {
   return (
     <div className="w-[min(90vw,520px)]">
       <AnimatedWordmark fluid autoMorph autoMorphDuration={10000} morphSpeed={250} />
     </div>
-  );
-}
-
-/** Official multi-color Google "G", so the social button matches brand guidelines. */
-function GoogleMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path
-        fill="#4285F4"
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1Z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23Z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84Z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38Z"
-      />
-    </svg>
   );
 }
 
@@ -157,7 +135,7 @@ interface ResetState {
 export function LoginView() {
   const router = useRouter();
   const prefersReduced = useReducedMotion();
-  const [mode, setMode] = useState<"loading" | "sso" | "ready">("loading");
+  const [mode, setMode] = useState<"loading" | "ready">("loading");
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [oauth, setOauth] = useState<{ google: boolean; github: boolean }>({
     google: false,
@@ -185,6 +163,7 @@ export function LoginView() {
   const [verify, setVerify] = useState<{ email: string } | null>(null);
   const [verifyCode, setVerifyCode] = useState("");
   const [verifyLoading, setVerifyLoading] = useState(false);
+  const [localSignIn, setLocalSignIn] = useState(false);
 
   useEffect(() => {
     setPasskeySupported(browserSupportsWebAuthn());
@@ -229,11 +208,18 @@ export function LoginView() {
     // route), fall back to the credential form instead of hanging on the spinner.
     const loadProviders = () =>
       getProviders()
-        .then((providers) => {
-          if (providers?.adfs) {
-            setMode("sso");
-            void signIn("adfs", { callbackUrl: postLoginTarget() });
-            return;
+        .then(async (providers) => {
+          // The local desktop build has a single account, so the spinner
+          // stays up while it signs in, and the form shows only on failure.
+          if (isLocalMode() && providers?.local) {
+            setLocalSignIn(true);
+            const result = await signIn("local", { redirect: false }).catch(() => null);
+            if (result && !result.error) {
+              finishLogin();
+              return;
+            }
+            setLocalSignIn(false);
+            setError(msg("local_auth.failed"));
           }
           setOauth({ google: !!providers?.google, github: !!providers?.github });
           setMode("ready");
@@ -302,10 +288,9 @@ export function LoginView() {
   }
 
   /**
-   * Ask the backend to email a reset code. The response is deliberately identical
-   * for known and unknown addresses, so a success only advances the card to the
-   * code step; it never reveals whether the email has an account. Doubles as the
-   * "resend" action on the code step.
+   * Ask the backend to email a reset code. An unknown address comes back as an
+   * error, so the card stays on the email step instead of asking for a code that
+   * will never arrive. Doubles as the "resend" action on the code step.
    */
   async function requestResetCode(): Promise<void> {
     const cleanEmail = resetEmail.trim().toLowerCase();
@@ -783,7 +768,7 @@ export function LoginView() {
     }
   }
 
-  const isWorking = mode === "loading" || mode === "sso";
+  const isWorking = mode === "loading";
   // OAuth and passkeys are sign-IN affordances only: "continue with Google"
   // or "sign in with a passkey" make no sense under the "create an account"
   // tab, so both show on the signin tab exclusively.
@@ -812,7 +797,7 @@ export function LoginView() {
         className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           background:
-            "linear-gradient(90deg, rgba(250,248,245,0) 0%, rgba(250,248,245,0) 24%, rgba(250,248,245,1) 30%, rgba(250,248,245,1) 70%, rgba(250,248,245,0) 76%, rgba(250,248,245,0) 100%)",
+            "linear-gradient(90deg, transparent 0%, transparent 24%, var(--background) 30%, var(--background) 70%, transparent 76%, transparent 100%)",
         }}
       />
 
@@ -827,7 +812,7 @@ export function LoginView() {
             <LoginHeader />
             <div className="mt-9 flex items-center gap-2 text-sm text-muted-foreground">
               <CircleNotch className="size-4 animate-spin" />
-              <span>{msg("auth.login.loading")}</span>
+              <span>{msg(localSignIn ? "local_auth.signing_in" : "auth.login.loading")}</span>
             </div>
           </div>
         ) : (
@@ -1243,7 +1228,7 @@ export function LoginView() {
                           aria-selected={authMode === tab}
                           onClick={() => switchMode(tab)}
                           className={cn(
-                            "relative flex-1 cursor-pointer rounded-md px-2 py-2 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:px-3",
+                            "relative flex-1 cursor-pointer rounded-md px-2 py-2 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 sm:px-3",
                             authMode === tab
                               ? "text-foreground"
                               : "text-foreground/60 hover:text-foreground",
@@ -1255,7 +1240,7 @@ export function LoginView() {
                           {authMode === tab && (
                             <motion.div
                               layoutId="login-tab-active"
-                              className="absolute inset-0 rounded-md bg-background shadow-sm"
+                              className="absolute inset-0 rounded-md bg-background"
                               transition={
                                 prefersReduced
                                   ? { duration: 0 }

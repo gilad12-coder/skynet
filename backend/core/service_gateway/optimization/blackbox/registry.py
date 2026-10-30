@@ -16,14 +16,18 @@ from ....models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
+    BLACKBOX_ENGINE_SHINKA_EVOLVE,
     BLACKBOX_MULTI_PART_ENGINES,
 )
+from ....models.unified import DSPY_OPTIMIZERS
+from ..unified.dspy_engine import DspyEngine
 from .autoresearch import AutoResearchEngine
 from .autosaddler import AutoSaddlerEngine
 from .best_of_n import BestOfNEngine
 from .gepa_engine import GepaEngine
 from .meta_harness import MetaHarnessEngine
 from .protocol import Engine
+from .shinka_evolve import ShinkaEvolveEngine
 
 _AGENT_TARGET_REASON = "Meta-Harness optimizes a coding agent's harness; the job's target must be an agent."
 _NO_SANDBOX_REASON = "Agent sandboxes are not configured on this deployment."
@@ -61,6 +65,9 @@ class EngineSpec:
     requires_agent_target: bool = False
     requires_proposer: bool = False
     checkpoint_recovery_supported: bool = False
+    # DSPy optimizers run only from a unified dspy_program run; the legacy
+    # black-box catalog and Auto never offer them.
+    hidden: bool = False
 
     @property
     def supports_parts(self) -> bool:
@@ -137,13 +144,48 @@ ENGINES: dict[str, EngineSpec] = {
         id=BLACKBOX_ENGINE_AUTOSADDLER,
         label="AutoSaddler",
         description=(
-            "A coding agent diagnoses training failures and patches the version; "
-            "only patches confirmed on held-out development cases are kept."
+            "A coding agent diagnoses the scorer's feedback and patches the version; "
+            "only patches a fresh scorer run confirms are kept."
         ),
         factory=AutoSaddlerEngine,
         requires_proposer=True,
     ),
+    BLACKBOX_ENGINE_SHINKA_EVOLVE: EngineSpec(
+        id=BLACKBOX_ENGINE_SHINKA_EVOLVE,
+        label="ShinkaEvolve",
+        description="Evolves many versions in parallel islands and learns which models improve them most.",
+        factory=ShinkaEvolveEngine,
+        requires_proposer=True,
+    ),
 }
+
+_DSPY_LABELS = {
+    "dspy_gepa": ("DSPy GEPA", "DSPy's reflective GEPA optimizer over the program's predictor instructions."),
+    "dspy_miprov2": ("DSPy MIPROv2", "DSPy's instruction and few-shot search with Bayesian optimization."),
+    "dspy_bootstrap_fewshot": ("DSPy BootstrapFewShot", "DSPy's bootstrapped few-shot demonstrations."),
+}
+
+
+def _dspy_factory(optimizer_id: str) -> Callable[[], Engine]:
+    """Bind a DSPy optimizer id into a zero-argument engine factory.
+
+    Args:
+        optimizer_id: A unified DSPy optimizer id.
+
+    Returns:
+        A factory making a :class:`DspyEngine` for that optimizer.
+    """
+    return lambda: DspyEngine(optimizer_id)
+
+
+for _dspy_id in DSPY_OPTIMIZERS:
+    ENGINES[_dspy_id] = EngineSpec(
+        id=_dspy_id,
+        label=_DSPY_LABELS[_dspy_id][0],
+        description=_DSPY_LABELS[_dspy_id][1],
+        factory=_dspy_factory(_dspy_id),
+        hidden=True,
+    )
 
 
 def available_engine_ids(caps: EngineCapabilities = NO_CAPABILITIES, *, parts: bool = False) -> list[str]:
@@ -156,7 +198,11 @@ def available_engine_ids(caps: EngineCapabilities = NO_CAPABILITIES, *, parts: b
     Returns:
         Runnable engine ids.
     """
-    return [spec.id for spec in ENGINES.values() if spec.available_for(caps) and (spec.supports_parts or not parts)]
+    return [
+        spec.id
+        for spec in ENGINES.values()
+        if not spec.hidden and spec.available_for(caps) and (spec.supports_parts or not parts)
+    ]
 
 
 def get_engine(engine_id: str, caps: EngineCapabilities = NO_CAPABILITIES) -> Engine:

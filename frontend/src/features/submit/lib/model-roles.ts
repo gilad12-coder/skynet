@@ -16,6 +16,7 @@ export type OptimizationModelFamily =
   | "meta_harness"
   | "autoresearch"
   | "autosaddler"
+  | "shinka_evolve"
   | "auto";
 
 /**
@@ -34,6 +35,7 @@ export function modelIdentity(config: ModelConfig | null | undefined): string | 
     name,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? (config.byok_provider ?? null) : null,
+    ...(tokenSource === "subscription" ? { cli_provider: config.cli_provider ?? null } : {}),
     temperature: config.temperature ?? null,
     max_tokens: config.max_tokens ?? null,
     extra: extraEntries.length > 0 ? Object.fromEntries(extraEntries) : null,
@@ -47,7 +49,10 @@ export function sameModelConfig(
   return modelIdentity(a) === modelIdentity(b);
 }
 
-/** Native proposers use model defaults; preserve BYOK so validation cannot hide it. */
+/**
+ * Native proposers use model defaults; preserve BYOK and the subscription CLI
+ * so validation cannot hide who pays.
+ */
 export function proposerModelConfig(config: ModelConfig, native: boolean): ModelConfig {
   if (!native) return config;
   const tokenSource = config.token_source ?? "managed";
@@ -55,6 +60,7 @@ export function proposerModelConfig(config: ModelConfig, native: boolean): Model
     name: config.name,
     token_source: tokenSource,
     byok_provider: tokenSource === "byok" ? (config.byok_provider ?? null) : null,
+    ...(tokenSource === "subscription" ? { cli_provider: config.cli_provider ?? null } : {}),
   };
 }
 
@@ -95,6 +101,7 @@ export function optimizationModelFamily(
     if (engine === "meta_harness") return "meta_harness";
     if (engine === "autoresearch") return "autoresearch";
     if (engine === "autosaddler") return "autosaddler";
+    if (engine === "shinka_evolve") return "shinka_evolve";
     if (engine === "best_of_n") return "best_of_n";
   }
   return "gepa";
@@ -108,4 +115,5 @@ export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFa
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
     autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",
     autosaddler: "submit.blackbox.roles.optimization.desc.autosaddler",
+    shinka_evolve: "submit.blackbox.roles.optimization.desc.shinka_evolve",
   };

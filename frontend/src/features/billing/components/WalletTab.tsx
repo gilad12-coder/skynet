@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import {
   ArrowSquareOut,
   CircleNotch,
+  ClockCounterClockwise,
   Coins,
   Crown,
   CreditCard,
@@ -14,6 +15,8 @@ import {
   Plus,
   Sparkle,
   Trash,
+  UserCircle,
+  Wallet,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
@@ -31,7 +34,6 @@ import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   createBillingPortalSession,
   createCheckoutSession,
@@ -152,7 +154,7 @@ function AddFundsControls() {
               aria-checked={active}
               onClick={() => setSelection(p.id)}
               className={cn(
-                "relative rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
+                "relative rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
                 active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
               )}
             >
@@ -161,7 +163,7 @@ function AddFundsControls() {
               {active && (
                 <motion.span
                   layoutId="credit-pack-pill"
-                  className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+                  className="absolute inset-0 rounded-md bg-background"
                   transition={PILL_TRANSITION}
                   aria-hidden="true"
                 />
@@ -178,7 +180,7 @@ function AddFundsControls() {
           {customActive && (
             <motion.span
               layoutId="credit-pack-pill"
-              className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+              className="absolute inset-0 rounded-md bg-background"
               transition={PILL_TRANSITION}
               aria-hidden="true"
             />
@@ -206,12 +208,12 @@ function AddFundsControls() {
           className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/70 sm:block"
         />
         <Button
-          variant="outline"
           size="sm"
           onClick={onBuy}
           data-telemetry="wallet-buy-credits"
+          data-accent
           disabled={buying || (!pack && !customValid)}
-          className="h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44] sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3"
+          className="h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3"
         >
           {buying ? (
             <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -286,14 +288,14 @@ function ProPlanRow() {
       description={description}
     >
       <Button
-        variant="outline"
+        variant={isPro ? "outline" : "default"}
         size="sm"
         onClick={() => void (isPro ? onManage() : onUpgrade())}
         disabled={pending}
         data-telemetry={isPro ? "wallet-manage-pro" : "wallet-upgrade-pro"}
+        data-accent={isPro ? undefined : true}
         className={cn(
           "h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3",
-          !isPro && "border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44]",
         )}
       >
         {pending ? (
@@ -361,7 +363,8 @@ function TransactionHistory() {
       aria-labelledby="transaction-history-heading"
     >
       <div className="flex items-center justify-between gap-3">
-        <h3 id="transaction-history-heading" className="text-sm font-semibold text-foreground">
+        <h3 id="transaction-history-heading" className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <ClockCounterClockwise className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {msg("billing.transactions.title")}
         </h3>
         {loading && data != null && (
@@ -432,14 +435,10 @@ function TransactionHistory() {
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground hover:text-foreground"
+                      autoTooltip={false}
                       aria-label={msg("billing.transactions.receipt")}
                     >
-                      <a
-                        href={transaction.document_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={msg("billing.transactions.receipt")}
-                      >
+                      <a href={transaction.document_url} target="_blank" rel="noreferrer">
                         <ArrowSquareOut className="size-4" aria-hidden="true" />
                       </a>
                     </Button>
@@ -743,28 +742,25 @@ function BillingDetails() {
     <div className="flex flex-col gap-6 border-t border-border/40 pt-5">
       <section className="flex flex-col gap-2" aria-labelledby="billing-profile-heading">
         <div className="flex items-center justify-between gap-3">
-          <h3 id="billing-profile-heading" className="text-sm font-semibold text-foreground">
+          <h3 id="billing-profile-heading" className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <UserCircle className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             {msg("billing.profile.title")}
           </h3>
-          <TooltipButton tooltip={msg("billing.profile.edit")}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={unavailable || portalFlow !== null}
-              onClick={() => void openPortal("manage")}
-              className="text-muted-foreground hover:text-foreground"
-              aria-label={msg("billing.profile.edit")}
-            >
-              {portalFlow === "manage" ? (
-                <CircleNotch
-                  className="animate-spin motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
-              ) : (
-                <PencilSimple className="size-4" aria-hidden="true" />
-              )}
-            </Button>
-          </TooltipButton>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={unavailable || portalFlow !== null}
+            onClick={() => void openPortal("manage")}
+            className="text-muted-foreground hover:text-foreground"
+            autoTooltip={false}
+            aria-label={msg("billing.profile.edit")}
+          >
+            {portalFlow === "manage" ? (
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <PencilSimple className="size-4" aria-hidden="true" />
+            )}
+          </Button>
         </div>
         <dl className="divide-y divide-border/40 border-y border-border/40">
           {[
@@ -788,28 +784,25 @@ function BillingDetails() {
 
       <section className="flex flex-col gap-2" aria-labelledby="payment-methods-heading">
         <div className="flex items-center justify-between gap-3">
-          <h3 id="payment-methods-heading" className="text-sm font-semibold text-foreground">
+          <h3 id="payment-methods-heading" className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <CreditCard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             {msg("billing.payment_methods.title")}
           </h3>
-          <TooltipButton tooltip={msg("billing.payment_methods.add")}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={unavailable || portalFlow !== null}
-              onClick={() => void openPortal("payment_method")}
-              className="text-muted-foreground hover:text-foreground"
-              aria-label={msg("billing.payment_methods.add")}
-            >
-              {portalFlow === "payment_method" ? (
-                <CircleNotch
-                  className="animate-spin motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
-              ) : (
-                <Plus className="size-4" aria-hidden="true" />
-              )}
-            </Button>
-          </TooltipButton>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={unavailable || portalFlow !== null}
+            onClick={() => void openPortal("payment_method")}
+            className="text-muted-foreground hover:text-foreground"
+            autoTooltip={false}
+            aria-label={msg("billing.payment_methods.add")}
+          >
+            {portalFlow === "payment_method" ? (
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <Plus className="size-4" aria-hidden="true" />
+            )}
+          </Button>
         </div>
         {profile.payment_methods.length === 0 ? (
           <EmptyState
@@ -850,30 +843,28 @@ function BillingDetails() {
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-0.5">
-                  <TooltipButton tooltip={msg("billing.payment_methods.edit")}>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={unavailable}
-                      onClick={() => setEditing(method)}
-                      className="text-muted-foreground hover:text-foreground"
-                      aria-label={`${msg("billing.payment_methods.edit")} ${paymentMethodLabel(method)}`}
-                    >
-                      <PencilSimple className="size-4" aria-hidden="true" />
-                    </Button>
-                  </TooltipButton>
-                  <TooltipButton tooltip={msg("billing.payment_methods.remove")}>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={unavailable}
-                      onClick={() => setRemoving(method)}
-                      className="text-muted-foreground hover:text-destructive"
-                      aria-label={`${msg("billing.payment_methods.remove")} ${paymentMethodLabel(method)}`}
-                    >
-                      <Trash className="size-4" aria-hidden="true" />
-                    </Button>
-                  </TooltipButton>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={unavailable}
+                    onClick={() => setEditing(method)}
+                    className="text-muted-foreground hover:text-foreground"
+                    autoTooltip={false}
+                    aria-label={`${msg("billing.payment_methods.edit")} ${paymentMethodLabel(method)}`}
+                  >
+                    <PencilSimple className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={unavailable}
+                    onClick={() => setRemoving(method)}
+                    className="text-muted-foreground hover:text-destructive"
+                    autoTooltip={false}
+                    aria-label={`${msg("billing.payment_methods.remove")} ${paymentMethodLabel(method)}`}
+                  >
+                    <Trash className="size-4" aria-hidden="true" />
+                  </Button>
                 </span>
               </li>
             ))}
@@ -920,10 +911,11 @@ export function WalletTab() {
           }
         />
       )}
-      <section className="flex flex-col gap-5" data-tutorial="settings-billing">
+      <section className="flex flex-col gap-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
+              <Wallet className="size-3.5 shrink-0" aria-hidden="true" />
               {msg("billing.popover.title")}
             </span>
             <div className="flex items-center gap-2" aria-busy={syncing || undefined}>
@@ -931,7 +923,7 @@ export function WalletTab() {
               <Coins
                 className={cn(
                   "size-6 shrink-0",
-                  syncing ? "text-muted-foreground" : "text-[#C8A882]",
+                  syncing ? "text-muted-foreground" : "text-primary",
                 )}
                 aria-hidden="true"
               />

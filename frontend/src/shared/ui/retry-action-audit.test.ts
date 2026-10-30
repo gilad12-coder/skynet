@@ -7,7 +7,6 @@ import ts from "typescript";
 const RECOVERY_LABEL_KEYS = new Set([
   "auto.features.agent.panel.components.generalistpanel.error_retry",
   "auto.features.dashboard.components.analyticsempty.2",
-  "auto.features.submit.components.steps.codeagentpanel.2",
   "billing.wallet.retry",
   "optimizations.react.chat_retry",
   "settings.notifications.retry",

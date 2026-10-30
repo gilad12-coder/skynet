@@ -1,4 +1,4 @@
-"""Logging and metrics setup for on-prem deployments.
+"""Logging and metrics setup for the API process.
 
 Three concerns live here:
 
@@ -12,7 +12,7 @@ Three concerns live here:
 * :func:`install_metrics` mounts a Prometheus-compatible ``/metrics``
   endpoint via ``prometheus-fastapi-instrumentator``. The dependency is
   imported lazily so the backend still boots in environments where the
-  wheel hasn't been mirrored to the local artifactory yet.
+  wheel isn't installed.
 
 * :func:`install_request_id_middleware` adds a tiny ASGI middleware that
   reads the inbound ``X-Request-ID`` header (or generates a UUID4),
@@ -45,9 +45,17 @@ from ..billing.model_reconciliation import OpenRouterUsageReconciler
 from ..billing.operation_pricing import json_fingerprint
 from ..billing.vercel_reconciliation import VercelSessionUsageClient, VercelUsageReconciler
 from ..config import settings
+from ..constants import (
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+    PAYLOAD_OVERVIEW_TOKEN_SOURCE,
+)
+from ..notifications import notify_job_completed
 from ..storage.usage import purge_expired_staged_datasets
+from ..telemetry import record_server_event
+from ..telemetry.run_outcome import failed_properties
 from .alerts import install_alert_log_handler
-from .log_shipping import build_log_ship_handler
 from .routers.agent_history import purge_stale_conversations
 
 # python-json-logger ships its formatter under two different names depending
@@ -224,9 +232,7 @@ def configure_logging() -> None:
     time) are removed so log output has a single, predictable shape. When
     ``ALERT_WEBHOOK_URL`` is set, an :class:`~core.api.alerts.AlertLogHandler`
     is also attached so records at or above ``ALERT_MIN_LEVEL`` are forwarded
-    to the chat webhook. When ``LOG_SHIP_URL`` is set, a
-    :class:`~core.api.log_shipping.LogShipHandler` ships a JSON copy of every
-    admitted record to that endpoint.
+    to the chat webhook.
     """
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -240,10 +246,6 @@ def configure_logging() -> None:
     root.addHandler(handler)
     root.setLevel(level)
     install_alert_log_handler(root)
-    shipper = build_log_ship_handler()
-    if shipper is not None:
-        shipper.addFilter(_ContextFilter())
-        root.addHandler(shipper)
 
 
 def install_metrics(app: FastAPI) -> None:
@@ -368,7 +370,7 @@ def advisory_lock(engine: Any, key: int) -> Iterator[bool]:
 
 
 class OrphanRecoverySweeper:
-    """Periodically re-queue jobs whose worker lease expired.
+    """Periodically requeue or fail jobs whose worker lease expired.
 
     The startup-only sweep in :func:`backend.core.api.app.lifespan` only fires
     once. If a worker dies mid-job after the fleet has booted, the lease ticks
@@ -411,6 +413,21 @@ class OrphanRecoverySweeper:
             self._thread.join(timeout=2.0)
 
     def sweep_once(self) -> int:
+        """Run one orphan-recovery pass, then tell owners about the runs it ended.
+
+        The notifications also cover runs that the boot-time sweep ended in
+        this process, so they go out even when a peer wins the lock.
+
+        Returns:
+            The number of orphans handled by the sweep, or ``0`` if this
+            replica did not win the advisory lock (peer is sweeping).
+        """
+        try:
+            return self._recover_orphans()
+        finally:
+            self._notify_ended_orphans()
+
+    def _recover_orphans(self) -> int:
         """Acquire the leader-election lock and run one orphan-recovery pass.
 
         Returns:
@@ -420,8 +437,7 @@ class OrphanRecoverySweeper:
         engine = getattr(self._job_store, "engine", None)
         if engine is None or engine.dialect.name != "postgresql":
             try:
-                kwargs = {"budget_service": BudgetService(engine=engine)} if engine is not None else {}
-                recovered = int(self._job_store.recover_orphaned_jobs(**kwargs))
+                recovered = int(self._job_store.recover_orphaned_jobs())
                 self._reconcile_sandbox_usage(engine)
                 return recovered
             except Exception:
@@ -435,12 +451,50 @@ class OrphanRecoverySweeper:
                 ).scalar()
                 if not acquired:
                     return 0
-                recovered = int(self._job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=engine)))
+                recovered = int(self._job_store.recover_orphaned_jobs())
                 self._reconcile_sandbox_usage(engine)
                 return recovered
         except Exception:
             logger.warning("Orphan recovery sweep failed", exc_info=True)
             return 0
+
+    def _notify_ended_orphans(self) -> None:
+        """Send the failure or stop notification and outcome event for each run a sweep ended.
+
+        A worker that stops a run itself sends these; a run that the sweep
+        ends has no worker left to do it.
+        """
+        take = getattr(self._job_store, "take_ended_orphans", None)
+        if take is None:
+            return
+        for optimization_id, generation in take():
+            try:
+                # The owner can resume a stopped run before this pass; the
+                # fence leaves its notification to the worker that runs it.
+                job = self._job_store.claim_ended_orphan_notification(optimization_id, generation)
+                if job is None:
+                    continue
+                username = job.get("username") or ""
+                status = job.get("status") or "failed"
+                notify_job_completed(optimization_id, username, status, message=job.get("message"))
+                overview = job.get("payload_overview") or {}
+                properties: dict[str, Any] = {
+                    "status": status,
+                    "optimization_type": overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
+                    "optimizer": overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
+                    "model": overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+                    "token_source": overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE),
+                }
+                if status == "failed":
+                    properties.update(failed_properties(None, None))
+                record_server_event(
+                    getattr(self._job_store, "engine", None),
+                    username=username or None,
+                    name="run_stopped" if status == "stopped" else "run_failed",
+                    properties=properties,
+                )
+            except Exception:
+                logger.warning("Could not notify the owner of ended orphan %s", optimization_id, exc_info=True)
 
     def _reconcile_sandbox_usage(self, engine: Any) -> None:
         """Reconcile a bounded page under the existing recovery leader's lease.

@@ -30,11 +30,19 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from ...service_gateway.agents.generalist import (
+    ThinkingTrail,
     TrustMode,
     WizardState,
     approval_key,
+    fallback_summary,
     get_approval_registry,
     run_generalist_agent,
+)
+from ...service_gateway.agents.steering import (
+    STEER_APPLIED_EVENT,
+    STEER_KEY_MAX_CHARS,
+    STEER_TEXT_MAX_CHARS,
+    get_steer_store,
 )
 from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
@@ -155,6 +163,15 @@ class GeneralistAgentRequest(BaseModel):
         default=None,
         description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
+    steer_key: str | None = Field(
+        default=None,
+        max_length=STEER_KEY_MAX_CHARS,
+        description=(
+            "Client-chosen key for this turn. Messages posted to "
+            "``/optimizations/agent-steer`` under it while the turn runs reach "
+            "the agent at its next step, announced by a ``steer_applied`` event."
+        ),
+    )
 
 
 class ConfirmApprovalRequest(BaseModel):
@@ -168,6 +185,34 @@ class ConfirmApprovalResponse(BaseModel):
     """Ack for an approval confirm call."""
 
     resolved: bool
+
+
+class SteerMessageRequest(BaseModel):
+    """A message for an agent turn that is still running."""
+
+    steer_key: str = Field(..., min_length=1, max_length=STEER_KEY_MAX_CHARS, description="The running turn's key.")
+    text: str = Field(..., min_length=1, max_length=STEER_TEXT_MAX_CHARS, description="The message text.")
+
+
+class SteerMessageResponse(BaseModel):
+    """Ack for a steer message."""
+
+    id: str
+
+
+class SteerWithdrawRequest(BaseModel):
+    """Take back the messages a finished turn never read."""
+
+    steer_key: str = Field(..., min_length=1, max_length=STEER_KEY_MAX_CHARS, description="The turn's key.")
+    ids: list[str] | None = Field(
+        default=None, max_length=100, description="Take back only these messages; omitted takes back every one."
+    )
+
+
+class SteerWithdrawResponse(BaseModel):
+    """Messages returned to the client, oldest first."""
+
+    ids: list[str]
 
 
 def _derive_title(user_message: str) -> str:
@@ -302,7 +347,7 @@ def _persist_assistant_turn(
     allowed_tools: list[str] | None = None,
     tool_schema_hashes: dict[str, str] | None = None,
     router_metadata: dict[str, Any] | None = None,
-) -> None:
+) -> int:
     """Insert the assistant's completed turn (with tool-call payloads).
 
     Called once, from the SSE wrapper, when the upstream ``done`` event fires.
@@ -322,32 +367,74 @@ def _persist_assistant_turn(
         tool_schema_hashes: ``{tool_name: sha256(schema_json)}`` snapshot.
         router_metadata: OpenRouter upstream id + served-by host + latency.
             ``None`` until the runtime captures it (see spec §4).
+
+    Returns:
+        The new message's id.
     """
     now = datetime.now(UTC)
     with Session(job_store.engine) as session:
-        session.add(
-            AgentMessageModel(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                tool_calls=tool_calls or None,
-                model=model,
-                wizard_state_before=wizard_state_before,
-                wizard_state_after=wizard_state_after,
-                allowed_tools=allowed_tools,
-                tool_schema_hashes=tool_schema_hashes,
-                router_metadata=router_metadata,
-                created_at=now,
-            )
+        message = AgentMessageModel(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls or None,
+            model=model,
+            wizard_state_before=wizard_state_before,
+            wizard_state_after=wizard_state_after,
+            allowed_tools=allowed_tools,
+            tool_schema_hashes=tool_schema_hashes,
+            router_metadata=router_metadata,
+            created_at=now,
         )
+        session.add(message)
         row = session.get(AgentConversationModel, conversation_id)
         if row is not None:
             row.updated_at = cast(Any, now)
         session.commit()
+        message_id = message.id
     # Refresh the haystack embedding so the next search hit reflects the
     # turn we just persisted. Runs on a daemon thread and is best-effort —
     # the startup backfill heals any failures on the next deploy.
     queue_conversation_embed(conversation_id, engine=job_store.engine)
+    return message_id
+
+
+def _save_late_metadata(job_store, message_id: int, updates: dict[str, Any]) -> None:
+    """Replace keys of a saved turn's metadata, for labels and stats that arrived after its ``done``.
+
+    Args:
+        job_store: Job-store instance whose engine backs the DB session.
+        message_id: The assistant message the metadata belongs to.
+        updates: The keys to replace, e.g. ``thinking`` and ``stats``.
+    """
+    with Session(job_store.engine) as session:
+        message = session.get(AgentMessageModel, message_id)
+        if message is None:
+            return
+        message.router_metadata = {**(message.router_metadata or {}), **updates}
+        session.commit()
+
+
+def _labelled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every row without a label one cut from its reasoning.
+
+    A stream dropped before its last labels arrived would otherwise save
+    rows that reopen without one.
+
+    Args:
+        rows: The turn's thinking rows.
+
+    Returns:
+        The rows, each with a ``summary`` when its reasoning has any text.
+    """
+    out = []
+    for row in rows:
+        if not row.get("summary"):
+            label = fallback_summary(str(row.get("reasoning") or ""))
+            if label:
+                row = {**row, "summary": label}
+        out.append(row)
+    return out
 
 
 async def _wrap_with_persistence(
@@ -397,10 +484,15 @@ async def _wrap_with_persistence(
     model_used: str | None = None
     served_model_used: str | None = None
     turn_stats: dict[str, Any] | None = None
+    plan: str | None = None
+    thinking = ThinkingTrail()
     allowed_tools: list[str] | None = None
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
     persisted = False
+    saved_message_id: int | None = None
+    late_labels = False
+    late_stats: dict[str, Any] | None = None
 
     async def _do_persist(content: str) -> None:
         """Write the accumulated turn exactly once; never raise.
@@ -411,12 +503,12 @@ async def _wrap_with_persistence(
         Args:
             content: Final assistant message text for the row.
         """
-        nonlocal persisted
+        nonlocal persisted, saved_message_id
         if persisted or not (conversation_id and job_store is not None):
             return
         ordered_tools = [tool_calls[tid] for tid in tool_order if tid in tool_calls]
         try:
-            await asyncio.to_thread(
+            saved_message_id = await asyncio.to_thread(
                 _persist_assistant_turn,
                 job_store,
                 conversation_id,
@@ -428,7 +520,14 @@ async def _wrap_with_persistence(
                 allowed_tools=allowed_tools,
                 tool_schema_hashes=tool_schema_hashes,
                 router_metadata={
-                    key: value for key, value in (("served_model", served_model_used), ("stats", turn_stats)) if value
+                    key: value
+                    for key, value in (
+                        ("served_model", served_model_used),
+                        ("stats", turn_stats),
+                        ("plan", plan),
+                        ("thinking", _labelled(thinking.rows())),
+                    )
+                    if value
                 }
                 or None,
             )
@@ -440,6 +539,7 @@ async def _wrap_with_persistence(
         async for event in source:
             name = event.get("event")
             data = event.get("data") or {}
+            thinking.observe(event)
             if name == "message_patch":
                 chunk = data.get("chunk")
                 if isinstance(chunk, str):
@@ -448,6 +548,10 @@ async def _wrap_with_persistence(
                 # The text so far prefaced a tool call; salvaging it on a
                 # dropped stream would persist narration as the reply.
                 assistant_buf.clear()
+            elif name == "plan":
+                raw_plan = data.get("text")
+                if isinstance(raw_plan, str) and raw_plan.strip():
+                    plan = raw_plan.strip()
             elif name == "turn_metadata":
                 raw_allowed = data.get("allowed_tools")
                 if isinstance(raw_allowed, list):
@@ -457,6 +561,14 @@ async def _wrap_with_persistence(
                     tool_schema_hashes = {str(k): str(v) for k, v in raw_hashes.items()}
                 # Internal envelope — never forward to the frontend.
                 continue
+            elif name == STEER_APPLIED_EVENT:
+                # The steered message is a user turn of this conversation; it
+                # goes in now so it sits before the reply written on ``done``.
+                if conversation_id and job_store is not None and isinstance(data.get("text"), str):
+                    try:
+                        await asyncio.to_thread(_persist_user_turn, job_store, conversation_id, data["text"])
+                    except Exception:
+                        logger.exception("Failed to persist a steered user message")
             elif name == "tool_start":
                 tid = str(data.get("id", ""))
                 if tid:
@@ -491,8 +603,22 @@ async def _wrap_with_persistence(
                 raw_stats = data.get("stats")
                 turn_stats = raw_stats if isinstance(raw_stats, dict) else None
                 await _do_persist(content)
+            elif name == "thinking_summary" and persisted:
+                late_labels = True
+            elif name == "turn_stats" and persisted and isinstance(data.get("stats"), dict):
+                late_stats = data["stats"]
             yield event
     finally:
+        late: dict[str, Any] = {}
+        if late_labels:
+            late["thinking"] = _labelled(thinking.rows())
+        if late_stats:
+            late["stats"] = late_stats
+        if late and saved_message_id is not None and job_store is not None:
+            try:
+                await asyncio.to_thread(_save_late_metadata, job_store, saved_message_id, late)
+            except Exception:
+                logger.exception("Failed to save the turn's late labels and stats")
         # The frontend tears down the SSE stream the moment ``submit_job_run_post``
         # succeeds, so ``done`` often never arrives and the wrapped generator is
         # closed (GeneratorExit / CancelledError). Salvage the turn here when it
@@ -543,6 +669,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
     engine = getattr(job_store, "engine", None) if job_store is not None else None
     if engine is not None:
         get_approval_registry().bind_engine(engine)
+        get_steer_store().bind_engine(engine)
 
     @router.post(
         "/optimizations/generalist-agent",
@@ -620,6 +747,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             locale=req.locale,
             model_config=model_config,
             usage_sink=usage_sink,
+            steer_key=req.steer_key,
         )
         metered = stream_with_llm_metering(
             source,
@@ -674,5 +802,48 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         if not resolved:
             raise DomainError("agent.approval.unknown_call_id", status=404)
         return ConfirmApprovalResponse(resolved=True)
+
+    @router.post(
+        "/optimizations/agent-steer",
+        response_model=SteerMessageResponse,
+        summary="Send a message into a running agent turn",
+    )
+    def post_steer(req: SteerMessageRequest, current_user: AuthenticatedUserDep) -> SteerMessageResponse:
+        """Store a message for the caller's turn running under ``steer_key``.
+
+        The turn reads it at its next step and announces that with a
+        ``steer_applied`` event. Works for the generalist agent and the code,
+        black-box and workflow assistants.
+
+        Args:
+            req: The turn's key and the message.
+            current_user: The authenticated caller; only their own turns read it.
+
+        Returns:
+            The stored message's id.
+        """
+        return SteerMessageResponse(id=get_steer_store().post(current_user.username, req.steer_key, req.text))
+
+    @router.post(
+        "/optimizations/agent-steer/withdraw",
+        response_model=SteerWithdrawResponse,
+        summary="Take back steer messages a turn never read",
+    )
+    def withdraw_steer(req: SteerWithdrawRequest, current_user: AuthenticatedUserDep) -> SteerWithdrawResponse:
+        """Take back messages the turn under ``steer_key`` has not read.
+
+        Called when the turn ends, and when the user deletes, edits or
+        reorders a steered message; each message goes either to the turn or
+        back here, never both.
+
+        Args:
+            req: The turn's key, and optionally which messages to take back.
+            current_user: The authenticated caller.
+
+        Returns:
+            The ids of the messages returned, oldest first.
+        """
+        taken = get_steer_store().take(current_user.username, req.steer_key, req.ids)
+        return SteerWithdrawResponse(ids=[message_id for message_id, _ in taken])
 
     return router

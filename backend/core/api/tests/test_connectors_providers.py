@@ -230,6 +230,7 @@ def test_status_lists_every_provider(vault_key: str, generic_oauth_off: None) ->
         "supabase",
         "bigquery",
         "snowflake",
+        "foundry",
         "langfuse",
         "langsmith",
         "braintrust",
@@ -334,6 +335,183 @@ def test_github_import_refuses_oversized_file_before_download(
     assert response.status_code == 413
     assert response.json()["code"] == "connectors.import_too_large"
     stream.assert_not_called()
+
+
+def _github_picker_api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """Route mocked GitHub API calls behind the repository picker.
+
+    Args:
+        method: HTTP method.
+        url: Request URL.
+        **kwargs: Request options; ``params`` carries the branch page.
+
+    Returns:
+        The canned response.
+    """
+    path = urlparse(url).path
+    if path == "/user":
+        return _response(200, {"login": "octo"})
+    if path == "/user/repos":
+        return _response(
+            200,
+            [
+                {
+                    "full_name": "octo/app",
+                    "private": True,
+                    "description": "The app",
+                    "language": "Python",
+                    "default_branch": "main",
+                    "pushed_at": "2026-01-02T00:00:00Z",
+                },
+                {"full_name": "octo/docs", "private": False, "description": None, "language": None},
+            ],
+        )
+    if path == "/repos/public/lib":
+        return _response(200, {"full_name": "public/lib", "private": False, "default_branch": "trunk"})
+    if path == "/repos/nobody/missing":
+        return _response(404, {"message": "Not Found"})
+    if path == "/repos/octo/app":
+        return _response(200, {"full_name": "octo/app", "default_branch": "main"})
+    if path == "/repos/octo/app/branches":
+        page = kwargs["params"]["page"]
+        names = [f"b{(page - 1) * 100 + i}" for i in range(100)] if page < 4 else []
+        return _response(200, [{"name": name} for name in names])
+    if path == "/repos/octo/app/git/trees/feature%2Fx":
+        return _response(
+            200,
+            {
+                "truncated": False,
+                "tree": [
+                    {"path": "src", "type": "tree"},
+                    {"path": "src/app.py", "type": "blob"},
+                    {"path": "vendor/lib", "type": "commit"},
+                    {"path": "README.md", "type": "blob"},
+                ],
+            },
+        )
+    if path == "/repos/octo/app/git/trees/HEAD":
+        return _response(200, {"truncated": True, "tree": [{"path": "a.txt", "type": "blob"}]})
+    if path == "/repos/octo/app/contents/src/app.py":
+        assert kwargs["params"] == {"ref": "abc123"}
+        encoded = base64.b64encode(b"print('hi')\n").decode()
+        return _response(200, {"type": "file", "size": 12, "encoding": "base64", "content": encoded})
+    if path == "/repos/octo/app/contents/logo.png":
+        assert kwargs["params"] is None
+        encoded = base64.b64encode(b"\x89PNG\x00").decode()
+        return _response(200, {"type": "file", "size": 5, "encoding": "base64", "content": encoded})
+    if path == "/repos/octo/app/contents/data.bin":
+        return _response(200, {"type": "file", "size": 5 * 1024 * 1024, "encoding": "none", "content": ""})
+    if path == "/repos/octo/app/contents/gone.py":
+        return _response(404, {"message": "Not Found"})
+    raise AssertionError(f"unexpected call {method} {url}")
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_lists_repositories_with_details() -> None:
+    """The picker gets every repository's details, filtered, plus a typed public one."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        listed = client.get("/connectors/github/repos")
+        filtered = client.get("/connectors/github/repos", params={"search": "DOCS"}).json()["repositories"]
+        typed = client.get("/connectors/github/repos", params={"search": "public/lib"}).json()["repositories"]
+        unknown = client.get("/connectors/github/repos", params={"search": "nobody/missing"}).json()
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["repositories"][0] == {
+        "full_name": "octo/app",
+        "private": True,
+        "description": "The app",
+        "language": "Python",
+        "default_branch": "main",
+        "pushed_at": "2026-01-02T00:00:00Z",
+    }
+    assert [r["full_name"] for r in filtered] == ["octo/docs"]
+    assert typed[0]["full_name"] == "public/lib"
+    assert typed[0]["default_branch"] == "trunk"
+    assert unknown == {"repositories": []}
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_branches_are_paginated_and_capped() -> None:
+    """Branches page through GitHub up to the cap, with the default branch kept in the list."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        response = client.get("/connectors/github/branches", params={"repo": "octo/app"})
+        invalid = client.get("/connectors/github/branches", params={"repo": "octo/app/extra"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["default_branch"] == "main"
+    assert body["branches"][0] == "main"
+    assert len(body["branches"]) == github.BRANCH_LIMIT + 1
+    assert invalid.status_code == 400
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_tree_lists_files_and_folders() -> None:
+    """The tree keeps files and folders, skips submodules, and reports truncation."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api):
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        tree = client.get("/connectors/github/tree", params={"repo": "octo/app", "branch": "feature/x"})
+        default = client.get("/connectors/github/tree", params={"repo": "octo/app"}).json()
+    assert tree.status_code == 200, tree.text
+    assert tree.json() == {
+        "entries": [
+            {"path": "src", "type": "dir"},
+            {"path": "src/app.py", "type": "file"},
+            {"path": "README.md", "type": "file"},
+        ],
+        "truncated": False,
+    }
+    assert default == {"entries": [{"path": "a.txt", "type": "file"}], "truncated": True}
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_file_reads_text_and_flags_the_rest() -> None:
+    """One file reads as text at a ref, and binary, oversized, missing and bad paths are flagged or refused."""
+    client, _ = _make_client()
+    with patch("core.connectors.transport.CLIENT.request", side_effect=_github_picker_api) as api:
+        client.put("/connectors/github/credentials", json={"fields": {"token": "ghp_secret"}})
+        text = client.get("/connectors/github/file", params={"repo": "octo/app", "ref": "abc123", "path": "src/app.py"})
+        binary = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "logo.png"}).json()
+        large = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "data.bin"}).json()
+        missing = client.get("/connectors/github/file", params={"repo": "octo/app", "path": "gone.py"}).json()
+        calls = api.call_count
+        refused = [
+            client.get("/connectors/github/file", params={"repo": "octo/app", "path": bad})
+            for bad in ("../etc/passwd", "/src/app.py", ".git/config")
+        ]
+        assert api.call_count == calls
+    assert text.status_code == 200, text.text
+    assert text.json() == {
+        "path": "src/app.py",
+        "text": "print('hi')\n",
+        "binary": False,
+        "too_large": False,
+        "missing": False,
+    }
+    assert binary == {"path": "logo.png", "text": None, "binary": True, "too_large": False, "missing": False}
+    assert large == {"path": "data.bin", "text": None, "binary": False, "too_large": True, "missing": False}
+    assert missing == {"path": "gone.py", "text": None, "binary": False, "too_large": False, "missing": True}
+    for response in refused:
+        assert response.status_code == 400
+        assert response.json()["code"] == "connectors.invalid_ref"
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_github_picker_needs_a_linked_account() -> None:
+    """Every picker route answers 409 before GitHub is linked."""
+    client, _ = _make_client()
+    for path, params in (
+        ("/connectors/github/repos", {}),
+        ("/connectors/github/branches", {"repo": "octo/app"}),
+        ("/connectors/github/tree", {"repo": "octo/app"}),
+        ("/connectors/github/file", {"repo": "octo/app", "path": "README.md"}),
+    ):
+        response = client.get(path, params=params)
+        assert response.status_code == 409
+        assert response.json()["code"] == "connectors.not_connected"
 
 
 @pytest.mark.usefixtures("vault_key", "generic_oauth_off")
@@ -821,6 +999,125 @@ def test_braintrust_experiment_fetch_follows_cursor(vault_key: str, generic_oaut
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
         {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
     ]
+
+
+def test_foundry_browses_spaces_and_reads_dataset_table(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Spaces open into folders and datasets; a pasted RID jumps to its dataset; tables read as CSV."""
+    client, store = _make_client()
+    space = "ri.compass.main.folder.s1"
+    dataset = "ri.foundry.main.dataset.d1"
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Foundry platform API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer fdry_tok"
+        assert kwargs["follow_redirects"] is False
+        parsed = urlparse(url)
+        assert parsed.netloc == "acme.palantirfoundry.com"
+        if parsed.path == "/api/v2/filesystem/spaces":
+            return _response(200, {"data": [{"rid": space, "displayName": "Research"}]})
+        if parsed.path == "/api/v2/admin/users/getCurrent":
+            return _response(200, {"username": "ada"})
+        if parsed.path == f"/api/v2/filesystem/folders/{space}/children":
+            if kwargs["params"].get("pageToken") == "p2":
+                return _response(200, {"data": [{"rid": dataset, "displayName": "qa_pairs"}]})
+            children = [
+                {"rid": "ri.compass.main.folder.f1", "displayName": "raw"},
+                {"rid": "ri.workshop.main.module.w1", "displayName": "App"},
+            ]
+            return _response(200, {"data": children, "nextPageToken": "p2"})
+        if parsed.path == f"/api/v2/datasets/{dataset}":
+            return _response(200, {"rid": dataset, "name": "qa_pairs"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO),
+        patch("core.connectors.transport.CLIENT.request", side_effect=fake_request),
+        patch("core.connectors.transport.CLIENT.stream", return_value=_StreamCtx(CSV)) as stream,
+    ):
+        saved = client.put(
+            "/connectors/foundry/credentials",
+            json={"fields": {"host": "https://acme.palantirfoundry.com/workspace/", "token": "fdry_tok"}},
+        )
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "foundry")["account_label"] == "ada"
+        root = client.get("/connectors/foundry/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in root] == [(space, "folder")]
+        inside = client.get("/connectors/foundry/browse", params={"location": space}).json()["entries"]
+        assert [(e["name"], e["kind"]) for e in inside] == [("raw", "folder"), ("qa_pairs", "file")]
+        jump = client.get("/connectors/foundry/browse", params={"search": dataset}).json()["entries"]
+        assert [(e["ref"], e["name"]) for e in jump] == [(dataset, "qa_pairs")]
+        bad = client.get("/connectors/foundry/preview", params={"ref": "../admin"})
+        assert bad.json()["code"] == "connectors.invalid_ref"
+
+        preview = client.get("/connectors/foundry/preview", params={"ref": dataset}).json()
+        assert preview["rows"][0] == {"name": "ada", "score": "1"}
+        assert stream.call_args.args[1].endswith(f"/api/v2/datasets/{dataset}/readTable")
+        assert stream.call_args.kwargs["params"] == {"format": "CSV", "rowLimit": 20}
+        assert stream.call_args.kwargs["follow_redirects"] is False
+        imported = client.post("/connectors/foundry/import", json={"ref": dataset})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "qa_pairs"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert library.get_rows(imported.json()["dataset"]["id"]) == [
+        {"name": "ada", "score": "1"},
+        {"name": "bob", "score": "2"},
+    ]
+
+
+_PUBLIC_ADDRINFO = [(2, 1, 6, "", ("52.1.2.3", 443))]
+
+
+@pytest.mark.parametrize(
+    ("host", "address"),
+    [
+        ("http://acme.palantirfoundry.com", "52.1.2.3"),
+        ("https://user:pw@acme.palantirfoundry.com", "52.1.2.3"),
+        ("internal.example.com", "10.0.0.5"),
+        ("localhost", "127.0.0.1"),
+        ("metadata.example.com", "169.254.169.254"),
+    ],
+)
+def test_foundry_refuses_hosts_outside_the_public_internet(
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+    host: str,
+    address: str,
+) -> None:
+    """A plain-HTTP, credentialed, private, loopback or metadata host never receives the token.
+
+    Args:
+        vault_key: Vault fixture.
+        generic_oauth_off: OAuth fixture.
+        host: The pasted hostname.
+        address: What its DNS resolves to.
+    """
+    client, _ = _make_client()
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=[(2, 1, 6, "", (address, 443))]),
+        patch("core.connectors.transport.CLIENT.request") as outbound,
+    ):
+        saved = client.put("/connectors/foundry/credentials", json={"fields": {"host": host, "token": "fdry_tok"}})
+    assert saved.status_code == 400, saved.text
+    assert saved.json()["code"] == "connectors.invalid_credentials"
+    outbound.assert_not_called()
+
+
+def test_foundry_refuses_redirects(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """A 3xx from the stack fails instead of being followed toward another host."""
+    client, _ = _make_client()
+    with (
+        patch("core.connectors.foundry.socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO),
+        patch(
+            "core.connectors.transport.CLIENT.request",
+            return_value=httpx.Response(302, headers={"Location": "http://169.254.169.254/"}),
+        ),
+    ):
+        saved = client.put(
+            "/connectors/foundry/credentials",
+            json={"fields": {"host": "acme.palantirfoundry.com", "token": "fdry_tok"}},
+        )
+    assert saved.status_code == 502, saved.text
+    assert saved.json()["code"] == "connectors.provider_error"
 
 
 def test_postgres_url_normalises_and_reads_tables(

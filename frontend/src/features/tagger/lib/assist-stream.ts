@@ -1,10 +1,11 @@
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readServerSentEvents } from "@/shared/lib/sse";
 import { fetchWithAuthRetry, parseInterviewOptions, type InterviewOption } from "@/shared/lib/api";
+import { kickoffOpening } from "@/shared/lib/agent-kickoff";
 import { msg } from "@/shared/lib/messages";
 import type { AssistPrediction, DatasetSpec, TaggerConfig } from "./types";
 
-// Resolve lazily — a module-load const races the injected window.__SKYNET_ENV__
+// Resolve lazily — a module-load const races the injected window.__APP_ENV__
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
 
@@ -53,7 +54,9 @@ export interface InterviewStreamHandlers {
 /**
  * Stream one tagger-interview turn via SSE. Mirrors `streamGeneralistAgent`
  * — same transport, same `reasoning_patch` / `message_patch` event shapes —
- * with a terminal `interview_done` instead of the agent's `done`.
+ * with a terminal `interview_done` instead of the agent's `done`. An opening
+ * over the server's size budget arrives as the fixed `kickoff_oversized`
+ * opening and lands through `onDone` like any reply.
  */
 export async function streamInterviewTurn(
   sessionId: string,
@@ -89,6 +92,20 @@ export async function streamInterviewTurn(
   try {
     await readServerSentEvents(res.body, ({ event, data }) => {
       const payload = data as Record<string, unknown>;
+      const opening = kickoffOpening(event, payload);
+      if (opening !== null) {
+        finished = true;
+        handlers.onDone({
+          message: opening,
+          options: [],
+          rubric: [],
+          done: false,
+          taskOverride: {},
+          datasetSpec: null,
+          title: "",
+        });
+        return;
+      }
       switch (event) {
         case "reasoning_patch":
           handlers.onReasoningPatch?.(String(payload.chunk ?? ""));
@@ -146,8 +163,19 @@ export interface PredictStreamHandlers {
   onPrediction: (id: string, prediction: AssistPrediction) => void;
   /** Terminal event: the authoritative merged map (covers missed events). */
   onDone: (predictions: Record<string, AssistPrediction>) => void;
-  onError: () => void;
+  /** The round failed; `code` is the server's error code when it refused the request. */
+  onError: (code?: string) => void;
   signal?: AbortSignal;
+}
+
+/** The `code` of a refused request's JSON error body, or undefined. */
+async function refusalCode(res: Response): Promise<string | undefined> {
+  try {
+    const body = (await res.json()) as { code?: unknown } | null;
+    return typeof body?.code === "string" ? body.code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -177,7 +205,8 @@ export async function streamPredictions(
     return;
   }
   if (!res.ok || !res.body) {
-    handlers.onError();
+    // The model is checked before the stream opens, so a refusal is a plain JSON error.
+    handlers.onError(res.ok ? undefined : await refusalCode(res));
     return;
   }
   let finished = false;

@@ -3,20 +3,20 @@
 import type React from "react";
 import { Badge } from "@/shared/ui/primitives/badge";
 import type { OptimizationSummaryResponse } from "@/shared/types/api";
-import { formatPercent } from "@/shared/lib";
+import { formatBlackboxDelta, formatBlackboxScore, formatPercent } from "@/shared/lib";
 import { msg } from "@/shared/lib/messages";
 
 export function typeBadge(jobType: string) {
   if (jobType === "grid_search") {
     return (
-      <Badge variant="outline" className="border-primary/30 text-primary">
+      <Badge variant="outline" className="border-primary-fill/30 text-primary">
         {msg("auto.features.dashboard.lib.status.badges.1")}
       </Badge>
     );
   }
   if (jobType === "blackbox") {
     return (
-      <Badge variant="outline" className="border-[#C8A882]/45 text-[#3D2E22]">
+      <Badge variant="outline" className="border-primary-fill/45 text-primary">
         {msg("optimization.blackbox.badge")}
       </Badge>
     );
@@ -31,6 +31,11 @@ export function formatScore(job: OptimizationSummaryResponse): React.ReactNode {
 
   if (baseline == null && optimized == null) return "-";
 
+  // Black-box (and Auto) runs report raw scorer values, often 0–1, not a
+  // 0–100 percentage; format them the way the run page does.
+  const isBlackbox = job.optimization_type === "blackbox";
+  const fmtScore = isBlackbox ? formatBlackboxScore : formatPercent;
+
   if (baseline != null && optimized != null && improvement != null) {
     const color =
       improvement > 0
@@ -38,25 +43,22 @@ export function formatScore(job: OptimizationSummaryResponse): React.ReactNode {
         : improvement < 0
           ? "text-[var(--danger)]"
           : "text-muted-foreground";
-    const sign = improvement > 0 ? "+" : "";
-    const deltaPct = improvement.toFixed(1);
+    const delta = isBlackbox
+      ? formatBlackboxDelta(improvement)
+      : `${improvement > 0 ? "+" : ""}${improvement.toFixed(1)}%`;
     return (
       <span
         className="inline-flex items-center gap-1 text-xs whitespace-nowrap"
-        title={`${formatPercent(baseline)} → ${formatPercent(optimized)}`}
+        title={`${fmtScore(baseline)} → ${fmtScore(optimized)}`}
       >
-        <span className="font-medium">{formatPercent(optimized)}</span>
-        <span className={`${color} font-medium`}>
-          ({sign}
-          {deltaPct}%)
-        </span>
+        <span className="font-medium">{fmtScore(optimized)}</span>
+        <span className={`${color} font-medium`}>({delta})</span>
       </span>
     );
   }
 
-  if (optimized != null)
-    return <span className="font-medium text-xs">{formatPercent(optimized)}</span>;
+  if (optimized != null) return <span className="font-medium text-xs">{fmtScore(optimized)}</span>;
   if (baseline != null)
-    return <span className="text-muted-foreground text-xs">{formatPercent(baseline)}</span>;
+    return <span className="text-muted-foreground text-xs">{fmtScore(baseline)}</span>;
   return "-";
 }

@@ -22,18 +22,24 @@ import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import { ExportMenu } from "./ExportMenu";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={180} borderRadius={8} />,
-});
 
 // Reuses the detail page's read-only DAG (its own 480px canvas) to frame the
 // optimized workflow; heavy enough to load on demand like the code editor.
 const WorkflowGraphView = dynamic(
   () => import("./WorkflowGraphView").then((m) => m.WorkflowGraphView),
-  { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
+  {
+    ssr: false,
+    // Same height rule as the canvas, which shrinks to 65dvh on short phone screens.
+    loading: () => (
+      <Skeleton
+        height="100%"
+        borderRadius={8}
+        containerClassName="block h-[min(480px,65dvh)] sm:h-[480px]"
+      />
+    ),
+  },
 );
 
 // What the run produced, gathered in one place: the export menu (runnable
@@ -94,13 +100,13 @@ export function ArtifactTab({
   // Downloads (pickle/program JSON/logs) are desk work; phones read and copy only.
 
   return (
-    <div className="space-y-6" data-tutorial="artifact-output">
+    <div className="space-y-6">
       <FadeIn>
         <p className="text-sm text-muted-foreground">{msg("optimization.artifact.description")}</p>
       </FadeIn>
 
       {hasExports && (
-        <div className="flex flex-col items-stretch gap-3 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-[0_0_20px_rgba(var(--primary),0.06)] sm:flex-row sm:items-center sm:p-5">
+        <div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-card p-4 sm:flex-row sm:items-center sm:p-5">
           <p className="flex-1 text-sm font-medium">
             {activePair
               ? msg("auto.features.optimizations.components.pairdetailview.2")
@@ -130,9 +136,7 @@ export function ArtifactTab({
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <Sparkle className="size-4" />
-                  <HelpTip text={tip("prompt.optimized")}>
-                    {msg("auto.features.optimizations.components.codetab.5")}
-                  </HelpTip>
+                  {msg("auto.features.optimizations.components.codetab.5")}
                 </CardTitle>
               </CardHeader>
               <CardContent>

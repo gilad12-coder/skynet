@@ -111,6 +111,7 @@ export function CopyButton({
     <Button
       variant={variant}
       size={size}
+      autoTooltip={false}
       {...rest}
       aria-label={copied && copiedAriaLabel ? copiedAriaLabel : ariaLabel}
       onClick={async (e) => {

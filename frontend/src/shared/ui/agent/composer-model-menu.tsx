@@ -4,12 +4,17 @@ import * as React from "react";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
-import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
+import { effortLabel, effortsFor, unpickedEffort } from "@/shared/lib/model-efforts";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
-import { modelProviderSlug } from "@/shared/lib/model-provider";
-import type { ModelCatalogResponse } from "@/shared/types/api";
+import {
+  catalogFallbackModel,
+  modelDisplayName,
+  modelProviderSlug,
+  type DefaultModelFlag,
+} from "@/shared/lib/model-provider";
+import type { CatalogModel, ModelCatalogResponse } from "@/shared/types/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,19 +33,24 @@ interface ComposerModelMenuProps {
   effort: string | null;
   onEffortChange: (effort: string | null) => void;
   disabled?: boolean;
-}
-
-/** Short display name for a LiteLLM id ("openai/gpt-4o-mini" → "gpt-4o-mini"). */
-function shortName(id: string): string {
-  return id.split("/").pop() || id;
+  /**
+   * Catalog flag naming the model that runs with no pick. Interviews run the
+   * fast `is_interview_default`; it falls back to `is_default` when absent.
+   */
+  defaultFlag?: DefaultModelFlag;
+  /**
+   * Lists exactly these models instead of the catalog, e.g. the local build's
+   * subscription models. The first one runs with no pick.
+   */
+  models?: CatalogModel[];
 }
 
 // The retired "Auto · Intelligent" entry; saved prefs and conversations may
 // still carry it, and the backend runs the default for it like for null.
 const RETIRED_AUTO_MODEL = "auto:intelligent";
 
-// Caps the fallback list when the catalog flags no featured models (an
-// on-prem gateway whose listing carries no release dates or benchmarks).
+// Caps the fallback list when the catalog flags no featured models (a
+// listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
 
 function effortHint(level: string | null): string {
@@ -80,16 +90,20 @@ export function ComposerModelMenu({
   effort,
   onEffortChange,
   disabled,
+  defaultFlag = "is_default",
+  models,
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
-  const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(
-    cachedCatalog() ?? null,
-  );
+  // Starts empty on server and client alike: the cache lives in localStorage,
+  // so seeding the first render from it would not match the SSR markup.
+  const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(null);
   // The synchronous cache may be stale (served without a TTL so the menu is
   // never empty) — always adopt the revalidated catalog when it lands.
   React.useEffect(() => {
     let cancelled = false;
+    const cached = cachedCatalog();
+    if (cached) setCatalog(cached);
     getModelCatalog()
       .then((c) => {
         if (!cancelled) setCatalog(c);
@@ -101,17 +115,15 @@ export function ComposerModelMenu({
   }, []);
 
   const available = React.useMemo(
-    () => (catalog?.models ?? []).filter((m) => m.available),
-    [catalog],
+    () => models ?? (catalog?.models ?? []).filter((m) => m.available),
+    [models, catalog],
   );
+  const listed = models ?? catalog?.models;
   // A saved pick the live catalog no longer lists (a withdrawn model) would
   // name a dead id on the chip. Only judged against a loaded, non-empty
   // catalog so a gateway outage never wipes a valid pick.
   const stale =
-    !!savedValue &&
-    !!catalog &&
-    catalog.models.length > 0 &&
-    !catalog.models.some((m) => m.value === savedValue);
+    !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
   const value = savedValue && !stale ? savedValue : null;
   React.useEffect(() => {
     if (stale) {
@@ -124,9 +136,10 @@ export function ComposerModelMenu({
   // metadata. A gateway that flags none falls back to the plain list rather
   // than an empty menu.
   const featured = React.useMemo(() => {
+    if (models) return models;
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
-  }, [available]);
+  }, [models, available]);
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -136,17 +149,17 @@ export function ComposerModelMenu({
 
   // No pick runs the catalog's flagged default, so the chip names it and its
   // efforts apply.
-  const catalogDefault = available.find((m) => m.is_default) ?? null;
+  const catalogDefault = models
+    ? (models[0] ?? null)
+    : catalogFallbackModel(available, defaultFlag);
   const effective = value ?? catalogDefault?.value ?? null;
-  const displayName = effective ? shortName(effective) : msg("agent.model_menu.effort_default");
+  const displayName = effective
+    ? modelDisplayName(effective, available)
+    : msg("agent.model_menu.effort_default");
   const current = available.find((m) => m.value === effective);
   const canThink = !!current?.supports_thinking;
   const efforts = effortsFor(effective, available);
-  // An off-by-default thinker runs "Default" with no reasoning at all, so it
-  // has no default level to name.
-  const defaultEffort = current?.reasoning_default_enabled
-    ? (current.default_reasoning_effort ?? null)
-    : null;
+  const defaultEffort = unpickedEffort(current);
 
   const pick = (model: string | null) => {
     onChange(model);
@@ -200,11 +213,11 @@ export function ComposerModelMenu({
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-72 overflow-hidden p-0">
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto py-1">
               {currentExtra && (
                 <MenuItem
                   selected
-                  label={shortName(currentExtra.value)}
+                  label={modelDisplayName(currentExtra.value, available)}
                   icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={16} />}
                   onSelect={() => pick(currentExtra.value)}
                 />
@@ -213,7 +226,7 @@ export function ComposerModelMenu({
                 <MenuItem
                   key={m.value}
                   selected={effective === m.value}
-                  label={shortName(m.value)}
+                  label={modelDisplayName(m.value, available)}
                   icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
                   onSelect={() => pick(m.value)}
                 />

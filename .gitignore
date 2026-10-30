@@ -11,8 +11,8 @@ dist/
 *.egg
 
 # Virtual environments
-.venv/
-venv/
+.venv
+venv
 ENV/
 
 # IDE
@@ -25,8 +25,11 @@ ENV/
 .coverage
 htmlcov/
 
-# Editor sessions
-.claude/
+# Editor sessions. The Setup hook and the agent prompts are shared; logs,
+# worktrees and local settings stay out of git.
+.claude/*
+!.claude/settings.json
+!.claude/commands/
 CLAUDE.md
 
 # Jupyter
