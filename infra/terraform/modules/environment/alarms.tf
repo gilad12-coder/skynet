@@ -163,33 +163,30 @@ resource "aws_cloudwatch_metric_alarm" "service_memory" {
   }
 }
 
-# Fires when a service runs fewer tasks than desired, or none at all (crash
-# loop, failed start, image pull failure, scale to 0). "running - desired"
-# alone misses a scale to 0: desired falls too. The floor of 1 catches it.
-# Container Insights (enabled) sends no data while a service has no tasks.
-# FILL turns each missing minute into a breaching point: treat_missing_data
-# alone keeps using older real points while the look-back range has enough
-# of them, which delays the alarm. Desired is the live ECS value, not the
-# tfvars count: the service ignores desired_count changes after create.
-# Deploys keep running at or above desired (minimum healthy percent 100).
+# Fires when a service runs no tasks (crash loop, failed start, image pull
+# failure, scale to 0). A fixed floor of 1, not "running - desired": a scale
+# to 0 lowers desired too. Container Insights (enabled) sends no data while a
+# service has no tasks. FILL turns each missing minute into 0: with
+# treat_missing_data alone, CloudWatch keeps using older real points while
+# its look-back range holds enough of them, which delays the alarm.
 # 3 of 5 one-minute points: ALARM about 3 to 5 minutes after the outage.
 resource "aws_cloudwatch_metric_alarm" "service_running" {
   for_each = { for k, v in aws_ecs_service.this : k => v if var.services[k].desired_count > 0 }
 
   alarm_name          = "${local.name}-${each.key}-tasks-missing"
-  alarm_description   = "${each.key} ran fewer tasks than desired, or none, in 3 of the last 5 minutes."
+  alarm_description   = "${each.key} ran no tasks in 3 of the last 5 minutes."
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 5
   datapoints_to_alarm = 3
-  threshold           = 0
+  threshold           = 1
   treat_missing_data  = "breaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
   metric_query {
-    id          = "gap"
-    expression  = "FILL(MIN([running - desired, running - 1]), -1)"
-    label       = "running minus max(desired, 1)"
+    id          = "filled"
+    expression  = "FILL(running, 0)"
+    label       = "running tasks, missing as 0"
     return_data = true
   }
 
@@ -206,6 +203,46 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
       }
     }
   }
+}
+
+# Fires when a service runs fewer tasks than desired (lost or failing tasks
+# of a multi-task service). Desired is the live ECS value: the service
+# ignores desired_count changes after create. 5 of 5 one-minute points,
+# because a two-step autoscaling scale-out keeps running below desired for
+# up to about 4 minutes while the tasks start. A service with no tasks is
+# the alarm above.
+resource "aws_cloudwatch_metric_alarm" "service_below_desired" {
+  for_each = aws_cloudwatch_metric_alarm.service_running
+
+  alarm_name          = "${local.name}-${each.key}-tasks-below-desired"
+  alarm_description   = "${each.key} ran fewer tasks than desired for 5 minutes."
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 5
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  metric_query {
+    id          = "gap"
+    expression  = "running - desired"
+    label       = "running minus desired"
+    return_data = true
+  }
+
+  metric_query {
+    id = "running"
+    metric {
+      namespace   = "ECS/ContainerInsights"
+      metric_name = "RunningTaskCount"
+      period      = 60
+      stat        = "Minimum"
+      dimensions = {
+        ClusterName = aws_ecs_cluster.this.name
+        ServiceName = aws_ecs_service.this[each.key].name
+      }
+    }
+  }
 
   metric_query {
     id = "desired"
@@ -216,7 +253,7 @@ resource "aws_cloudwatch_metric_alarm" "service_running" {
       stat        = "Maximum"
       dimensions = {
         ClusterName = aws_ecs_cluster.this.name
-        ServiceName = each.value.name
+        ServiceName = aws_ecs_service.this[each.key].name
       }
     }
   }
