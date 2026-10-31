@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
+import { HostedLinkClient } from "./hosted-link";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
 import { holdQuitUntilStopped } from "./quit";
@@ -61,9 +62,26 @@ let postgresStarted = false;
 let frontendUrl: string | null = null;
 let sweptOrphans = false;
 let sweptSandboxes = false;
+let hostedLink: HostedLinkClient | null = null;
+let signInPoll: NodeJS.Timeout | null = null;
+let signInUrl: string | null = null;
+
+// Setup screens are small; the window grows for the web app. Progress screens
+// show only the timeline, so they are shorter than screens that ask for an action.
+const SETUP_SIZE = { width: 600, height: 120 };
+const SETUP_ACTION_HEIGHT = 540;
+
+function setupHeight(s: OnboardingState): number {
+  const progress = s.kind === "checking" || s.kind === "starting" || s.kind === "ready" || (s.kind === "sign_in" && s.signIn === "waiting");
+  return progress ? SETUP_SIZE.height : SETUP_ACTION_HEIGHT;
+}
+
+const APP_SIZE = { width: 1440, height: 900, minWidth: 960, minHeight: 640 };
 
 function setState(next: OnboardingState): void {
+  const resize = win !== null && win.webContents.getURL().startsWith("file:") && setupHeight(next) !== setupHeight(state);
   state = next;
+  if (resize) useSetupSize();
   log(`state ${next.kind}${next.step ? ` (${next.step})` : ""}${next.error ? `: ${next.error}` : ""}`);
   win?.webContents.send("onboarding:state", state);
 }
@@ -74,7 +92,73 @@ function locale(): "en" | "he" {
   return app.getLocale().toLowerCase().startsWith("he") ? "he" : "en";
 }
 
-function showOnboarding(): void {
+function useSetupSize(): void {
+  if (!win) return;
+  win.setMinimumSize(SETUP_SIZE.width, SETUP_SIZE.height);
+  win.setContentSize(SETUP_SIZE.width, setupHeight(state));
+  win.setResizable(false);
+  win.setMaximizable(false);
+  win.setFullScreenable(false);
+  win.center();
+}
+
+function useAppSize(): void {
+  if (!win) return;
+  win.setResizable(true);
+  win.setMaximizable(true);
+  win.setFullScreenable(true);
+  win.setMinimumSize(APP_SIZE.minWidth, APP_SIZE.minHeight);
+  win.setSize(APP_SIZE.width, APP_SIZE.height);
+  win.center();
+}
+
+// Matches --bg in onboarding.css and the web app, so no light flash shows in dark mode.
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea");
+
+/**
+ * The Helper binary runs Node without a Dock icon (its bundle sets LSUIElement);
+ * the main binary in Node mode still shows up as a second app in the Dock.
+ */
+function nodeBinary(): string {
+  const name = path.basename(process.execPath);
+  const helper = path.join(path.dirname(process.execPath), "..", "Frameworks", `${name} Helper.app`, "Contents", "MacOS", `${name} Helper`);
+  return fs.existsSync(helper) ? helper : process.execPath;
+}
+
+/** The Dock icon follows the system appearance; the .icns in Finder stays light. */
+function applyTheme(): void {
+  app.dock?.setIcon(path.join(__dirname, "..", "icons", nativeTheme.shouldUseDarkColors ? "dock-dark.png" : "dock-light.png"));
+  win?.setBackgroundColor(windowBackground());
+}
+
+/** `npm run dev`: reload the onboarding page or relaunch on a rebuild of out/. */
+function watchOwnBuild(): void {
+  const outDir = path.join(__dirname, "..");
+  let timer: NodeJS.Timeout | null = null;
+  const debounce = (fn: () => void) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(fn, 200);
+  };
+  fs.watch(path.join(outDir, "renderer"), () =>
+    debounce(() => {
+      if (win?.webContents.getURL().startsWith("file:")) win.webContents.reload();
+    }),
+  );
+  for (const dir of ["main", "preload"]) {
+    fs.watch(path.join(outDir, dir), () =>
+      debounce(() => {
+        log("dev: rebuilt, relaunching");
+        app.relaunch();
+        app.quit();
+      }),
+    );
+  }
+}
+
+/** Set the state first: the window size follows it, and getURL() still has the old page. */
+function showOnboarding(next?: OnboardingState): void {
+  if (next) setState(next);
+  useSetupSize();
   void win?.loadFile(path.join(__dirname, "..", "renderer", "index.html"), { query: { lang: locale() } });
 }
 
@@ -233,7 +317,7 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   });
 
   step("frontend");
-  frontend = new ManagedProcess("frontend", process.execPath, ["server.js"], {
+  frontend = new ManagedProcess("frontend", nodeBinary(), ["server.js"], {
     env: buildChildEnv(process.env, {
       PATH: loginPath,
       ELECTRON_RUN_AS_NODE: "1",
@@ -259,20 +343,131 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
 
   if (quitting) return;
   frontendUrl = feOrigin;
-  setState({ ...base, kind: "ready", url: feOrigin });
   watchForCrash(apiProc, "The API");
   watchForCrash(feProc, "The web app");
-  await win?.loadURL(feOrigin);
+
+  // Sign-in to a Skynet account comes first; "Use without signing in" skips it.
+  hostedLink = new HostedLinkClient(apiOrigin, secrets.backendAuthSecret);
+  await hostedLink.ensureLocalUser();
+  let linked = false;
+  try {
+    linked = await hostedLink.linked();
+  } catch (err) {
+    log(`account status check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (linked) return openApp();
+  // Straight to "waiting": the small window stays small until skynetml.com loads.
+  setState({ ...base, kind: "sign_in", signIn: "waiting" });
+  await signIn();
+}
+
+async function openApp(): Promise<void> {
+  stopSignInPoll();
+  signInUrl = null;
+  if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
+  setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
+  useAppSize();
+  await win?.loadURL(frontendUrl);
+}
+
+function stopSignInPoll(): void {
+  if (signInPoll) clearInterval(signInPoll);
+  signInPoll = null;
+}
+
+/**
+ * Show the hosted sign-in (skynetml.com) full size in this window. The page
+ * links the account, the hosted service redirects to the local API callback,
+ * and the status poll opens the app. Without a hosted link (or on an error)
+ * the onboarding card offers a retry and "Use without signing in".
+ */
+async function signIn(): Promise<void> {
+  if (state.kind !== "sign_in" || !hostedLink) return;
+  const link = hostedLink;
+  let result;
+  try {
+    result = await link.start();
+  } catch (err) {
+    result = { ok: false as const, reason: "failed" as const, detail: err instanceof Error ? err.message : String(err) };
+  }
+  if (state.kind !== "sign_in") return;
+  if (!result.ok) {
+    log(`sign-in start failed (${result.reason}): ${result.detail}`);
+    showOnboarding({ ...state, signIn: result.reason, error: result.detail || undefined });
+    return;
+  }
+  signInUrl = result.url;
+  setState({ ...state, signIn: "waiting", error: undefined });
+  // Stay small until skynetml.com commits, so no half-empty full-size window shows first.
+  const grow = (_event: Electron.Event, url: string) => {
+    if (url.startsWith("file:")) return;
+    win?.webContents.off("did-navigate", grow);
+    if (signInUrl) useAppSize();
+  };
+  win?.webContents.on("did-navigate", grow);
+  // The hosted page redirects (/desktop/link to /login, then client-side), which
+  // rejects loadURL with ERR_ABORTED. Real failures arrive through did-fail-load.
+  win?.loadURL(result.url, { userAgent: desktopUserAgent() }).catch(() => undefined);
+  stopSignInPoll();
+  // No deadline: a slow sign-up or Google round-trip still opens the app when it completes.
+  signInPoll = setInterval(() => {
+    if (state.kind !== "sign_in") return stopSignInPoll();
+    link
+      .linked()
+      .then((done) => (done ? openApp() : undefined))
+      .catch((err: Error) => log(`account status poll failed: ${err.message}`));
+  }, 2_000);
+}
+
+/** The hosted pages show "Use without signing in" only for this suffix. */
+function desktopUserAgent(): string {
+  return `${win?.webContents.getUserAgent() ?? ""} SkynetDesktop`;
+}
+
+/** Offline or skynetml.com down: back to the card with retry and skip. */
+function signInLoadFailed(code: number, detail: string, url: string): void {
+  if (code === -3 || !signInUrl || state.kind !== "sign_in") return;
+  log(`sign-in page failed to load (${code} ${detail}): ${new URL(url).origin}`);
+  stopSignInPoll();
+  signInUrl = null;
+  showOnboarding({ ...state, signIn: "failed", error: detail });
+}
+
+function skipSignIn(): void {
+  log("sign-in skipped");
+  void openApp();
+}
+
+/**
+ * Navigation rules while the hosted sign-in shows. Google refuses OAuth in an
+ * embedded browser, so that one round-trip moves to the default browser and
+ * this window keeps polling.
+ */
+function signInNavigation(target: string): "allow" | "skip" | "external" {
+  if (!signInUrl) return "external";
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return "external";
+  }
+  const hosted = new URL(signInUrl);
+  if (url.origin === hosted.origin && url.pathname === "/desktop/link/skip") return "skip";
+  if (url.hostname === "accounts.google.com") return "external";
+  if (url.origin === hosted.origin || url.hostname === "github.com") return "allow";
+  if (hostedLink && url.origin === hostedLink.apiOrigin) return "allow";
+  return "external";
 }
 
 function watchForCrash(proc: ManagedProcess, label: string): void {
   const timer = setInterval(() => {
-    if (quitting || state.kind !== "ready") return clearInterval(timer);
+    // "starting" too: startStack checks the account after it starts the watchers.
+    if (quitting || (state.kind !== "starting" && state.kind !== "ready" && state.kind !== "sign_in")) return clearInterval(timer);
     if (!proc.exited) return;
     clearInterval(timer);
+    stopSignInPoll();
     frontendUrl = null;
-    showOnboarding();
-    setState({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
+    showOnboarding({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
   }, 1_000);
 }
 
@@ -284,6 +479,8 @@ function recordStarted(role: string, pid: number | undefined): void {
 /** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
 async function stopStack(): Promise<void> {
   killActiveCommands();
+  stopSignInPoll();
+  hostedLink = null;
   const fe = frontend;
   const be = api;
   frontend = null;
@@ -318,13 +515,14 @@ function isAllowedUrl(target: string): boolean {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 960,
-    minHeight: 640,
+    ...SETUP_SIZE,
+    useContentSize: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     show: false,
     title: "Skynet",
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea",
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload", "index.js"),
       contextIsolation: true,
@@ -339,8 +537,22 @@ function createWindow(): void {
   });
   win.webContents.on("will-navigate", (event, url) => {
     if (isAllowedUrl(url)) return;
+    const rule = signInNavigation(url);
+    if (rule === "allow") return;
     event.preventDefault();
+    if (rule === "skip") return skipSignIn();
+    if (rule === "external" && signInUrl && new URL(url).hostname === "accounts.google.com") {
+      void shell.openExternal(signInUrl);
+      return;
+    }
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  });
+  win.webContents.on("did-fail-load", (_event, code, detail, url, isMainFrame) => {
+    if (isMainFrame) signInLoadFailed(code, detail, url);
+  });
+  // A 5xx or 404 page from skynetml.com loads without did-fail-load, and it has no skip link.
+  win.webContents.on("did-navigate", (_event, url, httpResponseCode, httpStatusText) => {
+    if (httpResponseCode >= 400) signInLoadFailed(httpResponseCode, httpStatusText || `HTTP ${httpResponseCode}`, url);
   });
   win.on("closed", () => {
     win = null;
@@ -360,6 +572,10 @@ ipcMain.handle("onboarding:copy", (_event, text: unknown) => {
   if (typeof text === "string" && text.length < 500) clipboard.writeText(text);
 });
 ipcMain.handle("onboarding:open-logs", () => shell.openPath(logsDir));
+ipcMain.handle("onboarding:sign-in", () => {
+  void signIn();
+});
+ipcMain.handle("onboarding:skip-sign-in", () => skipSignIn());
 ipcMain.handle("onboarding:open-docker", () => shell.openExternal("https://www.docker.com/products/docker-desktop/"));
 
 if (!app.requestSingleInstanceLock()) {
@@ -371,7 +587,13 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     log(`Skynet desktop ${app.getVersion()} starting`);
+    // Secure DNS first, the system resolver as fallback: some networks fail to
+    // resolve the hosted sign-in page through the system resolver.
+    app.configureHostResolver({ secureDnsMode: "automatic", secureDnsServers: ["https://cloudflare-dns.com/dns-query"] });
     createWindow();
+    applyTheme();
+    nativeTheme.on("updated", applyTheme);
+    if (process.env.SKYNET_DESKTOP_DEV === "1" && !app.isPackaged) watchOwnBuild();
     win?.webContents.once("did-finish-load", () => void check());
     startUpdateCheck(log);
   });
