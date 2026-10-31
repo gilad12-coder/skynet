@@ -831,6 +831,22 @@ export function generateApiToken() {
   return request<ApiTokenCreated>("/settings/api-token", { method: "POST" });
 }
 
+export interface DesktopLinkAuthorizeRequest {
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: "S256";
+  scope: string;
+  device_name: string;
+}
+
+/** Approve a Mac link for the signed-in user; returns a 60 s single-use link code. */
+export function authorizeDesktopLink(body: DesktopLinkAuthorizeRequest) {
+  return request<{ code: string; expires_in: number }>("/desktop/link/authorize", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 /** Revoke the caller's active API token. Idempotent; the route returns 204. */
 export async function revokeApiToken(): Promise<void> {
   const res = await fetchWithAuthRetry(`${apiBase()}/settings/api-token`, { method: "DELETE" });
