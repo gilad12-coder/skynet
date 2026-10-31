@@ -35,13 +35,17 @@ const SUBSCRIPTION: CatalogModel[] = [
   },
 ];
 
-function render(value: string | null, models?: CatalogModel[]): string {
+function render(
+  value: string | null,
+  models?: CatalogModel[],
+  effort: string | null = null,
+): string {
   setClientLocale("en");
   return renderToStaticMarkup(
     <ComposerModelMenu
       value={value}
       onChange={() => {}}
-      effort={null}
+      effort={effort}
       onEffortChange={() => {}}
       models={models}
     />,
@@ -83,5 +87,10 @@ void describe("ComposerModelMenu", () => {
     // The UI catalog does not load under jiti, so its strings render as their keys.
     const html = render(null);
     assert.match(html, />agent\.model_menu\.effort_default</);
+  });
+
+  void it("names the effort that the request sends while no model is shown", () => {
+    const html = render(null, undefined, "high");
+    assert.match(html, />agent\.model_menu\.effort_high</);
   });
 });

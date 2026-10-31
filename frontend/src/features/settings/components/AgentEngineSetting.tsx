@@ -245,6 +245,12 @@ export function AgentEngineSetting() {
   if (local && engine !== OPENROUTER_ENGINE) value = defaultAgentCli(status, engine);
   const keyVerified =
     keys.loading || keys.failed ? null : keys.keyFor(LOCAL_KEY_PROVIDER)?.status === "verified";
+  const { failed: keysFailed, reload: reloadKeys } = keys;
+  // Only the OpenRouter engine retries the key list, so the OpenRouter option
+  // would stay disabled under a CLI engine until the app reloads.
+  React.useEffect(() => {
+    if (local && keysFailed) void reloadKeys();
+  }, [local, keysFailed, reloadKeys]);
 
   const onChange = (next: AgentEngine) => {
     setSaving(true);

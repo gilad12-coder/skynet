@@ -233,7 +233,8 @@ export function ComposerModelMenu({
           </span>
           {/* Codex-style chip: the effort reads as a lighter suffix after the
               model name ("gpt-5 High"), not a separated fragment. */}
-          {effective && shownEffort && (
+          {/* With no model shown the request still sends the effort, so the chip names it too. */}
+          {shownEffort && (
             <span className="shrink-0 text-muted-foreground">{effortLabel(shownEffort)}</span>
           )}
           <CaretDown className="size-3 shrink-0 text-muted-foreground" />

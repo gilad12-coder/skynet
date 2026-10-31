@@ -188,11 +188,16 @@ export function ByokKeysProvider({
     [keys],
   );
 
-  const upsert = React.useCallback((next: ProviderKey) => {
-    keysGen.current += 1;
-    invalidateByokModelCatalog();
-    setKeys((prev) => [...prev.filter((k) => k.provider !== next.provider), next]);
-  }, []);
+  const upsert = React.useCallback(
+    (next: ProviderKey) => {
+      keysGen.current += 1;
+      invalidateByokModelCatalog();
+      setKeys((prev) => [...prev.filter((k) => k.provider !== next.provider), next]);
+      // One key does not make a failed list complete, so fetch the list again.
+      if (failed) void reload();
+    },
+    [failed, reload],
+  );
 
   const saveKey = React.useCallback(
     async (provider: string, secret: string, opts?: SaveProviderKeyOptions): Promise<KeyStatus> => {
