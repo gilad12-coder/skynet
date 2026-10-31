@@ -101,6 +101,13 @@ async function dev() {
   for (const file of ["index.html", "onboarding.css"]) {
     fs.watch(path.join(desktopDir, "src/renderer", file), () => copyStatic());
   }
+  // macOS takes the Dock and menu bar name from the bundle, so name the local Electron.app Skynet.
+  if (process.platform === "darwin") {
+    const plist = path.join(desktopDir, "node_modules/electron/dist/Electron.app/Contents/Info.plist");
+    for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
+      execFileSync("plutil", ["-replace", key, "-string", "Skynet", plist]);
+    }
+  }
   const electron = path.join(desktopDir, "node_modules/.bin/electron");
   spawn(electron, ["."], { cwd: desktopDir, stdio: "inherit", env: { ...process.env, SKYNET_DESKTOP_DEV: "1" } });
   console.log("watching src/ (Ctrl+C stops the watcher; quit the app with Cmd+Q)");
