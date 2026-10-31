@@ -310,6 +310,16 @@ def test_one_huge_start_tag_stops_the_part() -> None:
     assert text.endswith("It is too large to read.]")
 
 
+def test_entity_expansion_in_a_doctype_is_refused() -> None:
+    """A DOCTYPE in any Office part stops the read before its entities expand."""
+    doctype = '<!DOCTYPE d [<!ENTITY a "<x/>"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
+    body = "<w:body><w:p><w:r><w:t>hi</w:t></w:r></w:p>&b;</w:body>"
+    docx = _zip({"word/document.xml": f"{doctype}<w:document {_W_NS}>{body}</w:document>"})
+    assert extract_attachment_text("bomb.docx", "", docx).endswith("Its contents could not be read.]")
+    with pytest.raises(ValueError):
+        attachments._index_elements(f"{doctype}<workbook>&b;</workbook>".encode())
+
+
 def test_zip_member_reading_stops_at_the_part_byte_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """A zip member is read only up to the per-part byte cap, and the cut is noted."""
     monkeypatch.setattr(attachments, "_MAX_PART_BYTES", 10_000)

@@ -170,6 +170,37 @@ def _qualified(name: str) -> str:
     return f"{{{name}" if "}" in name else name
 
 
+def _refuse_doctype(*_: object) -> None:
+    """Stop the parse at a DOCTYPE declaration.
+
+    Office parts never carry a DTD, and its entities could expand a few bytes
+    into millions of elements inside one ``Parse`` call, before any cap runs.
+
+    Raises:
+        ValueError: Always.
+    """
+    raise ValueError("XML with a DOCTYPE is not read")
+
+
+def _index_elements(data: bytes) -> list[ET.Element]:
+    """Parse a small XML index part into a flat list of its elements.
+
+    Args:
+        data: The part bytes, at most ``_MAX_INDEX_PART_BYTES`` long.
+
+    Returns:
+        Every element with its tag and attributes, in document order.
+    """
+    elements: list[ET.Element] = []
+    parser = expat.ParserCreate(namespace_separator="}")
+    parser.StartDoctypeDeclHandler = _refuse_doctype
+    parser.StartElementHandler = lambda name, attributes: elements.append(
+        ET.Element(_qualified(name), {_qualified(k): v for k, v in attributes.items()})
+    )
+    parser.Parse(data, True)
+    return elements
+
+
 def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
     """Yield each XML element as it closes, without children.
 
@@ -245,6 +276,7 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         closed.append(elem)
 
     parser = expat.ParserCreate(namespace_separator="}")
+    parser.StartDoctypeDeclHandler = _refuse_doctype
     parser.StartElementHandler = start
     parser.EndElementHandler = end
     parser.CharacterDataHandler = data
@@ -474,11 +506,11 @@ def _xlsx_text(data: bytes) -> Iterator[str]:
                         if size > MAX_ATTACHMENT_CHARS:
                             break
                     yield ""
-        rels = ET.fromstring(_read_member(archive, "xl/_rels/workbook.xml.rels"))
-        targets = {rel.get("Id"): rel.get("Target", "") for rel in rels.iter(f"{_PKG_REL}Relationship")}
-        workbook = ET.fromstring(_read_member(archive, "xl/workbook.xml"))
+        rels = _index_elements(_read_member(archive, "xl/_rels/workbook.xml.rels"))
+        targets = {rel.get("Id"): rel.get("Target", "") for rel in rels if rel.tag == f"{_PKG_REL}Relationship"}
+        workbook = _index_elements(_read_member(archive, "xl/workbook.xml"))
         first = True
-        for sheet in workbook.iter(f"{_S}sheet"):
+        for sheet in (elem for elem in workbook if elem.tag == f"{_S}sheet"):
             target = targets.get(sheet.get(f"{_R}id"), "").lstrip("/")
             path = target if target.startswith("xl/") else f"xl/{target}"
             if path not in names:
