@@ -274,6 +274,42 @@ def test_xlsx_shared_strings_stop_at_the_character_cap(monkeypatch: pytest.Monke
     assert sum(len(value) + 1 for value in kept) <= MAX_ATTACHMENT_CHARS + 16
 
 
+def test_deep_xml_nesting_stops_at_the_depth_cap() -> None:
+    """Elements nested past the depth cap stop the part instead of piling up open elements."""
+    opened = 0
+    real_element = attachments.ET.Element
+
+    def counting_element(*args: object, **kwargs: object) -> object:
+        """Count each element the parser builds.
+
+        Args:
+            *args: The arguments for ``ET.Element``.
+            **kwargs: The keyword arguments for ``ET.Element``.
+
+        Returns:
+            The built element.
+        """
+        nonlocal opened
+        opened += 1
+        return real_element(*args, **kwargs)
+
+    document = f"<w:document {_W_NS}><w:body><w:p><w:r><w:t>kept</w:t></w:r></w:p>" + "<a>" * 100_000
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(attachments.ET, "Element", counting_element)
+        text = extract_attachment_text("deep.docx", "", _zip({"word/document.xml": document}))
+    assert text.startswith("kept")
+    assert text.endswith("[Truncated: deep.docx is too large to read in full, so only its first part is shown.]")
+    assert opened < 1000
+
+
+def test_one_huge_start_tag_stops_the_part() -> None:
+    """A start tag with a huge attribute list is refused before its attributes are built."""
+    attrs = "".join(f' a{n}=""' for n in range(200_000))
+    document = f"<w:document {_W_NS}><w:body><w:p{attrs}><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>"
+    text = extract_attachment_text("attrs.docx", "", _zip({"word/document.xml": document}))
+    assert text.endswith("It is too large to read.]")
+
+
 def test_zip_member_reading_stops_at_the_part_byte_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """A zip member is read only up to the per-part byte cap, and the cut is noted."""
     monkeypatch.setattr(attachments, "_MAX_PART_BYTES", 10_000)

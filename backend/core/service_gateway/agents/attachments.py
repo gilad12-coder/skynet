@@ -36,6 +36,13 @@ _MAX_INFLATED_BYTES = 256 * 1024 * 1024
 # little text, so reading one part stops at this many unpacked bytes.
 _MAX_PART_BYTES = 32 * 1024 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
+# Every open element is held until its end tag, so nesting is capped.
+_MAX_XML_DEPTH = 256
+# expat builds a start tag's attributes only once the whole tag has arrived;
+# input this far past the last parser event is one huge tag, refused unbuilt.
+_MAX_PENDING_XML_BYTES = 1024 * 1024
+# The only attributes the parsers read: a cell's reference and type.
+_KEPT_ATTRIBUTES = ("r", "t")
 # Workbook index parts (relationships, sheet list) are small; they are parsed
 # whole, so they get a tight cap of their own.
 _MAX_INDEX_PART_BYTES = 1024 * 1024
@@ -178,12 +185,23 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         Each element with its tag, attributes and capped text, in closing
         order.
 
+        After each chunk with no closed element, an empty-tag element, so the
+        caller can still check its time budget.
+
     Raises:
-        _PartTooLargeError: When the stream runs past ``_MAX_PART_BYTES``.
+        _PartTooLargeError: When the stream runs past ``_MAX_PART_BYTES``,
+            nests past ``_MAX_XML_DEPTH`` or holds one tag longer than
+            ``_MAX_PENDING_XML_BYTES``.
     """
     open_elements: list[tuple[ET.Element, list[str]]] = []
     sizes: list[int] = []
     closed: list[ET.Element] = []
+    progress = 0
+
+    def track() -> None:
+        """Record where the latest parser event starts."""
+        nonlocal progress
+        progress = parser.CurrentByteIndex
 
     def start(name: str, attributes: dict[str, str]) -> None:
         """Open an element.
@@ -191,8 +209,14 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         Args:
             name: The expat element name.
             attributes: The expat attributes.
+
+        Raises:
+            _PartTooLargeError: When the element nests past ``_MAX_XML_DEPTH``.
         """
-        elem = ET.Element(_qualified(name), {_qualified(k): v for k, v in attributes.items()})
+        track()
+        if len(open_elements) >= _MAX_XML_DEPTH:
+            raise _PartTooLargeError
+        elem = ET.Element(_qualified(name), {k: attributes[k] for k in _KEPT_ATTRIBUTES if k in attributes})
         open_elements.append((elem, []))
         sizes.append(0)
 
@@ -202,6 +226,7 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         Args:
             text: A piece of character data.
         """
+        track()
         room = MAX_ATTACHMENT_CHARS + 1 - sizes[-1] if sizes else 0
         if room > 0:
             open_elements[-1][1].append(text[:room])
@@ -213,6 +238,7 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         Args:
             name: The expat element name.
         """
+        track()
         elem, parts = open_elements.pop()
         sizes.pop()
         elem.text = "".join(parts)
@@ -228,8 +254,15 @@ def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
         if not chunk and read >= _MAX_PART_BYTES and source.read(1):
             raise _PartTooLargeError
         read += len(chunk)
-        parser.Parse(chunk, not chunk)
-        yield from closed
+        try:
+            parser.Parse(chunk, not chunk)
+        except _PartTooLargeError:
+            yield from closed
+            raise
+        if read - progress > _MAX_PENDING_XML_BYTES:
+            yield from closed
+            raise _PartTooLargeError
+        yield from closed or [ET.Element("")]
         closed.clear()
         if not chunk:
             return
