@@ -22,6 +22,7 @@
 import { forwardRef, createElement } from "react";
 import type { Icon, IconProps } from "@phosphor-icons/react";
 
+import { AppleLogo as AppleLogoBase } from "@phosphor-icons/react/dist/ssr/AppleLogo";
 import { ArrowBendDownRight as ArrowBendDownRightBase } from "@phosphor-icons/react/dist/ssr/ArrowBendDownRight";
 import { ArrowClockwise as ArrowClockwiseBase } from "@phosphor-icons/react/dist/ssr/ArrowClockwise";
 import { ArrowCounterClockwise as ArrowCounterClockwiseBase } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise";
@@ -225,6 +226,7 @@ function bold(Base: Icon): Icon {
   return Bold;
 }
 
+export const AppleLogo = /* @__PURE__ */ bold(AppleLogoBase);
 export const ArrowBendDownRight = /* @__PURE__ */ bold(ArrowBendDownRightBase);
 export const ArrowClockwise = /* @__PURE__ */ bold(ArrowClockwiseBase);
 export const ArrowCounterClockwise = /* @__PURE__ */ bold(ArrowCounterClockwiseBase);

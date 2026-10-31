@@ -12,10 +12,14 @@ INBOX: Final = "inbox"
 EMAIL: Final = "email"
 CHROME: Final = "chrome"
 SLACK: Final = "slack"
+MACOS: Final = "macos"
 
 CHANNELS: Final[tuple[str, ...]] = (INBOX, EMAIL, CHROME, SLACK)
 # The channels that send outside the app; the inbox row is written by ``notify`` itself.
 DELIVERY_CHANNELS: Final[tuple[str, ...]] = (EMAIL, CHROME, SLACK)
+# Channels only the Mac app (local mode) has. Hosted grids, routing and API
+# answers never contain them, so hosted behavior stays exactly as it was.
+LOCAL_CHANNELS: Final[tuple[str, ...]] = (MACOS,)
 
 NEEDS_INPUT: Final = "needs_input"
 BUDGET_NEAR: Final = "budget_near"
@@ -72,6 +76,11 @@ DEFAULT_GRID: Final[dict[str, dict[str, bool]]] = {
     STUCK: _row(True, False, False, False),
     SHARED: _row(True, False, False, False),
     PRODUCT_NEWS: _row(True, False, False, False),
+}
+
+# A local-mode channel's default cells: the same events Chrome push gets by default.
+LOCAL_DEFAULT_CELLS: Final[dict[str, dict[str, bool]]] = {
+    event: {MACOS: row[CHROME]} for event, row in DEFAULT_GRID.items()
 }
 
 DEFAULT_HOLD_MINUTES: Final = 10
