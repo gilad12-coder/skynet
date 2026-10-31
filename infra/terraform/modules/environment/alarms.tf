@@ -261,6 +261,88 @@ resource "aws_cloudwatch_metric_alarm" "service_below_desired" {
   }
 }
 
+# ------------------------------------------------------------ task crashes
+# ECS replaces a crashed task in about a minute, too fast for the
+# tasks-missing alarm. These rules match each stopped service task whose stop
+# is a crash: the essential container exited, the task failed to start, a
+# health check failed, or someone stopped it by hand. Deploys and scale-in
+# stop tasks with ServiceSchedulerInitiated and a "Scaling activity" reason,
+# so they do not match. The exact service group leaves out the migrate task
+# and the PR preview services.
+resource "aws_cloudwatch_event_rule" "task_crashed" {
+  for_each = aws_cloudwatch_metric_alarm.service_running
+
+  name        = "${local.name}-${each.key}-task-crashed"
+  description = "A ${each.key} task stopped because of a crash."
+
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Task State Change"]
+    detail = {
+      clusterArn = [aws_ecs_cluster.this.arn]
+      group      = ["service:${aws_ecs_service.this[each.key].name}"]
+      lastStatus = ["STOPPED"]
+      "$or" = [
+        { stopCode = ["EssentialContainerExited", "TaskFailedToStart", "UserInitiated"] },
+        { stoppedReason = [{ prefix = "Task failed" }] },
+      ]
+    }
+  })
+}
+
+# The log keeps each stop event with its reason. The alarm reads the rule's
+# own MatchedEvents metric, so it does not depend on log delivery.
+resource "aws_cloudwatch_log_group" "task_crashes" {
+  name              = "/aws/events/${local.name}-task-crashes"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_resource_policy" "task_crashes" {
+  policy_name = "${local.name}-task-crashes"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = ["events.amazonaws.com", "delivery.logs.amazonaws.com"] }
+      Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource  = "${aws_cloudwatch_log_group.task_crashes.arn}:*"
+      Condition = {
+        ArnEquals = { "aws:SourceArn" = [for r in aws_cloudwatch_event_rule.task_crashed : r.arn] }
+      }
+    }]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "task_crashed" {
+  for_each = aws_cloudwatch_event_rule.task_crashed
+
+  rule = each.value.name
+  arn  = aws_cloudwatch_log_group.task_crashes.arn
+}
+
+# 1 of 5 one-minute points: the alarm fires about 1 to 2 minutes after a
+# crash and returns to OK 5 minutes after the last one, so a crash loop sends
+# one ALARM email, not one per crash.
+resource "aws_cloudwatch_metric_alarm" "task_crashed" {
+  for_each = aws_cloudwatch_event_rule.task_crashed
+
+  alarm_name          = "${local.name}-${each.key}-task-crashed"
+  alarm_description   = "A ${each.key} task crashed in the last 5 minutes. The stop reason is in the ${aws_cloudwatch_log_group.task_crashes.name} log group."
+  namespace           = "AWS/Events"
+  metric_name         = "MatchedEvents"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+  dimensions          = { RuleName = each.value.name }
+}
+
 resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   alarm_name          = "${local.name}-rds-cpu"
   alarm_description   = "RDS CPU is above 80 % for 15 minutes."
