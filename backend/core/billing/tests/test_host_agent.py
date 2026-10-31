@@ -701,19 +701,34 @@ def test_capability_records_a_zero_cost_turn(
     assert host_agent_failure(gateway) is None
 
 
+@pytest.mark.parametrize(
+    ("requested", "ran"),
+    [
+        ("subscription/codex/openai/gpt-5.6-sol", "openai/gpt-5.6-sol"),
+        ("openrouter/subscription/codex/openai/gpt-5.6-sol", "openai/gpt-5.6-sol"),
+        # No codex model for this slug, so the CLI runs its own default.
+        ("subscription/codex/gpt-5.5", None),
+    ],
+)
 def test_host_turn_shows_its_model_tokens_and_latency_in_the_usage(
-    gateway: ModelGateway, local: Settings, guest: Path, database: Engine, monkeypatch: pytest.MonkeyPatch
+    requested: str,
+    ran: str | None,
+    gateway: ModelGateway,
+    local: Settings,
+    guest: Path,
+    database: Engine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The run's usage breakdown reads a host turn like a CLI dispatcher call."""
+    """The run's usage breakdown reads a host turn like a CLI dispatcher call, with the model the CLI ran."""
     monkeypatch.setenv("FAKE_CLI_NAME", "codex")
     token = bind_host_agent(gateway, local, cli="codex", permission="workspace_only")
-    body = {"model": "subscription/codex/gpt-5.5", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+    body = {"model": requested, "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
 
     assert _post(gateway, token, body).status_code == 200
 
     records = run_usage.load_records(database, str(gateway.runtime.budget_id))
     [row] = run_usage.aggregate(records, proposer=True)
-    assert row.model == "subscription/codex/gpt-5.5"
+    assert row.model == ran
     assert row.calls == 1
     assert (row.input_tokens, row.output_tokens) == (120, 30)
     assert row.latency_calls == 1

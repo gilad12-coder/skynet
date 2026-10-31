@@ -40,6 +40,13 @@ AGENT_CONFIG_NAMES = frozenset({".claude", ".codex", ".factory", ".agents", ".mc
 # The rendered system context of each CLI's turn. The host CLIs run with their own
 # project-file loading off, so the parent puts this file into the prompt instead.
 INSTRUCTIONS_FILES = {"codex": "AGENTS.md", "claude": "CLAUDE.md"}
+# Skill folders the engines write (meta-harness, AutoSaddler). They are agent
+# config, so they stay here, but the prompt points the proposer at them.
+SKILL_DIRECTORIES = (".claude/skills", ".agents/skills")
+_SKILLS_NOTE = (
+    "\n\n# Skills\n\nThe skill files below are not in your copy of the workspace. "
+    "Their text follows; follow them as if they were written for you.\n\n"
+)
 # CLI login file names; the host turn must never send one back to the guest.
 LOGIN_FILE_NAMES = frozenset({"auth.json", ".credentials.json", ".claude.json"})
 # The Mac's home volume ignores case, so ".Claude" opens ".claude".
@@ -90,6 +97,25 @@ def excluded_path(relative: Path) -> bool:
     """
     parts = [part.casefold() for part in relative.parts]
     return bool(parts) and (parts[0] in _EXCLUDED_TOP_FOLDED or any(part in _EXCLUDED_NAMES_FOLDED for part in parts))
+
+
+def skill_text(workspace: Path) -> str:
+    """Render the workspace's skills as prompt text, so the host CLI reads them as data.
+
+    Args:
+        workspace: Directory the proposer works in.
+
+    Returns:
+        Each ``SKILL.md`` under the skill folders with its path, or "" when there is none.
+    """
+    root = workspace.resolve()
+    sections = []
+    for directory in SKILL_DIRECTORIES:
+        for path in sorted((workspace / directory).glob("*/SKILL.md")):
+            if path.is_file() and path.resolve().is_relative_to(root):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                sections.append(f"--- {path.relative_to(workspace).as_posix()} ---\n{text}")
+    return _SKILLS_NOTE + "\n".join(sections) if sections else ""
 
 
 def pack_workspace(workspace: Path) -> tuple[bytes, set[str]]:
@@ -261,6 +287,7 @@ def main() -> int:
     workspace = Path.cwd()
     prompt_file = _env("APP_PROMPT_FILE")
     prompt = Path(prompt_file).read_text(encoding="utf-8") if prompt_file else ""
+    prompt += skill_text(workspace)
     archive, shipped = pack_workspace(workspace)
     # The parent takes the CLI and its permission from the run settings only.
     body = json.dumps(
