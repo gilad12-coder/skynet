@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowClockwise, Terminal, Warning } from "@/shared/ui/icons";
+import { ArrowClockwise, MagicWand, Terminal, Warning } from "@/shared/ui/icons";
 import type { CliProvider } from "@/features/billing";
 import { Label } from "@/shared/ui/primitives/label";
 import { Segmented } from "@/shared/ui/segmented";
@@ -43,6 +43,21 @@ export function hostCliChoices(): Array<{ value: string; label: string }> {
     { value: HOST_CLI_OFF, label: msg("host_agent.cli.off") },
     ...CLI_PROVIDERS.map((cli) => ({ value: cli, label: cliLabel(cli) })),
   ];
+}
+
+/**
+ * One host CLI menu row. The default follows the agent engine, which can be
+ * OpenRouter, so it shows the app's default-choice wand, not the CLI terminal.
+ */
+export function HostCliChoice({ value, label }: { value: string; label: string }) {
+  if (value === HOST_CLI_OFF) return <>{label}</>;
+  const Icon = value === HOST_CLI_DEFAULT ? MagicWand : Terminal;
+  return (
+    <span className="flex items-center gap-2">
+      <Icon className="size-4" aria-hidden="true" />
+      <span>{label}</span>
+    </span>
+  );
 }
 
 /**

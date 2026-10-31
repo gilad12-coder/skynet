@@ -22,6 +22,7 @@ import { cn } from "@/shared/lib/utils";
 import { defaultOpen, useExperienceLevel } from "@/features/experience";
 import {
   HostAgentPermissionField,
+  HostCliChoice,
   hostCliChoices,
   hostCliPatch,
   hostCliValue,
@@ -29,7 +30,6 @@ import {
 } from "@/features/local-runtime";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { msg } from "@/shared/lib/messages";
-import { Terminal } from "@/shared/ui/icons";
 
 import { emptyModelConfig } from "../../constants";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
@@ -291,20 +291,11 @@ export function ModelsSection({ kind, choice }: { kind: ArtifactKind; choice: Op
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {hostCliChoices().map(({ value, label }) =>
-                      value === "off" ? (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ) : (
-                        <SelectItem key={value} value={value}>
-                          <span className="flex items-center gap-2">
-                            <Terminal className="size-4" aria-hidden="true" />
-                            <span>{label}</span>
-                          </span>
-                        </SelectItem>
-                      ),
-                    )}
+                    {hostCliChoices().map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>
+                        <HostCliChoice value={value} label={label} />
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </Field>

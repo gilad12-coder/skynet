@@ -56,6 +56,7 @@ export {
 export {
   SubscriptionSourcePicker,
   cliLabel,
+  HostCliChoice,
   cliLoginCommand,
   cliStateText,
   hostCliChoices,
