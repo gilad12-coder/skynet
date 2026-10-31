@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist/
+stage/
+*.log
+# The root .gitignore drops build/; electron-builder reads entitlements from here.
+!build/
