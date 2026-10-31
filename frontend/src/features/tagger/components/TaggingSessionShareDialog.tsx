@@ -45,6 +45,10 @@ import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { Label } from "@/shared/ui/primitives/label";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { shareLinkUrl } from "@/shared/lib/share-link";
+import { shareDialogPlan } from "@/shared/lib/share-dialog-plan";
+import { LocalShareNotice } from "@/shared/ui/local-share-notice";
 
 const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
 
@@ -91,16 +95,14 @@ export function TaggingSessionShareDialog({ sessionId }: { sessionId: string }) 
 
   const isOwner = !!state?.owner && state.owner.toLowerCase() === me;
 
-  const shareUrl =
-    state?.token && typeof window !== "undefined"
-      ? `${window.location.origin}/tagger/share/${state.token}`
-      : null;
+  const plan = shareDialogPlan("tagger", isLocalMode());
+  const shareUrl = state?.token ? shareLinkUrl(`/tagger/share/${state.token}`) : null;
 
   const accessCount = state ? (state.owner ? 1 : 0) + state.members.length : 0;
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next && state === null) {
+    if (next && state === null && plan.loadSharing) {
       getTaggerSessionSharing(sessionId)
         .then(setState)
         .catch((err) => toast.error(err instanceof Error ? err.message : msg("share.error")));
@@ -211,7 +213,9 @@ export function TaggingSessionShareDialog({ sessionId }: { sessionId: string }) 
               <DialogTitle>{msg("share.dialog_title")}</DialogTitle>
             </DialogHeader>
 
-            {state === null ? (
+            {plan.showLocalNotice ? (
+              <LocalShareNotice />
+            ) : state === null ? (
               <div className="flex items-center justify-center gap-2 px-6 py-10 text-sm text-muted-foreground">
                 <CircleNotch className="size-4 animate-spin" />
                 {msg("share.loading")}

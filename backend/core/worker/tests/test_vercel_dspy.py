@@ -170,7 +170,7 @@ class CrashingSession(FakeSession):
             "Traceback (most recent call last):\n"
             '  File "<frozen runpy>", line 198, in _run_module_as_main\n'
             "PermissionError: [Errno 13] Permission denied: '/app/.deno'\n",
-            "The Vercel optimizer exited without a complete result (exit 1). "
+            "The optimizer in the cloud sandbox exited without a complete result (exit 1). "
             "PermissionError: [Errno 13] Permission denied: '/app/.deno'",
             INFRASTRUCTURE_INTERRUPTION,
         ),
