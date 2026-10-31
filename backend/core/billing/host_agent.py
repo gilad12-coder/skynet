@@ -58,7 +58,7 @@ from ..i18n import t_locale
 from ..local.cli_catalog import CliProvider, cli_model_arg, parse_subscription_model_id
 from ..local.cli_isolation import CODEX_AUTH_FILE, isolated_cli
 from ..local.cli_probe import cli_binary, codex_subscription_login, read_cli_limits, write_cli_limit
-from ..worker.host_agent_shim import excluded_path
+from ..worker.host_agent_shim import INSTRUCTIONS_FILES, excluded_path
 from .cli_runners import limit_error
 from .codex_auth_proxy import CodexAuthProxy, jwt_claims, placeholder_login, real_account
 from .model_dispatch import ModelHTTPResult
@@ -1108,6 +1108,10 @@ def run_host_agent(
     try:
         _extract(archive, workdir)
         strip_agent_config(workdir)
+        # The isolation flags stop the CLI from loading project files, this one included.
+        instructions = _read_no_follow(workdir / INSTRUCTIONS_FILES[cli])
+        if instructions:
+            prompt = f"{instructions.decode('utf-8', errors='replace')}\n\n{prompt}"
         turn_tmp = turn / "tmp"
         turn_tmp.mkdir()
         with isolated_cli(cli) as isolation, contextlib.ExitStack() as turn_services:
@@ -1323,11 +1327,12 @@ def bind_host_agent(gateway: ModelGateway, settings: Settings, *, cli: str, perm
         if not isinstance(body, dict):
             return _reply(400, _error(FAILED_KEY, "The host agent request is not a JSON object."))
         request = {"cli": trusted_cli, "model": body.get("model"), "permission": trusted_permission}
+        model = str(body.get("model") or "").removeprefix("openrouter/") or None
         quote = operation_quote(
             {**request, "path": HOST_AGENT_PATH, "nonce": uuid.uuid4().hex},
             Decimal(0),
             policy,
-            {"source": "host_agent", "cli": trusted_cli},
+            {"source": "host_agent", "cli": trusted_cli, "model": model},
         )
 
         def dispatch() -> PaidResult[dict[str, Any]]:
@@ -1343,6 +1348,10 @@ def bind_host_agent(gateway: ModelGateway, settings: Settings, *, cli: str, perm
                 "prompt_tokens": usage["prompt_tokens"],
                 "completion_tokens": usage["completion_tokens"],
                 "model_ms": usage["model_ms"],
+                # The run's Usage tab reads these three, as for a CLI dispatcher call.
+                "model": model,
+                "usage": {"prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"]},
+                "latency_ms": usage["model_ms"],
             }
             return PaidResult(document, Decimal(0), evidence)
 

@@ -448,8 +448,6 @@ def pi_editor_launch(
 
 
 HOST_AGENT_SHIM_FILE = ".app/host-agent/shim.py"
-# Each CLI reads its own instructions file from the copied workspace.
-_HOST_INSTRUCTIONS = {"codex": "AGENTS.md", "claude": "CLAUDE.md"}
 
 
 def host_cli_launch(model: str, gateway: GatewayConfig, host_cli: str, host_agent_token: str | None) -> HarnessLaunch:
@@ -473,7 +471,7 @@ def host_cli_launch(model: str, gateway: GatewayConfig, host_cli: str, host_agen
     """
     if not settings.local_mode:
         raise ServiceError("Host CLI proposers run only in the Mac app.")
-    instructions = _HOST_INSTRUCTIONS.get(host_cli)
+    instructions = host_agent_shim.INSTRUCTIONS_FILES.get(host_cli)
     if instructions is None:
         raise ServiceError(f"Unknown host CLI '{host_cli}'.")
     if not host_agent_token:
