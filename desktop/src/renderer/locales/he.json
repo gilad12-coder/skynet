@@ -4,7 +4,7 @@
   "check.login": "מחובר",
   "check.limits": "מגבלת שימוש",
   "check.stack": "שירותים מקומיים",
-  "check.account": "חשבון Skynet",
+  "check.account": "חשבון",
   "checking.title": "בודקים את המק",
   "docker_missing.title": "צריך להתקין את Docker Desktop",
   "docker_missing.body": "Skynet מריץ את מסד הנתונים ואת סביבת הבידוד של כל עבודה ב-Docker. אפשר להתקין את Docker Desktop, לפתוח אותו פעם אחת ואז לבדוק שוב.",

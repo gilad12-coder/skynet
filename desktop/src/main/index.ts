@@ -66,12 +66,22 @@ let hostedLink: HostedLinkClient | null = null;
 let signInPoll: NodeJS.Timeout | null = null;
 let signInUrl: string | null = null;
 
-// Setup screens show one card; the window fits it, then grows for the web app.
-const SETUP_SIZE = { width: 760, height: 560 };
+// Setup screens are small; the window grows for the web app. Progress screens
+// show only the timeline, so they are shorter than screens that ask for an action.
+const SETUP_SIZE = { width: 600, height: 220 };
+const SETUP_ACTION_HEIGHT = 540;
+
+function setupHeight(s: OnboardingState): number {
+  const progress = s.kind === "checking" || s.kind === "starting" || s.kind === "ready" || (s.kind === "sign_in" && s.signIn === "waiting");
+  return progress ? SETUP_SIZE.height : SETUP_ACTION_HEIGHT;
+}
+
 const APP_SIZE = { width: 1440, height: 900, minWidth: 960, minHeight: 640 };
 
 function setState(next: OnboardingState): void {
+  const resize = win !== null && win.webContents.getURL().startsWith("file:") && setupHeight(next) !== setupHeight(state);
   state = next;
+  if (resize) useSetupSize();
   log(`state ${next.kind}${next.step ? ` (${next.step})` : ""}${next.error ? `: ${next.error}` : ""}`);
   win?.webContents.send("onboarding:state", state);
 }
@@ -85,7 +95,7 @@ function locale(): "en" | "he" {
 function useSetupSize(): void {
   if (!win) return;
   win.setMinimumSize(SETUP_SIZE.width, SETUP_SIZE.height);
-  win.setContentSize(SETUP_SIZE.width, SETUP_SIZE.height);
+  win.setContentSize(SETUP_SIZE.width, setupHeight(state));
   win.setResizable(false);
   win.setMaximizable(false);
   win.setFullScreenable(false);

@@ -128,7 +128,10 @@ function renderChecklist(state: State): void {
   const list = document.getElementById("checklist") as HTMLOListElement;
   list.replaceChildren(
     ...rowStatuses(state).map(({ key, status }) =>
-      el("li", { className: `check check-${status}` }, [el("span", { className: "dot" }), el("span", { className: "check-label", text: t(key) })]),
+      el("li", { className: `check check-${status}` }, [
+        el("span", { className: "dot", text: status === "ok" ? "✓" : status === "fail" ? "!" : "" }),
+        el("span", { className: "check-label", text: t(key) }),
+      ]),
     ),
   );
 }
@@ -147,7 +150,6 @@ function panelBody(state: State): Node[] {
 
   switch (state.kind) {
     case "checking":
-      nodes.push(el("div", { className: "spinner", text: "" }));
       break;
     case "docker_missing":
       nodes.push(actions(button(t("docker_missing.action"), "primary", () => void bridge.openDockerDownload()), button(t("action.recheck"), "secondary", () => void bridge.recheck())));
@@ -180,12 +182,11 @@ function panelBody(state: State): Node[] {
       nodes.push(actions(button(t("rate_capped.continue"), "primary", () => void bridge.continueAnyway()), button(t("action.recheck"), "secondary", () => void bridge.recheck())));
       break;
     case "starting":
-      nodes.push(el("div", { className: "spinner", text: "" }));
       break;
     case "sign_in": {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
       if (state.signIn === "waiting") {
-        nodes.push(el("p", { className: "waiting" }, [el("span", { className: "spinner spinner-small" }), el("span", { text: t("sign_in.waiting") })]));
+        nodes.push(el("p", { className: "waiting", text: t("sign_in.waiting") }));
         nodes.push(actions(skip));
       } else if (state.signIn === "unavailable") {
         nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
@@ -206,16 +207,23 @@ function panelBody(state: State): Node[] {
   return nodes;
 }
 
+const PROGRESS: Kind[] = ["checking", "starting", "ready"];
+
 function render(state: State): void {
   document.body.dataset.state = state.kind;
   renderChecklist(state);
-  const panel = document.getElementById("panel") as HTMLDivElement;
   const lead = `${state.kind}.body`;
-  panel.replaceChildren(
+  const intro = document.getElementById("intro") as HTMLDivElement;
+  // Progress screens show only the brand and the timeline; the timeline says what is happening.
+  intro.hidden = PROGRESS.includes(state.kind);
+  intro.replaceChildren(
     el("h1", { text: t(`${state.kind}.title`) }),
     ...(lead in messages || lead in en ? [el("p", { className: "lead", text: t(lead) })] : []),
-    ...panelBody(state),
   );
+  const body = panelBody(state);
+  const panel = document.getElementById("panel") as HTMLDivElement;
+  panel.hidden = body.length === 0;
+  panel.replaceChildren(...body);
 }
 
 for (const node of document.querySelectorAll<HTMLElement>("[data-i18n]")) {

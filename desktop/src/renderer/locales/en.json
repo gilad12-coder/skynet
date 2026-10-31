@@ -4,7 +4,7 @@
   "check.login": "Signed in",
   "check.limits": "Usage limit",
   "check.stack": "Local services",
-  "check.account": "Skynet account",
+  "check.account": "Account",
   "checking.title": "Checking this Mac",
   "docker_missing.title": "Install Docker Desktop",
   "docker_missing.body": "Skynet runs its database and every job sandbox in Docker. Install Docker Desktop, open it once, then check again.",
