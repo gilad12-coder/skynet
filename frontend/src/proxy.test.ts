@@ -23,7 +23,7 @@ test("every API route is either excluded from the auth matcher or explicitly gat
 // such as the bundled fonts. A gated asset is answered with the /login HTML.
 test("every public/ asset is excluded from the auth matcher", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src", "proxy.ts"), "utf8");
-  const pattern = source.match(/"(\/\(\(\?!.*\))"/)?.[1];
+  const pattern = source.match(/AUTH_GATED_PATTERN =\s*"(.*)";/)?.[1];
   assert.ok(pattern, "matcher pattern not found in proxy.ts");
   const matcher = new RegExp(`^${pattern.replaceAll("\\\\", "\\")}$`);
   const publicDir = path.join(process.cwd(), "public");
@@ -37,4 +37,23 @@ test("every public/ asset is excluded from the auth matcher", () => {
     [],
   );
   assert.ok(matcher.test("/datasets"), "app routes must stay gated");
+});
+
+// Local mode refuses a foreign Host in the proxy, so the proxy must run on the
+// NextAuth routes and the signed-out pages too, not only on gated routes.
+test("the proxy runs on every route except build output", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src", "proxy.ts"), "utf8");
+  const pattern = source.match(/matcher: \["(.*)"\]/)?.[1];
+  assert.ok(pattern, "matcher not found in proxy.ts");
+  const matcher = new RegExp(`^${pattern}$`);
+  for (const route of [
+    "/api/auth/session",
+    "/api/auth/callback/local",
+    "/login",
+    "/fonts/a.woff2",
+    "/datasets",
+  ]) {
+    assert.ok(matcher.test(route), route);
+  }
+  assert.ok(!matcher.test("/_next/static/chunks/main.js"));
 });

@@ -38,8 +38,10 @@ VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 ENV_PREFIX = "APP_"
 LEGACY_ENV_PREFIX = "SKYNET_"
 
-# Local mode must stay reachable from this machine only.
-LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+# Local mode must stay reachable from this machine only. The API also accepts
+# only these names in the Host header (DNS rebinding). Starlette's host check
+# splits on the first ":", so an IPv6 bind such as "::1" could never match.
+LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
 DEFAULT_API_HOST = "0.0.0.0"
 
 
@@ -1422,8 +1424,7 @@ class Settings(BaseSettings):
         because some container runtimes resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
         a raw ``ConnectError``. Local mode binds ``api_host`` instead, so the
-        agent dials that loopback host; an IPv6 literal such as ``::1`` gets
-        brackets.
+        agent dials that loopback host.
 
         Returns:
             The settings instance with ``generalist_agent_mcp_url`` populated.
@@ -1431,7 +1432,7 @@ class Settings(BaseSettings):
         if not self.generalist_agent_mcp_url:
             host = "127.0.0.1" if self.host in ("0.0.0.0", "") else self.host
             if self.local_mode:
-                host = f"[{self.api_host}]" if ":" in self.api_host else self.api_host
+                host = self.api_host
             self.generalist_agent_mcp_url = f"http://{host}:{self.port}/mcp/"
         return self
 

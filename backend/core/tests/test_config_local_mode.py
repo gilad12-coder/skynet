@@ -78,9 +78,12 @@ def test_local_mode_refuses_a_deployed_environment(monkeypatch: pytest.MonkeyPat
         Settings(_env_file=None)
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10"])
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::1"])
 def test_local_mode_refuses_a_network_host(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
     """A non-loopback API_HOST makes local mode fail at startup.
+
+    ``::1`` is refused too: the API's Host check cannot match a bracketed
+    IPv6 Host header, so every request to that bind would fail.
 
     Args:
         monkeypatch: Pytest fixture used to set the environment.
@@ -297,19 +300,6 @@ def test_api_port_wins_over_a_stray_port(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert settings.port == 48100
     assert settings.generalist_agent_mcp_url == "http://127.0.0.1:48100/mcp/"
-
-
-def test_local_mcp_url_dials_the_ipv6_bind_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """In local mode the MCP URL dials the host the API binds, with IPv6 brackets.
-
-    Args:
-        monkeypatch: Pytest fixture used to set the environment.
-    """
-    monkeypatch.setenv("APP_LOCAL_MODE", "1")
-    monkeypatch.setenv("API_HOST", "::1")
-    monkeypatch.setenv("API_PORT", "48100")
-
-    assert Settings(_env_file=None).generalist_agent_mcp_url == "http://[::1]:48100/mcp/"
 
 
 @pytest.mark.parametrize(

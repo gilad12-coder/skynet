@@ -33,6 +33,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
@@ -54,7 +55,7 @@ from ..billing import (
 )
 from ..billing.data_policy import configure_data_policy
 from ..brand import APP_NAME
-from ..config import settings
+from ..config import LOCAL_MODE_LOOPBACK_HOSTS, settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
@@ -1251,6 +1252,11 @@ def create_app(
     # Outermost so it compresses the fully-assembled response body. Skips
     # text/event-stream to keep SSE streams flushing incrementally.
     app.add_middleware(SSEFriendlyGZipMiddleware, minimum_size=1024)
+    if settings.local_mode:
+        # DNS rebinding: a web page can point its own hostname at 127.0.0.1 and
+        # call this API from the browser, but its Host header keeps naming that
+        # page's domain. Added last, so it wraps GZip and refuses the request first.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(LOCAL_MODE_LOOPBACK_HOSTS))
 
     @app.get(
         "/queue",
