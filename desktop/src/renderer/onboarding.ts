@@ -185,10 +185,9 @@ function panelBody(state: State): Node[] {
       break;
     case "sign_in": {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
-      if (state.signIn === "waiting") {
-        nodes.push(el("p", { className: "waiting", text: t("sign_in.waiting") }));
-        nodes.push(actions(skip));
-      } else if (state.signIn === "unavailable") {
+      // While waiting, the window grows and shows skynetml.com as soon as it loads.
+      if (state.signIn === "waiting") break;
+      if (state.signIn === "unavailable") {
         nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
         nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
       } else {
@@ -208,14 +207,16 @@ function panelBody(state: State): Node[] {
 }
 
 const PROGRESS: Kind[] = ["checking", "starting", "ready"];
+const isProgress = (state: State) => PROGRESS.includes(state.kind) || (state.kind === "sign_in" && state.signIn === "waiting");
 
 function render(state: State): void {
   document.body.dataset.state = state.kind;
+  document.body.toggleAttribute("data-progress", isProgress(state));
   renderChecklist(state);
   const lead = `${state.kind}.body`;
   const intro = document.getElementById("intro") as HTMLDivElement;
   // Progress screens show only the brand and the timeline; the timeline says what is happening.
-  intro.hidden = PROGRESS.includes(state.kind);
+  intro.hidden = isProgress(state);
   intro.replaceChildren(
     el("h1", { text: t(`${state.kind}.title`) }),
     ...(lead in messages || lead in en ? [el("p", { className: "lead", text: t(lead) })] : []),

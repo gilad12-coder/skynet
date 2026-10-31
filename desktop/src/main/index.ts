@@ -68,7 +68,7 @@ let signInUrl: string | null = null;
 
 // Setup screens are small; the window grows for the web app. Progress screens
 // show only the timeline, so they are shorter than screens that ask for an action.
-const SETUP_SIZE = { width: 600, height: 220 };
+const SETUP_SIZE = { width: 600, height: 120 };
 const SETUP_ACTION_HEIGHT = 540;
 
 function setupHeight(s: OnboardingState): number {
@@ -386,7 +386,13 @@ async function signIn(): Promise<void> {
   }
   signInUrl = result.url;
   setState({ ...state, signIn: "waiting", error: undefined });
-  useAppSize();
+  // Stay small until skynetml.com commits, so no half-empty full-size window shows first.
+  const grow = (_event: Electron.Event, url: string) => {
+    if (url.startsWith("file:")) return;
+    win?.webContents.off("did-navigate", grow);
+    if (signInUrl) useAppSize();
+  };
+  win?.webContents.on("did-navigate", grow);
   // The hosted page redirects (/desktop/link to /login, then client-side), which
   // rejects loadURL with ERR_ABORTED. Real failures arrive through did-fail-load.
   win?.loadURL(result.url, { userAgent: desktopUserAgent() }).catch(() => undefined);

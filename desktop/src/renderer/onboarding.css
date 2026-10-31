@@ -111,33 +111,16 @@ body {
   padding: 28px 32px;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-
-.mark {
-  width: 40px;
-  height: 40px;
-  color: var(--text-1);
-}
-
-.wordmark {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 34px;
-  line-height: 1;
-  letter-spacing: -0.02em;
-}
-
-/* Progress screens hold only the brand and the timeline, centred in the window. */
-body:is([data-state="checking"], [data-state="starting"], [data-state="ready"]) .shell {
+/* Progress screens hold only the timeline, centred in the window. */
+body[data-progress] .shell {
   justify-content: center;
 }
 
-body:is([data-state="checking"], [data-state="starting"], [data-state="ready"]) .setup {
+body[data-progress] .setup {
+  flex: none;
+}
+
+.setup {
   flex: none;
 }
 
@@ -406,11 +389,6 @@ h1 {
   margin: 0;
   font-weight: 600;
   color: var(--warning);
-}
-
-.waiting {
-  margin: 0;
-  color: var(--text-2);
 }
 
 @media (prefers-reduced-motion: reduce) {
