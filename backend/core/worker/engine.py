@@ -751,7 +751,7 @@ class BackgroundWorker:
             )
             if not protected_execution and not allow_unprotected:
                 raise ValueError(
-                    "This stored job predates protected execution. Submit it again to create a funded Vercel run."
+                    "This stored job predates protected execution. Submit it again to start a funded run in the cloud sandbox."
                 )
             bill_legacy_usage = not protected_execution
             service = self._get_service()
