@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 import dspy
+import dspy.clients.lm as dspy_lm
 import httpx
 import litellm
 
@@ -520,7 +521,8 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
 
     Only non-None optional fields (temperature, base_url, max_tokens) are
     forwarded to ``dspy.LM`` to avoid LiteLLM rejecting unexpected None values.
-    Extra kwargs from ``config.extra`` are merged in last.
+    Extra kwargs from ``config.extra`` are merged in last. When a budget-relay
+    call sets no output limit, a default one is added so the relay can price it.
 
     Args:
         config: Provider-agnostic model configuration.
@@ -589,6 +591,14 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         lm_kwargs["base_url"] = app_env("APP_BUDGET_RELAY_URL", budget_route["url"])
         lm_kwargs["api_key"] = budget_route["token"]
         lm_kwargs.pop("api_base", None)
+        if lm_kwargs.get("max_tokens") is None and lm_kwargs.get("max_completion_tokens") is None:
+            # The relay prices every call up front and rejects one with no
+            # output limit (SKY-217). Off the relay the provider default stays:
+            # a fixed cap would undercut a direct Anthropic thinking budget.
+            # dspy refuses an OpenAI reasoning model below 16000 and judges
+            # that from the last segment of the model id, so ask it.
+            reasoning = dspy_lm._is_openai_reasoning_model(lm_kwargs["model"])
+            lm_kwargs["max_tokens"] = _OPENAI_REASONING_MAX_TOKENS if reasoning else _DEFAULT_REASONING_MAX_TOKENS
     try:
         language_model = MeteredLM(**lm_kwargs)
     except ValueError as exc:
