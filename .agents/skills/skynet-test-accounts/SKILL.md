@@ -13,9 +13,12 @@ skill.
 
 | Your check needs | Use |
 | --- | --- |
-| The PR's own code (new behavior, the After evidence) | The PR preview: `https://pr-<n>.staging.skynetml.com`, API `https://api-pr-<n>.staging.skynetml.com` |
-| The current product (the Before evidence, unrelated flows) | Shared staging: `https://staging.skynetml.com`, API `https://api-staging.skynetml.com` |
+| The PR's own code (new behavior) | The PR preview: `https://pr-<n>.staging.skynetml.com`, API `https://api-pr-<n>.staging.skynetml.com` |
+| The current product (baseline checks, unrelated flows) | Shared staging: `https://staging.skynetml.com`, API `https://api-staging.skynetml.com` |
 
+- Before and After videos: record both on the PR preview, the Before first.
+  Use staging for the Before only when the preview cannot show the baseline.
+  See section 5 of the `skynet-pr-workflow` skill.
 - Shared staging runs merged code only. It does not hold your PR's change.
 - A preview has its own empty database. Staging accounts do not exist there.
   It needs its own account.

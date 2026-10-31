@@ -114,9 +114,10 @@ for review until the evidence is there.
   `infra/terraform/environments/staging`): app `https://staging.skynetml.com`,
   API `https://api-staging.skynetml.com`. Railway is deleted (2026-10-29);
   never log in to, call, deploy to or test on it.
-- Use shared staging for baseline (Before) evidence. Use the PR preview for
-  changed (After) behavior. Never overwrite shared staging with an unmerged
-  branch.
+- Use shared staging for baseline checks. Use the PR preview for changed
+  behavior. For the Before and After videos, follow section 5: both go on
+  the preview, and staging is only the fallback for the Before. Never
+  overwrite shared staging with an unmerged branch.
 - Until AWS staging serves a needed flow, use local Docker evidence and state
   the gap in the PR body.
 - You may deploy the issue's isolated preview. Never deploy production, run
@@ -210,7 +211,7 @@ for review until the evidence is there.
 ### Backend-only merges (2026-10-19)
 
 - The orchestrator may merge a backend-only PR into `staging` without another
-  human approval. Gates: one current Opus 5.5 medium-effort approval of the
+  human approval, in the daily merge window below. Gates: one current Opus 5.5 medium-effort approval of the
   current head and base, required checks and staging evidence pass, and the
   review confirms no visible UI change.
 - Automatic scope: `backend/**`, plus optional Markdown under `docs/**`. At
@@ -226,8 +227,9 @@ for review until the evidence is there.
   revision, base, evidence and review policy. Use a merge command that
   requires the reviewed head commit. Never bypass branch protection or queue
   an unchecked future merge.
-- **Only the orchestrator merges.** Implementation and review agents leave
-  the final action to the orchestrator.
+- **Only the orchestrator merges** (through its cloud merger routine, in the
+  daily merge window below). Implementation and review agents leave the
+  final action to the orchestrator.
 
 ### Linear approval and revisions (2026-10-19)
 

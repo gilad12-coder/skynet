@@ -95,7 +95,7 @@ run `/scope`.
   commit message. Push the branch and open a **draft** PR against `staging`.
 - The PR may touch only the files in its Linear issue's `## Files` list
   (`.github/workflows/pr-files-scope.yml` checks this).
-- Never bypass branch protection or hooks. Never force-push over other work.
+- Never bypass branch protection or hooks. Never force-push.
 - The repository is **public**. Never commit secrets, passwords, tokens,
   emails, account data or videos. Secret names are fine. Keep
   machine-specific rules in `CLAUDE.local.md` (gitignored).
@@ -108,8 +108,9 @@ a PR environment (preview), a full copy of staging with an empty database, at
 Run the acceptance checks and record the videos there, before the merge.
 Details: `docs/agents/pr-previews.md`.
 
-Only the orchestrator merges. The cloud merger routine merges in the daily
-window (03:00 America/Los_Angeles), or earlier when Gilad explicitly asks.
+Only the orchestrator merges, through its cloud merger routine: in the daily
+window (03:00 America/Los_Angeles), or when Gilad explicitly asks. After an
+approval, the orchestrator moves the issue to Ready to Merge.
 Implementation and review agents never merge, and never post `Approved for merge` or
 `Changes requested:` comments. The full gate, review and Linear flow is in
 the `skynet-pr-workflow` skill.
@@ -121,16 +122,18 @@ gates pass:
 1. Agent code review is clean.
 2. Tests and the Linear issue's acceptance checks pass in the PR environment.
 3. The diff touches only the files in the issue's `## Files` list.
-4. Up to date: the branch is rebased on the latest `staging`, then tests pass again.
+4. Up to date: the branch includes the latest `staging` (one merge commit from
+   `staging`, never a force-push), then tests pass again.
 5. After the merge, the staging smoke test passes. If it fails, revert that
-   PR's single squash commit right away and reopen its issue with the failure.
+   PR's merge right away and reopen its issue with the failure.
 
 **UI PRs** (anything touching `frontend/`, including mixed PRs) wait for the
 user. Attach a proof card: one line naming the decision and the Linear issue,
-a 15–30s video of a browser agent walking the acceptance criteria in the PR
-environment, the review verdict, and the diff size. Merge only after the user
-approves that specific PR in chat or on GitHub (or with `Approved for merge`
-on the Linear issue). A frontend PR with no meaningful visible change can use
+the Before and After videos of the acceptance criteria in the PR environment
+(on the Linear issue; see the skill), the review verdict, and the diff size.
+Merge only after the user approves that specific PR in chat or on GitHub (or
+with `Approved for merge` on the Linear issue), and then only in the daily
+window above. A frontend PR with no meaningful visible change can use
 the backend path; see the skill.
 
 Any other PR (files outside `backend/` and `docs/**/*.md`, or no backend
