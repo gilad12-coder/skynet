@@ -1,4 +1,4 @@
-import { isLocalModelRefusal, localAgentModel } from "@/features/local-runtime";
+import { isLocalModelRefusal, localAgentEffort, localAgentModel } from "@/features/local-runtime";
 import { agentSubscriptionFor, readPref } from "@/features/settings";
 import type { ModelConfig } from "@/shared/types/api";
 import type {
@@ -200,6 +200,14 @@ export function interviewRequestModel(
   assist: Pick<AssistState, "interviewModel">,
 ): Promise<string | null> {
   return localAgentModel(interviewComposerModel(assist), agentSubscriptionFor("tagger"));
+}
+
+/** The effort an interview request sends with `sent`, the model it resolved. */
+export function interviewRequestEffort(
+  assist: Pick<AssistState, "interviewModel" | "interviewEffort">,
+  sent: string | null,
+): string | null {
+  return localAgentEffort(interviewComposerModel(assist), interviewComposerEffort(assist), sent);
 }
 
 /** Effective reasoning effort for the interview composer; same fallback split. */

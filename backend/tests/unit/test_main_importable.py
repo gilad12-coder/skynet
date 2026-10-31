@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from core.config import Settings
+
 from ..mocks import import_main_fresh as _import_main_fresh
 
 
@@ -42,6 +44,17 @@ class TestMainImportable:
         mock_run.assert_called_once()
         call_args = mock_run.call_args
         assert call_args.args[0] == "main:app"
+
+    def test_run_server_binds_the_settings_port(self) -> None:
+        """``run_server`` binds ``settings.port``, the port the agent's MCP URL uses."""
+        main = _import_main_fresh()
+        config = Settings(_env_file=None, port=48100)
+
+        with patch.object(main, "settings", config), patch("uvicorn.run") as mock_run:
+            main.run_server()
+
+        assert mock_run.call_args.kwargs["port"] == 48100
+        assert config.generalist_agent_mcp_url.endswith(":48100/mcp/")
 
     def test_run_server_does_not_start_real_server(self) -> None:
         """``run_server`` returns immediately when ``uvicorn.run`` is patched out."""

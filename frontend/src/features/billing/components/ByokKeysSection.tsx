@@ -14,6 +14,7 @@ import {
 import { toast } from "react-toastify";
 import { startOpenRouterOAuth } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { useLocale } from "@/shared/providers";
 import { Button } from "@/shared/ui/primitives/button";
@@ -320,7 +321,10 @@ export function ByokKeysSection() {
   useByokErrorParam();
   return (
     <div data-setup="model-keys" className="space-y-3">
-      <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>
+      <p className="text-xs text-muted-foreground">
+        {/* The local backend runs models only on a saved OpenRouter key and bills no Skynet balance for them. */}
+        {msg(isLocalMode() ? "settings.keys.description_local" : "settings.keys.description")}
+      </p>
 
       <div className="flex flex-col gap-2">
         {BYOK_PROVIDERS.map((p) => (

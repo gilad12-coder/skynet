@@ -38,6 +38,13 @@ from ..billing import (
     payload_uses_token_source,
 )
 from ..billing.budgets import BudgetService
+from ..billing.host_agent import (
+    attach_host_agent_token,
+    bind_host_agent,
+    failure_message,
+    host_agent_failure,
+    host_proposer,
+)
 from ..billing.metering import debit_at_fallback_price
 from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
@@ -77,6 +84,10 @@ from ..notifications.run_watcher import RunNotificationWatcher
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
+from ..service_gateway.optimization.blackbox.docker_sandbox import (
+    docker_runtime_from_settings,
+    remove_idle_sandbox_networks,
+)
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_from_settings
 from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME
@@ -751,7 +762,7 @@ class BackgroundWorker:
             )
             if not protected_execution and not allow_unprotected:
                 raise ValueError(
-                    "This stored job predates protected execution. Submit it again to create a funded Vercel run."
+                    "This stored job predates protected execution. Submit it again to start a funded run in the cloud sandbox."
                 )
             bill_legacy_usage = not protected_execution
             service = self._get_service()
@@ -916,6 +927,13 @@ class BackgroundWorker:
                         ),
                         allow_private_tools=settings.discover_allow_private,
                     )
+                    host = host_proposer(payload_dict)
+                    if host is not None:
+                        # The CLI and permission come from the stored run settings,
+                        # never from the guest, and only this run's proposer gets the token.
+                        attach_host_agent_token(
+                            payload_dict, bind_host_agent(budget_gateway, settings, cli=host[0], permission=host[1])
+                        )
                     # The wizard leaves the ceiling unset for a budget without a
                     # limit, while the guest's proposer still plans its spend
                     # against one, so the parent hands it the ledger's allowance.
@@ -1062,6 +1080,11 @@ class BackgroundWorker:
                     execution_budget_snapshot, settlement_error = self._close_budget_gateway(
                         optimization_id, closing_gateway, execution_generation
                     )
+                    host_failure = host_agent_failure(closing_gateway)
+                    if host_failure is not None:
+                        # A capped subscription stops every later turn, so the run
+                        # ends with the cap and its reset time, not a proposer error.
+                        raise OptimizerProcessError(failure_message(host_failure), "HostAgentRateLimited")
                     if settlement_error is not None and subprocess_error is None:
                         raise settlement_error
 
@@ -2034,7 +2057,7 @@ class BackgroundWorker:
             logger.info("Optimization %s subprocess terminated", optimization_id)
 
     def _stop_blackbox_sandboxes(self, optimization_id: str) -> None:
-        """Stop the sandboxes a killed black-box job left running on Vercel.
+        """Stop the sandboxes a killed black-box job left running on Vercel or local Docker.
 
         The child closes its boxes on a normal exit, but a cancel, a stall or
         a shutdown kills it before its ``finally`` blocks run, and a scorer
@@ -2043,7 +2066,11 @@ class BackgroundWorker:
         Args:
             optimization_id: The job whose boxes to stop.
         """
-        runtime = sandbox_runtime_from_settings(settings)
+        # The local availability probe also checks the image; leftover boxes
+        # are removed by label, which needs only the Docker CLI.
+        runtime = (
+            docker_runtime_from_settings(settings) if settings.local_mode else sandbox_runtime_from_settings(settings)
+        )
         if runtime is None:
             return
         try:
@@ -2485,6 +2512,10 @@ def get_worker(
         if _worker is None or not _worker.threads_alive():
             num_workers = settings.worker_threads
             poll_interval = settings.worker_poll_interval
+            if settings.local_mode:
+                # A killed backend leaves setup networks behind; each holds a /16
+                # of Docker's small pool, so clear idle ones before any box opens.
+                remove_idle_sandbox_networks(settings.docker_bin)
             _worker = BackgroundWorker(
                 job_store=job_store,
                 num_workers=num_workers,

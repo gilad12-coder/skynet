@@ -34,6 +34,7 @@ from ...billing import (
     cost_ceiling_budget,
     provider_slug_for_model,
 )
+from ...billing.budget_amounts import MAX_CENTS
 from ...billing.budgets import BudgetError, BudgetService
 from ...billing.protected_credentials import ProtectedCredentialVault, protect_execution_credentials
 from ...config import settings
@@ -108,9 +109,10 @@ from ...service_gateway.optimization.unified.split import split_cases, task_fing
 from ...storage.preflights import PreflightStore, setup_seed
 from ...storage.usage import json_byte_size
 from ...worker.engine import get_worker
+from ..agent_engine import fill_proposer_host_cli
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_billing import normalize_model_token_sources
+from ..model_billing import enforce_local_mode_sources, normalize_model_token_sources
 from ..preflight_execution import WizardPreflightRequest, run_preflight
 from ..rate_limit import enforce_submission_rate
 from ..submission_idempotency import resolve_submission_replay_keys
@@ -308,7 +310,12 @@ def _ensure_api_budget(
         # A retry reuses the original approved total: the balance it would be
         # recomputed from moves once the first attempt's check reserves spend.
         budget = service.find_by_creation_key(user.username, budget_creation_key)
-        if budget is None:
+        if budget is None and settings.local_mode:
+            # Local mode charges no managed spend or platform fee, so the
+            # budget only records usage and never stops the run.
+            total = payload.max_cost_cents or max(1, min(settings.local_grant_cents, MAX_CENTS))
+            budget = service.create(user.username, total, idempotency_key=budget_creation_key, uncapped=True)
+        elif budget is None:
             spendable = _enforce_balance(job_store, user.username, payload.token_source)
             total = payload.max_cost_cents
             if total is None:
@@ -583,7 +590,8 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
     fleet of funded accounts) cannot run the shared provider float dry. No-op
     when the ceiling is unset (``0``) or the store has no SQL engine. Tripping
     it logs at ERROR, which the alert log handler forwards to operators, so the
-    refusal is never silent.
+    refusal is never silent. Local mode has no shared provider float, so the
+    check is off there.
 
     Args:
         job_store: Job-store instance whose ORM engine backs the billing tables.
@@ -594,7 +602,7 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
             so internal budget figures are not leaked to callers.
     """
     ceiling = settings.global_daily_spend_ceiling_cents
-    if ceiling <= 0:
+    if ceiling <= 0 or settings.local_mode:
         return
     engine = getattr(job_store, "engine", None)
     if engine is None:
@@ -994,10 +1002,14 @@ def submit_unified_payload(
 
     _enforce_submission_admission(job_store, payload.username)
 
+    _requested_source = payload.token_source
     _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-    _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-    if payload.execution_budget_id is None:
-        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+    fill_proposer_host_cli(job_store, payload.username, payload)
+    enforce_local_mode_sources(payload, _requested_source, _model_configs)
+    if not settings.local_mode:
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
     _enforce_byok_connections(job_store, payload.username, _model_configs)
 
     try:
@@ -1187,10 +1199,14 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         _enforce_submission_admission(job_store, payload.username)
 
+        _requested_source = payload.token_source
         _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
-        if payload.execution_budget_id is None:
-            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        fill_proposer_host_cli(job_store, payload.username, payload)
+        enforce_local_mode_sources(payload, _requested_source, _model_configs)
+        if not settings.local_mode:
+            _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
+            if payload.execution_budget_id is None:
+                _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _model_configs)
 
         _ensure_api_budget(

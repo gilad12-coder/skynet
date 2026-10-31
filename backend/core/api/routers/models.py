@@ -33,6 +33,8 @@ from ...billing.openrouter_quotes import fetch_endpoint_prices, price_text_reque
 from ...billing.operation_pricing import ChargePolicy, UnpricedOperationError
 from ...billing.vercel_usage import sandbox_hold_cents
 from ...config import settings
+from ...local.cli_catalog import SUBSCRIPTION_MODEL_PREFIX
+from ...local.cli_probe import probe_clis
 from ...service_gateway.optimization.blackbox.runner import DEFAULT_MAX_TOKENS
 from ...service_gateway.optimization.blackbox.sandbox import COVERAGE_SLICE_SECONDS, SandboxSpec
 from ..artificial_analysis import with_artificial_analysis_links
@@ -294,11 +296,28 @@ def _catalog_to_agent_entry(model: CatalogModel) -> AgentModelEntry:
     )
 
 
+def _subscription_agent_entries() -> list[AgentModelEntry]:
+    """List the subscription models of every signed-in coding CLI on this Mac.
+
+    Local mode has no managed models and no platform provider keys, so these
+    ``subscription/<cli>/<slug>`` ids are the models a local run can use.
+
+    Returns:
+        One row per model of each installed, current, signed-in CLI.
+    """
+    return [
+        AgentModelEntry(name=f"{SUBSCRIPTION_MODEL_PREFIX}{status.id}/{slug}", provider=slug.partition("/")[0])
+        for status in probe_clis(settings)
+        if status.path is not None and status.version_ok and status.logged_in
+        for slug in status.models
+    ]
+
+
 class CallHoldModel(BaseModel):
     """One model role whose single-call reservation the wizard needs."""
 
     name: str = Field(min_length=1, max_length=200)
-    token_source: Literal["managed", "byok"] = "managed"
+    token_source: Literal["managed", "byok", "subscription"] = "managed"
 
 
 class CallHoldsRequest(BaseModel):
@@ -311,7 +330,7 @@ class CallHold(BaseModel):
     """The charged cents one call of a model reserves before it is sent."""
 
     name: str
-    token_source: Literal["managed", "byok"]
+    token_source: Literal["managed", "byok", "subscription"]
     cents: float | None = Field(
         default=None,
         description="Charged cents one call reserves; null when the model has no verified pricing.",
@@ -358,12 +377,15 @@ def call_hold_cents(name: str, token_source: str, *, client: httpx.Client) -> De
 
     Args:
         name: The model as the wizard names it, optionally ``openrouter/``-prefixed.
-        token_source: ``managed`` for platform-paid calls, ``byok`` for the caller's key.
+        token_source: ``managed`` for platform-paid calls, ``byok`` for the caller's key,
+            ``subscription`` for the caller's logged-in CLI (never charged).
         client: HTTP client for the public OpenRouter catalog.
 
     Returns:
         The hold in charged cents, or ``None`` when the model has no verified pricing.
     """
+    if token_source == "subscription":
+        return Decimal(0)
     try:
         slug = resolve_model_slug(name, client=client)
         catalog = fetch_endpoint_prices(slug, client=client)
@@ -449,14 +471,17 @@ def create_models_router(*, http_client: Callable[[], httpx.Client] | None = Non
 
         Returns:
             The (optionally filtered) catalog projected to
-            ``{name, provider, …}`` rows.
+            ``{name, provider, …}`` rows. In local mode, the
+            ``subscription/<cli>/<slug>`` models of the signed-in CLIs.
         """
-        catalog = get_catalog_cached()
-        entries = (_catalog_to_agent_entry(m) for m in catalog.models)
+        if settings.local_mode:
+            entries = _subscription_agent_entries()
+        else:
+            entries = [_catalog_to_agent_entry(m) for m in get_catalog_cached().models]
         if query:
             needle = query.lower()
-            entries = (entry for entry in entries if needle in entry.name.lower())
-        return AgentModelCatalogResponse(models=list(entries))
+            entries = [entry for entry in entries if needle in entry.name.lower()]
+        return AgentModelCatalogResponse(models=entries)
 
     @router.post(
         "/models/discover",

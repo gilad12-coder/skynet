@@ -15,10 +15,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .artifacts import ProgramArtifact
-from .common import ModelConfig
+from .common import ModelConfig, refuse_removed_cli
 from .results import LMActivity, ModelTokenUsage
 from .scorer_dependencies import ScorerDependencyLock
 
@@ -273,6 +273,8 @@ class BlackboxTarget(BaseModel):
 # harness is stopped once it starts one more, and the edits it already made
 # stand. It also bounds each ShinkaEvolve agent-editor session. Harnesses whose
 # output reports no tool calls as they happen (a custom command) are not capped.
+# ``host_cli`` offers only Codex and Claude Code: Droid has no flag that skips
+# the user's own config, hooks and MCP servers, so it cannot run isolated.
 class BlackboxProposer(BaseModel):
     harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None
@@ -281,6 +283,10 @@ class BlackboxProposer(BaseModel):
     ralph: bool = True
     max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
     max_tool_calls: int = Field(default=100, ge=1, le=1000)
+    host_cli: Literal["codex", "claude"] | None = None
+    host_permission: Literal["workspace_only", "full_access"] = "workspace_only"
+
+    _refuse_removed_cli = field_validator("host_cli", mode="before")(refuse_removed_cli)
 
     @model_validator(mode="after")
     def _ensure_launchable(self) -> BlackboxProposer:
@@ -405,7 +411,7 @@ class BlackboxRunRequest(BaseModel):
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
     target: BlackboxTarget = Field(default_factory=BlackboxTarget)
-    proposer_runtime: Literal["vercel"] = "vercel"
+    proposer_runtime: Literal["vercel", "docker"] = "vercel"
     proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
@@ -418,7 +424,7 @@ class BlackboxRunRequest(BaseModel):
         max_length=BLACKBOX_MAX_EXTRA_REFLECTION_MODELS,
     )
     shinka: BlackboxShinkaSettings | None = None
-    token_source: Literal["managed", "byok"] = "managed"
+    token_source: Literal["managed", "byok", "subscription"] = "managed"
     is_private: bool = False
     economy_mode: bool = Field(
         default=False,
@@ -817,7 +823,7 @@ class SandboxRuntimeCost(BaseModel):
 
 
 class BlackboxProposerRuntimeInfo(BaseModel):
-    id: Literal["vercel"]
+    id: Literal["vercel", "docker"]
     available: bool
     unavailable_reason: str | None = None
     cost: SandboxRuntimeCost

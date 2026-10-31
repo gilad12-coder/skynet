@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowClockwise, Terminal, Warning } from "@/shared/ui/icons";
+import { ArrowClockwise, MagicWand, Terminal, Warning } from "@/shared/ui/icons";
 import type { CliProvider } from "@/features/billing";
 import { Label } from "@/shared/ui/primitives/label";
 import { Segmented } from "@/shared/ui/segmented";
@@ -32,23 +32,49 @@ export function cliLabel(cli: CliProvider): string {
   return msg(CLI_LABEL_KEYS[cli]);
 }
 
-// Radix Select cannot hold an empty value, so "no host CLI" has its own.
+// Radix Select cannot hold an empty value, so "no pick" and "off" have their own.
+const HOST_CLI_DEFAULT = "default";
 const HOST_CLI_OFF = "off";
 
-/** The proposer's host CLI menu: off, then each supported CLI. */
+/** The proposer's host CLI menu: the agent engine's default, off, then each supported CLI. */
 export function hostCliChoices(): Array<{ value: string; label: string }> {
   return [
+    { value: HOST_CLI_DEFAULT, label: msg("host_agent.cli.default") },
     { value: HOST_CLI_OFF, label: msg("host_agent.cli.off") },
     ...CLI_PROVIDERS.map((cli) => ({ value: cli, label: cliLabel(cli) })),
   ];
 }
 
-/** The host CLI menu's value; a saved CLI the app no longer offers reads as off. */
-export function hostCliValue(saved: string | null | undefined): string {
-  return isCliProvider(saved) ? saved : HOST_CLI_OFF;
+/**
+ * One host CLI menu row. The default follows the agent engine, which can be
+ * OpenRouter, so it shows the app's default-choice wand, not the CLI terminal.
+ */
+export function HostCliChoice({ value, label }: { value: string; label: string }) {
+  if (value === HOST_CLI_OFF) return <>{label}</>;
+  const Icon = value === HOST_CLI_DEFAULT ? MagicWand : Terminal;
+  return (
+    <span className="flex items-center gap-2">
+      <Icon className="size-4" aria-hidden="true" />
+      <span>{label}</span>
+    </span>
+  );
 }
 
-function stateText(state: CliState, version: string | null): string {
+/**
+ * The host CLI menu's value. An explicit null is off; no pick, or a saved CLI
+ * the app no longer offers, follows the agent engine.
+ */
+export function hostCliValue(saved: string | null | undefined): string {
+  if (isCliProvider(saved)) return saved;
+  return saved === null ? HOST_CLI_OFF : HOST_CLI_DEFAULT;
+}
+
+/** The command that signs a CLI in, shown after "Signed out. To sign in, run". */
+export function cliLoginCommand(cli: CliProvider): string {
+  return LOGIN_COMMANDS[cli];
+}
+
+export function cliStateText(state: CliState, version: string | null): string {
   switch (state.kind) {
     case "ok":
       return version
@@ -74,7 +100,7 @@ function stateText(state: CliState, version: string | null): string {
 }
 
 /**
- * The "My subscription" source's CLI choice: one segment per supported CLI,
+ * The "Local" source's CLI choice: one segment per supported CLI,
  * then the chosen CLI's state (signed in, too old, signed out, capped).
  */
 export function SubscriptionSourcePicker({
@@ -99,7 +125,7 @@ export function SubscriptionSourcePicker({
   else if (!status) note = msg("subscription.state.loading");
   else if (!value) note = msg("subscription.pick_cli");
   else if (!chosen || !state) note = msg("subscription.state.missing");
-  else note = stateText(state, chosen.version);
+  else note = cliStateText(state, chosen.version);
   const warn = failed || (!!state && state.kind !== "ok") || (!!status && !!value && !chosen);
 
   return (

@@ -51,12 +51,16 @@ from sqlalchemy.orm import Session
 
 from ...api.interview_model import interview_model_id
 from ...api.model_catalog import agent_model_id, catalog_snapshot
+from ...billing.cli_dispatch import THINKING_LABEL_ROLE
 from ...brand import APP_NAME
 from ...config import settings
+from ...constants import TOKEN_SOURCE_BYOK
 from ...exceptions import ServiceError
+from ...local.cli_catalog import CliProvider
 from ...models import ModelConfig
 from ...storage.models import AgentApprovalModel
 from ..language_models import (
+    SUBSCRIPTION_ROLE_KEY,
     apply_model_reasoning_config,
     build_language_model,
     served_model_from,
@@ -2288,6 +2292,12 @@ _SUMMARY_PROMPT = (
     "answer column the expected output.' Never write 'I', 'me' or 'we'. Never name tools, functions, fields, "
     "model ids or code. Say only what the reasoning says; never guess. No quotes, lists or preamble."
 )
+# The Mac app labels thinking on the turn's CLI with its smallest fast model,
+# so labels spend little of the user's subscription.
+_LOCAL_SUMMARY_MODELS: dict[CliProvider, str] = {
+    "codex": "openai/gpt-5.6-luna",
+    "claude": "anthropic/claude-haiku-4.5",
+}
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
 # Stored labels put the heading on its own first line, which the row shows bold.
 _HEADING_BREAK = "\n"
@@ -2374,6 +2384,62 @@ def _build_summary_lm() -> Any:
             extra=_no_thinking_extra(model),
         )
     )
+    return _summary_lm_from(config)
+
+
+def _build_local_summary_lm(turn_config: ModelConfig | None) -> Any | None:
+    """Build the Mac app's summary model on the engine the turn runs on.
+
+    The Mac app has no managed key, so a label runs where the turn runs: a
+    saved OpenRouter key labels with the small interview pick on that key, and
+    a CLI subscription labels with a small model on the same CLI.
+
+    Args:
+        turn_config: The turn's resolved model config, or ``None``.
+
+    Returns:
+        The summary LM, or ``None`` when the turn has no BYOK key and no CLI.
+    """
+    if turn_config is None:
+        return None
+    if turn_config.token_source == TOKEN_SOURCE_BYOK:
+        model = interview_model_id() or agent_model_id()
+        # Keep the saved key, endpoint and connection params; drop the turn's
+        # own effort and any connection reasoning knobs, which a label must
+        # not think with.
+        extra = {k: v for k, v in turn_config.extra.items() if k not in {"reasoning_effort", "reasoning", "thinking"}}
+        # A connection's own reasoning body would make the label think; only
+        # the no-thinking settings below may set it.
+        if isinstance(extra.get("extra_body"), dict):
+            extra["extra_body"] = {k: v for k, v in extra["extra_body"].items() if k != "reasoning"}
+        no_thinking = _no_thinking_extra(model)
+        if isinstance(extra.get("extra_body"), dict) and "extra_body" in no_thinking:
+            no_thinking["extra_body"] = {**extra["extra_body"], **no_thinking["extra_body"]}
+        config = apply_model_reasoning_config(
+            turn_config.model_copy(update={"name": model, "extra": {**extra, **no_thinking}})
+        )
+    elif turn_config.token_source == "subscription" and turn_config.cli_provider is not None:
+        cli = turn_config.cli_provider
+        config = ModelConfig(
+            name=_LOCAL_SUMMARY_MODELS[cli],
+            token_source="subscription",
+            cli_provider=cli,
+            extra={SUBSCRIPTION_ROLE_KEY: THINKING_LABEL_ROLE},
+        )
+    else:
+        return None
+    return _summary_lm_from(config)
+
+
+def _summary_lm_from(config: ModelConfig) -> Any:
+    """Build a summary LM from ``config`` with the label's timeout and no retries.
+
+    Args:
+        config: The summary model's config, changed in place.
+
+    Returns:
+        The LM, marked as a side call so its tokens stay out of the reply's speed.
+    """
     config.extra["timeout"] = _SUMMARY_TIMEOUT_SECONDS
     config.extra["num_retries"] = 0
     lm = build_language_model(config, disable_cache=True)
@@ -2776,16 +2842,21 @@ def _thinking_summaries(
     language: str,
     out_queue: asyncio.Queue[dict],
     usage_sink: list | None,
+    model_config: ModelConfig | None = None,
 ) -> ThinkingSummaries:
     """Wire a turn's thinking labels to the summary model and the turn's stream.
 
     The model is built on the first label the turn needs and joins
-    ``usage_sink``, so its calls are metered with the turn.
+    ``usage_sink``, so its calls are metered with the turn. In local mode it
+    runs on the turn's engine (see :func:`_build_local_summary_lm`); a turn
+    with no usable engine gets no model labels.
 
     Args:
         language: English name of the language labels are written in.
         out_queue: The turn's event queue, owned by the running loop.
         usage_sink: The turn's metered LMs, or ``None`` when unmetered.
+        model_config: The turn's resolved model config, which picks the local
+            summary engine; ``None`` for the default managed turn.
 
     Returns:
         The turn's :class:`ThinkingSummaries`.
@@ -2802,9 +2873,12 @@ def _thinking_summaries(
             The label, or ``None``.
         """
         if not built:
-            built.append(_build_summary_lm())
-            if usage_sink is not None:
-                usage_sink.append(built[0])
+            lm = _build_local_summary_lm(model_config) if settings.local_mode else _build_summary_lm()
+            built.append(lm)
+            if usage_sink is not None and lm is not None:
+                usage_sink.append(lm)
+        if built[0] is None:
+            return None
         return await asyncio.to_thread(_summary_line, built[0], language, reasoning)
 
     return ThinkingSummaries(summarize, out_queue.put_nowait)
@@ -3059,9 +3133,12 @@ async def run_generalist_agent(
     model_name = model_config.name if model_config else agent_model_id(settings.generalist_agent_model)
     try:
         if model_config:
-            override = model_config.model_copy(
-                update={"base_url": model_config.base_url or settings.generalist_agent_base_url or None}
+            # A BYOK config must reach its own provider: the agent's base URL
+            # names the managed gateway, which would receive the user's key.
+            default_base = (
+                None if model_config.token_source == TOKEN_SOURCE_BYOK else settings.generalist_agent_base_url
             )
+            override = model_config.model_copy(update={"base_url": model_config.base_url or default_base or None})
             override = apply_model_reasoning_config(override)
             _apply_interactive_timeout(override)
             lm = build_language_model(override, disable_cache=True)
@@ -3080,7 +3157,7 @@ async def run_generalist_agent(
     loop = asyncio.get_running_loop()
     emit: Callable[[dict], None] = partial(_emit_to_queue_threadsafe, loop, out_queue)
     reply_language = _reply_language(locale)
-    summaries = _thinking_summaries(reply_language, out_queue, usage_sink)
+    summaries = _thinking_summaries(reply_language, out_queue, usage_sink, model_config)
 
     drive_task = asyncio.create_task(
         _drive_generalist_agent(

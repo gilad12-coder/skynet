@@ -33,6 +33,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
@@ -54,7 +55,7 @@ from ..billing import (
 )
 from ..billing.data_policy import configure_data_policy
 from ..brand import APP_NAME
-from ..config import settings
+from ..config import LOCAL_MODE_LOOPBACK_HOSTS, settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
@@ -95,6 +96,7 @@ from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
 from .routers.admin_dashboard import create_admin_dashboard_router
+from .routers.agent_engine import create_agent_engine_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
 from .routers.api_tokens import create_api_tokens_router
@@ -107,11 +109,15 @@ from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
+from .routers.desktop_link import create_desktop_link_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.experience import create_experience_router
 from .routers.folders import create_folders_router
 from .routers.generalist_agent import create_generalist_agent_router
+from .routers.local_hosted_link import create_local_hosted_link_router
+from .routers.local_notifications import create_local_notifications_router
+from .routers.local_runtime import create_local_runtime_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
@@ -1249,6 +1255,11 @@ def create_app(
     # Outermost so it compresses the fully-assembled response body. Skips
     # text/event-stream to keep SSE streams flushing incrementally.
     app.add_middleware(SSEFriendlyGZipMiddleware, minimum_size=1024)
+    if settings.local_mode:
+        # DNS rebinding: a web page can point its own hostname at 127.0.0.1 and
+        # call this API from the browser, but its Host header keeps naming that
+        # page's domain. Added last, so it wraps GZip and refuses the request first.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(LOCAL_MODE_LOOPBACK_HOSTS))
 
     @app.get(
         "/queue",
@@ -1325,6 +1336,7 @@ def create_app(
     app.include_router(create_generalist_agent_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_desktop_link_router(job_store=job_store), tags=["Desktop link"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_runtimes_router(), tags=["Wizard"])
@@ -1334,11 +1346,15 @@ def create_app(
         tags=["Auth"],
     )
     app.include_router(create_account_security_router(job_store=job_store), tags=["Auth"])
+    app.include_router(create_local_runtime_router(), tags=["Auth"])
+    app.include_router(create_local_hosted_link_router(job_store=job_store), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_local_notifications_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notifications_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_experience_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_agent_engine_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_scorer_dependencies_router(job_store=job_store), tags=["Wizard"])
     app.include_router(create_datasets_router(job_store=job_store), tags=["Datasets"])

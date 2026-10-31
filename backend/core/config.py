@@ -14,9 +14,12 @@ from collections.abc import Mapping
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .local.vault_key import load_or_create_vault_key
 
 _ENV_FILE = Path(__file__).parent.parent / ".env"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +40,48 @@ VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 86_400
 # ``SKYNET_*`` variables, so every ``APP_*`` read falls back to its old name.
 ENV_PREFIX = "APP_"
 LEGACY_ENV_PREFIX = "SKYNET_"
+
+# Local mode must stay reachable from this machine only. The API also accepts
+# only these names in the Host header (DNS rebinding). Starlette's host check
+# splits on the first ":", so an IPv6 bind such as "::1" could never match.
+LOCAL_MODE_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+DEFAULT_API_HOST = "0.0.0.0"
+
+# Hosted Skynet the Mac app links to (SKY-124). Gilad's Q2 decision: release
+# builds link to production, dev builds to staging. A build with no
+# ``APP_HOSTED_TARGET`` and no stamp file is treated as a release build, so a
+# packaging slip can never send real users to staging. Dev builds opt in with
+# ``APP_HOSTED_TARGET=staging`` (see ``.env.example``). The production API
+# origin is the Railway production backend behind ``api.skynetml.com``.
+HOSTED_TARGET_STAMP = Path(__file__).parent / "hosted_target.txt"
+HOSTED_TARGET_URLS = {
+    "production": ("https://skynetml.com", "https://api.skynetml.com"),
+    "staging": ("https://staging.skynetml.com", "https://api-staging.skynetml.com"),
+}
+
+
+def _is_safe_hosted_origin(url: str, *, allow_insecure: bool) -> bool:
+    """Return whether a hosted link URL is a plain origin the Mac may send tokens to.
+
+    Args:
+        url: The configured URL, without a trailing slash.
+        allow_insecure: Whether the dev override allows ``http`` on a loopback host.
+
+    Returns:
+        True for ``https://host[:port]`` with no user info, path, query or fragment,
+        and for ``http`` on a loopback host when the override is on.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        _ = parts.port
+    except ValueError:
+        return False
+    if not host or "@" in parts.netloc or parts.path or parts.query or parts.fragment:
+        return False
+    if parts.scheme == "https":
+        return True
+    return allow_insecure and parts.scheme == "http" and host in LOCAL_MODE_LOOPBACK_HOSTS
 
 
 def legacy_env_name(name: str) -> str:
@@ -187,6 +232,93 @@ class Settings(BaseSettings):
         alias="PREVIEW_GRANT_CENTS",
         description="One-time credit each new account gets in a PR preview environment, so automated "
         "checks can pay for a run there. Ignored outside preview environments.",
+    )
+    local_mode: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("APP_LOCAL_MODE", "SKYNET_LOCAL_MODE"),
+        description="Run as a single-user app on this machine (the Mac app). Never valid on a hosted deployment.",
+    )
+    local_state_dir: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_LOCAL_STATE_DIR", "SKYNET_LOCAL_STATE_DIR"),
+        description="Directory for local-mode state files, such as CLI rate-limit records.",
+    )
+    local_grant_cents: int = Field(
+        default=100_000_000,
+        ge=0,
+        validation_alias=AliasChoices("APP_LOCAL_GRANT_CENTS", "SKYNET_LOCAL_GRANT_CENTS"),
+        description="Credit the local user gets in local mode, so budget checks never block a run.",
+    )
+    local_user_email: str = Field(
+        default="local@skynet.local",
+        validation_alias=AliasChoices("APP_LOCAL_USER_EMAIL", "SKYNET_LOCAL_USER_EMAIL"),
+        description="Email of the single local-mode user.",
+    )
+    hosted_target: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_TARGET",
+        description="Hosted Skynet the Mac app links to: production or staging. Unset reads the build stamp; "
+        "no stamp means production. Dev builds set staging.",
+    )
+    hosted_app_url: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_APP_URL",
+        description="Hosted web app origin for the Mac account link. Unset uses the hosted target default.",
+    )
+    hosted_api_url: str = Field(
+        default="",
+        validation_alias="APP_HOSTED_API_URL",
+        description="Hosted API origin for the Mac account link. Unset uses the hosted target default.",
+    )
+    hosted_allow_insecure_url: bool = Field(
+        default=False,
+        validation_alias="APP_HOSTED_ALLOW_INSECURE_URL",
+        description="Dev only: let local mode use an http hosted URL on a loopback host, for a local hosted stack.",
+    )
+    local_sandbox_image: str = Field(
+        default="",
+        pattern=r"^(sha256:[0-9a-f]{64})?$",
+        validation_alias=AliasChoices("APP_LOCAL_SANDBOX_IMAGE", "SKYNET_LOCAL_SANDBOX_IMAGE"),
+        description="Docker image id (sha256:<64 hex>) of the local proposer sandbox. Empty means not built.",
+    )
+    docker_bin: str = Field(
+        default="docker",
+        validation_alias=AliasChoices("APP_DOCKER_BIN", "SKYNET_DOCKER_BIN"),
+        description="Docker CLI used by local mode.",
+    )
+    codex_bin: str = Field(
+        default="codex",
+        validation_alias=AliasChoices("APP_CODEX_BIN", "SKYNET_CODEX_BIN"),
+        description="Codex CLI used for subscription calls in local mode.",
+    )
+    claude_bin: str = Field(
+        default="claude",
+        validation_alias=AliasChoices("APP_CLAUDE_BIN", "SKYNET_CLAUDE_BIN"),
+        description="Claude Code CLI used for subscription calls in local mode.",
+    )
+    cli_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        validation_alias=AliasChoices("APP_CLI_MAX_CONCURRENCY", "SKYNET_CLI_MAX_CONCURRENCY"),
+        description="Most CLI subscription calls that run at the same time in local mode.",
+    )
+    cli_fallback_order: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_CLI_FALLBACK", "SKYNET_CLI_FALLBACK"),
+        description="Comma-separated CLIs to try, in order, when a CLI is rate limited. Empty disables fallback.",
+    )
+    cli_call_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias=AliasChoices("APP_CLI_CALL_TIMEOUT", "SKYNET_CLI_CALL_TIMEOUT"),
+        description="Wall-clock limit for one CLI subscription model call.",
+    )
+    host_agent_timeout_seconds: float = Field(
+        default=3600.0,
+        gt=0,
+        validation_alias=AliasChoices("APP_HOST_AGENT_TIMEOUT", "SKYNET_HOST_AGENT_TIMEOUT"),
+        description="Wall-clock limit for one host CLI proposer session.",
     )
     smtp_host: str | None = Field(
         default=None,
@@ -782,7 +914,24 @@ class Settings(BaseSettings):
     default_timeout: float = Field(default=30.0, ge=1.0, description="Standard request timeout in seconds")
 
     host: str = Field(default="0.0.0.0", description="Server bind address")
-    port: int = Field(default=8000, ge=1024, le=65535, description="Server port")
+    # Read through Settings, not os.environ, so the local-mode guard and the
+    # server bind see the same value: any case, and backend/.env as well.
+    api_host: str = Field(
+        default=DEFAULT_API_HOST,
+        description="Address main.run_server and the local-mode image command bind",
+        validation_alias="API_HOST",
+    )
+    # One port source for the bind and the agent's MCP self-dial URL (SKY-111
+    # D2). main.py binds this port, and API_PORT comes first so a PORT left in
+    # a dev shell (Node tools) does not move it. The image binds the platform
+    # PORT and exports that same value as API_PORT, so both agree there too.
+    port: int = Field(
+        default=8000,
+        ge=1024,
+        le=65535,
+        description="Server port",
+        validation_alias=AliasChoices("API_PORT", "PORT"),
+    )
     reload: bool = Field(default=False, description="Enable auto-reload on code changes (dev only)")
 
     cors_origins: str = Field(
@@ -1334,14 +1483,88 @@ class Settings(BaseSettings):
         host is dialled as ``127.0.0.1`` — the IPv4 literal, not ``localhost``,
         because some container runtimes resolve ``localhost`` to
         ``::1`` while Uvicorn listens on IPv4 only, turning the self-dial into
-        a raw ``ConnectError``.
+        a raw ``ConnectError``. Local mode binds ``api_host`` instead, so the
+        agent dials that loopback host.
 
         Returns:
             The settings instance with ``generalist_agent_mcp_url`` populated.
         """
         if not self.generalist_agent_mcp_url:
             host = "127.0.0.1" if self.host in ("0.0.0.0", "") else self.host
+            if self.local_mode:
+                host = self.api_host
             self.generalist_agent_mcp_url = f"http://{host}:{self.port}/mcp/"
+        return self
+
+    @model_validator(mode="after")
+    def _guard_local_mode(self) -> Settings:
+        """Refuse local mode on any hosted or network-reachable deployment.
+
+        Local mode grants a large credit, skips budget checks and signs in a
+        single user without a password. On a hosted deployment that would give
+        every caller free spend, so the app must not start.
+
+        Returns:
+            The settings instance, unchanged.
+
+        Raises:
+            ValueError: When local mode is on and the process runs in a deployed
+                environment (staging, production or a PR preview), or binds a
+                non-loopback API_HOST.
+        """
+        if not self.local_mode:
+            return self
+        # Every deployed service sets APP_ENVIRONMENT; a PR preview is one too.
+        if self.app_environment:
+            raise ValueError("APP_LOCAL_MODE is not allowed in a deployed environment")
+        if self.api_host not in LOCAL_MODE_LOOPBACK_HOSTS:
+            raise ValueError(f"APP_LOCAL_MODE requires a loopback API_HOST, got {self.api_host!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_hosted_link(self) -> Settings:
+        """Fill the hosted link URLs from the build target and check them in local mode.
+
+        The Mac sends its desktop tokens to these URLs, so local mode accepts
+        only a plain ``https`` origin. The dev override opens ``http`` for a
+        loopback hosted stack only.
+
+        Returns:
+            The settings instance with the hosted target and URLs set.
+
+        Raises:
+            ValueError: When the target or the stamp names an unknown target,
+                or when local mode gets an unsafe hosted URL.
+        """
+        target = self.hosted_target.strip().lower()
+        if not target and HOSTED_TARGET_STAMP.is_file():
+            target = HOSTED_TARGET_STAMP.read_text(encoding="utf-8").strip().lower()
+        target = target or "production"
+        if target not in HOSTED_TARGET_URLS:
+            raise ValueError(f"unknown hosted target {target!r}; expected production or staging")
+        self.hosted_target = target
+        app_default, api_default = HOSTED_TARGET_URLS[target]
+        self.hosted_app_url = (self.hosted_app_url.strip() or app_default).rstrip("/")
+        self.hosted_api_url = (self.hosted_api_url.strip() or api_default).rstrip("/")
+        if self.local_mode:
+            for name, url in (("APP_HOSTED_APP_URL", self.hosted_app_url), ("APP_HOSTED_API_URL", self.hosted_api_url)):
+                if url and not _is_safe_hosted_origin(url, allow_insecure=self.hosted_allow_insecure_url):
+                    raise ValueError(f"{name} must be a plain https origin, got {url!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _local_vault_key(self) -> Settings:
+        """Give the Mac app a BYOK vault key from its state directory.
+
+        Without a vault key the user cannot save a provider key, and the Mac
+        app has no operator to set ``BYOK_VAULT_KEY``. An explicit key wins.
+
+        Returns:
+            The settings instance, with ``byok_vault_key`` set in local mode
+            when a state directory is configured.
+        """
+        if self.local_mode and self.byok_vault_key is None and self.local_state_dir:
+            self.byok_vault_key = SecretStr(load_or_create_vault_key(self.local_state_dir))
         return self
 
     @property
@@ -1454,6 +1677,23 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def local_bind_host(config: Settings | None = None) -> str:
+    """Return the address the Docker image binds in local mode.
+
+    The image command calls this instead of reading shell variables, so it
+    sees local mode exactly as ``Settings`` does.
+
+    Args:
+        config: Settings to read; the process settings when omitted.
+
+    Returns:
+        The checked loopback ``API_HOST`` in local mode, or ``""`` when local
+        mode is off and the hosted bind applies.
+    """
+    config = config or settings
+    return config.api_host if config.local_mode else ""
 
 
 def embeddings_schema_enabled() -> bool:

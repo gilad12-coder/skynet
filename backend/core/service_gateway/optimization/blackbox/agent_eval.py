@@ -96,7 +96,9 @@ def agent_target_unavailable_reason(settings: Settings) -> str | None:
     reason = sandbox_unavailable_reason(settings)
     if reason is not None:
         return reason
-    if gateway_from_settings(settings) is None:
+    # Local mode routes model calls through the run's own parent gateway
+    # (the user's CLI subscriptions), never through a deployment proxy.
+    if not settings.local_mode and gateway_from_settings(settings) is None:
         return _GATEWAY_MISSING
     return None
 
@@ -435,7 +437,7 @@ class SandboxAgentScorer:
                 if not result.ok:
                     detail = _tail(result.stderr or result.stdout, 800)
                     suffix = f": {detail}" if detail else "."
-                    raise ServiceError("The agent dependency command failed inside the offline Vercel sandbox" + suffix)
+                    raise ServiceError("The agent dependency command failed inside the offline cloud sandbox" + suffix)
             return {
                 "harness": self._target.harness,
                 "readiness": (

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 from collections.abc import Iterator
 from queue import Empty, Queue
@@ -38,6 +39,7 @@ from ...service_gateway.optimization.unified.contract import (
     with_message_codes,
 )
 from ...storage.preflights import setup_seed
+from ..agent_engine import fill_proposer_host_cli
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..preflight_execution import (
     BUDGET_CHECK_KEY,
@@ -52,6 +54,7 @@ from .submissions import _default_unified_seed, _materialize_unified_cases
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 AcceptLanguageDep = Annotated[str | None, Header(include_in_schema=False)]
+logger = logging.getLogger(__name__)
 CONTRACT_CHECK_KEY = "metric.contract"
 # Fixed English texts that setup checks, sandbox images and budget errors emit
 # without a catalog code. Stored evidence keeps them as written, so they are
@@ -300,6 +303,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 typed = model.model_validate(payload)
             except ValidationError as error:
                 raise RequestValidationError(error.errors()) from error
+            # The dump below writes host_cli, so fill it first, as the submit route does.
+            fill_proposer_host_cli(job_store, user.username, typed)
             if isinstance(typed, UnifiedRunRequest):
                 _materialize_unified_cases(typed, job_store=job_store, username=user.username)
                 _default_unified_seed(typed)
@@ -349,6 +354,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             except RequestValidationError:
                 events.put({"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.invalid_config")}})
             except Exception:
+                # The viewer sees only a generic line, so the cause must reach the log.
+                logger.exception("wizard setup check stream failed")
                 events.put(
                     {"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.could_not_finish")}}
                 )
@@ -536,6 +543,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
             except RequestValidationError:
                 events.put({"event": "error", "data": {"detail": t_locale(locale, "submit.preflight.invalid_config")}})
             except Exception:
+                # The viewer sees only a generic line, so the cause must reach the log.
+                logger.exception("workspace contract check stream failed")
                 events.put(
                     {
                         "event": "error",

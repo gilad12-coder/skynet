@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { localAgentModel } from "@/features/local-runtime";
+import { localAgentEffort, localAgentModel } from "@/features/local-runtime";
 import { agentSubscriptionFor } from "@/features/settings";
 import { useCodeAgent, type AgentMessage, type CodeAgentState } from "@/shared/hooks/use-code-agent";
 import type { ValidateCodeResponse } from "@/shared/types/api";
@@ -148,6 +148,7 @@ export function useIdeCodingAgent(options: {
     model,
     resolveModel: resolveCodeModel,
     reasoningEffort: effort,
+    resolveEffort: localAgentEffort,
     initialMessages: options.initialMessages,
   });
 

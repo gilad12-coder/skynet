@@ -430,7 +430,7 @@ function parseError(text: string): {
 }
 
 /** Rendered message from an error body, or ``undefined`` for non-JSON bodies. */
-function parseErrorMessage(text: string): string | undefined {
+export function parseErrorMessage(text: string): string | undefined {
   return parseError(text).message;
 }
 
@@ -1036,6 +1036,74 @@ export function updateNotificationPreferences(patch: NotificationPreferencesPatc
   });
 }
 
+export interface LocalNotificationChannels {
+  /** Delivery channel -> whether this Mac can deliver on it now. */
+  channels: Record<NotificationHeldChannel | "macos", boolean>;
+  /** Event type -> whether it shows as a macOS notification. */
+  macos: Record<NotificationEventType, boolean>;
+  /** Whether non-urgent macOS notifications wait the hold. */
+  macos_held: boolean;
+}
+
+/** One queued macOS notification for the Mac app to show. */
+export interface NativeNotification {
+  id: string;
+  title: string;
+  body: string;
+  /** App path the notification opens. */
+  url: string;
+  tag: string;
+}
+
+/**
+ * Read the Mac app's channel states and macOS cells. Hosted servers answer
+ * 404 on this local-only route; that resolves to null so callers keep the
+ * hosted UI.
+ */
+export async function getLocalNotificationChannels(): Promise<LocalNotificationChannels | null> {
+  try {
+    return await request<LocalNotificationChannels>("/local/notifications/channels");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Change macOS cells in the Mac app; untouched cells keep their value. */
+export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType, boolean>>) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ grid }),
+  });
+}
+
+/** Add macOS to, or take it out of, the held channels in the Mac app. */
+export function updateLocalMacosHeld(held: boolean) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ held }),
+  });
+}
+
+/**
+ * Lease the queued macOS notifications in the UI locale. A lease that is not
+ * confirmed runs out, and the server hands those notifications out again.
+ */
+export function claimNativeNotifications() {
+  return request<{ items: NativeNotification[] }>("/local/notifications/native/claim", {
+    method: "POST",
+    body: JSON.stringify({ locale: getActiveLocale() }),
+  });
+}
+
+/** Tell the server which claimed macOS notifications the app showed. */
+export function confirmNativeNotifications(ids: string[]) {
+  return request<{ confirmed: number }>("/local/notifications/native/confirm", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export type NotificationTab = "focused" | "everything";
 
 export interface NotificationFacts {
@@ -1226,6 +1294,26 @@ export function updateModelPrivacy(settings: ModelPrivacySettings) {
   return request<ModelPrivacySettings>("/account/model-privacy", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+/** The caller's agent engine; see `AgentEngine` in the local-runtime feature. */
+export interface AgentEnginePreference {
+  engine: string | null;
+  /** False (or missing) when `engine` is the backend's automatic pick. */
+  stored?: boolean;
+}
+
+/** Fetch which engine runs the caller's agent turns that pick no model. */
+export function getAgentEngine() {
+  return request<AgentEnginePreference>("/account/agent-engine");
+}
+
+/** Persist which engine runs the caller's agent turns that pick no model. */
+export function updateAgentEngine(engine: string) {
+  return request<AgentEnginePreference>("/account/agent-engine", {
+    method: "PUT",
+    body: JSON.stringify({ engine }),
   });
 }
 
@@ -3552,7 +3640,9 @@ export async function serveProgramStream(
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
-      handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.5")));
+      handlers.onError(
+        parseErrorMessage(JSON.stringify(data)) ?? msg("auto.shared.lib.api.literal.5"),
+      );
     }
   };
   try {
@@ -3612,7 +3702,9 @@ export async function servePairProgramStream(
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
-      handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.8")));
+      handlers.onError(
+        parseErrorMessage(JSON.stringify(data)) ?? msg("auto.shared.lib.api.literal.8"),
+      );
     }
   };
   try {

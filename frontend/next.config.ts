@@ -44,6 +44,21 @@ const nextConfig: NextConfig = {
     // `immutable` long-lived caching; setting our own Cache-Control there is
     // redundant and trips a build-time warning, so it's intentionally omitted.
   ],
+  turbopack: {
+    rules: {
+      // The submit IDE's monaco-vscode packages import stylesheets as
+      // namespaces, which Next 16.4 rejects. See monaco-css-import-loader.cjs.
+      "*.js": {
+        condition: {
+          all: [
+            { path: /node_modules\/@codingame\/monaco-vscode-/ },
+            { content: /import \* as [\w$]+ from '[^'\n]+\.css';/ },
+          ],
+        },
+        loaders: ["./monaco-css-import-loader.cjs"],
+      },
+    },
+  },
   experimental: {
     optimizePackageImports: [
       "framer-motion",

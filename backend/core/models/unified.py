@@ -335,7 +335,7 @@ class UnifiedRunRequest(BaseModel):
     models: UnifiedModels
     workspace: UnifiedWorkspace
     seed: int | None = None
-    token_source: Literal["managed", "byok"] = "managed"
+    token_source: Literal["managed", "byok", "subscription"] = "managed"
     is_private: bool = False
     economy_mode: bool = False
     preflight_id: str | None = Field(default=None, min_length=1, max_length=64)

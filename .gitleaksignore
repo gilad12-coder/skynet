@@ -1,0 +1,6 @@
+# Reviewed gitleaks false positives (fingerprint = commit:file:rule:line).
+# Add a line only after a person checks the match. Never add a real secret
+# here: rotate it instead.
+
+# i18n catalog text "Use my own key" (key experience.intake.q3.billing.byok).
+e0e45d3fe90e22e0cb1ae2f8cc4385b92095b273:frontend/src/shared/lib/generated/ui-catalog.ts:generic-api-key:19583

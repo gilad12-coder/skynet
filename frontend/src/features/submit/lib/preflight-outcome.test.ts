@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { UnifiedRunRequest } from "@/shared/types/unified-run";
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import {
+  checkedRunRequest,
   preflightMayAdvance,
   preflightPendingMessageKey,
   reusableSuccessfulPreflight,
@@ -99,4 +101,30 @@ test("only an explicit evaluation dependency can advance while pending", () => {
     preflightPendingMessageKey(response("pending", false, "setup_incomplete")),
     "submit.preflight.incomplete",
   );
+});
+
+test("a run sends back the proposer CLI its check ran on", () => {
+  const payload = {
+    payload_kind: "unified_v1",
+    optimizer: { choice: "gepa", budget: {}, proposer: { harness: "codex" } },
+  } as unknown as UnifiedRunRequest;
+  const checked = { ...response("succeeded", true), proposer_host_cli: "codex" as const };
+
+  const request = checkedRunRequest(payload, checked);
+
+  assert.equal(request.optimizer.proposer?.host_cli, "codex");
+  assert.equal(request.preflight_id, "preflight");
+  assert.equal(request.preflight_fingerprint, "fingerprint");
+  assert.equal(request.execution_budget_id, "budget");
+  assert.equal(request.execution_budget_revision, 1);
+  assert.equal(
+    checkedRunRequest(payload, { ...checked, proposer_host_cli: null }).optimizer.proposer
+      ?.host_cli,
+    null,
+  );
+  assert.equal(
+    checkedRunRequest(payload, response("succeeded", true)).optimizer.proposer?.host_cli,
+    null,
+  );
+  assert.equal(payload.optimizer.proposer?.host_cli, undefined);
 });

@@ -4,6 +4,7 @@
  * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -14,9 +15,10 @@ import type { CliStatus, LocalStatus } from "../lib/subscription-model";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { SubscriptionSourcePicker, hostCliChoices, hostCliValue } = await import(
+const { HostCliChoice, SubscriptionSourcePicker, hostCliChoices, hostCliValue } = await import(
   "./SubscriptionSourcePicker"
 );
+const { MagicWand, Terminal } = await import("@/shared/ui/icons");
 const { HostAgentPermissionField } = await import("./HostAgentPermissionField");
 
 // The hints the local backend sends (backend/core/local/cli_probe.py).
@@ -103,19 +105,52 @@ void describe("SubscriptionSourcePicker", () => {
 });
 
 void describe("proposer host CLI picker", () => {
-  void it("lists off, Codex and Claude Code only", () => {
+  void it("lists the agent engine default, off, Codex and Claude Code only", () => {
     setClientLocale("en");
     assert.deepEqual(hostCliChoices(), [
+      { value: "default", label: "host_agent.cli.default" },
       { value: "off", label: "host_agent.cli.off" },
       { value: "codex", label: "subscription.cli.codex" },
       { value: "claude", label: "subscription.cli.claude" },
     ]);
   });
 
-  void it("shows a saved Droid choice as off", () => {
-    assert.equal(hostCliValue("droid"), "off");
-    assert.equal(hostCliValue(undefined), "off");
+  void it("shows no pick and a saved Droid choice as the engine default, and null as off", () => {
+    assert.equal(hostCliValue("droid"), "default");
+    assert.equal(hostCliValue(undefined), "default");
+    assert.equal(hostCliValue(null), "off");
     assert.equal(hostCliValue("claude"), "claude");
+  });
+
+  void it("shows the default-choice wand on the default, the terminal on each CLI, and none on off", () => {
+    const svg = (html: string) => html.match(/<svg[\s\S]*?<\/svg>/g) ?? [];
+    const wand = svg(renderToStaticMarkup(<MagicWand className="size-4" aria-hidden="true" />));
+    const terminal = svg(renderToStaticMarkup(<Terminal className="size-4" aria-hidden="true" />));
+    assert.notDeepEqual(wand, terminal);
+    const rows = Object.fromEntries(
+      hostCliChoices().map(({ value, label }) => [
+        value,
+        svg(renderToStaticMarkup(<HostCliChoice value={value} label={label} />)),
+      ]),
+    );
+    assert.deepEqual(rows, {
+      default: wand,
+      off: [],
+      codex: terminal,
+      claude: terminal,
+    });
+  });
+
+  void it("labels the default choice as the agent engine in every UI catalog", () => {
+    const ui = new URL("../../../../../i18n/locales/ui/", import.meta.url);
+    const label = (locale: string) =>
+      (JSON.parse(readFileSync(new URL(`${locale}.json`, ui), "utf8")) as Record<string, string>)[
+        "host_agent.cli.default"
+      ];
+    assert.equal(label("en"), "Agent engine (default)");
+    // he.json is the base catalog, so the key must be translated there too.
+    assert.ok(label("he"));
+    assert.notEqual(label("he"), label("en"));
   });
 });
 

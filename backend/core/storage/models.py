@@ -60,6 +60,71 @@ class ApiTokenModel(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class DesktopLinkModel(Base):
+    """One Mac app linked to a hosted account (SKY-124).
+
+    A link owns its desktop tokens. ``scopes`` is space-separated, in the
+    OAuth ``scope`` form. Removing a link sets ``revoked_at``; it is never
+    reactivated, so a re-link always makes a new row.
+    """
+
+    __tablename__ = "desktop_links"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DesktopTokenModel(Base):
+    """A desktop access or refresh token, stored only as its SHA-256 hash.
+
+    ``parent_hash`` names the refresh token that minted this token, so a
+    retried refresh can replace the pair it minted. ``used_at`` marks a
+    refresh token as rotated; a later use of it is the theft signal.
+    ``superseded_at`` marks a refresh token whose pair a retry replaced; any
+    use of it is also the theft signal.
+    """
+
+    __tablename__ = "desktop_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    link_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    parent_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DesktopLinkCodeModel(Base):
+    """A single-use link code from the hosted consent page, stored as its hash."""
+
+    __tablename__ = "desktop_link_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    code_challenge: Mapped[str] = mapped_column(String(64), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(String(255), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    link_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class AgentApprovalModel(Base):
     """Cross-replica handoff for a generalist-agent tool approval decision.
 
@@ -374,6 +439,25 @@ class ModelPrivacyPreferenceModel(Base):
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
     data_policy: Mapped[str] = mapped_column(String(16), nullable=False, default="deny")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class AgentEnginePreferenceModel(Base):
+    """Which engine runs a caller's agent turns when no model is picked.
+
+    Only local mode stores a row; a hosted caller always runs on OpenRouter.
+    A missing row means the first ready subscription CLI.
+    """
+
+    __tablename__ = "agent_engine_preferences"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    engine: Mapped[str] = mapped_column(String(16), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
