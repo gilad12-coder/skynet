@@ -3,13 +3,15 @@
  * the `/local/status` shapes, each CLI's display state, and the
  * `subscription/<cli>/<catalog-slug>` shorthand agent requests carry.
  *
- * Only type imports, so `node --test` loads it directly.
+ * Its one value import is the shared CLI list, which `node --test` resolves
+ * through the test's `@/` hook.
  */
 import type { CliProvider } from "@/features/billing";
+import { isCliProvider } from "@/shared/lib/cli-providers";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import type { RunUsageRow } from "@/shared/types/run-usage";
 
-export const CLI_PROVIDERS: readonly CliProvider[] = ["codex", "claude"];
+export { CLI_PROVIDERS, isCliProvider } from "@/shared/lib/cli-providers";
 
 export const SUBSCRIPTION_MODEL_PREFIX = "subscription/";
 
@@ -42,10 +44,6 @@ export type CliState =
   | { kind: "old"; version: string | null; minVersion: string }
   | { kind: "logged_out"; hint: string | null }
   | { kind: "capped"; until: Date };
-
-export function isCliProvider(value: unknown): value is CliProvider {
-  return typeof value === "string" && (CLI_PROVIDERS as readonly string[]).includes(value);
-}
 
 /**
  * Resolve a CLI's state. A missing binary wins over everything; a usage cap
