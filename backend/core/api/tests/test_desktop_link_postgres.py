@@ -1004,6 +1004,38 @@ def test_first_oauth_sign_in_during_account_deletion_leaves_no_identity(
         assert session.query(UserIdentityModel).count() == 0
 
 
+@pytest.mark.parametrize("stop", DELETION_STOPS)
+def test_oauth_link_during_account_deletion_leaves_no_identity(
+    full_database: Engine, sign_in: SimpleNamespace, stop: str
+) -> None:
+    """Linking a provider during account deletion cannot leave an orphan identity."""
+    with Session(full_database) as session:
+        expires = datetime.now(UTC) + timedelta(days=1)
+        session.add(
+            DesktopLinkModel(id="link", username=ALICE, device_name="Mac", scopes="", absolute_expires_at=expires)
+        )
+        session.add(DesktopTokenModel(token_hash="token", link_id="link", kind="access", expires_at=expires))
+        session.commit()
+
+    def link_oauth() -> Any:
+        """Link a Google account to Alice."""
+        return sign_in.client.post(
+            "/auth/oauth/link",
+            json={"username": ALICE, "provider": "google", "provider_account_id": "g-999"},
+            headers={"X-Internal-Auth": INTERNAL_SECRET},
+        )
+
+    results = _run_during_parked_deletion(full_database, stop, link_oauth)
+
+    assert results["deletion"] == "ok", results
+    _assert_account_gone(full_database)
+    with Session(full_database) as session:
+        assert session.query(UserIdentityModel).count() == 0
+    assert results["call"] in (200, 404), results
+    if results["call"] == 404:
+        assert results["body"] == {"code": "accounts.not_found"}
+
+
 def test_desktop_call_during_account_deletion_reports_a_revoked_link(
     full_database: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
