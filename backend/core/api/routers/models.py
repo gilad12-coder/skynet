@@ -298,7 +298,7 @@ class CallHoldModel(BaseModel):
     """One model role whose single-call reservation the wizard needs."""
 
     name: str = Field(min_length=1, max_length=200)
-    token_source: Literal["managed", "byok"] = "managed"
+    token_source: Literal["managed", "byok", "subscription"] = "managed"
 
 
 class CallHoldsRequest(BaseModel):
@@ -311,7 +311,7 @@ class CallHold(BaseModel):
     """The charged cents one call of a model reserves before it is sent."""
 
     name: str
-    token_source: Literal["managed", "byok"]
+    token_source: Literal["managed", "byok", "subscription"]
     cents: float | None = Field(
         default=None,
         description="Charged cents one call reserves; null when the model has no verified pricing.",
@@ -358,12 +358,15 @@ def call_hold_cents(name: str, token_source: str, *, client: httpx.Client) -> De
 
     Args:
         name: The model as the wizard names it, optionally ``openrouter/``-prefixed.
-        token_source: ``managed`` for platform-paid calls, ``byok`` for the caller's key.
+        token_source: ``managed`` for platform-paid calls, ``byok`` for the caller's key,
+            ``subscription`` for the caller's logged-in CLI (never charged).
         client: HTTP client for the public OpenRouter catalog.
 
     Returns:
         The hold in charged cents, or ``None`` when the model has no verified pricing.
     """
+    if token_source == "subscription":
+        return Decimal(0)
     try:
         slug = resolve_model_slug(name, client=client)
         catalog = fetch_endpoint_prices(slug, client=client)

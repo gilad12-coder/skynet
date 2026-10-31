@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Blocks a commit that adds a secret. `just setup` (scripts/agent/init.sh)
+# turns the repo hooks on with: git config core.hooksPath .githooks
+# Needs gitleaks 8.25 or later for the [[allowlists]] table in .gitleaks.toml
+# (brew install gitleaks).
+# The CI job .github/workflows/gitleaks.yml is the enforced control; this
+# hook stops a secret before it leaves the machine.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  if [[ "${SKIP_GITLEAKS:-}" == "1" ]]; then
+    echo "pre-commit: gitleaks is not installed; SKIP_GITLEAKS=1, secret scan skipped" >&2
+    exit 0
+  fi
+  echo "pre-commit: gitleaks is not installed (brew install gitleaks)." >&2
+  echo "pre-commit: commit blocked. To commit without the scan once, set SKIP_GITLEAKS=1." >&2
+  exit 1
+fi
+# --redact keeps a found value out of the terminal.
+exec gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml .
