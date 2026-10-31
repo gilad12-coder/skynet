@@ -14,14 +14,17 @@ starts from a copy of that prepared tree and runs no setup of its own.
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import threading
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .repo_tree import archive_chunks, patch_violations
+from .repo_tree import MAX_PATCH_BYTES, archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
+
+logger = logging.getLogger(__name__)
 
 REPO_DIR = ".app-repo"
 BASE_DIR = f"{REPO_DIR}/base"
@@ -117,6 +120,9 @@ class Checkout:
 
     path: str | None
     problems: tuple[str, ...] = ()
+    # The run's path rules refused the version, as opposed to a change that
+    # is too large or does not apply.
+    blocked: bool = False
 
 
 def redact(text: str, secrets: Iterable[str]) -> str:
@@ -239,7 +245,17 @@ class RepoWorkspace:
                 self._cut_network(session)
         except BaseException as error:
             self._failure = error
-            session.close()
+            # Unsettled usage stays in the ledger for reconciliation; the setup
+            # error is what the user can act on, so no close error may replace
+            # it. Only the type is logged: settlement and ledger texts can name
+            # the provider.
+            try:
+                session.close()
+            except Exception as close_error:
+                logger.warning(
+                    "Repository setup failed; the sandbox did not close cleanly (%s)",
+                    type(close_error).__name__,
+                )
             raise
         self._session = session
         return session
@@ -342,6 +358,17 @@ class RepoWorkspace:
         if not probe.ok or _PROBE_OK not in probe.stdout:
             raise NetworkCutoffError("The scoring box could still reach the network after it was switched off.")
 
+    def violations(self, patch: str) -> list[str]:
+        """Explain how a version breaks the run's path rules, without touching the box.
+
+        Args:
+            patch: The version as a git patch against the snapshot.
+
+        Returns:
+            One reason per broken rule; empty when the version is allowed.
+        """
+        return patch_violations(patch, self._editable, self._readonly, self._protected)
+
     def checkout(self, patch: str) -> Checkout:
         """Lay out one version on a copy of the prepared tree.
 
@@ -352,9 +379,9 @@ class RepoWorkspace:
             The checkout's path, relative to the box, or why the version is
             not allowed or does not apply.
         """
-        problems = patch_violations(patch, self._editable, self._readonly, self._protected)
+        problems = self.violations(patch)
         if problems:
-            return Checkout(path=None, problems=tuple(problems))
+            return Checkout(path=None, problems=tuple(problems), blocked=len(patch.encode("utf-8")) <= MAX_PATCH_BYTES)
         with self._lock:
             self._stamps_before_run = None
             session = self.session()

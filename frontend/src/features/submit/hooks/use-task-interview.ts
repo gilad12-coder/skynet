@@ -2,7 +2,8 @@
 
 import * as React from "react";
 
-import { readPref } from "@/features/settings";
+import { localAgentModel, localModelRefusalMessage } from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { streamTaskInterviewTurn } from "@/shared/lib/api";
@@ -34,6 +35,8 @@ export interface TaskInterviewState {
   /** Pickable answers for the current question; empty for an open question. */
   options: InterviewOption[];
   error: boolean;
+  /** A specific message for `error`, such as the local backend's no-model refusal. */
+  errorMessage: string | null;
   /** The interviewer has what it needs; the artifact card is complete. */
   done: boolean;
   model: string | null;
@@ -70,6 +73,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
   const [thinking, setThinking] = React.useState<AgentThinking | null>(null);
   const [options, setOptions] = React.useState<InterviewOption[]>([]);
   const [error, setError] = React.useState(false);
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [done, setDone] = React.useState(false);
   const [served, setServed] = React.useState<Record<number, ServedTurn>>({});
   const [model, setModel] = React.useState<string | null>(() => readPref("composerModel"));
@@ -118,6 +122,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
       patchTask({ transcript: next });
       setBusy(true);
       setError(false);
+      setErrorMessage(null);
       setDone(false);
       setStreamText("");
       setThinking(null);
@@ -125,60 +130,63 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
       const controller = new AbortController();
       abortRef.current = controller;
 
-      void streamTaskInterviewTurn(
-        {
-          turns: next,
-          objective: current.objective,
-          background: current.background,
-          artifact_kind: current.artifactKind,
-          starting_version: current.startingVersion,
-          locale: getActiveLocale(),
-          model: model ?? undefined,
-          reasoning_effort: reasoningEffort ?? undefined,
-        },
-        {
-          onReasoning: (chunk: string) =>
-            setThinking((prev) => ({
-              reasoning: (prev?.reasoning ?? "") + chunk,
-              startedAt: prev?.startedAt ?? Date.now(),
-              endedAt: null,
-              streaming: true,
-            })),
-          onMessagePatch: (chunk: string) => {
-            setThinking((prev) =>
-              prev && prev.streaming ? { ...prev, streaming: false, endedAt: Date.now() } : prev,
-            );
-            setStreamText((text) => text + chunk);
+      void localAgentModel(model, agentSubscriptionFor("interview")).then((sentModel) =>
+        streamTaskInterviewTurn(
+          {
+            turns: next,
+            objective: current.objective,
+            background: current.background,
+            artifact_kind: current.artifactKind,
+            starting_version: current.startingVersion,
+            locale: getActiveLocale(),
+            model: sentModel ?? undefined,
+            reasoning_effort: reasoningEffort ?? undefined,
           },
-          onReset: () => {
-            setStreamText("");
-            setThinking(null);
+          {
+            onReasoning: (chunk: string) =>
+              setThinking((prev) => ({
+                reasoning: (prev?.reasoning ?? "") + chunk,
+                startedAt: prev?.startedAt ?? Date.now(),
+                endedAt: null,
+                streaming: true,
+              })),
+            onMessagePatch: (chunk: string) => {
+              setThinking((prev) =>
+                prev && prev.streaming ? { ...prev, streaming: false, endedAt: Date.now() } : prev,
+              );
+              setStreamText((text) => text + chunk);
+            },
+            onReset: () => {
+              setStreamText("");
+              setThinking(null);
+            },
+            onDone: (result: TaskInterviewTurnResult) => {
+              const transcript: UnifiedChatTurn[] = [
+                ...next,
+                { role: "assistant", content: result.message },
+              ];
+              patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
+              setServed((prev) => ({
+                ...prev,
+                [transcript.length - 1]: {
+                  model: result.model ?? null,
+                  servedModel: result.served_model ?? null,
+                },
+              }));
+              setOptions(result.done ? [] : result.options);
+              setDone(result.done);
+              setBusy(false);
+              setStreamText("");
+              setThinking(null);
+            },
+            onError: (_message, code) => {
+              setError(true);
+              setErrorMessage(localModelRefusalMessage(code));
+              clearStream();
+            },
           },
-          onDone: (result: TaskInterviewTurnResult) => {
-            const transcript: UnifiedChatTurn[] = [
-              ...next,
-              { role: "assistant", content: result.message },
-            ];
-            patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
-            setServed((prev) => ({
-              ...prev,
-              [transcript.length - 1]: {
-                model: result.model ?? null,
-                servedModel: result.served_model ?? null,
-              },
-            }));
-            setOptions(result.done ? [] : result.options);
-            setDone(result.done);
-            setBusy(false);
-            setStreamText("");
-            setThinking(null);
-          },
-          onError: () => {
-            setError(true);
-            clearStream();
-          },
-        },
-        controller.signal,
+          controller.signal,
+        ),
       ).finally(() => {
         if (abortRef.current === controller) abortRef.current = null;
       });
@@ -225,6 +233,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
     setThinking(null);
     setOptions([]);
     setError(false);
+    setErrorMessage(null);
     setDone(false);
     setServed({});
     patchTask({ transcript: [] });
@@ -264,6 +273,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
     thinking,
     options,
     error,
+    errorMessage,
     done,
     model,
     setModel,

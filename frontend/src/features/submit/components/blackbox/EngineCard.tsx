@@ -49,12 +49,16 @@ export function EngineCard({
   engine,
   blocked = false,
   blockedNote,
+  footerSlot = false,
 }: {
   engine: EngineSlideInfo;
   // The setup rules this optimizer out; the card stays readable so the
   // user can see what they are giving up.
   blocked?: boolean;
   blockedNote?: string;
+  // Reserves a row at the card's foot for controls the caller overlays there,
+  // such as source links that cannot live inside the card's button.
+  footerSlot?: boolean;
 }) {
   const { Banner, icon: Icon } = ENGINE_VISUALS[engine.id] ?? GENERIC_VISUAL;
   return (
@@ -91,6 +95,7 @@ export function EngineCard({
             </span>
           )
         )}
+        {footerSlot && <span aria-hidden="true" className="mt-auto h-7 shrink-0" />}
       </div>
     </>
   );

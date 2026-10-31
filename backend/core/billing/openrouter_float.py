@@ -24,7 +24,6 @@ break because a monitor read timed out.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -44,7 +43,7 @@ logger = logging.getLogger("app.billing.openrouter_float")
 
 OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits"
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
-# Highest spend limit a key used off Railway may carry before startup warns. A
+# Highest spend limit a key used on a developer machine may carry before startup warns. A
 # local backend has no float watch or alert history of its own, so it should
 # run on its own small-limit key rather than the production key.
 LOCAL_KEY_LIMIT_CEILING_DOLLARS = 20.0
@@ -131,10 +130,10 @@ def read_account_balance_cents() -> int | None:
 
 
 def local_key_limit_problem() -> str | None:
-    """Say what is wrong with the OpenRouter key when running off Railway.
+    """Say what is wrong with the OpenRouter key when running on a developer machine.
 
-    Railway sets ``RAILWAY_ENVIRONMENT_NAME`` on every deployed service, so its
-    absence means a developer machine. There the key should be a separate one
+    Every deployed service sets ``APP_ENVIRONMENT``, so its absence means a
+    developer machine. There the key should be a separate one
     with a small spend limit: a local run on the production key spends the
     same balance that backs every user's balance. Fails open.
 
@@ -143,7 +142,7 @@ def local_key_limit_problem() -> str | None:
         capped low enough, or the key could not be read.
     """
     key = settings.openrouter_api_key
-    if key is None or os.environ.get("RAILWAY_ENVIRONMENT_NAME"):
+    if key is None or settings.app_environment:
         return None
     try:
         response = httpx.get(
@@ -160,7 +159,7 @@ def local_key_limit_problem() -> str | None:
         return None
     cap = "no spend limit" if limit is None else f"a ${float(limit):.2f} spend limit"
     return (
-        f"OPENROUTER_API_KEY has {cap} and this backend is not on Railway. Local runs "
+        f"OPENROUTER_API_KEY has {cap} and this backend is not deployed. Local runs "
         "spend the same balance that backs user balances. Create a separate key at "
         f"https://openrouter.ai/settings/keys with a limit of ${LOCAL_KEY_LIMIT_CEILING_DOLLARS:.0f} "
         "or less and put it in backend/.env."

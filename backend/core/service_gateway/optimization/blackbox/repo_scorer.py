@@ -24,6 +24,7 @@ from typing import Any
 from ....billing.model_dispatch import ModelHTTPResult
 from . import runner, sandbox_log
 from .repo_workspace import REPO_DIR, RepoWorkspace, redact
+from .rule_judge import ILLEGAL_APPROACH_KEY, ILLEGAL_SCORE, RuleJudge, RuleJudgeUnavailableError
 from .sandbox import SandboxSession
 from .sandbox_scorer import RUNNER_SOURCE
 
@@ -75,17 +76,29 @@ def fold_case_scores(side_info: Mapping[str, Any]) -> dict[str, Any]:
 class RepoScorer:
     """Score one repository version at a time in the parent's workspace box."""
 
-    def __init__(self, workspace: RepoWorkspace, code: str, *, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        workspace: RepoWorkspace,
+        code: str,
+        *,
+        timeout_seconds: float,
+        rule_judge: RuleJudge | None = None,
+    ) -> None:
         """Bind the user's scorer code to a repository workspace.
 
         Args:
             workspace: Parent-owned box holding the pristine tree.
             code: Scorer source defining ``score(repo_path)`` or ``score(repo_path, case)``.
             timeout_seconds: Longest one scorer call may run, setup excluded.
+            rule_judge: The repository's constraints-file enforcement, when it
+                has an ``optimize.toml``: path-rule refusals then get the fixed
+                illegal-action message, and every changed version passes the
+                final rule judge before it is scored.
         """
         self._workspace = workspace
         self._code = code
         self._timeout_seconds = timeout_seconds
+        self._rule_judge = rule_judge
         self._root: str | None = None
         self._calls = 0
         self._lock = threading.Lock()
@@ -98,19 +111,36 @@ class RepoScorer:
             case: The case to score it on, when the run has cases.
 
         Returns:
-            ``{"score": ..., **side_info}``, secrets redacted.
+            ``{"score": ..., **side_info}``, secrets redacted; an illegal
+            approach gets a score of 0 with the judge's reason, unscored.
 
         Raises:
             RepoScoreError: When the version breaks the path rules or does not
-                apply, changes a protected file while it runs, or the scorer
-                fails or returns no score.
+                apply, changes a protected file while it runs, the rule judge
+                cannot check it, or the scorer fails or returns no score.
         """
         secrets = list(self._workspace.secrets.values())
+        judge = self._rule_judge
+        # The judge runs outside the lock: a slow verdict must not hold up the
+        # checkout and scoring of other versions.
+        if judge is not None and patch.strip() and not self._workspace.violations(patch):
+            try:
+                verdict = judge.judge_version(patch)
+            except RuleJudgeUnavailableError as error:
+                raise RepoScoreError(str(error)) from error
+            if verdict.violated:
+                return {
+                    "score": ILLEGAL_SCORE,
+                    "feedback": verdict.feedback,
+                    ILLEGAL_APPROACH_KEY: {"rule": verdict.rule, "reason": verdict.reason},
+                }
         # Checkout and scoring share one lock: the next version's checkout
         # replaces the tree this one is scored on.
         with self._lock:
             checkout = self._workspace.checkout(patch)
             if checkout.path is None:
+                if judge is not None and checkout.blocked:
+                    raise RepoScoreError(judge.blocked(checkout.problems))
                 raise RepoScoreError(" ".join(checkout.problems))
             session = self._workspace.session()
             root = self._box_root(session)
@@ -144,7 +174,8 @@ class RepoScorer:
             tampered = self._workspace.protected_changes()
             if tampered:
                 # The version's code names these files and can read the secrets.
-                raise RepoScoreError(redact(" ".join(tampered), secrets))
+                reason = redact(" ".join(tampered), secrets)
+                raise RepoScoreError(judge.blocked([reason]) if judge is not None else reason)
             text = session.read_file(f"{CALLS_DIR}/{self._calls:06d}/{runner.OUTPUT_FILE}")
         if text is None:
             output = redact((result.stderr or result.stdout)[-2_000:], secrets)
@@ -173,7 +204,8 @@ class RepoScorer:
 
         Returns:
             200 with the score and side information, or 422 with why the
-            version could not be scored, as text.
+            version could not be scored, as text. Rule warnings the watch
+            judge left since the last reply open the feedback of a 200.
 
         Raises:
             ValueError: When the body is not a patch and an optional case.
@@ -186,6 +218,10 @@ class RepoScorer:
         except RepoScoreError as error:
             # Plain text: the guest's relay client quotes the body in its error.
             return ModelHTTPResult(422, "text/plain; charset=utf-8", str(error).encode())
+        notes = self._rule_judge.take_notes() if self._rule_judge is not None else []
+        if notes:
+            feedback = document.get("feedback")
+            document["feedback"] = "\n\n".join([*notes, *([str(feedback)] if feedback else [])])
         return ModelHTTPResult(200, "application/json", json.dumps(document).encode())
 
     def _box_root(self, session: SandboxSession) -> str:

@@ -195,6 +195,7 @@
     "agent.status.tool_start": "智能体正在调用工具…",
     "agent.turn.not_found": "未找到智能体回合，或已过期。",
     "analytics.other_bucket": "其他",
+    "auth.account_not_found": "此帐户已不存在。请重新登录。",
     "auth.invalid_token": "身份验证令牌无效或已过期。",
     "auth.missing_token": "需要提供身份验证令牌。",
     "auth.not_configured": "后端身份验证尚未配置。",

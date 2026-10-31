@@ -17,7 +17,7 @@ export const LEGAL_CONFIG = {
 
   // Dates shown on both documents. Update lastUpdated whenever the text changes.
   effectiveDate: "August 11, 2026",
-  lastUpdated: "October 13, 2026",
+  lastUpdated: "October 29, 2026",
 
   // The service is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.
@@ -38,7 +38,7 @@ export const LEGAL_CONFIG = {
   sourceRepoUrl: "https://github.com/gilad12-coder/skynet",
 } as const;
 
-// The Docker build bakes in the commit Railway deployed, so the link names the
+// The Docker build bakes in the deployed commit, so the link names the
 // exact source running; local builds without it fall back to the repo root.
 const SOURCE_COMMIT = process.env.NEXT_PUBLIC_SOURCE_COMMIT;
 

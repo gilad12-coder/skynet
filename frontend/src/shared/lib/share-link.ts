@@ -10,8 +10,8 @@
 
 import { isLocalMode } from "@/shared/lib/runtime-env";
 
-// The Mac app build does not set NEXT_PUBLIC_SITE_URL, and that fallback is not
-// the hosted app, so the sign-in link uses its own origin.
+// The Mac app build sets neither NEXT_PUBLIC_HOSTED_APP_URL nor
+// NEXT_PUBLIC_SITE_URL, so the sign-in link needs its own hosted origin.
 const FALLBACK_HOSTED_APP_URL = "https://skynetml.com";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);

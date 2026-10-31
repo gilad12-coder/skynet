@@ -182,6 +182,63 @@ def test_app_hides_local_routes_from_openapi() -> None:
     assert not set(_LOCAL_PATHS) & schema_paths
 
 
+def _full_app(monkeypatch: pytest.MonkeyPatch, *, local_mode: bool) -> FastAPI:
+    """Build the full app with local mode set before ``create_app`` reads it.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+        local_mode: Whether the app starts in local mode.
+
+    Returns:
+        The assembled application with its stores and worker stubbed.
+    """
+    monkeypatch.setattr(settings, "local_mode", local_mode)
+    with (
+        patch("core.api.app.get_job_store"),
+        patch("core.api.app.get_worker"),
+        patch("core.api.app.DspyService"),
+    ):
+        return create_app(registry=ServiceRegistry())
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:48100", "localhost:48100", "127.0.0.1", "localhost:8000"])
+def test_local_mode_serves_loopback_host_names(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    """The desktop app and local dev reach the API as 127.0.0.1 or localhost.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+        host: The Host header the browser or the web server sends.
+    """
+    client = TestClient(_full_app(monkeypatch, local_mode=True))
+
+    assert client.get("/openapi.json", headers={"host": host}).status_code == 200
+
+
+@pytest.mark.parametrize("host", ["evil.example", "evil.example:48100", "127.0.0.1.evil.example", "[::1]:48100", ""])
+def test_local_mode_refuses_a_foreign_host(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    """A DNS-rebound page keeps its own name in Host, so the API refuses it.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode.
+        host: A Host header that does not name this machine's loopback.
+    """
+    client = TestClient(_full_app(monkeypatch, local_mode=True))
+
+    assert client.get("/openapi.json", headers={"host": host}).status_code == 400
+    assert client.post("/auth/local/session", headers={"host": host}).status_code == 400
+
+
+def test_hosted_mode_does_not_check_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted deployments sit behind their own load balancer host rules.
+
+    Args:
+        monkeypatch: Pytest fixture used to keep local mode off.
+    """
+    client = TestClient(_full_app(monkeypatch, local_mode=False))
+
+    assert client.get("/openapi.json", headers={"host": "api-staging.skynetml.com"}).status_code == 200
+
+
 def _local_submit_client(monkeypatch: pytest.MonkeyPatch, *, local_mode: bool) -> tuple[TestClient, _FakeJobStore]:
     """Build an ``/optimize`` client that runs the real budget step.
 
@@ -282,13 +339,15 @@ def test_host_cli_proposer_is_refused_outside_local_mode(monkeypatch: pytest.Mon
     assert store.created_ids() == []
 
 
-def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("field", ["execution_runtime", "proposer_runtime"])
+def test_docker_runtime_is_refused_outside_local_mode(monkeypatch: pytest.MonkeyPatch, field: str) -> None:
     """A hosted deployment runs only Vercel sandboxes, so a Docker run gets 422.
 
     Args:
         monkeypatch: Pytest fixture used to switch local mode.
+        field: The runtime field that names Docker.
     """
-    payload = SimpleNamespace(execution_runtime="docker")
+    payload = SimpleNamespace(**{field: "docker"})
     monkeypatch.setattr(settings, "local_mode", False)
 
     with pytest.raises(DomainError) as refused:
@@ -400,6 +459,11 @@ def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.Monke
     assert refused.value.code == "models.managed_unavailable_local"
 
 
+# The evaluation check validates the scorer before it runs the gate, so these
+# requests carry a valid scorer to reach the gate.
+_VALID_SCORER = {"kind": "python", "metric_code": "def score(p):\n    return 1\n"}
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -407,6 +471,7 @@ def test_local_execution_check_refuses_a_managed_model(monkeypatch: pytest.Monke
         {"proposer": {"host_cli": "codex"}},
         {"task_model_config": {"name": "anthropic/claude-sonnet-4.6", "token_source": "subscription"}},
         {"execution_runtime": "docker"},
+        {"proposer_runtime": "docker"},
     ],
 )
 def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
@@ -431,14 +496,15 @@ def test_hosted_wizard_check_refuses_local_only_work(monkeypatch: pytest.MonkeyP
             json={
                 "workflow": "anything",
                 "scope": "evaluation",
-                "payload": payload,
+                "payload": {**payload, "scorer": _VALID_SCORER},
                 "execution_budget_id": "draft",
                 "execution_budget_revision": 1,
             },
         )
 
     assert response.status_code == 422
-    code = "local.not_available" if "execution_runtime" in payload else "models.subscription_local_only"
+    runtime_fields = {"execution_runtime", "proposer_runtime"}
+    code = "local.not_available" if runtime_fields & payload.keys() else "models.subscription_local_only"
     assert response.json()["detail"] == DomainError(code).detail
 
 

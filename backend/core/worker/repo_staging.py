@@ -13,9 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..api.model_catalog import agent_model_id, catalog_snapshot, lowest_effort_from_low, strongest_model_id
+from ..billing.operation_pricing import ChargePolicy
 from ..billing.protected_credentials import ProtectedCredentialVault, resolve_repo_secrets
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from ..brand import APP_NAME
+from ..config import settings
 from ..connectors.github_publish import RepoPublishError, open_pull_request, push_version
 from ..connectors.github_repo import RepoFetchError, RepoSnapshot, fetch_snapshot, github_token, resolve_commit
 from ..connectors.saved_secrets import SavedSecretStore
@@ -29,6 +32,14 @@ from ..service_gateway.optimization.blackbox.repo_scorer import RepoScorer
 from ..service_gateway.optimization.blackbox.repo_setup import infer_setup_command
 from ..service_gateway.optimization.blackbox.repo_tree import REPO_SNAPSHOT_KEY, patch_paths, patch_violations
 from ..service_gateway.optimization.blackbox.repo_workspace import RepoWorkspace
+from ..service_gateway.optimization.blackbox.rule_judge import (
+    ILLEGAL_APPROACH_KEY,
+    JUDGE_ANSWER_TOKENS,
+    JUDGE_REASONING_TOKENS,
+    RuleJudge,
+    describe_model_call,
+    run_log_emitter,
+)
 from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -36,8 +47,11 @@ logger = logging.getLogger(__name__)
 PULL_REQUEST_DETAIL = "pull_request"
 ENVIRONMENT_KEY = "environment"
 # Rules the run is held to; a resumed run must arrive at exactly these again.
-_ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_paths", "services")
+_ENFORCED_FIELDS = ("commit", "editable_paths", "protected_paths", "readonly_paths", "services", "rules")
+# Environments recorded before a field existed hold its empty value.
+_ENFORCED_DEFAULTS: dict[str, Any] = {"rules": []}
 _SETUP_ANSWER_TOKENS = 1_024
+_JUDGE_ROLE = "judge"
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,8 @@ class StagedRepository:
     workdir: Path
     scorers: list[RepoScorer] = field(default_factory=list)
     protected_paths: tuple[str, ...] = ()
+    constrained: bool = False
+    rules: tuple[str, ...] = ()
 
     def close_scorers(self) -> None:
         """Close the parent's scoring boxes; the gateway still stops any that fail to close."""
@@ -143,9 +159,15 @@ def stage_repository(
         "commit": commit,
         "readonly_paths": list(snapshot.readonly_paths),
         "secret_names": sorted(secrets),
+        "constrained": environment.constraints is not None,
     }
     return result, StagedRepository(
-        snapshot=snapshot, secrets=secrets, workdir=workdir, protected_paths=environment.protected_paths
+        snapshot=snapshot,
+        secrets=secrets,
+        workdir=workdir,
+        protected_paths=environment.protected_paths,
+        constrained=environment.constraints is not None,
+        rules=environment.rules,
     )
 
 
@@ -161,11 +183,34 @@ def _ensure_unchanged(previous: Any, current: dict[str, Any]) -> None:
     """
     if not isinstance(previous, dict):
         return
-    changed = [name for name in _ENFORCED_FIELDS if previous.get(name) != current.get(name)]
+    changed = [
+        name
+        for name in _ENFORCED_FIELDS
+        if previous.get(name, _ENFORCED_DEFAULTS.get(name)) != current.get(name, _ENFORCED_DEFAULTS.get(name))
+    ]
     if changed:
         raise ConstraintsError(
             f"The run's environment changed since it was recorded ({', '.join(changed)}); clone the run to review it."
         )
+
+
+def _reply_text(body: bytes) -> str | None:
+    """Return the text of a chat completion that finished on its own.
+
+    Args:
+        body: The provider's JSON response body.
+
+    Returns:
+        The reply text, or ``None`` when it is missing or the provider cut
+        it off at the length limit.
+    """
+    choice = json.loads(body)["choices"][0]
+    # A cut-off judge reply can end before its own answer, leaving only a
+    # verdict it quoted from the diff to be read as the answer.
+    if choice.get("finish_reason") == "length":
+        return None
+    content = choice["message"].get("content")
+    return content if isinstance(content, str) else None
 
 
 def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str | None] | None:
@@ -194,7 +239,8 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
             prompt: The question.
 
         Returns:
-            The model's reply, or ``None`` when the provider refused it.
+            The model's reply, or ``None`` when the provider refused it or
+            cut it off at the length limit.
         """
         body = {
             "model": route["model"],
@@ -204,10 +250,125 @@ def _setup_asker(payload: dict[str, Any], gateway: Any) -> Callable[[str], str |
         response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
         if not 200 <= response.status < 300:
             return None
-        content = json.loads(response.body)["choices"][0]["message"].get("content")
-        return content if isinstance(content, str) else None
+        return _reply_text(response.body)
 
     return ask
+
+
+def _judge_limits(model: str) -> dict[str, Any]:
+    """Return the length limit and reasoning control for one judge model's requests.
+
+    Args:
+        model: The judge's route model, which the gateway gives without the
+            ``openrouter/`` prefix that catalog ids keep.
+
+    Returns:
+        ``max_tokens`` with room for reasoning, plus the lowest effort from
+        ``low`` up when the model reasons; only the answer limit for a model
+        the catalog says does not reason. A model missing from the catalog,
+        or one whose reasoning data is unknown, gets the room without an effort.
+    """
+    snapshot = catalog_snapshot()
+    slug = model.removeprefix("openrouter/")
+    entry = (
+        next((m for m in snapshot.models if m.value.removeprefix("openrouter/") == slug), None)
+        if snapshot is not None
+        else None
+    )
+    roomy = {"max_tokens": JUDGE_ANSWER_TOKENS + JUDGE_REASONING_TOKENS}
+    # ``None`` reasoning data means the provider did not say, so the judge
+    # may still reason; only a known non-reasoner gets the tight limit.
+    if entry is None or entry.reasoning_efforts is None:
+        return roomy
+    if not (entry.reasoning_efforts or entry.reasoning_default_enabled or entry.reasoning_mandatory):
+        return {"max_tokens": JUDGE_ANSWER_TOKENS}
+    effort = lowest_effort_from_low(entry)
+    return {**roomy, "reasoning": {"effort": effort}} if effort else roomy
+
+
+def _route_asker(gateway: Any, route: dict[str, str]) -> Callable[[str], str | None]:
+    """Return a metered one-shot chat call through one registered model route.
+
+    Args:
+        gateway: The run's model gateway.
+        route: A route the parent registered.
+
+    Returns:
+        A function sending one prompt and returning the reply text, or
+        ``None`` when the provider refused it.
+    """
+    limits = _judge_limits(route["model"])
+
+    def ask(prompt: str) -> str | None:
+        """Send one prompt through the route.
+
+        Args:
+            prompt: The question.
+
+        Returns:
+            The model's reply, or ``None`` when the provider refused it or
+            cut it off at the length limit.
+        """
+        body = {"model": route["model"], "messages": [{"role": "user", "content": prompt}], **limits}
+        response = gateway.dispatch_guest(route["token"], "/v1/chat/completions", body, {})
+        if not 200 <= response.status < 300:
+            return None
+        return _reply_text(response.body)
+
+    return ask
+
+
+def _rule_judge(staged: StagedRepository, gateway: Any, *, owner_id: str, managed_key: str) -> RuleJudge | None:
+    """Build the judge that enforces the repository's constraints file, when it has one.
+
+    Both judge models run on the managed key through routes only the parent
+    holds, so their cost counts in the run's budget and the guest cannot call them.
+
+    Args:
+        staged: The fetched tree and its constraints.
+        gateway: The run's model gateway.
+        owner_id: Job identity that owns the rule events.
+        managed_key: The platform's OpenRouter key, or ``""`` when not configured.
+
+    Returns:
+        The judge, or ``None`` when the repository has no ``optimize.toml``.
+
+    Raises:
+        ConstraintsError: When the file has plain-language rules but no judge model can be reached.
+    """
+    if not staged.constrained:
+        return None
+    if not staged.rules:
+        return RuleJudge(
+            (), ask_fast=lambda _prompt: None, ask_strong=lambda _prompt: None, emit=run_log_emitter(owner_id)
+        )
+    if not managed_key:
+        raise ConstraintsError(
+            "optimize.toml has [rules], but the judge models that check them are not configured on this server."
+        )
+    policy = ChargePolicy("managed_model")
+    fast = gateway.register(
+        model=agent_model_id(settings.rule_watch_model),
+        api_key=managed_key,
+        role=_JUDGE_ROLE,
+        policy=policy,
+        parent_only=True,
+    )
+    strong = gateway.register(
+        model=strongest_model_id(settings.rule_judge_model),
+        api_key=managed_key,
+        role=_JUDGE_ROLE,
+        policy=policy,
+        parent_only=True,
+    )
+    judge = RuleJudge(
+        staged.rules,
+        ask_fast=_route_asker(gateway, fast),
+        ask_strong=_route_asker(gateway, strong),
+        emit=run_log_emitter(owner_id),
+    )
+    gateway.observe_role("optimization", lambda body: judge.record_action(describe_model_call(body)))
+    return judge
 
 
 def infer_repo_setup(payload: dict[str, Any], staged: StagedRepository, gateway: Any) -> str | None:
@@ -230,7 +391,9 @@ def infer_repo_setup(payload: dict[str, Any], staged: StagedRepository, gateway:
     return command
 
 
-def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway: Any, *, owner_id: str) -> None:
+def bind_repo_scorer(
+    payload: dict[str, Any], staged: StagedRepository, gateway: Any, *, owner_id: str, managed_key: str = ""
+) -> None:
     """Score the run's versions in a parent-owned box and hand the guest only its route.
 
     The box is opened in-process through the gateway's parent-only runtime,
@@ -245,7 +408,13 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
         staged: The fetched tree and decrypted secrets.
         gateway: The run's model gateway, already bound to its sandbox broker.
         owner_id: Job identity naming the box's operations.
+        managed_key: The platform's OpenRouter key, which pays for the rule
+            judges under the run's budget; ``""`` when not configured.
+
+    Raises:
+        ConstraintsError: When the repository's plain-language rules cannot be judged.
     """
+    rule_judge = _rule_judge(staged, gateway, owner_id=owner_id, managed_key=managed_key)
     descriptor = payload["_budget_gateway_descriptor"]
     target = payload["target"]
     scorer_spec = payload["scorer"]
@@ -269,6 +438,7 @@ def bind_repo_scorer(payload: dict[str, Any], staged: StagedRepository, gateway:
         ),
         str(scorer_spec["metric_code"]),
         timeout_seconds=float(scorer_spec["timeout_seconds"]),
+        rule_judge=rule_judge,
     )
     environment = target["repo"].get(ENVIRONMENT_KEY)
     if isinstance(environment, dict):
@@ -298,6 +468,24 @@ def _version_score(result: dict[str, Any], candidate: str) -> float | None:
     return None
 
 
+def _version_illegal(result: dict[str, Any], candidate: str) -> bool:
+    """Return whether the rule judge rejected one version during the run.
+
+    Args:
+        result: Finished black-box result.
+        candidate: The version's patch.
+
+    Returns:
+        ``True`` when the version's recorded side info carries the judge's rejection.
+    """
+    return any(
+        isinstance(version, dict)
+        and version.get("candidate") == candidate
+        and ILLEGAL_APPROACH_KEY in (version.get("side_info") or {})
+        for version in result.get("versions") or []
+    )
+
+
 def improved_patch(result: dict[str, Any]) -> str | None:
     """Return the best version when it beat the starting code, else ``None``.
 
@@ -308,10 +496,13 @@ def improved_patch(result: dict[str, Any]) -> str | None:
         result: Finished black-box result.
 
     Returns:
-        The best version's patch, or ``None`` when it is empty or no better.
+        The best version's patch, or ``None`` when it is empty, no better, or
+        an approach the rule judge rejected.
     """
     best = result.get("best_candidate")
     if not isinstance(best, str) or not best.strip() or result.get("regression_guard_applied"):
+        return None
+    if _version_illegal(result, best):
         return None
     baseline, optimized = result.get("baseline_score"), result.get("best_score")
     if baseline is None or optimized is None:

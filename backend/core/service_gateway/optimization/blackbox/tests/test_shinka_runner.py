@@ -631,6 +631,58 @@ def _install_editor(tmp_path: Path, bundle: Any = None, part_names: list[str] | 
     return runner, selection, ledger
 
 
+def test_a_constrained_agent_edit_outside_the_paths_is_an_illegal_action(tmp_path: Path, monkeypatch: Any) -> None:
+    """Under a constraints file, refuse the agent's version for a file outside the editable paths, and log it.
+
+    The refused version is never written or scored, so it uses no evaluation.
+
+    Args:
+        tmp_path: Run folder.
+        monkeypatch: Replaces the harness session.
+    """
+    chunks, _ = _repo(tmp_path)
+    blocks: list[str] = []
+    bundle = shinka_bundle.RepoBundle.prepare(
+        {"chunks": chunks, "editable_paths": ["src"], "constrained": True},
+        "",
+        tmp_path / "constrained-checkout",
+        on_block=blocks.append,
+    )
+
+    def edit(workspace: Path) -> None:
+        """Change an editable file and a file outside the editable paths.
+
+        Args:
+            workspace: Scratch checkout.
+        """
+        (workspace / "src/util.py").write_text("SCALE = 9\n")
+        (workspace / "app.py").write_text("tampered\n")
+
+    monkeypatch.setattr(shinka_runner.harness_bridge, "run_session", _fake_session(edit, []))
+    runner, _, _ = _install_editor(tmp_path, bundle=bundle)
+    parent = SimpleNamespace(code=shinka_bundle.encode_bundle({}))
+
+    patch, meta, success = asyncio.run(runner._run_patch_async(parent, [], [], 2))
+
+    assert (patch, success) == (None, False)
+    assert meta["last_error_msg"] == repo_tree.ILLEGAL_ACTION_MESSAGE
+    assert len(blocks) == 1
+    assert "app.py" in blocks[0]
+    assert not (tmp_path / "results" / "gen_2").exists()
+
+
+def test_rule_blocker_writes_a_rule_block_run_event(capsys: pytest.CaptureFixture[str]) -> None:
+    """Frame a path-rule block as a structured log line the parent forwards as ``rule.block``."""
+    shinka_runner.rule_blocker(shinka_runner.EvaluatorMailbox("testnonce", 1.0))("Cannot change 'app.py'.")
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("APP_NATIVE_LOG testnonce ")]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split(" ", 2)[2])
+    assert record["event"] == repo_tree.RULE_BLOCK_EVENT
+    assert record["source"] == "engine"
+    assert record["fields"] == {"rule": repo_tree.PATH_RULE, "reason": "Cannot change 'app.py'."}
+
+
 def test_config_turns_the_patch_mix_into_full_rewrites_for_the_agent_editor(tmp_path: Path) -> None:
     """Sample only full-rewrite prompts in agent mode, whatever patch mix the settings hold.
 
