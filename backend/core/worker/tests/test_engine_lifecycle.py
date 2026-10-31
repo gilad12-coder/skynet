@@ -726,6 +726,20 @@ def test_stop_blackbox_sandboxes_swallows_a_failed_sweep(
     assert store.append_log_calls == []
 
 
+def test_stop_blackbox_sandboxes_in_local_mode_skips_the_availability_probe(
+    worker: BackgroundWorker, store: FakeJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow or failed Docker probe never stops the local sweep of a killed job's boxes."""
+    runtime = _SweepRuntime(1)
+    monkeypatch.setattr(engine_module.settings, "local_mode", True)
+    monkeypatch.setattr(engine_module, "sandbox_runtime_from_settings", lambda settings: None)
+    monkeypatch.setattr(engine_module, "docker_runtime_from_settings", lambda settings: runtime)
+
+    worker._stop_blackbox_sandboxes("opt-1")
+
+    assert runtime.swept == ["opt-1"]
+
+
 def test_renewing_lease_touches_activity_while_a_blocking_step_runs(
     worker: BackgroundWorker, monkeypatch: pytest.MonkeyPatch
 ) -> None:
