@@ -185,7 +185,7 @@ for review until the evidence is there.
   side-by-side image.
 - Check that both uploaded videos play and show the expected behavior. State
   that check in the Linear comment and in the PR body.
-- Record the videos last, on the final commit.
+- Record the After video last, on the final commit.
 
 ## 6. Defect repairs and conflicts (standing rule, 2026-10-20)
 

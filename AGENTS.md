@@ -148,7 +148,7 @@ bugs before you push. Follow this order for every PR:
    fix it. Repeat until a review finds nothing new.
 3. Push once. Let CI, the preview build and the automated review gate run.
 4. Run the acceptance checks on the PR preview.
-5. Record the before-and-after videos last, on the final commit.
+5. Record the After video last, on the final commit.
 
 If the review gate or the acceptance checks find a bug, fix all findings
 locally, check them again, and then push them together in one push.
