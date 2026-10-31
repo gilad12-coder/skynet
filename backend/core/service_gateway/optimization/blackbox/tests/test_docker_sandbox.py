@@ -23,6 +23,7 @@ from core.i18n import t
 from core.worker import engine
 from core.worker.vercel_dspy import _require_image_protocol
 
+from .. import docker_sandbox
 from ..docker_egress_proxy import READY_MARKER
 from ..docker_sandbox import (
     DOCKER_JOB_LABEL,
@@ -64,6 +65,10 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as log:
     log.write(json.dumps(args) + "\\n")
+if args[0] == "exec":
+    names = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == "-e" and "=" not in args[i + 1]]
+    with open(os.environ["FAKE_DOCKER_LOG"] + ".env", "a") as log:
+        log.write(json.dumps({{name: os.environ.get(name) for name in names}}) + "\\n")
 command = " ".join(args[:2]) if args[:1] in (["image"], ["network"]) else args[0]
 if command in os.environ.get("FAKE_DOCKER_FAIL", "").split(","):
     sys.stderr.write("Error response from daemon: refused\\n")
@@ -101,6 +106,14 @@ def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     if values.get("local_mode"):
         monkeypatch.setenv("API_HOST", "127.0.0.1")
     return Settings(_env_file=None, **values)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_probe_cache() -> Iterator[None]:
+    """Start and end each test with no cached Docker availability answer."""
+    docker_sandbox._probe_cache.clear()
+    yield
+    docker_sandbox._probe_cache.clear()
 
 
 @pytest.fixture
@@ -423,10 +436,24 @@ def test_session_commands_address_the_container(fake_docker: tuple[str, Path]) -
     run, read, remove = _calls(log)
     assert result.ok
     timeout = ["timeout", "--signal=KILL", "5s"]
-    assert run == ["exec", "-w", "/workspace", "-e", "K=V", "box1", *timeout, "bash", "-lc", "echo hi"]
+    assert run == ["exec", "-w", "/workspace", "-e", "K", "box1", *timeout, "bash", "-lc", "echo hi"]
+    assert json.loads(Path(f"{log}.env").read_text().splitlines()[0]) == {"K": "V"}
     assert read[:4] == ["exec", "-w", "/workspace", "box1"]
     assert read[-1] == "out/a.txt"
     assert remove == ["rm", "-f", "box1"]
+
+
+def test_session_commands_keep_secret_values_off_the_command_line(fake_docker: tuple[str, Path]) -> None:
+    """Pass run secrets to ``docker exec`` by name, so ``ps`` never shows their values."""
+    binary, log = fake_docker
+    session = DockerSandboxSession(binary, "box1", env={}, owner=None)
+
+    session.run("true", env={"SCORER_API_KEY": "sk-secret-value", "HOME": "/workspace"}, timeout_seconds=5)
+
+    (run,) = _calls(log)
+    assert not any("sk-secret-value" in arg for arg in run)
+    assert _flag_values(run, "-e") == ["SCORER_API_KEY", "HOME=/workspace"]
+    assert json.loads(Path(f"{log}.env").read_text()) == {"SCORER_API_KEY": "sk-secret-value"}
 
 
 @pytest.mark.parametrize("path", ["/etc/passwd", "../escape", ""])
@@ -462,6 +489,21 @@ def test_unavailable_reason_explains_a_stopped_daemon_or_missing_image(
     monkeypatch.setenv("FAKE_DOCKER_FAIL", fail)
     settings = _settings(monkeypatch, docker_bin=binary, local_sandbox_image=image)
     assert docker_sandbox_unavailable_reason(settings) == t(key)
+
+
+def test_unavailable_reason_reuses_a_recent_answer(
+    fake_docker: tuple[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Probe the daemon once for questions asked close together, then again after the answer ages."""
+    binary, log = fake_docker
+    settings = _settings(monkeypatch, docker_bin=binary, local_sandbox_image=_IMAGE)
+
+    assert [docker_sandbox_unavailable_reason(settings) for _ in range(4)] == [None] * 4
+    assert [call[0] for call in _calls(log)].count("info") == 1
+
+    monkeypatch.setattr(docker_sandbox, "_PROBE_CACHE_SECONDS", 0.0)
+    docker_sandbox_unavailable_reason(settings)
+    assert [call[0] for call in _calls(log)].count("info") == 2
 
 
 def test_local_mode_settings_build_docker_and_never_vercel(

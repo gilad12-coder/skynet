@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import math
+import os
 import posixpath
 import shutil
 import subprocess
@@ -53,6 +54,14 @@ _TMPFS_MOUNTS = (
 _PIDS_LIMIT = 1024
 _CLI_TIMEOUT_SECONDS = 60.0
 _PROBE_TIMEOUT_SECONDS = 10.0
+# One catalog request asks for availability several times; a short-lived answer
+# keeps a stalled daemon from costing one probe timeout per question.
+_PROBE_CACHE_SECONDS = 5.0
+_probe_cache: dict[tuple[str, str], tuple[float, str | None]] = {}
+_probe_cache_lock = threading.Lock()
+# The Docker CLI reads these itself, so a guest value for them stays on the
+# command line rather than changing how the CLI runs.
+_CLI_ENV_NAMES = frozenset({"HOME", "PATH", "TMPDIR", "XDG_CONFIG_HOME"})
 _MISSING_FILE_EXIT = 3
 _READ_FILE_SCRIPT = f'test -f "$1" || exit {_MISSING_FILE_EXIT}; exec cat -- "$1"'
 # The proxy sidecar's own way out; the setup box never joins it.
@@ -183,10 +192,10 @@ def _label_args(labels: Mapping[str, str]) -> list[str]:
 
 
 def _env_args(env: Mapping[str, str]) -> list[str]:
-    """Turn an environment mapping into Docker ``-e`` arguments.
+    """Turn a box's start environment into Docker ``-e`` arguments.
 
     Args:
-        env: Non-secret guest environment; secrets never enter a guest.
+        env: The box's non-secret start environment (home, temp dir, proxy).
 
     Returns:
         Alternating ``-e`` flags and ``NAME=value`` items.
@@ -195,6 +204,30 @@ def _env_args(env: Mapping[str, str]) -> list[str]:
     for name, value in env.items():
         args += ["-e", f"{name}={value}"]
     return args
+
+
+def _exec_env(env: Mapping[str, str]) -> tuple[list[str], dict[str, str]]:
+    """Split a command's environment into ``docker exec`` flags and the CLI's own environment.
+
+    A command's environment can hold run secrets (repository scorer keys, the
+    gateway key), and every local user can read a process's arguments. So a
+    value travels in the CLI's environment and the flag carries only its name.
+
+    Args:
+        env: The command's environment.
+
+    Returns:
+        The ``-e`` flags, and the environment to start the Docker CLI with.
+    """
+    args: list[str] = []
+    passed: dict[str, str] = {}
+    for name, value in env.items():
+        if name in _CLI_ENV_NAMES or name.startswith("DOCKER_"):
+            args += ["-e", f"{name}={value}"]
+        else:
+            args += ["-e", name]
+            passed[name] = value
+    return args, {**os.environ, **passed}
 
 
 class DockerSandboxSession:
@@ -295,10 +328,17 @@ class DockerSandboxSession:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = ["timeout", "--signal=KILL", f"{seconds}s", *inner]
             deadline = seconds + sandbox_contract.KILL_GRACE_SECONDS
-        argv = [self._docker_bin, "exec", "-w", WORKSPACE_DIR, *_env_args(env or {}), self.container, *inner]
+        env_args, cli_env = _exec_env(env or {})
+        argv = [self._docker_bin, "exec", "-w", WORKSPACE_DIR, *env_args, self.container, *inner]
         try:
             process = subprocess.Popen(
-                argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1
+                argv,
+                env=cli_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="replace",
+                bufsize=1,
             )
         except FileNotFoundError as error:
             raise ServiceError(t("sandbox.docker_unavailable")) from error
@@ -696,6 +736,29 @@ def remove_idle_sandbox_networks(docker_bin: str) -> int:
 
 def docker_sandbox_unavailable_reason(settings: Settings) -> str | None:
     """Explain why local Docker sandboxes cannot start, or return ``None``.
+
+    The answer is reused for a few seconds per Docker CLI and image.
+
+    Args:
+        settings: The backend settings with the Docker CLI and local image id.
+
+    Returns:
+        A user-facing reason, or ``None`` when the daemon runs and the image exists.
+    """
+    key = (settings.docker_bin, settings.local_sandbox_image or "")
+    now = time.monotonic()
+    with _probe_cache_lock:
+        cached = _probe_cache.get(key)
+    if cached is not None and now - cached[0] < _PROBE_CACHE_SECONDS:
+        return cached[1]
+    reason = _probe_docker(settings)
+    with _probe_cache_lock:
+        _probe_cache[key] = (time.monotonic(), reason)
+    return reason
+
+
+def _probe_docker(settings: Settings) -> str | None:
+    """Check the Docker CLI, the daemon and the local image once.
 
     Args:
         settings: The backend settings with the Docker CLI and local image id.
