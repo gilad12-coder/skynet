@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isRefusedLocalHost } from "./local-host.ts";
+import { isRefusedLocalHost, proxyRoute } from "./proxy-route.ts";
 
 const desktop = { APP_LOCAL_MODE: "1", AUTH_URL: "http://127.0.0.1:48120" };
 
@@ -37,4 +37,21 @@ test("local dev without AUTH_URL serves the loopback names on any port", () => {
   assert.equal(isRefusedLocalHost("localhost:3000", dev), false);
   assert.equal(isRefusedLocalHost("127.0.0.1:3002", dev), false);
   assert.equal(isRefusedLocalHost("evil.example:3000", dev), true);
+});
+
+test("local mode refuses a foreign host before the login gate decides", () => {
+  for (const path of ["/api/auth/session", "/api/auth/callback/local", "/login", "/datasets"]) {
+    assert.equal(proxyRoute("evil.example:48120", path, desktop), "refuse", path);
+  }
+});
+
+test("local mode keeps the normal routing for its own host", () => {
+  assert.equal(proxyRoute("127.0.0.1:48120", "/api/auth/session", desktop), "pass");
+  assert.equal(proxyRoute("localhost:48120", "/login", desktop), "pass");
+  assert.equal(proxyRoute("127.0.0.1:48120", "/datasets", desktop), "auth");
+});
+
+test("hosted builds route by path only", () => {
+  assert.equal(proxyRoute("staging.skynetml.com", "/api/auth/session", {}), "pass");
+  assert.equal(proxyRoute("staging.skynetml.com", "/datasets", {}), "auth");
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { AUTH_GATED_PATTERN } from "./shared/lib/proxy-route.ts";
 
 // API routes that must stay behind login. Every other ``src/app/api`` route is
 // hit by logged-out visitors and must be excluded from the proxy matcher, or
@@ -9,8 +10,9 @@ import test from "node:test";
 const GATED_API = new Set<string>(["account-link"]);
 
 test("every API route is either excluded from the auth matcher or explicitly gated", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "src", "proxy.ts"), "utf8");
-  const excluded = new Set([...source.matchAll(/api\/([\w-]+)(?=[|)])/g)].map((m) => m[1]));
+  const excluded = new Set(
+    [...AUTH_GATED_PATTERN.matchAll(/api\/([\w-]+)(?=[|)])/g)].map((m) => m[1]),
+  );
   const routes = fs
     .readdirSync(path.join(process.cwd(), "src", "app", "api"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -22,10 +24,7 @@ test("every API route is either excluded from the auth matcher or explicitly gat
 // Signed-out pages (login, terms, privacy, public runs) load ``public/`` assets
 // such as the bundled fonts. A gated asset is answered with the /login HTML.
 test("every public/ asset is excluded from the auth matcher", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "src", "proxy.ts"), "utf8");
-  const pattern = source.match(/AUTH_GATED_PATTERN =\s*"(.*)";/)?.[1];
-  assert.ok(pattern, "matcher pattern not found in proxy.ts");
-  const matcher = new RegExp(`^${pattern.replaceAll("\\\\", "\\")}$`);
+  const matcher = new RegExp(`^${AUTH_GATED_PATTERN}$`);
   const publicDir = path.join(process.cwd(), "public");
   const assets = fs
     .readdirSync(publicDir, { recursive: true, withFileTypes: true })

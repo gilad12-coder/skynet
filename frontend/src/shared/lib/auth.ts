@@ -537,6 +537,6 @@ export const { handlers, auth } = NextAuth({
   },
   // Auth.js refuses every request when trustHost is false; it has no mode that
   // compares Host with AUTH_URL. Local mode refuses a foreign Host in the proxy
-  // (shared/lib/local-host.ts), and AUTH_URL fixes the URLs Auth.js builds.
+  // (shared/lib/proxy-route.ts), and AUTH_URL fixes the URLs Auth.js builds.
   trustHost: true,
 });
