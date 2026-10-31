@@ -747,6 +747,13 @@ test("with the agent engine load failed, the request sends what the empty menu's
   // A Local pick still runs on its CLI.
   const local = "subscription/claude/anthropic/claude-opus-4.1";
   assert.equal(await resolveLocalAgentModel(local, "claude", deps()), local);
+  // A pick that is neither shows as itself on the empty menu's chip: it runs on a
+  // CLI that serves that model, and is sent unchanged otherwise.
+  assert.equal(
+    await resolveLocalAgentModel("anthropic/claude-opus-4.1", "claude", deps()),
+    "subscription/claude/anthropic/claude-opus-4.1",
+  );
+  assert.equal(await resolveLocalAgentModel("openai/gpt-9", "claude", deps()), "openai/gpt-9");
   // So does a pick for another CLI than the role's pin or the default one.
   const codex = "subscription/codex/openai/gpt-5";
   assert.equal(await resolveLocalAgentModel(codex, null, deps()), codex);
@@ -768,6 +775,14 @@ test("the composer clears only a pick that a non-empty menu omits, and keeps a L
   });
   assert.deepEqual(menuPickState(local, keyRows, keyRows, true), { unlisted: true, stale: false });
   assert.deepEqual(menuPickState(local, keyRows, keyRows, false), { unlisted: true, stale: true });
+  // The OpenRouter engine runs no other pick, so the chip shows none while its rows load.
+  for (const rows of [[], undefined]) {
+    assert.deepEqual(menuPickState(local, rows, rows, true), { unlisted: true, stale: false });
+    assert.deepEqual(menuPickState("anthropic/claude-sonnet-4.5", rows, rows, true), {
+      unlisted: true,
+      stale: false,
+    });
+  }
   assert.deepEqual(menuPickState(null, keyRows, keyRows, false), { unlisted: false, stale: false });
   assert.deepEqual(menuPickState(keyRows[0]!.value, keyRows, keyRows, false), {
     unlisted: false,

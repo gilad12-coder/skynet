@@ -358,7 +358,8 @@ function resolveOpenRouterEngineModel(
  * saved OpenRouter pick, which is sent unchanged, or shows the default label
  * with no pick, and nothing is sent. The menu is also empty while the engine
  * load failed (`engineLoaded` false), so the same rule applies: a Local pick
- * resolves on its own CLI, which the chip names. A role pinned to a CLI with
+ * resolves on its own CLI, which the chip names, and any other pick runs on the
+ * CLI only as that same model, else it is sent unchanged. A role pinned to a CLI with
  * no pick still runs on that CLI: the backend would fill no pick from its own
  * engine and drop the pin.
  */
@@ -381,8 +382,16 @@ export async function resolveLocalAgentModel(
   if (model === RETIRED_AUTO_MODEL) model = null;
   if (deps.engineLoaded === false) {
     if (model ? isOpenRouterModelId(model) : !cli) return model;
-    const pickCli = parseSubscriptionModelId(model)?.cli ?? cli;
-    return resolveAgentModel(model, pickCli, deps.loadStatus, deps.peekStatus);
+    const local = parseSubscriptionModelId(model);
+    const resolved = await resolveAgentModel(
+      model,
+      local?.cli ?? cli,
+      deps.loadStatus,
+      deps.peekStatus,
+    );
+    // The chip names any other pick as is, so it runs on the CLI only as that model.
+    if (model && !local && parseSubscriptionModelId(resolved)?.slug !== model) return model;
+    return resolved;
   }
   let engine = deps.engine ?? null;
   if (engine === OPENROUTER_ENGINE) {
@@ -581,7 +590,8 @@ export function hiddenLocalPick(
  * Whether the composer menu lists a saved pick, and whether the pick is stale
  * (the menu clears it). Only a non-empty list judges a pick, so a list that
  * still loads or failed never clears one. A Local pick the OpenRouter engine
- * menu hides is not stale.
+ * menu hides is not stale. The OpenRouter engine sends no pick but an
+ * OpenRouter one, so its chip lists no other pick, even with no rows yet.
  */
 export function menuPickState(
   pick: string | null,
@@ -589,9 +599,10 @@ export function menuPickState(
   models: CatalogModel[] | undefined,
   openRouterEngine: boolean,
 ): { unlisted: boolean; stale: boolean } {
-  const unlisted =
+  const omitted =
     !!pick && !!listed && listed.length > 0 && !listed.some((model) => model.value === pick);
-  return { unlisted, stale: unlisted && !hiddenLocalPick(pick, models, openRouterEngine) };
+  const unlisted = omitted || (openRouterEngine && !!pick && !isOpenRouterModelId(pick));
+  return { unlisted, stale: omitted && !hiddenLocalPick(pick, models, openRouterEngine) };
 }
 
 /**
