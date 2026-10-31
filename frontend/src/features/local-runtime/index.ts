@@ -10,6 +10,7 @@ export {
   useAgentEngine,
   loadAgentEngine,
   peekAgentEngine,
+  peekAgentEngineStored,
   saveAgentEngine,
 } from "./hooks/use-agent-engine";
 export {

@@ -4312,6 +4312,7 @@
   "settings.agent_local.role.interview": "Интервью по задаче",
   "settings.agent_local.role.tagger": "Интервью по разметке",
   "settings.agent_engine.label": "Движок агентов",
+  "settings.agent_engine.automatic": "Автоматически ({engine})",
   "settings.agent_engine.description": "Агенты работают на управляемых моделях через OpenRouter",
   "settings.agent_engine.description_local": "Агенты без собственного CLI работают на этом CLI, а их меню моделей показывают только его модели",
   "settings.agent_engine.openrouter": "OpenRouter",

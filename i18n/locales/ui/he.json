@@ -4315,6 +4315,7 @@
   "settings.agent_local.role.interview": "ראיון המשימה",
   "settings.agent_local.role.tagger": "ראיון התיוג",
   "settings.agent_engine.label": "מנוע הסוכנים",
+  "settings.agent_engine.automatic": "אוטומטי ({engine})",
   "settings.agent_engine.description": "הסוכנים רצים על מודלים מנוהלים דרך OpenRouter",
   "settings.agent_engine.description_local": "סוכנים בלי CLI משלהם רצים על ה-CLI הזה, ותפריטי המודלים שלהם מציגים רק את המודלים שלו",
   "settings.agent_engine.openrouter": "OpenRouter",

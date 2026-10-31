@@ -1232,6 +1232,8 @@ export function updateModelPrivacy(settings: ModelPrivacySettings) {
 /** The caller's agent engine; see `AgentEngine` in the local-runtime feature. */
 export interface AgentEnginePreference {
   engine: string | null;
+  /** False (or missing) when `engine` is the backend's automatic pick. */
+  stored?: boolean;
 }
 
 /** Fetch which engine runs the caller's agent turns that pick no model. */

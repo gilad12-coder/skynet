@@ -4312,6 +4312,7 @@
   "settings.agent_local.role.interview": "タスクインタビュー",
   "settings.agent_local.role.tagger": "タグ付けインタビュー",
   "settings.agent_engine.label": "エージェントエンジン",
+  "settings.agent_engine.automatic": "自動 ({engine})",
   "settings.agent_engine.description": "エージェントは OpenRouter 経由の管理モデルで動作します",
   "settings.agent_engine.description_local": "専用の CLI がないエージェントはこの CLI で動作し、モデルメニューにはこの CLI のモデルだけが表示されます",
   "settings.agent_engine.openrouter": "OpenRouter",
