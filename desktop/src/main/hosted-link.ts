@@ -20,6 +20,7 @@ export function mintSessionToken(secret: string, email: string, now = Date.now()
 }
 
 export type StartResult = { ok: true; url: string } | { ok: false; reason: "unavailable" | "failed"; detail: string };
+export type FinishResult = { ok: true } | { ok: false; detail: string };
 
 /** Talks to the local backend's /local/hosted-link routes as the local user. */
 export class HostedLinkClient {
@@ -28,11 +29,15 @@ export class HostedLinkClient {
     private readonly secret: string,
   ) {}
 
-  private async call(method: "GET" | "POST", route: string, headers: Record<string, string> = {}): Promise<Response> {
+  private async call(method: "GET" | "POST", route: string, body?: unknown): Promise<Response> {
+    const headers: Record<string, string> = { authorization: `Bearer ${mintSessionToken(this.secret, LOCAL_USER_EMAIL)}` };
+    if (body !== undefined) headers["content-type"] = "application/json";
     return fetch(`${this.apiOrigin}${route}`, {
       method,
-      headers: { authorization: `Bearer ${mintSessionToken(this.secret, LOCAL_USER_EMAIL)}`, ...headers },
-      signal: AbortSignal.timeout(10_000),
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      // The finish call waits for the hosted code exchange (15 s timeout in the backend).
+      signal: AbortSignal.timeout(20_000),
     });
   }
 
@@ -54,12 +59,21 @@ export class HostedLinkClient {
   }
 
   async start(): Promise<StartResult> {
-    const res = await this.call("POST", "/local/hosted-link/start");
+    // The consent page opens in the default browser and hands the result back through skynet://.
+    const res = await this.call("POST", "/local/hosted-link/start", { app_callback: true });
     const body = (await res.json().catch(() => ({}))) as { authorize_url?: string; code?: string; detail?: string };
     if (res.ok && body.authorize_url?.startsWith("https://")) return { ok: true, url: body.authorize_url };
     if (res.status === 503 || body.code === "hosted_link.not_configured") {
       return { ok: false, reason: "unavailable", detail: body.detail ?? "" };
     }
     return { ok: false, reason: "failed", detail: body.detail ?? `HTTP ${res.status}` };
+  }
+
+  /** Trade the code and state from the skynet:// URL for the link (the local API checks the state). */
+  async finish(code: string, state: string): Promise<FinishResult> {
+    const res = await this.call("POST", "/local/hosted-link/finish", { code, state });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    return { ok: false, detail: body.detail ?? `HTTP ${res.status}` };
   }
 }

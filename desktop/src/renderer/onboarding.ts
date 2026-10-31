@@ -33,7 +33,7 @@ interface State {
   limitMessage?: string;
   step?: string;
   error?: string;
-  signIn?: "waiting" | "unavailable" | "failed";
+  signIn?: "waiting" | "unavailable" | "failed" | "declined";
 }
 
 interface Bridge {
@@ -185,12 +185,13 @@ function panelBody(state: State): Node[] {
       break;
     case "sign_in": {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
-      // While waiting, the window grows and shows skynetml.com as soon as it loads.
-      if (state.signIn === "waiting") break;
-      if (state.signIn === "unavailable") {
+      if (state.signIn === "waiting") {
+        // The browser shows the link page; the window shows only the timeline.
+      } else if (state.signIn === "unavailable") {
         nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
         nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
       } else {
+        if (state.signIn === "declined") nodes.push(el("p", { className: "lead", text: t("sign_in.declined") }));
         if (state.signIn === "failed") nodes.push(el("pre", { className: "detail detail-error", text: state.error || t("sign_in.failed"), dir: "auto" }));
         nodes.push(actions(button(t("action.retry"), "primary", () => void bridge.signIn()), skip));
       }
@@ -207,7 +208,8 @@ function panelBody(state: State): Node[] {
 }
 
 const PROGRESS: Kind[] = ["checking", "starting", "ready"];
-const isProgress = (state: State) => PROGRESS.includes(state.kind) || (state.kind === "sign_in" && state.signIn === "waiting");
+const isProgress = (state: State) =>
+  PROGRESS.includes(state.kind) || (state.kind === "sign_in" && state.signIn === "waiting");
 
 function render(state: State): void {
   document.body.dataset.state = state.kind;

@@ -298,10 +298,20 @@ def test_database_holds_only_hashes(harness: Any) -> None:
         "http://127.0.0.1:54321/other",
         "http://evil.example@127.0.0.1:54321/local/hosted-link/callback",
         "https://skynet.app/local/hosted-link/callback",
+        "skynet://link/callback/",
+        "skynet://link/callback?x=1",
+        "skynet://link/callback#x",
+        "skynet://link/other",
+        "skynet://evil/callback",
+        "skynet://evil@link/callback",
+        "skynet:link/callback",
+        "skynet:///link/callback",
+        "SKYNET://link/callback",
+        "skynet-evil://link/callback",
     ],
 )
 def test_authorize_rejects_non_loopback_redirects(harness: Any, redirect_uri: str) -> None:
-    """Only the exact RFC 8252 loopback callback form is accepted."""
+    """Only the exact app URL or the exact RFC 8252 loopback callback form is accepted."""
     client, _, _ = harness
     response, _ = _authorize(client, redirect_uri=redirect_uri)
     assert response.status_code == 400
@@ -315,6 +325,18 @@ def test_authorize_accepts_ipv6_loopback(harness: Any) -> None:
     response, verifier = _authorize(client, redirect_uri=redirect)
     assert response.status_code == 200
     assert _exchange(client, response.json()["code"], verifier, redirect_uri=redirect).status_code == 200
+
+
+def test_authorize_accepts_the_app_url(harness: Any) -> None:
+    """The Mac app's ``skynet://`` callback is accepted and must match at exchange."""
+    client, _, _ = harness
+    response, verifier = _authorize(client, redirect_uri="skynet://link/callback")
+    assert response.status_code == 200
+    assert _exchange(client, response.json()["code"], verifier, redirect_uri=REDIRECT).status_code == 400
+
+    response, verifier = _authorize(client, redirect_uri="skynet://link/callback")
+    exchanged = _exchange(client, response.json()["code"], verifier, redirect_uri="skynet://link/callback")
+    assert exchanged.status_code == 200
 
 
 @pytest.mark.parametrize("scope", ["", "identity admin", "identity  settings", "everything"])

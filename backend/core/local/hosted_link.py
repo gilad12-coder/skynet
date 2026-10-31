@@ -38,6 +38,9 @@ RELAY_AUTH_METHOD = "oauth_relay"
 CLIENT_ID = "skynet-desktop"
 SCOPES = "identity balance:read sync models connectors web"
 CALLBACK_PATH = "/local/hosted-link/callback"
+# The Mac app opens the consent page in the default browser, which hands the
+# result back through this URL; the app then calls ``finish_link`` (SKY-228).
+APP_CALLBACK_URI = "skynet://link/callback"
 STATE_TTL_SECONDS = 600
 REFRESH_MARGIN = timedelta(minutes=5)
 _TIMEOUT = httpx.Timeout(15.0)
@@ -127,12 +130,14 @@ def _challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
 
 
-def start_link(username: str, *, device_name: str) -> str:
+def start_link(username: str, *, device_name: str, app_callback: bool = False) -> str:
     """Begin a link and return the hosted consent URL to open in the browser.
 
     Args:
         username: The local user who will own the link.
         device_name: The Mac name shown on the hosted consent screen.
+        app_callback: Send the result to the Mac app's ``skynet://`` URL
+            instead of the loopback callback of this API.
 
     Returns:
         The hosted ``/desktop/link`` URL with PKCE and an encrypted state.
@@ -143,7 +148,7 @@ def start_link(username: str, *, device_name: str) -> str:
     if not settings.hosted_api_url or not settings.hosted_app_url:
         raise DomainError("hosted_link.not_configured", status=503)
     verifier = secrets.token_urlsafe(64)
-    redirect_uri = callback_uri()
+    redirect_uri = APP_CALLBACK_URI if app_callback else callback_uri()
     payload = {"t": _STATE_PURPOSE, "v": verifier, "n": secrets.token_urlsafe(16), "r": redirect_uri, "u": username}
     state = vault_cipher().encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
     query = urlencode(

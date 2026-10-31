@@ -125,6 +125,13 @@ function devAppBinary() {
     }
     fs.writeFileSync(stamp, version);
   }
+  // skynet:// (SKY-228): macOS routes the scheme only to bundles that declare it,
+  // and Launch Services must see the edited Info.plist. Runs on every start so
+  // an existing dev copy gets it too.
+  const plist = path.join(app, "Contents/Info.plist");
+  const urlTypes = JSON.stringify([{ CFBundleURLName: "Skynet", CFBundleURLSchemes: ["skynet"] }]);
+  execFileSync("plutil", ["-replace", "CFBundleURLTypes", "-json", urlTypes, plist]);
+  execFileSync("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", app]);
   return path.join(app, "Contents/MacOS/Electron");
 }
 
