@@ -44,8 +44,13 @@ build() {
     echo "skip: $url:$tag exists"
     return
   fi
-  docker buildx build --platform linux/arm64 --provenance=false \
-    -t "$url:$tag" --push "$@" "$context"
+  if ! docker buildx build --platform linux/arm64 --provenance=false \
+    -t "$url:$tag" --push "$@" "$context"; then
+    # The staging and production runs can build the same backend and litellm
+    # tag at once; the second push then fails on the immutable tag.
+    exists "skynet/$name" "$tag" || die "push failed: $url:$tag"
+    echo "skip: $url:$tag was pushed by another run"
+  fi
 }
 
 build backend "$sha" "$repo_root/backend" --build-arg "GIT_SHA=$sha"

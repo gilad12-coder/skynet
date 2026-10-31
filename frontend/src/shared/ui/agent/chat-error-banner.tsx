@@ -9,7 +9,10 @@ interface ChatErrorBannerProps {
   message: React.ReactNode;
   retryLabel?: string;
   onRetry?: () => void;
-  /** A compact action shown on the same row, after the message (e.g. "Add funds"). */
+  /**
+   * A compact action (e.g. "Add funds"), shown on its own row under the
+   * message. The message then stays on one line.
+   */
   action?: React.ReactNode;
   className?: string;
 }
@@ -34,13 +37,20 @@ export function ChatErrorBanner({
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#9B2C1F]/10 text-[#9B2C1F] dark:text-[#ffa595]">
           <XCircle className="size-3.5" aria-hidden="true" />
         </span>
+        {/* Beside the message, the action left too little room and the short
+            balance message wrapped. With the action on its own row, the
+            message fits one line at the 480px panel minimum; narrower panes
+            truncate it and the title keeps the full text. */}
         <p
-          className="max-h-32 min-w-0 flex-1 overflow-y-auto break-words text-xs leading-[1.45] text-pretty text-[#7A1E13] dark:text-[#ffb2a0]"
+          className={cn(
+            "min-w-0 flex-1 text-xs leading-[1.45] text-[#7A1E13] dark:text-[#ffb2a0]",
+            action ? "truncate" : "max-h-32 overflow-y-auto break-words text-pretty",
+          )}
           dir="auto"
+          title={action && typeof message === "string" ? message : undefined}
         >
           {message}
         </p>
-        {action && <div className="shrink-0">{action}</div>}
         {onRetry && retryLabel && (
           <RetryIconButton
             label={retryLabel}
@@ -49,6 +59,7 @@ export function ChatErrorBanner({
           />
         )}
       </div>
+      {action && <div className="mt-2 ps-10">{action}</div>}
     </div>
   );
 }
