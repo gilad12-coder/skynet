@@ -33,7 +33,7 @@ interface State {
   limitMessage?: string;
   step?: string;
   error?: string;
-  signIn?: "idle" | "waiting" | "unavailable" | "failed";
+  signIn?: "waiting" | "unavailable" | "failed";
 }
 
 interface Bridge {
@@ -192,7 +192,7 @@ function panelBody(state: State): Node[] {
         nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
       } else {
         if (state.signIn === "failed") nodes.push(el("pre", { className: "detail detail-error", text: state.error || t("sign_in.failed"), dir: "auto" }));
-        nodes.push(actions(button(t(state.signIn === "failed" ? "action.retry" : "sign_in.action"), "primary", () => void bridge.signIn()), skip));
+        nodes.push(actions(button(t("action.retry"), "primary", () => void bridge.signIn()), skip));
       }
       break;
     }

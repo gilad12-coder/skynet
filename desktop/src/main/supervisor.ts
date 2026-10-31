@@ -23,7 +23,7 @@ export type OnboardingKind =
   | "error";
 
 /** Where the hosted-account sign-in is, while kind is "sign_in". */
-export type SignInPhase = "idle" | "waiting" | "unavailable" | "failed";
+export type SignInPhase = "waiting" | "unavailable" | "failed";
 
 export interface OnboardingState {
   kind: OnboardingKind;

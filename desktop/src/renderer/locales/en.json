@@ -25,7 +25,6 @@
   "rate_capped.continue": "Open Skynet anyway",
   "starting.title": "Starting Skynet",
   "sign_in.title": "Sign in to Skynet",
-  "sign_in.action": "Sign in to Skynet",
   "sign_in.skip": "Use without signing in",
   "sign_in.unavailable": "Sign-in is not available in this build.",
   "sign_in.failed": "The sign-in could not start.",
