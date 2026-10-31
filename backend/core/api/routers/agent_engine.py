@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
 from ...storage.models import AgentEnginePreferenceModel
-from ..agent_engine import OPENROUTER_ENGINE, AgentEngine, effective_agent_engine
+from ..agent_engine import OPENROUTER_ENGINE, AgentEngine, effective_agent_engine, stored_agent_engine
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 
@@ -31,6 +31,11 @@ class AgentEnginePreference(BaseModel):
         description=_ENGINE_DESCRIPTION
         + " Null in the Mac app when no engine was chosen, no subscription CLI is ready and no verified"
         + " OpenRouter key is saved."
+    )
+    stored: bool = Field(
+        description="True when the caller saved this engine in the Mac app. False when the engine is the"
+        " automatic pick (the first ready subscription CLI, else a verified OpenRouter key), and always"
+        " false in hosted mode, which stores no engine."
     )
 
 
@@ -65,9 +70,12 @@ def create_agent_engine_router(*, job_store) -> APIRouter:
             user: Authenticated caller whose setting is requested.
 
         Returns:
-            The effective agent engine.
+            The effective agent engine, and whether the caller saved it.
         """
-        return AgentEnginePreference(engine=effective_agent_engine(job_store, user.username))
+        return AgentEnginePreference(
+            engine=effective_agent_engine(job_store, user.username),
+            stored=stored_agent_engine(job_store, user.username) is not None,
+        )
 
     @router.put(
         "/account/agent-engine",
@@ -94,7 +102,7 @@ def create_agent_engine_router(*, job_store) -> APIRouter:
             if body.engine != OPENROUTER_ENGINE:
                 raise DomainError("models.subscription_local_only", status=422)
             # Hosted turns always run on OpenRouter, so there is nothing to store.
-            return AgentEnginePreference(engine=OPENROUTER_ENGINE)
+            return AgentEnginePreference(engine=OPENROUTER_ENGINE, stored=False)
         if body.engine == OPENROUTER_ENGINE and not ProviderKeyVault(engine=job_store.engine).has_verified_connection(
             user.username, OPENROUTER_ENGINE
         ):
@@ -107,6 +115,6 @@ def create_agent_engine_router(*, job_store) -> APIRouter:
             row.engine = body.engine
             row.updated_at = datetime.now(UTC)
             session.commit()
-        return AgentEnginePreference(engine=body.engine)
+        return AgentEnginePreference(engine=body.engine, stored=True)
 
     return router

@@ -782,7 +782,8 @@ def test_process_job_blackbox_without_budget_requires_vercel(
         worker._process_job("opt-bb", 0)
 
     assert store._jobs["opt-bb"]["status"] == "failed"
-    assert "Vercel" in store._jobs["opt-bb"]["message"]
+    assert "cloud sandbox" in store._jobs["opt-bb"]["message"]
+    assert "Vercel" not in store._jobs["opt-bb"]["message"]
     validate_bb.assert_not_called()
 
 
