@@ -438,6 +438,18 @@
     "hosted_link.linked_unknown_account": "your account",
     "local.not_available": "This feature is available only in the {term.appName} Mac app.",
     "models.subscription_local_only": "Subscription models and host CLI proposers run only in the {term.appName} Mac app.",
-    "models.managed_unavailable_local": "The Mac app cannot use managed models. Pick a subscription model or your own provider key."
+    "models.managed_unavailable_local": "The Mac app cannot use managed models. Pick a subscription model or your own provider key.",
+    "sync.import_local_only_disabled": "Import runs only on the hosted {term.appName} account, not in the Mac app.",
+    "sync.unsupported_schema": "This export file uses an unsupported format ({schema}).",
+    "sync.invalid_bundle": "This export file is damaged or incomplete.",
+    "sync.bundle_too_large": "The export file is larger than {max_mb} MB.",
+    "sync.export_not_finished": "Only a finished run can be exported. This run is '{status}'.",
+    "sync.unsupported_run_type": "Runs of type '{optimization_type}' cannot be exported.",
+    "serve.subscription_model_hosted": "This run used a local subscription model. Serve it in the {term.appName} Mac app, or start a new optimization with a managed model or your own provider key.",
+    "budget.insufficient": "The available budget or account balance cannot cover the next operation.",
+    "budget.pending": "Usage is still being settled. Wait for work in progress to finish before continuing.",
+    "budget.conflict": "This budget changed in another tab. Refresh its balance before updating it.",
+    "budget.not_found": "This budget is unavailable for your account. Start a new setup budget.",
+    "budget.invalid": "Enter a spending limit that covers usage already spent or reserved."
   }
 }

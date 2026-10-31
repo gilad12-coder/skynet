@@ -438,6 +438,18 @@
     "hosted_link.linked_unknown_account": "你的账号",
     "local.not_available": "此功能仅在 {term.appName} Mac 应用中可用。",
     "models.subscription_local_only": "订阅模型和本机 CLI 提议器仅在 {term.appName} Mac 应用中运行。",
-    "models.managed_unavailable_local": "Mac 应用无法使用托管模型。请选择订阅模型或您自己的提供商密钥。"
+    "models.managed_unavailable_local": "Mac 应用无法使用托管模型。请选择订阅模型或您自己的提供商密钥。",
+    "sync.import_local_only_disabled": "导入仅在托管的 {term.appName} 账户中可用，Mac 应用中不可用。",
+    "sync.unsupported_schema": "此导出文件使用了不受支持的格式（{schema}）。",
+    "sync.invalid_bundle": "此导出文件已损坏或不完整。",
+    "sync.bundle_too_large": "导出文件超过 {max_mb} MB。",
+    "sync.export_not_finished": "只能导出已完成的运行。此运行状态为 '{status}'。",
+    "sync.unsupported_run_type": "无法导出 '{optimization_type}' 类型的运行。",
+    "serve.subscription_model_hosted": "此运行使用了本地订阅模型。请在 {term.appName} Mac 应用中提供服务，或使用托管模型或你自己的提供商密钥开始新的优化。",
+    "budget.insufficient": "可用预算或账户余额不足以支付下一项操作。",
+    "budget.pending": "使用量仍在结算中。请等待正在进行的工作完成后再继续。",
+    "budget.conflict": "此预算已在其他标签页中更改。更新前请刷新余额。",
+    "budget.not_found": "此预算对您的账户不可用。请创建新的设置预算。",
+    "budget.invalid": "请输入能够覆盖已花费或已预留用量的支出上限。"
   }
 }

@@ -438,6 +438,18 @@
     "hosted_link.linked_unknown_account": "Ihr Konto",
     "local.not_available": "Diese Funktion gibt es nur in der {term.appName}-App für Mac.",
     "models.subscription_local_only": "Abo-Modelle und lokale CLI-Proposer laufen nur in der {term.appName}-App für Mac.",
-    "models.managed_unavailable_local": "Die Mac-App kann keine verwalteten Modelle nutzen. Wählen Sie ein Abo-Modell oder Ihren eigenen Anbieterschlüssel."
+    "models.managed_unavailable_local": "Die Mac-App kann keine verwalteten Modelle nutzen. Wählen Sie ein Abo-Modell oder Ihren eigenen Anbieterschlüssel.",
+    "sync.import_local_only_disabled": "Der Import funktioniert nur im gehosteten {term.appName}-Konto, nicht in der Mac-App.",
+    "sync.unsupported_schema": "Diese Exportdatei verwendet ein nicht unterstütztes Format ({schema}).",
+    "sync.invalid_bundle": "Diese Exportdatei ist beschädigt oder unvollständig.",
+    "sync.bundle_too_large": "Die Exportdatei ist größer als {max_mb} MB.",
+    "sync.export_not_finished": "Nur ein abgeschlossener Lauf kann exportiert werden. Dieser Lauf ist '{status}'.",
+    "sync.unsupported_run_type": "Läufe vom Typ '{optimization_type}' können nicht exportiert werden.",
+    "serve.subscription_model_hosted": "Dieser Lauf hat ein lokales Abo-Modell verwendet. Stelle ihn in der {term.appName}-Mac-App bereit oder starte eine neue Optimierung mit einem verwalteten Modell oder deinem eigenen Anbieterschlüssel.",
+    "budget.insufficient": "Das verfügbare Budget oder Kontoguthaben reicht für den nächsten Vorgang nicht aus.",
+    "budget.pending": "Die Nutzung wird noch abgerechnet. Warte, bis laufende Vorgänge abgeschlossen sind, bevor du fortfährst.",
+    "budget.conflict": "Dieses Budget wurde in einem anderen Tab geändert. Lade den Kontostand neu, bevor du es aktualisierst.",
+    "budget.not_found": "Dieses Budget ist für dein Konto nicht verfügbar. Erstelle ein neues Einrichtungsbudget.",
+    "budget.invalid": "Gib ein Ausgabenlimit ein, das bereits verbrauchte oder reservierte Beträge abdeckt."
   }
 }

@@ -438,6 +438,18 @@
     "hosted_link.linked_unknown_account": "あなたのアカウント",
     "local.not_available": "この機能は {term.appName} の Mac アプリでのみ使用できます。",
     "models.subscription_local_only": "サブスクリプションモデルとホスト CLI プロポーザーは {term.appName} の Mac アプリでのみ実行されます。",
-    "models.managed_unavailable_local": "Mac アプリではマネージドモデルを使用できません。サブスクリプションモデルか、ご自身のプロバイダーキーを選択してください。"
+    "models.managed_unavailable_local": "Mac アプリではマネージドモデルを使用できません。サブスクリプションモデルか、ご自身のプロバイダーキーを選択してください。",
+    "sync.import_local_only_disabled": "インポートはホスト版の {term.appName} アカウントでのみ動作し、Mac アプリでは動作しません。",
+    "sync.unsupported_schema": "このエクスポートファイルは未対応の形式 ({schema}) です。",
+    "sync.invalid_bundle": "このエクスポートファイルは破損しているか不完全です。",
+    "sync.bundle_too_large": "エクスポートファイルが {max_mb} MB を超えています。",
+    "sync.export_not_finished": "エクスポートできるのは完了した実行のみです。この実行は '{status}' です。",
+    "sync.unsupported_run_type": "'{optimization_type}' タイプの実行はエクスポートできません。",
+    "serve.subscription_model_hosted": "この実行はローカルのサブスクリプションモデルを使用しました。{term.appName} の Mac アプリで提供するか、マネージドモデルまたは自分のプロバイダーキーで新しい最適化を開始してください。",
+    "budget.insufficient": "利用可能な予算またはアカウント残高では、次の処理の費用を賄えません。",
+    "budget.pending": "使用量を精算中です。進行中の処理が終わるまでお待ちください。",
+    "budget.conflict": "別のタブで予算が変更されました。変更前に残高を更新してください。",
+    "budget.not_found": "この予算はお使いのアカウントでは利用できません。新しいセットアップ予算を作成してください。",
+    "budget.invalid": "すでに使用または予約された分を賄える支出上限を入力してください。"
   }
 }
