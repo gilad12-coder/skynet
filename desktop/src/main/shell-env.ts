@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import os from "node:os";
 
 /**
@@ -82,18 +82,33 @@ export type ExecFileLike = (
 
 const defaultExec: ExecFileLike = (file, args, options) =>
   new Promise((resolve, reject) => {
-    // An interactive shell ignores SIGTERM, so the timeout must SIGKILL; and an
-    // rc file that reads stdin must get EOF, not wait on an open pipe forever.
-    const child = execFile(
-      file,
-      args,
-      { ...options, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024, encoding: "utf8" },
-      (err, stdout) => {
-        if (err) reject(err);
-        else resolve({ stdout });
-      },
-    );
-    child.stdin?.end();
+    // Its own process group keeps an interactive shell off any terminal, and lets
+    // the timeout kill what the rc files started. It ignores SIGTERM, so SIGKILL;
+    // stdin is /dev/null, so an rc file that reads it gets EOF.
+    const child = spawn(file, args, { env: options.env, detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    const timer = setTimeout(() => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      child.stdout.destroy();
+      reject(new Error("login shell timed out"));
+    }, options.timeout);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout });
+      else reject(new Error(`login shell exited with ${code}`));
+    });
   });
 
 /**
@@ -107,17 +122,20 @@ export async function loginShellPath(
   const shell = opts.shell || process.env.SHELL || "/bin/zsh";
   const home = opts.home || os.homedir();
   const exec = opts.exec ?? defaultExec;
-  try {
-    // Interactive too: zsh reads .zshrc only in interactive shells, and nvm's
-    // installer puts its PATH lines there.
-    const { stdout } = await exec(shell, ["-ilc", "env -0"], {
-      timeout: opts.timeoutMs ?? LOGIN_SHELL_TIMEOUT_MS,
-      env: { ...process.env, HOME: home, SHELL: shell, TERM: "dumb" },
-    });
-    const parsed = parseEnvNul(stdout).PATH;
-    if (parsed && parsed.trim()) return { path: parsed, fromShell: true };
-  } catch {
-    // Timeout, missing shell or a broken rc file: the fallback PATH still finds Homebrew installs.
+  // Interactive first: zsh reads .zshrc only in interactive shells, and nvm's
+  // installer puts its PATH lines there. A .zshrc that execs tmux or another
+  // shell prints no env, so a plain login shell is the next try.
+  for (const flags of ["-ilc", "-lc"]) {
+    try {
+      const { stdout } = await exec(shell, [flags, "env -0"], {
+        timeout: opts.timeoutMs ?? LOGIN_SHELL_TIMEOUT_MS,
+        env: { ...process.env, HOME: home, SHELL: shell, TERM: "dumb" },
+      });
+      const parsed = parseEnvNul(stdout).PATH;
+      if (parsed && parsed.trim()) return { path: parsed, fromShell: true };
+    } catch {
+      // Timeout, missing shell or a broken rc file: the fallback PATH still finds Homebrew installs.
+    }
   }
   return { path: fallbackPath(home), fromShell: false };
 }

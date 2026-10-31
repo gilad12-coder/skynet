@@ -59,10 +59,20 @@ describe("loginShellPath", () => {
       if (zdotdir !== undefined) process.env.ZDOTDIR = zdotdir;
     });
 
-    function homeWithZshrc(zshrc: string): string {
+    function homeWithZshrc(zshrc: string, zprofile = ""): string {
       const home = fs.mkdtempSync(path.join(os.tmpdir(), "skynet-shell-env-"));
       fs.writeFileSync(path.join(home, ".zshrc"), zshrc);
+      fs.writeFileSync(path.join(home, ".zprofile"), zprofile);
       return home;
+    }
+
+    function alive(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     it("reads .zshrc, where nvm puts its PATH, even when it reads stdin", async () => {
@@ -72,12 +82,40 @@ describe("loginShellPath", () => {
       expect(result.path.split(":")).toContain("/from/zshrc");
     });
 
-    it("falls back when .zshrc outlasts the timeout", async () => {
-      const home = homeWithZshrc("sleep 30\n");
+    it("reads a plain login shell when .zshrc outlasts the timeout", async () => {
+      const home = homeWithZshrc("sleep 30\n", "export PATH=/from/zprofile:$PATH\n");
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });
+      expect(result.fromShell).toBe(true);
+      expect(result.path.split(":")).toContain("/from/zprofile");
+    });
+
+    it("falls back when the login files outlast the timeout", async () => {
+      const home = homeWithZshrc("", "sleep 30\n");
       const started = Date.now();
       const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });
       expect(result.fromShell).toBe(false);
       expect(Date.now() - started).toBeLessThan(5_000);
+    });
+
+    it("stops what .zshrc started when the timeout kills the shell", async () => {
+      const home = homeWithZshrc('sleep 30 &\necho $! > "$HOME/child"\nsleep 30\n');
+      await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });
+      const child = Number(fs.readFileSync(path.join(home, "child"), "utf8").trim());
+      await expect.poll(() => alive(child), { timeout: 2_000 }).toBe(false);
+    });
+
+    it("runs the shell in its own process group, so it never takes over a terminal", async () => {
+      const home = homeWithZshrc('echo "$$ $(ps -o pgid= -p $$)" > "$HOME/pgid"\n');
+      await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
+      const [pid, pgid] = fs.readFileSync(path.join(home, "pgid"), "utf8").trim().split(/\s+/);
+      expect(pgid).toBe(pid);
+    });
+
+    it("falls back to a login shell when .zshrc replaces the shell", async () => {
+      const home = homeWithZshrc("exec /bin/sh -c true\n", "export PATH=/from/zprofile:$PATH\n");
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
+      expect(result.fromShell).toBe(true);
+      expect(result.path.split(":")).toContain("/from/zprofile");
     });
   });
 });
