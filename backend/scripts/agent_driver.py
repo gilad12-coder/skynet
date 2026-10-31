@@ -5,6 +5,8 @@ POSTs turns to the running server's ``POST /optimizations/generalist-agent``
 SSE endpoint, and threads ``conversation_id`` + ``chat_history`` +
 ``wizard_state`` across a multi-turn conversation. Each driven turn is
 persisted to ``agent_messages`` — those rows are the training trajectories.
+The driver first creates the identity's ``users`` row, because the backend
+refuses a session for an account that does not exist.
 
 ``wizard_state`` is threaded from the DB (the last turn's persisted
 ``wizard_state_after``) so the agent progresses through the wizard naturally.
@@ -44,6 +46,30 @@ def _secret() -> str:
     return value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
 
 
+def ensure_account(name: str) -> None:
+    """Create the ``users`` row for ``name`` if it does not exist.
+
+    The backend refuses a session JWT whose account row does not exist
+    (SKY-150), so the forged identity needs one. The row matches
+    ``load_tests.lib.db.ensure_test_accounts``: an empty password hash that can
+    never verify, flagged internal so product metrics skip it.
+
+    Args:
+        name: The username/email the driver mints a token for.
+    """
+    engine = create_engine(_DB_URL)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users "
+                "(email, name, password_hash, created_at, email_verified, email_2fa_enabled, is_internal) "
+                "VALUES (:name, :name, '', NOW(), TRUE, FALSE, TRUE) "
+                "ON CONFLICT (email) DO NOTHING"
+            ),
+            {"name": name},
+        )
+
+
 def mint_token(name: str, *, ttl_seconds: int = 3600) -> str:
     """Forge a backend session JWT for ``name``.
 
@@ -52,7 +78,8 @@ def mint_token(name: str, *, ttl_seconds: int = 3600) -> str:
         ttl_seconds: Token lifetime.
 
     Returns:
-        A signed HS256 JWT accepted by ``get_authenticated_user``.
+        A signed HS256 JWT that ``get_authenticated_user`` accepts once
+        :func:`ensure_account` created the account row.
     """
     now = int(time.time())
     header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8"))
@@ -215,6 +242,10 @@ def drive_conversation(
     Returns:
         ``{conversation_id, turns, tools_recorded}`` summarising the run.
     """
+    # get_authenticated_user strips and lowercases the JWT identity before the
+    # users lookup, so the seeded row and the token must use the same form.
+    user = user.strip().lower()
+    ensure_account(user)
     token = mint_token(user)
     conv_id: str | None = None
     chat_history: list[dict[str, str]] = []

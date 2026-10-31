@@ -37,7 +37,7 @@ def test_meta_harness_forwards_the_managed_runtime_unchanged(tmp_path: Path, mon
 def test_meta_harness_requires_a_native_runtime(tmp_path: Path) -> None:
     """Reject missing native execution instead of falling back to a custom prompt loop."""
     lm = MagicMock()
-    with pytest.raises(ServiceError, match="managed Vercel sandbox"):
+    with pytest.raises(ServiceError, match="managed cloud sandbox"):
         MetaHarnessEngine().run(
             Task(seed_candidate="seed"),
             EvalServer(vowel_scorer, max_evals=5),

@@ -195,6 +195,7 @@
     "agent.status.tool_start": "エージェントがツールを呼び出しています…",
     "agent.turn.not_found": "エージェントのターンが見つからないか、期限切れです。",
     "analytics.other_bucket": "その他",
+    "auth.account_not_found": "このアカウントはもう存在しません。もう一度サインインしてください。",
     "auth.invalid_token": "認証トークンが無効または期限切れです。",
     "auth.missing_token": "認証トークンが必要です。",
     "auth.not_configured": "バックエンド認証が構成されていません。",

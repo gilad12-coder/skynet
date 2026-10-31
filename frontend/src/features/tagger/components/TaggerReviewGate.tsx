@@ -100,7 +100,11 @@ export function TaggerReviewGate({
         <CardContent className="flex flex-col gap-3">
           {assistError && (
             <p role="alert" className="text-xs text-destructive">
-              {msg("tagger.assist.gate.error")}
+              {msg(
+                assistError === "local_key"
+                  ? "tagger.assist.local_key_needed"
+                  : "tagger.assist.gate.error",
+              )}
             </p>
           )}
 

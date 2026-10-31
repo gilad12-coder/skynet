@@ -398,7 +398,12 @@ def test_repository_tree_and_rules_reach_every_repository_engine(
     session = FakeSession()
     session.candidate = ""
     ctx = _context(tmp_path, FakeRuntime(session))
-    repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
+    repo = {
+        "chunks": [str(chunk) for chunk in chunks],
+        "editable_paths": ["src"],
+        "readonly_paths": ["vendor/lib"],
+        "constrained": True,
+    }
     ctx.native_options = replace(ctx.native_options, repo=repo)
     task = Task("", cases=[{"id": "a"}, {"id": "b"}])
     run_native_engine(engine_id, task, EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
@@ -410,6 +415,7 @@ def test_repository_tree_and_rules_reach_every_repository_engine(
         "chunks": ["repo-tree/tree.0000.b64", "repo-tree/tree.0001.b64"],
         "editable_paths": ["src"],
         "readonly_paths": ["vendor/lib"],
+        "constrained": True,
     }
     assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
 
@@ -1102,6 +1108,7 @@ def test_shinka_ships_a_repository_checkout_with_its_bundle_helpers(
         "chunks": ["repo-tree/tree.0000.b64"],
         "editable_paths": ["src"],
         "readonly_paths": ["vendor"],
+        "constrained": False,
     }
     assert {"shinka_runner.py", "shinka_bundle.py", "repo_tree.py"} <= set(session.files)
 
@@ -1524,3 +1531,11 @@ def test_the_child_names_the_candidate_and_case_of_each_request(tmp_path: Path) 
     server.evaluate("seed", list(server._examples.values())[1])
     server.evaluate("unregistered", None)
     assert labels == [(0, "1"), (None, None)]
+
+
+def test_unsupported_runtime_reason_names_the_cloud_sandbox_not_its_vendor() -> None:
+    """Keep the sandbox vendor out of the reason a user sees for an unsupported runtime."""
+    reason = native_runtime.native_runtime_unavailable_reason("docker", SimpleNamespace())
+
+    assert reason == "Production optimizations run in the managed cloud sandbox."
+    assert "vercel" not in reason.lower()

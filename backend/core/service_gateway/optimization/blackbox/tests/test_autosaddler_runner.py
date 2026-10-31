@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -436,3 +437,61 @@ def test_a_blank_seed_is_a_valid_starting_component() -> None:
     assert autosaddler_runner.baseline_components("") == {autosaddler_runner._SINGLE_COMPONENT: ""}
     with pytest.raises(ValueError, match="seed candidate"):
         autosaddler_runner.baseline_components(None)
+
+
+def _verify_readme_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, on_block: Any) -> tuple[bool, str, str]:
+    """Run the repository verifier on a checkout whose agent changed ``README.md``.
+
+    Args:
+        tmp_path: Scratch folder.
+        monkeypatch: Replaces upstream's verdict type, absent from this interpreter.
+        on_block: The verifier's block callback, or ``None``.
+
+    Returns:
+        The verdict's acceptance, check name and reason.
+    """
+    monkeypatch.setattr(autosaddler_runner, "GitVerificationVerdict", lambda *fields: fields)
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src" / "app.py").write_text("x = 1\n")
+    (source / "README.md").write_text("hi\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(tmp_path / f"tree.{index}.b64")
+        chunks[-1].write_text(chunk)
+    checkout = repo_tree.unpack_tree(chunks, tmp_path / "checkout")
+    base = subprocess.run(
+        ["git", "rev-parse", repo_tree.BASE_REF], cwd=checkout, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (checkout / "README.md").write_text("changed\n")
+    verify = autosaddler_runner.repo_verifier(base, ["src"], [], on_block=on_block)
+    accepted, check, reason, _ = verify(SimpleNamespace(workspace=checkout, changed_paths=["README.md"]))
+    return accepted, check, reason
+
+
+def test_a_constrained_repository_block_gives_the_illegal_action_message_and_a_run_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Under a constraints file, a path block reads the fixed message and reaches the run log as ``rule.block``."""
+    blocker = autosaddler_runner.rule_blocker(autosaddler_runner.EvaluatorMailbox("testnonce", 1.0))
+    accepted, check, reason = _verify_readme_edit(tmp_path, monkeypatch, blocker)
+    assert (accepted, check, reason) == (False, "repository-rules", repo_tree.ILLEGAL_ACTION_MESSAGE)
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("APP_NATIVE_LOG testnonce ")]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split(" ", 2)[2])
+    assert record["event"] == repo_tree.RULE_BLOCK_EVENT
+    assert record["source"] == "engine"
+    assert record["fields"]["rule"] == repo_tree.PATH_RULE
+    assert "README.md" in record["fields"]["reason"]
+
+
+def test_an_unconstrained_repository_block_keeps_naming_the_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without a constraints file, the verifier names the refused path and logs no rule event."""
+    accepted, check, reason = _verify_readme_edit(tmp_path, monkeypatch, None)
+    assert (accepted, check) == (False, "repository-rules")
+    assert "README.md" in reason
+    assert "APP_NATIVE_LOG" not in capsys.readouterr().out

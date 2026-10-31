@@ -1,5 +1,4 @@
 // Skynet helpers for reel flows (see ./SKILL.md). Each takes the reel `page`.
-import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -7,41 +6,53 @@ export const TICKETS_CSV = fileURLToPath(new URL("./fixtures/tickets.csv", impor
 
 const WORKBENCH = ".monaco-workbench";
 
-export const previewUrl = (pr) => `https://frontend-skynet-pr-${pr}.up.railway.app`;
+export const STAGING_URL = "https://staging.skynetml.com";
 
-/** The backend that serves the frontend `origin`: Railway preview or local dev. */
+/** The PR preview frontend (SKY-164). Its API is `https://api-pr-<n>.staging.skynetml.com`. */
+export const previewUrl = (pr) => `https://pr-${pr}.staging.skynetml.com`;
+
+/** The backend that serves the frontend `origin`: a PR preview, AWS staging or local dev. */
 function apiFor(origin) {
-  return origin.includes("frontend-skynet-") ? origin.replace("frontend-skynet-", "backend-skynet-") : "http://localhost:8000";
+  const host = new URL(origin).hostname;
+  if (/^pr-\d+\.staging\.skynetml\.com$/.test(host)) return `https://api-${host}`;
+  return origin === STAGING_URL ? "https://api-staging.skynetml.com" : "http://localhost:8000";
+}
+
+async function servedCommit(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    return res.ok ? ((await res.json()).commit ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wait until the PR preview serves `sha` on both the backend (`/health`) and
+ * the frontend (`/api/version`). Without `sha`, wait until both answer.
+ * Returns `{ backend, frontend }` (commit SHAs). Throws after `timeoutMs`.
+ */
+export async function waitForPreview(pr, { sha, timeoutMs = 20 * 60_000 } = {}) {
+  const app = previewUrl(pr);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const served = {
+      backend: await servedCommit(`${apiFor(app)}/health`),
+      frontend: await servedCommit(`${app}/api/version`),
+    };
+    const ok = sha ? served.backend === sha && served.frontend === sha : served.backend && served.frontend;
+    if (ok) return served;
+    if (Date.now() > deadline) {
+      throw new Error(`preview ${app} is not ready: ${JSON.stringify(served)}. See the PR's preview comment and run.`);
+    }
+    await new Promise((r) => setTimeout(r, 15_000));
+  }
 }
 
 function origin(page) {
   const url = page.url();
-  if (!url.startsWith("http")) throw new Error("navigate to the app first, e.g. startReel({ url: previewUrl(715) + '/login' })");
+  if (!url.startsWith("http")) throw new Error("navigate to the app first, e.g. startReel({ url: STAGING_URL + '/login' })");
   return new URL(url).origin;
-}
-
-/**
- * Wait until the latest backend, worker and frontend deploys of PR `pr` are SUCCESS.
- * Read-only (railway deployment list). Returns { service: commitSha }.
- */
-export async function waitForPreview(pr, { timeoutMin = 20 } = {}) {
-  const until = Date.now() + timeoutMin * 60_000;
-  for (;;) {
-    const shas = {};
-    const pending = [];
-    for (const svc of ["backend", "worker", "frontend"]) {
-      const out = execFileSync("railway", ["deployment", "list", "-e", `skynet-pr-${pr}`, "-s", svc, "--json", "--limit", "1"]);
-      const [latest] = JSON.parse(String(out));
-      if (!latest) throw new Error(`no ${svc} deployment in skynet-pr-${pr}`);
-      if (["FAILED", "CRASHED"].includes(latest.status)) throw new Error(`${svc} deploy ${latest.status}`);
-      if (latest.status !== "SUCCESS") pending.push(`${svc}=${latest.status}`);
-      shas[svc] = latest.meta?.commitHash;
-    }
-    if (!pending.length) return shas;
-    if (Date.now() > until) throw new Error(`preview not ready: ${pending.join(" ")}`);
-    console.log(`waiting for preview: ${pending.join(" ")}`);
-    await new Promise((r) => setTimeout(r, 30_000));
-  }
 }
 
 /** The commit the frontend was built from, read from the login page's "Source code" link. */
@@ -52,8 +63,9 @@ export async function deployedSha(page) {
 }
 
 /**
- * Register a throwaway account (recNNN-<random>@example.com, $10 starting credit),
+ * Register a throwaway account (recNNN-<random>@example.com, $0 credit),
  * sign the page in, set English and skip the experience intake. Never buy credit.
+ * Local dev with SMTP unset only: staging requires an email code, so sign-in fails.
  * Returns { email, password }.
  */
 export async function signup(page, { tag = "rec" } = {}) {

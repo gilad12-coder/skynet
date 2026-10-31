@@ -33,6 +33,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
@@ -54,7 +55,7 @@ from ..billing import (
 )
 from ..billing.data_policy import configure_data_policy
 from ..brand import APP_NAME
-from ..config import settings
+from ..config import LOCAL_MODE_LOOPBACK_HOSTS, settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
@@ -107,6 +108,7 @@ from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
+from .routers.desktop_link import create_desktop_link_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.experience import create_experience_router
@@ -1039,7 +1041,7 @@ def create_app(
             A :class:`JSONResponse` with media type ``application/problem+json``.
         """
         body: dict[str, Any] = {
-            "type": f"https://errors.skynet.app/{code}" if code else "about:blank",
+            "type": f"https://api.skynetml.com/errors/{code}" if code else "about:blank",
             "title": title
             or (
                 code.replace("_", " ").replace(".", " ").capitalize()
@@ -1243,13 +1245,18 @@ def create_app(
             status=HEALTH_STATUS_OK,
             registered_assets=snapshot,
             vector_search_enabled=getattr(job_store, "vector_search_enabled", None),
-            commit=os.getenv("RAILWAY_GIT_COMMIT_SHA") or None,
+            commit=settings.app_git_sha or None,
         )
 
     app.add_middleware(CacheControlMiddleware)
     # Outermost so it compresses the fully-assembled response body. Skips
     # text/event-stream to keep SSE streams flushing incrementally.
     app.add_middleware(SSEFriendlyGZipMiddleware, minimum_size=1024)
+    if settings.local_mode:
+        # DNS rebinding: a web page can point its own hostname at 127.0.0.1 and
+        # call this API from the browser, but its Host header keeps naming that
+        # page's domain. Added last, so it wraps GZip and refuses the request first.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(LOCAL_MODE_LOOPBACK_HOSTS))
 
     @app.get(
         "/queue",
@@ -1326,6 +1333,7 @@ def create_app(
     app.include_router(create_generalist_agent_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_desktop_link_router(job_store=job_store), tags=["Desktop link"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_runtimes_router(), tags=["Wizard"])

@@ -163,8 +163,19 @@ export interface PredictStreamHandlers {
   onPrediction: (id: string, prediction: AssistPrediction) => void;
   /** Terminal event: the authoritative merged map (covers missed events). */
   onDone: (predictions: Record<string, AssistPrediction>) => void;
-  onError: () => void;
+  /** The round failed; `code` is the server's error code when it refused the request. */
+  onError: (code?: string) => void;
   signal?: AbortSignal;
+}
+
+/** The `code` of a refused request's JSON error body, or undefined. */
+async function refusalCode(res: Response): Promise<string | undefined> {
+  try {
+    const body = (await res.json()) as { code?: unknown } | null;
+    return typeof body?.code === "string" ? body.code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -194,7 +205,8 @@ export async function streamPredictions(
     return;
   }
   if (!res.ok || !res.body) {
-    handlers.onError();
+    // The model is checked before the stream opens, so a refusal is a plain JSON error.
+    handlers.onError(res.ok ? undefined : await refusalCode(res));
     return;
   }
   let finished = false;

@@ -20,6 +20,16 @@ import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness"
 import { tip } from "@/shared/lib/tooltips";
 import { cn } from "@/shared/lib/utils";
 import { defaultOpen, useExperienceLevel } from "@/features/experience";
+import {
+  HostAgentPermissionField,
+  hostCliChoices,
+  hostCliPatch,
+  hostCliValue,
+  isCliProvider,
+} from "@/features/local-runtime";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { msg } from "@/shared/lib/messages";
+import { Terminal } from "@/shared/ui/icons";
 
 import { emptyModelConfig } from "../../constants";
 import { useWizardV2 } from "../../hooks/use-unified-wizard";
@@ -269,6 +279,42 @@ export function ModelsSection({ kind, choice }: { kind: ArtifactKind; choice: Op
               value={proposer.max_tool_calls}
               onChange={(value) => updateProposer({ max_tool_calls: value })}
             />
+            {isLocalMode() && (
+              <Field label={msg("host_agent.cli.label")} htmlFor="v2-proposer-host-cli">
+                <Select
+                  value={hostCliValue(proposer.host_cli)}
+                  onValueChange={(value) =>
+                    updateProposer(hostCliPatch(value, proposer.host_permission))
+                  }
+                >
+                  <SelectTrigger id="v2-proposer-host-cli" className={cn("w-full", TOUCH_FIELD)}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {hostCliChoices().map(({ value, label }) =>
+                      value === "off" ? (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ) : (
+                        <SelectItem key={value} value={value}>
+                          <span className="flex items-center gap-2">
+                            <Terminal className="size-4" aria-hidden="true" />
+                            <span>{label}</span>
+                          </span>
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            {isLocalMode() && isCliProvider(proposer.host_cli) && (
+              <HostAgentPermissionField
+                value={proposer.host_permission}
+                onChange={(next) => updateProposer({ host_permission: next })}
+              />
+            )}
           </div>
         </Disclosure>
       )}

@@ -60,6 +60,71 @@ class ApiTokenModel(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class DesktopLinkModel(Base):
+    """One Mac app linked to a hosted account (SKY-124).
+
+    A link owns its desktop tokens. ``scopes`` is space-separated, in the
+    OAuth ``scope`` form. Removing a link sets ``revoked_at``; it is never
+    reactivated, so a re-link always makes a new row.
+    """
+
+    __tablename__ = "desktop_links"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DesktopTokenModel(Base):
+    """A desktop access or refresh token, stored only as its SHA-256 hash.
+
+    ``parent_hash`` names the refresh token that minted this token, so a
+    retried refresh can replace the pair it minted. ``used_at`` marks a
+    refresh token as rotated; a later use of it is the theft signal.
+    ``superseded_at`` marks a refresh token whose pair a retry replaced; any
+    use of it is also the theft signal.
+    """
+
+    __tablename__ = "desktop_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    link_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    parent_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DesktopLinkCodeModel(Base):
+    """A single-use link code from the hosted consent page, stored as its hash."""
+
+    __tablename__ = "desktop_link_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    code_challenge: Mapped[str] = mapped_column(String(64), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(String(255), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    link_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class AgentApprovalModel(Base):
     """Cross-replica handoff for a generalist-agent tool approval decision.
 
@@ -925,9 +990,7 @@ class TelemetryEventModel(Base):
 
     One row per captured interaction (a page view, a labelled click, a named
     flow event). The browser SDK batches events to ``POST /telemetry/events``
-    and they land here, queryable beside the rest of the product data. An
-    operator may additionally export accepted events to PostHog with a one-way
-    account hash and without creating a person profile.
+    and they land here, queryable beside the rest of the product data.
 
     Identity is split deliberately. ``username`` is the *server-trusted* caller
     derived from the request's auth token (never from the request body), so it

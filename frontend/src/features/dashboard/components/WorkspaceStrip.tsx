@@ -8,6 +8,7 @@ import { formatCentsUsd, useBalance } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { Skeleton } from "@/shared/ui/skeleton";
@@ -252,6 +253,8 @@ export function WorkspaceStrip() {
       </WorkspaceSection>,
     );
   }
+  // The local build runs on the user's CLI subscriptions; there is nothing to fund.
+  const showFundHint = !isLocalMode();
   if (walletLoading) {
     sections.push(<BalanceSectionSkeleton key="balance" />);
   } else {
@@ -271,7 +274,7 @@ export function WorkspaceStrip() {
           </span>
         </div>
         {wallet.usage.length === 0 ? (
-          <EmptyHint text={msg("dashboard.workspace.balance.cta")} />
+          <>{showFundHint && <EmptyHint text={msg("dashboard.workspace.balance.cta")} />}</>
         ) : (
           wallet.usage.slice(0, 3).map((entry) => (
             <div key={entry.id} className="flex items-baseline justify-between gap-3 text-xs">

@@ -752,7 +752,7 @@ class BackgroundWorker:
             )
             if not protected_execution and not allow_unprotected:
                 raise ValueError(
-                    "This stored job predates protected execution. Submit it again to create a funded Vercel run."
+                    "This stored job predates protected execution. Submit it again to start a funded run in the cloud sandbox."
                 )
             bill_legacy_usage = not protected_execution
             service = self._get_service()
@@ -934,7 +934,17 @@ class BackgroundWorker:
                             inferred_setup = infer_repo_setup(payload_dict, staged_repository, budget_gateway)
                             if inferred_setup is not None:
                                 self._record_setup_command(optimization_id, inferred_setup)
-                            bind_repo_scorer(payload_dict, staged_repository, budget_gateway, owner_id=optimization_id)
+                            bind_repo_scorer(
+                                payload_dict,
+                                staged_repository,
+                                budget_gateway,
+                                owner_id=optimization_id,
+                                managed_key=(
+                                    settings.openrouter_api_key.get_secret_value()
+                                    if settings.openrouter_api_key is not None
+                                    else ""
+                                ),
+                            )
                             recorded = self._record_repo_environment(
                                 optimization_id, payload_dict["target"]["repo"][ENVIRONMENT_KEY]
                             )

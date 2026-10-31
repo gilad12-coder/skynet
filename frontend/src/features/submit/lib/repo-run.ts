@@ -11,7 +11,7 @@ import type { WizardV2State } from "./wizard-v2";
 
 export interface RepoRunOptions {
   username: string;
-  tokenSource: "managed" | "byok";
+  tokenSource: "managed" | "byok" | "subscription";
   maxCostCents: number | null;
 }
 

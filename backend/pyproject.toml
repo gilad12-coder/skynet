@@ -72,7 +72,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "scalar-fastapi>=1.8",
     "scipy>=1.15.3",
-    "fastmcp>=3.0",
+    "fastmcp>=3.4.10",
     "prometheus-client>=0.20",
     "prometheus-fastapi-instrumentator>=7.0",
     "python-json-logger>=2.0",
@@ -114,7 +114,7 @@ render = [
     "build123d>=0.11",
     "pyrender>=0.1.45",
     "trimesh>=5.0",
-    "pillow>=12",
+    "pillow>=13.0.0",
     "networkx>=3",
 ]
 

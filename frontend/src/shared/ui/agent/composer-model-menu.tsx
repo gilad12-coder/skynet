@@ -14,7 +14,7 @@ import {
   modelProviderSlug,
   type DefaultModelFlag,
 } from "@/shared/lib/model-provider";
-import type { ModelCatalogResponse } from "@/shared/types/api";
+import type { CatalogModel, ModelCatalogResponse } from "@/shared/types/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +38,11 @@ interface ComposerModelMenuProps {
    * fast `is_interview_default`; it falls back to `is_default` when absent.
    */
   defaultFlag?: DefaultModelFlag;
+  /**
+   * Lists exactly these models instead of the catalog, e.g. the local build's
+   * subscription models. The first one runs with no pick.
+   */
+  models?: CatalogModel[];
 }
 
 // The retired "Auto · Intelligent" entry; saved prefs and conversations may
@@ -86,6 +91,7 @@ export function ComposerModelMenu({
   onEffortChange,
   disabled,
   defaultFlag = "is_default",
+  models,
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
@@ -109,17 +115,15 @@ export function ComposerModelMenu({
   }, []);
 
   const available = React.useMemo(
-    () => (catalog?.models ?? []).filter((m) => m.available),
-    [catalog],
+    () => models ?? (catalog?.models ?? []).filter((m) => m.available),
+    [models, catalog],
   );
+  const listed = models ?? catalog?.models;
   // A saved pick the live catalog no longer lists (a withdrawn model) would
   // name a dead id on the chip. Only judged against a loaded, non-empty
   // catalog so a gateway outage never wipes a valid pick.
   const stale =
-    !!savedValue &&
-    !!catalog &&
-    catalog.models.length > 0 &&
-    !catalog.models.some((m) => m.value === savedValue);
+    !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
   const value = savedValue && !stale ? savedValue : null;
   React.useEffect(() => {
     if (stale) {
@@ -132,9 +136,10 @@ export function ComposerModelMenu({
   // metadata. A gateway that flags none falls back to the plain list rather
   // than an empty menu.
   const featured = React.useMemo(() => {
+    if (models) return models;
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
-  }, [available]);
+  }, [models, available]);
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -144,7 +149,9 @@ export function ComposerModelMenu({
 
   // No pick runs the catalog's flagged default, so the chip names it and its
   // efforts apply.
-  const catalogDefault = catalogFallbackModel(available, defaultFlag);
+  const catalogDefault = models
+    ? (models[0] ?? null)
+    : catalogFallbackModel(available, defaultFlag);
   const effective = value ?? catalogDefault?.value ?? null;
   const displayName = effective
     ? modelDisplayName(effective, available)

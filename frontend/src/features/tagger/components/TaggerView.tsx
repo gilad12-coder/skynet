@@ -366,7 +366,8 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
               onAccept={tagger.acceptPrediction}
               onGoTo={tagger.goTo}
               onFinishRound={tagger.finishRound}
-              predictError={tagger.assistError === "predict"}
+              predictError={tagger.assistError === "predict" || tagger.assistError === "local_key"}
+              localKeyError={tagger.assistError === "local_key"}
             />
           ) : (
             <TaggerReviewGate

@@ -98,8 +98,10 @@ _STOPPABLE_STATUSES = frozenset({"pending", "running"})
 _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 _NAME_MAX_CHARS = 60
 _NAME_SUFFIX_CHARS = 8
-_PACKAGE_MISSING = "The vercel-sandbox package is not installed."
-_CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID."
+# Users see these reasons (engine catalog, run errors), so they never name the
+# vendor; the operator log at the point of detection names the package and env vars.
+_PACKAGE_MISSING = "The cloud sandbox is not available on this server."
+_CREDENTIALS_MISSING = "The cloud sandbox is not configured on this server."
 # The local runtime hands user code a bare environment: the interpreter that
 # runs the worker, a private HOME/TMPDIR, and the host's CA bundle overrides
 # so its HTTPS calls verify the same way — never the worker's secrets.
@@ -336,7 +338,7 @@ class VercelSandboxSession:
         # cannot create another billable lifetime behind the admission boundary.
         self._session = box.current_session
         if self._session is None:
-            raise ServiceError("Vercel did not return the sandbox's exact execution session.")
+            raise ServiceError("The cloud sandbox did not return its exact execution session.")
         self._api_session = api_session
         self._context = context
         self._cwd = box.cwd
@@ -544,7 +546,7 @@ class VercelSandboxSession:
         # Vercel may echo an empty custom allowlist instead of the deny-all
         # mode; both admit no host, and anything else fails closed.
         if not (mode == "deny-all" or (mode == "custom" and not getattr(policy, "allow", None))):
-            raise ServiceError("Vercel did not confirm that the scoring box's network is off.")
+            raise ServiceError("The cloud sandbox did not confirm that the scoring box's network is off.")
         self._session = updated
 
     def close(self) -> None:
@@ -1072,8 +1074,10 @@ def sandbox_unavailable_reason(settings: Settings) -> str | None:
     if settings.local_mode:
         return docker_sandbox.docker_sandbox_unavailable_reason(settings)
     if vercel_sync is None or vercel_api is None:
+        logger.info("Agent sandboxes unavailable: the vercel-sandbox package is not installed.")
         return _PACKAGE_MISSING
     if not (settings.vercel_token and settings.vercel_team_id and settings.vercel_project_id):
+        logger.info("Agent sandboxes unavailable: set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID.")
         return _CREDENTIALS_MISSING
     return None
 

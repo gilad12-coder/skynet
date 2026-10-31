@@ -1,0 +1,4 @@
+# Never send local secrets into the build context. The image bakes only
+# config.yaml and the scripts (see Dockerfile); runtime secrets come from the
+# ECS task definition (Secrets Manager) or the compose env file.
+.env
