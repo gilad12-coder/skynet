@@ -436,6 +436,8 @@ def test_job_fields_count_toward_storage(
         lambda b: b["job"]["latest_metrics"].update({"bad\udfffkey": 1}),
         lambda b: b["optimization"]["payload_overview"].update(is_private=5),
         lambda b: b["optimization"]["payload_overview"].update(is_private="1.0"),
+        lambda b: b["job"]["latest_metrics"].update(optimized_test_metric=10**400),
+        lambda b: b["events"][0]["metrics"].update(baseline_test_metric=-(10**309)),
     ],
     ids=[
         "nan-metric",
@@ -446,6 +448,8 @@ def test_job_fields_count_toward_storage(
         "surrogate-key",
         "number-is-private",
         "string-is-private",
+        "huge-int-metric",
+        "huge-negative-int-event-metric",
     ],
 )
 def test_values_postgres_cannot_store_are_422(
@@ -453,8 +457,8 @@ def test_values_postgres_cannot_store_are_422(
 ) -> None:
     """Values Postgres cannot store or cast are refused before the write, though SQLite would accept them.
 
-    A lone surrogate fails the JSONB write. A non-boolean ``is_private`` fails the
-    public dashboard's boolean cast for every user.
+    A lone surrogate fails the JSONB write. A non-boolean ``is_private`` or an
+    integer beyond the float range fails a public dashboard cast for every user.
     """
     mutate(bundle)
     resp = _client(hosted_store, HOSTED_USER).post("/optimizations/import", content=json.dumps(bundle))

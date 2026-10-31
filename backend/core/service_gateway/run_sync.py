@@ -14,6 +14,7 @@ import base64
 import binascii
 import json
 import math
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -104,7 +105,8 @@ def _is_storable(value: Any, limit: int) -> bool:
 
     Walks iteratively, so a hostile depth cannot exhaust the Python stack. JSONB
     rejects NaN, Infinity, NUL characters and lone UTF-16 surrogates, which
-    ``json.loads`` accepts.
+    ``json.loads`` accepts, and the dashboard cannot cast an integer beyond the
+    float range.
 
     Args:
         value: A decoded JSON value.
@@ -112,13 +114,19 @@ def _is_storable(value: Any, limit: int) -> bool:
 
     Returns:
         ``True`` when the deepest container is at most ``limit`` levels down, every
-        float is finite, and every string and key is NUL-free valid UTF-8.
+        number fits a finite float, and every string and key is NUL-free valid UTF-8.
     """
     stack: list[tuple[Any, int]] = [(value, 1)]
     while stack:
         node, depth = stack.pop()
         if isinstance(node, float):
             if not math.isfinite(node):
+                return False
+            continue
+        if isinstance(node, int):
+            # The dashboard casts metrics to double precision, and a larger
+            # integer makes that cast fail for every user's Explore query.
+            if abs(node) > sys.float_info.max:
                 return False
             continue
         if isinstance(node, str):
