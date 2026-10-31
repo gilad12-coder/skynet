@@ -1438,5 +1438,6 @@ test("a hidden pick's effort goes with the key model only when that model takes 
     "max",
   );
   assert.equal(keyEngineEffort("max", null, "openrouter/openai/gpt-5", rows), "max");
+  assert.equal(keyEngineEffort("max", "auto:intelligent", "openrouter/openai/gpt-5", rows), "max");
   assert.equal(keyEngineEffort(null, local, null, rows), null);
 });

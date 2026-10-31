@@ -55,10 +55,12 @@ void describe("hiddenPickEffortStale", () => {
     assert.equal(hiddenPickEffortStale(true, "max", thinking, ["low", "high"]), true);
     assert.equal(hiddenPickEffortStale(true, "high", plain, ["low", "high"]), true);
   });
-  void it("keeps an effort that fits, a listed pick's effort, and any effort while the menu loads", () => {
+  void it("sets aside a hidden pick's effort while the menu names no model", () => {
+    assert.equal(hiddenPickEffortStale(true, "high", undefined, []), true);
+  });
+  void it("keeps an effort that fits and a listed pick's effort", () => {
     assert.equal(hiddenPickEffortStale(true, "high", thinking, ["low", "high"]), false);
     assert.equal(hiddenPickEffortStale(false, "max", thinking, ["low", "high"]), false);
-    assert.equal(hiddenPickEffortStale(true, "max", undefined, []), false);
     assert.equal(hiddenPickEffortStale(true, null, thinking, ["low"]), false);
   });
 });

@@ -295,7 +295,7 @@ export function keyEngineEffort(
   sent: string | null,
   rows: CatalogModel[] | null,
 ): string | null {
-  if (!effort || !pick || isOpenRouterModelId(pick)) return effort;
+  if (!effort || !pick || pick === RETIRED_AUTO_MODEL || isOpenRouterModelId(pick)) return effort;
   if (sent && !isOpenRouterModelId(sent)) return effort;
   const row = sent ? rows?.find((model) => model.value === sent) : undefined;
   return row?.supports_thinking && effortsFor(sent, rows).includes(effort) ? effort : null;

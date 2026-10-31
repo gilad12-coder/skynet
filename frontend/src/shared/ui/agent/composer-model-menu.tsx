@@ -63,10 +63,9 @@ const FALLBACK_LIST_CAP = 50;
 
 /**
  * Whether the menu sets aside a saved effort while it hides the saved pick (a
- * Local pick under the OpenRouter engine) and the model it names instead does
- * not take that effort. The effort stays saved for the pick, but the chip and
- * the request (keyEngineEffort) leave it out. Judged only once the menu lists
- * the model it runs.
+ * Local pick under the OpenRouter engine): the menu names no model yet, or
+ * one that does not take that effort. The effort stays saved for the pick,
+ * but the chip and the request (keyEngineEffort) leave it out.
  */
 export function hiddenPickEffortStale(
   hidden: boolean,
@@ -74,8 +73,8 @@ export function hiddenPickEffortStale(
   current: CatalogModel | undefined,
   efforts: readonly string[],
 ): boolean {
-  if (!hidden || !effort || !current) return false;
-  return !current.supports_thinking || !efforts.includes(effort);
+  if (!hidden || !effort) return false;
+  return !current?.supports_thinking || !efforts.includes(effort);
 }
 
 function effortHint(level: string | null): string {
