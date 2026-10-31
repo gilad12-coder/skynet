@@ -119,7 +119,7 @@ def _integer(value: Any, name: str) -> int:
         UsagePendingError: When the counter is missing or invalid.
     """
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise UsagePendingError(f"Vercel usage is awaiting a valid {name} counter.")
+        raise UsagePendingError(f"Cloud sandbox usage is awaiting a valid {name} counter.")
     return value
 
 
@@ -306,7 +306,7 @@ def vercel_actual_usd(
         UsagePendingError: When final usage or its billing classification is uncertain.
     """
     if session.get("id") != session_id or session.get("status") != "stopped":
-        raise UsagePendingError("Vercel has not confirmed the admitted session is fully stopped.")
+        raise UsagePendingError("The cloud sandbox has not confirmed the admitted session is fully stopped.")
     region = session.get("region")
     rates = (
         price_snapshot.get("rates")
@@ -317,17 +317,17 @@ def vercel_actual_usd(
         }
     )
     if not isinstance(region, str) or not isinstance(rates, Mapping) or region not in rates:
-        raise UsagePendingError("Vercel returned a region without a verified price snapshot.")
+        raise UsagePendingError("The cloud sandbox returned a region without a verified price snapshot.")
     if _integer(session.get("vcpus"), "vcpus") != vcpus or _integer(session.get("memory"), "memory") != vcpus * 2048:
-        raise UsagePendingError("Vercel resource allocation differs from the admitted request.")
+        raise UsagePendingError("Cloud sandbox resource allocation differs from the admitted request.")
     started = _integer(session.get("startedAt"), "startedAt")
     stopped = _integer(session.get("stoppedAt"), "stoppedAt")
     if stopped < started:
-        raise UsagePendingError("Vercel returned inconsistent session timestamps.")
+        raise UsagePendingError("The cloud sandbox returned inconsistent session timestamps.")
     cpu_ms = _integer(session.get("activeCpuDurationMs"), "activeCpuDurationMs")
     network = session.get("networkTransfer")
     if not isinstance(network, Mapping):
-        raise UsagePendingError("Vercel has not reported final network transfer.")
+        raise UsagePendingError("The cloud sandbox has not reported final network transfer.")
     ingress = _integer(network.get("ingress"), "network ingress")
     egress = _integer(network.get("egress"), "network egress")
     # The public counters are usage, not billing totals. Vercel reports a few
@@ -337,11 +337,13 @@ def vercel_actual_usd(
     # unclassified, and charging it as paid egress would overcharge.
     network_cap = _admitted_network_cap(price_snapshot)
     if (ingress or egress) and not network_cap and not _offline_admission(price_snapshot):
-        raise UsagePendingError("Offline Vercel transfer needs provider billing classification before settlement.")
+        raise UsagePendingError(
+            "Offline cloud sandbox transfer needs provider billing classification before settlement."
+        )
     # A networked box pays for every byte, control plane included: Vercel's
     # counters do not separate the two, and undercharging is the worse error.
     if network_cap and ingress + egress > network_cap:
-        raise UsagePendingError("Vercel transfer exceeded the admitted network allowance.")
+        raise UsagePendingError("Cloud sandbox transfer exceeded the admitted network allowance.")
     try:
         regional = rates[region]
         cpu_rate = exact_nonnegative(regional["cpu_hour_usd"])
@@ -355,7 +357,9 @@ def vercel_actual_usd(
         ):
             raise ValueError("Unsupported historical billing policy")
     except (KeyError, TypeError, ValueError) as error:
-        raise UsagePendingError("Vercel admission does not contain a usable historical price snapshot.") from error
+        raise UsagePendingError(
+            "The cloud sandbox admission does not contain a usable historical price snapshot."
+        ) from error
     return (
         creation
         + Decimal(cpu_ms) * cpu_rate / _MS_PER_HOUR
@@ -446,7 +450,7 @@ class VercelUsageReservation:
             UsagePendingError: When returned provider limits do not match coverage.
         """
         if self.session_id not in {None, session.id}:
-            raise UsagePendingError("Vercel returned a replacement session outside the admitted operation.")
+            raise UsagePendingError("The cloud sandbox returned a replacement session outside the admitted operation.")
         self.session_id = session.id
         self.runtime.service.mark_dispatched(self.operation.id, self.runtime.username, session.id)
         timeout = session.execution_time_limit
@@ -457,7 +461,9 @@ class VercelUsageReservation:
             or timeout is None
             or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
         ):
-            raise UsagePendingError("Vercel did not confirm the admitted CPU, memory, region, and lifetime limits.")
+            raise UsagePendingError(
+                "The cloud sandbox did not confirm the admitted CPU, memory, region, and lifetime limits."
+            )
 
     def extend(self, lifetime_ms: int, *, deadline: float) -> None:
         """Fund the session up to ``lifetime_ms`` before Vercel is asked to keep it alive that long.
@@ -502,7 +508,7 @@ class VercelUsageReservation:
             or timeout is None
             or math.ceil(timeout.total_seconds() * 1000) > self.lifetime_ms
         ):
-            raise UsagePendingError("Vercel extended the session beyond its funded lifetime.")
+            raise UsagePendingError("The cloud sandbox extended the session beyond its funded lifetime.")
 
     def pending(self) -> None:
         """Retain covered funding when creation, shutdown, or billing evidence is uncertain."""
@@ -555,7 +561,7 @@ class VercelUsageReservation:
         """
         try:
             if self.session_id is None:
-                raise UsagePendingError("Vercel creation has not returned an exact session identity.")
+                raise UsagePendingError("Cloud sandbox creation has not returned an exact session identity.")
             session = self._sessions.get(self.session_id, {})
             usd = vercel_actual_usd(
                 session, session_id=self.session_id, vcpus=self.vcpus, price_snapshot=self.quote.price_snapshot
@@ -596,7 +602,7 @@ def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
         or policy.get("kind") != "sandbox"
         or policy.get("version") != "skynet-operation-pricing-v1"
     ):
-        raise UsagePendingError("The Vercel operation has no supported cent conversion policy.")
+        raise UsagePendingError("The cloud sandbox operation has no supported cent conversion policy.")
     try:
         cent_usd = exact_nonnegative(policy.get("cent_usd"))
         if cent_usd <= 0:
@@ -604,4 +610,4 @@ def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
         markup = exact_nonnegative(policy.get("model_markup", "1"))
         return ChargePolicy("sandbox", cent_usd=cent_usd, model_markup=markup)
     except ValueError as error:
-        raise UsagePendingError("The Vercel operation has no usable historical cent conversion.") from error
+        raise UsagePendingError("The cloud sandbox operation has no usable historical cent conversion.") from error

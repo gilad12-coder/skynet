@@ -14,6 +14,7 @@ starts from a copy of that prepared tree and runs no setup of its own.
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import threading
 from collections.abc import Iterable, Mapping
@@ -22,6 +23,8 @@ from pathlib import Path
 
 from .repo_tree import MAX_PATCH_BYTES, archive_chunks, patch_violations
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
+
+logger = logging.getLogger(__name__)
 
 REPO_DIR = ".app-repo"
 BASE_DIR = f"{REPO_DIR}/base"
@@ -242,7 +245,17 @@ class RepoWorkspace:
                 self._cut_network(session)
         except BaseException as error:
             self._failure = error
-            session.close()
+            # Unsettled usage stays in the ledger for reconciliation; the setup
+            # error is what the user can act on, so no close error may replace
+            # it. Only the type is logged: settlement and ledger texts can name
+            # the provider.
+            try:
+                session.close()
+            except Exception as close_error:
+                logger.warning(
+                    "Repository setup failed; the sandbox did not close cleanly (%s)",
+                    type(close_error).__name__,
+                )
             raise
         self._session = session
         return session
