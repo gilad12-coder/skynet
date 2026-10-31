@@ -4296,6 +4296,7 @@
   "subscription.state.failed": "Bu bilgisayardaki CLI'lar denetlenemedi",
   "subscription.state.loading": "Bu bilgisayardaki CLI'lar denetleniyor…",
   "host_agent.cli.label": "Önericiyi kendi CLI'ımda çalıştır",
+  "host_agent.cli.default": "Ajan motoru (varsayılan)",
   "host_agent.cli.off": "Kapalı (yalıtılmış önerici)",
   "host_agent.permission.label": "Önerici erişimi",
   "host_agent.permission.workspace_only": "Yalnızca çalışma alanı",

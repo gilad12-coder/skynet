@@ -309,30 +309,34 @@ export async function resolveAgentModel(
 
 /**
  * The proposer patch for a host CLI choice. Picking a CLI keeps the current
- * permission, or starts at workspace only; any other value turns both off.
+ * permission, or starts at workspace only. "off" sends an explicit null, so
+ * the backend keeps the sandboxed proposer; any other value sends no pick,
+ * and the backend uses the agent engine's CLI.
  */
 export function hostCliPatch(
   value: string,
   permission: "workspace_only" | "full_access" | undefined,
 ): {
-  host_cli: CliProvider | undefined;
+  host_cli: CliProvider | null | undefined;
   host_permission: "workspace_only" | "full_access" | undefined;
 } {
-  return isCliProvider(value)
-    ? { host_cli: value, host_permission: permission ?? "workspace_only" }
-    : { host_cli: undefined, host_permission: undefined };
+  if (isCliProvider(value)) {
+    return { host_cli: value, host_permission: permission ?? "workspace_only" };
+  }
+  return { host_cli: value === "off" ? null : undefined, host_permission: undefined };
 }
 
 /**
- * The proposer as a run request sends it. A restored draft or a clone may name
- * a host CLI the app no longer offers; the menu shows that as off, so the
- * request drops it and its permission too.
+ * The proposer as a run request sends it. An explicit null (off) stays, so the
+ * backend does not fill in the agent engine's CLI. A restored draft or a clone
+ * may name a host CLI the app no longer offers; the menu shows that as the
+ * engine default, so the request drops it and its permission too.
  */
 export function withSupportedHostCli<
   T extends { host_cli?: string | null; host_permission?: string | null },
 >(proposer: T): T {
   if (isCliProvider(proposer.host_cli)) return proposer;
   if (!("host_cli" in proposer) && !("host_permission" in proposer)) return proposer;
-  const { host_cli: _hostCli, host_permission: _hostPermission, ...rest } = proposer;
-  return rest as T;
+  const { host_cli: hostCli, host_permission: _hostPermission, ...rest } = proposer;
+  return (hostCli === null ? { ...rest, host_cli: null } : rest) as T;
 }

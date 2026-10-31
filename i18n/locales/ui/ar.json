@@ -4296,6 +4296,7 @@
   "subscription.state.failed": "تعذّر فحص أدوات CLI على هذا الحاسوب",
   "subscription.state.loading": "جارٍ فحص أدوات CLI على هذا الحاسوب…",
   "host_agent.cli.label": "تشغيل المقترِح على أداة CLI الخاصة بي",
+  "host_agent.cli.default": "محرك الوكيل (افتراضي)",
   "host_agent.cli.off": "متوقف (مقترِح معزول)",
   "host_agent.permission.label": "صلاحيات المقترِح",
   "host_agent.permission.workspace_only": "مساحة العمل فقط",

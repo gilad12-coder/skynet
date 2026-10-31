@@ -4299,6 +4299,7 @@
   "subscription.state.failed": "Could not check the CLIs on this computer",
   "subscription.state.loading": "Checking the CLIs on this computer…",
   "host_agent.cli.label": "Run the proposer on my CLI",
+  "host_agent.cli.default": "Agent engine (default)",
   "host_agent.cli.off": "Off (sandboxed proposer)",
   "host_agent.permission.label": "Proposer access",
   "host_agent.permission.workspace_only": "Workspace only",

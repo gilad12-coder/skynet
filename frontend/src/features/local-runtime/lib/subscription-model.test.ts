@@ -288,7 +288,7 @@ test("Droid is not a CLI choice, even when an older backend still reports it", (
   });
 });
 
-test("the proposer host CLI select starts at workspace only and clears on off", () => {
+test("the proposer host CLI select starts at workspace only, sends null for off and no pick for the default", () => {
   assert.deepEqual(hostCliPatch("codex", undefined), {
     host_cli: "codex",
     host_permission: "workspace_only",
@@ -297,10 +297,19 @@ test("the proposer host CLI select starts at workspace only and clears on off", 
     host_cli: "claude",
     host_permission: "full_access",
   });
-  assert.deepEqual(hostCliPatch("off", "full_access"), {
-    host_cli: undefined,
-    host_permission: undefined,
-  });
+  // An explicit null keeps the sandboxed proposer; the backend fills only a missing pick.
+  const off = hostCliPatch("off", "full_access");
+  assert.deepEqual(off, { host_cli: null, host_permission: undefined });
+  assert.equal(
+    JSON.stringify(withSupportedHostCli({ harness: "codex", ...off })),
+    '{"harness":"codex","host_cli":null}',
+  );
+  const engineDefault = hostCliPatch("default", "full_access");
+  assert.deepEqual(engineDefault, { host_cli: undefined, host_permission: undefined });
+  assert.equal(
+    JSON.stringify(withSupportedHostCli({ harness: "codex", ...engineDefault })),
+    '{"harness":"codex"}',
+  );
 });
 
 test("the own-key hint names no platform fee in local mode", () => {
@@ -463,16 +472,17 @@ test("the model dialog never finds or preselects a CLI the app does not offer", 
   assert.equal(firstReadyCli(null, now), undefined);
 });
 
-test("a proposer with a CLI the app does not offer sends no host CLI", () => {
+test("a proposer with a CLI the app does not offer sends no host CLI, and off stays null", () => {
   const stale = { harness: "codex", host_cli: "droid", host_permission: "full_access" } as const;
   assert.deepEqual(withSupportedHostCli(stale as never), { harness: "codex" });
   const kept = { harness: "codex", host_cli: "claude", host_permission: "workspace_only" } as const;
   assert.equal(withSupportedHostCli(kept), kept);
   const off = { harness: "codex" };
   assert.equal(withSupportedHostCli(off), off);
-  assert.deepEqual(withSupportedHostCli({ harness: "codex", host_cli: null }), {
-    harness: "codex",
-  });
+  assert.deepEqual(
+    withSupportedHostCli({ harness: "codex", host_cli: null, host_permission: "full_access" }),
+    { harness: "codex", host_cli: null },
+  );
 });
 
 test("choosing a CLI keeps the model only when that CLI serves it", () => {
