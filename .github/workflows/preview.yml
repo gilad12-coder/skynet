@@ -54,9 +54,11 @@ jobs:
     environment: aws-preview
     # Per job, not per workflow: a run for another label skips this job, and
     # at workflow level it would still replace a pending deploy in the queue.
-    # Only a push cancels a running deploy: it deploys a newer commit, and
-    # deploy is safe to run again. Other events wait, so a reopen never
-    # cancels a running delete.
+    # Only a push cancels the running job: it deploys a newer commit, and
+    # deploy is safe to run again. Other events wait. The delete and cleanup
+    # jobs share this group, so a push can also stop a running delete. The
+    # new deploy repairs that state; if a service is still draining, its
+    # create fails and the next push recovers.
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: ${{ github.event.action == 'synchronize' }}
