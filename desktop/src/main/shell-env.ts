@@ -115,9 +115,10 @@ const defaultExec: ExecFileLike = (file, args, options) =>
     // A job the rc files put in the background can hold stdout open after the
     // shell exits, so "close" can come late. The output is in after a short grace.
     // With the shell gone, the group holds only those jobs; each check would
-    // otherwise leave one more copy running after the app quits.
+    // otherwise leave one more copy running after the app quits. They get the
+    // shell's own time budget first, so rc upkeep (zcompile under a lock) ends cleanly.
     child.on("exit", (code) => {
-      killGroup();
+      setTimeout(killGroup, options.timeout).unref();
       if (code !== 0) return;
       setTimeout(() => {
         child.stdout.destroy();

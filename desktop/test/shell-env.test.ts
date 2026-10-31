@@ -112,14 +112,23 @@ describe("loginShellPath", () => {
       await expect.poll(() => alive(child), { timeout: 2_000 }).toBe(false);
     });
 
-    it("stops what .zshrc started in the background once the shell exits", async () => {
+    it("stops what .zshrc started in the background once the shell's time is up", async () => {
       for (const job of ["sleep 30 &", "sleep 30 >/dev/null 2>&1 &"]) {
         const home = homeWithZshrc(`export PATH=/from/zshrc:$PATH\n${job}\necho $! > "$HOME/child"\n`);
-        const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
+        const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });
         expect(result.path.split(":")).toContain("/from/zshrc");
         const child = Number(fs.readFileSync(path.join(home, "child"), "utf8").trim());
-        await expect.poll(() => alive(child), { timeout: 2_000 }).toBe(false);
+        await expect.poll(() => alive(child), { timeout: 3_000 }).toBe(false);
       }
+    });
+
+    it("lets short .zshrc upkeep in the background finish", async () => {
+      const home = homeWithZshrc(
+        'export PATH=/from/zshrc:$PATH\n{ mkdir "$HOME/zwc.lock"; sleep 0.3; rmdir "$HOME/zwc.lock" } &!\n',
+      );
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 3_000 });
+      expect(result.path.split(":")).toContain("/from/zshrc");
+      await expect.poll(() => fs.existsSync(path.join(home, "zwc.lock")), { timeout: 2_000 }).toBe(false);
     });
 
     it("runs the shell in its own process group, so it never takes over a terminal", async () => {
