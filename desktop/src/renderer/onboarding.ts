@@ -10,6 +10,7 @@ type Kind =
   | "not_logged_in"
   | "rate_capped"
   | "starting"
+  | "sign_in"
   | "ready"
   | "error";
 
@@ -32,6 +33,7 @@ interface State {
   limitMessage?: string;
   step?: string;
   error?: string;
+  signIn?: "idle" | "waiting" | "unavailable" | "failed";
 }
 
 interface Bridge {
@@ -41,6 +43,8 @@ interface Bridge {
   copy(text: string): Promise<void>;
   openLogs(): Promise<void>;
   openDockerDownload(): Promise<void>;
+  signIn(): Promise<void>;
+  skipSignIn(): Promise<void>;
   onState(listener: (state: State) => void): () => void;
 }
 
@@ -106,11 +110,12 @@ const CHECK_ORDER: Kind[][] = [
   ["no_cli", "cli_too_old"],
   ["not_logged_in"],
   ["rate_capped"],
-  ["starting", "ready", "error"],
+  ["starting", "error"],
+  ["sign_in", "ready"],
 ];
 
 function rowStatuses(state: State): { key: string; status: RowStatus; note: string }[] {
-  const keys = ["check.docker", "check.cli", "check.login", "check.limits", "check.stack"];
+  const keys = ["check.docker", "check.cli", "check.login", "check.limits", "check.stack", "check.account"];
   const at = CHECK_ORDER.findIndex((kinds) => kinds.includes(state.kind));
   const failNotes: Partial<Record<Kind, string>> = {
     docker_missing: t("status.missing"),
@@ -125,7 +130,7 @@ function rowStatuses(state: State): { key: string; status: RowStatus; note: stri
     if (i < at) return { key, status: "ok", note: t("status.ok") };
     if (i === at) {
       if (state.kind === "ready") return { key, status: "ok", note: t("status.ok") };
-      if (state.kind === "starting") return { key, status: "active", note: "" };
+      if (state.kind === "starting" || state.kind === "sign_in") return { key, status: "active", note: "" };
       return { key, status: "fail", note: state.kind === "error" ? "" : (failNotes[state.kind] ?? "") };
     }
     return { key, status: "pending", note: "" };
@@ -207,6 +212,20 @@ function panelBody(state: State): Node[] {
       );
       break;
     }
+    case "sign_in": {
+      const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
+      if (state.signIn === "waiting") {
+        nodes.push(el("p", { className: "waiting" }, [el("span", { className: "spinner spinner-small" }), el("span", { text: t("sign_in.waiting") })]));
+        nodes.push(actions(button(t("sign_in.reopen"), "primary", () => void bridge.signIn()), skip));
+      } else if (state.signIn === "unavailable") {
+        nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
+        nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
+      } else {
+        if (state.signIn === "failed") nodes.push(el("pre", { className: "detail detail-error", text: state.error || t("sign_in.failed"), dir: "auto" }));
+        nodes.push(actions(button(t(state.signIn === "failed" ? "action.retry" : "sign_in.action"), "primary", () => void bridge.signIn()), skip));
+      }
+      break;
+    }
     case "ready":
       break;
     case "error":
@@ -221,9 +240,10 @@ function render(state: State): void {
   document.body.dataset.state = state.kind;
   renderChecklist(state);
   const panel = document.getElementById("panel") as HTMLDivElement;
+  const lead = `${state.kind}.body`;
   panel.replaceChildren(
     el("h1", { text: t(`${state.kind}.title`) }),
-    el("p", { className: "lead", text: t(`${state.kind}.body`) }),
+    ...(lead in messages || lead in en ? [el("p", { className: "lead", text: t(lead) })] : []),
     ...panelBody(state),
   );
 }

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
+import { HostedLinkClient } from "./hosted-link";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
 import { holdQuitUntilStopped } from "./quit";
@@ -61,6 +62,12 @@ let postgresStarted = false;
 let frontendUrl: string | null = null;
 let sweptOrphans = false;
 let sweptSandboxes = false;
+let hostedLink: HostedLinkClient | null = null;
+let signInPoll: NodeJS.Timeout | null = null;
+
+// Setup screens show one card; the window fits it, then grows for the web app.
+const SETUP_SIZE = { width: 760, height: 560 };
+const APP_SIZE = { width: 1440, height: 900, minWidth: 960, minHeight: 640 };
 
 function setState(next: OnboardingState): void {
   state = next;
@@ -74,7 +81,28 @@ function locale(): "en" | "he" {
   return app.getLocale().toLowerCase().startsWith("he") ? "he" : "en";
 }
 
+function useSetupSize(): void {
+  if (!win) return;
+  win.setMinimumSize(SETUP_SIZE.width, SETUP_SIZE.height);
+  win.setContentSize(SETUP_SIZE.width, SETUP_SIZE.height);
+  win.setResizable(false);
+  win.setMaximizable(false);
+  win.setFullScreenable(false);
+  win.center();
+}
+
+function useAppSize(): void {
+  if (!win) return;
+  win.setResizable(true);
+  win.setMaximizable(true);
+  win.setFullScreenable(true);
+  win.setMinimumSize(APP_SIZE.minWidth, APP_SIZE.minHeight);
+  win.setSize(APP_SIZE.width, APP_SIZE.height);
+  win.center();
+}
+
 function showOnboarding(): void {
+  useSetupSize();
   void win?.loadFile(path.join(__dirname, "..", "renderer", "index.html"), { query: { lang: locale() } });
 }
 
@@ -259,17 +287,69 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
 
   if (quitting) return;
   frontendUrl = feOrigin;
-  setState({ ...base, kind: "ready", url: feOrigin });
   watchForCrash(apiProc, "The API");
   watchForCrash(feProc, "The web app");
-  await win?.loadURL(feOrigin);
+
+  // Sign-in to a Skynet account comes first; "Use without signing in" skips it.
+  hostedLink = new HostedLinkClient(apiOrigin, secrets.backendAuthSecret);
+  await hostedLink.ensureLocalUser();
+  let linked = false;
+  try {
+    linked = await hostedLink.linked();
+  } catch (err) {
+    log(`account status check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (linked) return openApp();
+  setState({ ...base, kind: "sign_in", signIn: "idle" });
+}
+
+async function openApp(): Promise<void> {
+  stopSignInPoll();
+  if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
+  setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
+  useAppSize();
+  await win?.loadURL(frontendUrl);
+}
+
+function stopSignInPoll(): void {
+  if (signInPoll) clearInterval(signInPoll);
+  signInPoll = null;
+}
+
+async function signIn(): Promise<void> {
+  if (state.kind !== "sign_in" || !hostedLink) return;
+  const link = hostedLink;
+  let result;
+  try {
+    result = await link.start();
+  } catch (err) {
+    result = { ok: false as const, reason: "failed" as const, detail: err instanceof Error ? err.message : String(err) };
+  }
+  if (state.kind !== "sign_in") return;
+  if (!result.ok) {
+    log(`sign-in start failed (${result.reason}): ${result.detail}`);
+    setState({ ...state, signIn: result.reason, error: result.detail || undefined });
+    return;
+  }
+  await shell.openExternal(result.url);
+  setState({ ...state, signIn: "waiting", error: undefined });
+  stopSignInPoll();
+  const deadline = Date.now() + 15 * 60_000;
+  signInPoll = setInterval(() => {
+    if (state.kind !== "sign_in" || Date.now() > deadline) return stopSignInPoll();
+    link
+      .linked()
+      .then((done) => (done ? openApp() : undefined))
+      .catch((err: Error) => log(`account status poll failed: ${err.message}`));
+  }, 2_000);
 }
 
 function watchForCrash(proc: ManagedProcess, label: string): void {
   const timer = setInterval(() => {
-    if (quitting || state.kind !== "ready") return clearInterval(timer);
+    if (quitting || (state.kind !== "ready" && state.kind !== "sign_in")) return clearInterval(timer);
     if (!proc.exited) return;
     clearInterval(timer);
+    stopSignInPoll();
     frontendUrl = null;
     showOnboarding();
     setState({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
@@ -284,6 +364,8 @@ function recordStarted(role: string, pid: number | undefined): void {
 /** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
 async function stopStack(): Promise<void> {
   killActiveCommands();
+  stopSignInPoll();
+  hostedLink = null;
   const fe = frontend;
   const be = api;
   frontend = null;
@@ -318,10 +400,11 @@ function isAllowedUrl(target: string): boolean {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 960,
-    minHeight: 640,
+    ...SETUP_SIZE,
+    useContentSize: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     show: false,
     title: "Skynet",
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea",
@@ -360,6 +443,13 @@ ipcMain.handle("onboarding:copy", (_event, text: unknown) => {
   if (typeof text === "string" && text.length < 500) clipboard.writeText(text);
 });
 ipcMain.handle("onboarding:open-logs", () => shell.openPath(logsDir));
+ipcMain.handle("onboarding:sign-in", () => {
+  void signIn();
+});
+ipcMain.handle("onboarding:skip-sign-in", () => {
+  log("sign-in skipped");
+  void openApp();
+});
 ipcMain.handle("onboarding:open-docker", () => shell.openExternal("https://www.docker.com/products/docker-desktop/"));
 
 if (!app.requestSingleInstanceLock()) {

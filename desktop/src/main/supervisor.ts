@@ -18,8 +18,12 @@ export type OnboardingKind =
   | "not_logged_in"
   | "rate_capped"
   | "starting"
+  | "sign_in"
   | "ready"
   | "error";
+
+/** Where the hosted-account sign-in is, while kind is "sign_in". */
+export type SignInPhase = "idle" | "waiting" | "unavailable" | "failed";
 
 export interface OnboardingState {
   kind: OnboardingKind;
@@ -32,6 +36,7 @@ export interface OnboardingState {
   step?: string;
   error?: string;
   url?: string;
+  signIn?: SignInPhase;
 }
 
 export interface Inputs {
