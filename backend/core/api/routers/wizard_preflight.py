@@ -39,6 +39,7 @@ from ...service_gateway.optimization.unified.contract import (
     with_message_codes,
 )
 from ...storage.preflights import setup_seed
+from ..agent_engine import fill_proposer_host_cli
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..preflight_execution import (
     BUDGET_CHECK_KEY,
@@ -302,6 +303,8 @@ def create_wizard_preflight_router(*, job_store: Any) -> APIRouter:
                 typed = model.model_validate(payload)
             except ValidationError as error:
                 raise RequestValidationError(error.errors()) from error
+            # The dump below writes host_cli, so fill it first, as the submit route does.
+            fill_proposer_host_cli(job_store, user.username, typed)
             if isinstance(typed, UnifiedRunRequest):
                 _materialize_unified_cases(typed, job_store=job_store, username=user.username)
                 _default_unified_seed(typed)

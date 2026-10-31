@@ -4303,6 +4303,7 @@
   "subscription.state.failed": "بررسی CLIهای این رایانه ممکن نشد",
   "subscription.state.loading": "در حال بررسی CLIهای این رایانه…",
   "host_agent.cli.label": "اجرای پیشنهاددهنده روی CLI من",
+  "host_agent.cli.default": "موتور عامل (پیش‌فرض)",
   "host_agent.cli.off": "خاموش (پیشنهاددهندهٔ ایزوله)",
   "host_agent.permission.label": "دسترسی پیشنهاددهنده",
   "host_agent.permission.workspace_only": "فقط فضای کار",

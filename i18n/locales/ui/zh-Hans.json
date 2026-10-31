@@ -4303,6 +4303,7 @@
   "subscription.state.failed": "无法检查此电脑上的 CLI",
   "subscription.state.loading": "正在检查此电脑上的 CLI…",
   "host_agent.cli.label": "在我的 CLI 上运行提议器",
+  "host_agent.cli.default": "代理引擎（默认）",
   "host_agent.cli.off": "关闭（沙盒提议器）",
   "host_agent.permission.label": "提议器权限",
   "host_agent.permission.workspace_only": "仅限工作区",

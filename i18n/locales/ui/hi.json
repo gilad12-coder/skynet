@@ -4303,6 +4303,7 @@
   "subscription.state.failed": "इस कंप्यूटर पर CLI की जाँच नहीं हो सकी",
   "subscription.state.loading": "इस कंप्यूटर पर CLI की जाँच हो रही है…",
   "host_agent.cli.label": "प्रस्तावक को मेरे CLI पर चलाएँ",
+  "host_agent.cli.default": "एजेंट इंजन (डिफ़ॉल्ट)",
   "host_agent.cli.off": "बंद (सैंडबॉक्स प्रस्तावक)",
   "host_agent.permission.label": "प्रस्तावक की पहुँच",
   "host_agent.permission.workspace_only": "केवल वर्कस्पेस",

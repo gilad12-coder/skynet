@@ -4303,6 +4303,7 @@
   "subscription.state.failed": "Die CLIs auf diesem Computer konnten nicht geprüft werden",
   "subscription.state.loading": "CLIs auf diesem Computer werden geprüft…",
   "host_agent.cli.label": "Proposer auf meiner CLI ausführen",
+  "host_agent.cli.default": "Agent-Engine (Standard)",
   "host_agent.cli.off": "Aus (isolierter Proposer)",
   "host_agent.permission.label": "Proposer-Zugriff",
   "host_agent.permission.workspace_only": "Nur Arbeitsbereich",

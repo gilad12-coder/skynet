@@ -4303,6 +4303,7 @@
   "subscription.state.failed": "Не вдалося перевірити CLI на цьому комп'ютері",
   "subscription.state.loading": "Перевірка CLI на цьому комп'ютері…",
   "host_agent.cli.label": "Запускати генератор пропозицій у моєму CLI",
+  "host_agent.cli.default": "Рушій агента (за замовчуванням)",
   "host_agent.cli.off": "Вимк. (ізольований генератор)",
   "host_agent.permission.label": "Доступ генератора пропозицій",
   "host_agent.permission.workspace_only": "Лише робоча область",

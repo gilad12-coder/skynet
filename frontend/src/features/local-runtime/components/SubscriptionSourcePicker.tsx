@@ -32,20 +32,26 @@ export function cliLabel(cli: CliProvider): string {
   return msg(CLI_LABEL_KEYS[cli]);
 }
 
-// Radix Select cannot hold an empty value, so "no host CLI" has its own.
+// Radix Select cannot hold an empty value, so "no pick" and "off" have their own.
+const HOST_CLI_DEFAULT = "default";
 const HOST_CLI_OFF = "off";
 
-/** The proposer's host CLI menu: off, then each supported CLI. */
+/** The proposer's host CLI menu: the agent engine's default, off, then each supported CLI. */
 export function hostCliChoices(): Array<{ value: string; label: string }> {
   return [
+    { value: HOST_CLI_DEFAULT, label: msg("host_agent.cli.default") },
     { value: HOST_CLI_OFF, label: msg("host_agent.cli.off") },
     ...CLI_PROVIDERS.map((cli) => ({ value: cli, label: cliLabel(cli) })),
   ];
 }
 
-/** The host CLI menu's value; a saved CLI the app no longer offers reads as off. */
+/**
+ * The host CLI menu's value. An explicit null is off; no pick, or a saved CLI
+ * the app no longer offers, follows the agent engine.
+ */
 export function hostCliValue(saved: string | null | undefined): string {
-  return isCliProvider(saved) ? saved : HOST_CLI_OFF;
+  if (isCliProvider(saved)) return saved;
+  return saved === null ? HOST_CLI_OFF : HOST_CLI_DEFAULT;
 }
 
 /** The command that signs a CLI in, shown after "Signed out. To sign in, run". */
