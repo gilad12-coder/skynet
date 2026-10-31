@@ -64,6 +64,7 @@ let sweptOrphans = false;
 let sweptSandboxes = false;
 let hostedLink: HostedLinkClient | null = null;
 let signInPoll: NodeJS.Timeout | null = null;
+let signInUrl: string | null = null;
 
 // Setup screens show one card; the window fits it, then grows for the web app.
 const SETUP_SIZE = { width: 760, height: 560 };
@@ -99,6 +100,15 @@ function useAppSize(): void {
   win.setMinimumSize(APP_SIZE.minWidth, APP_SIZE.minHeight);
   win.setSize(APP_SIZE.width, APP_SIZE.height);
   win.center();
+}
+
+// Matches --bg in onboarding.css and the web app, so no light flash shows in dark mode.
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea");
+
+/** The Dock icon follows the system appearance; the .icns in Finder stays light. */
+function applyTheme(): void {
+  app.dock?.setIcon(path.join(__dirname, "..", "icons", nativeTheme.shouldUseDarkColors ? "dock-dark.png" : "dock-light.png"));
+  win?.setBackgroundColor(windowBackground());
 }
 
 function showOnboarding(): void {
@@ -301,10 +311,12 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   }
   if (linked) return openApp();
   setState({ ...base, kind: "sign_in", signIn: "idle" });
+  await signIn();
 }
 
 async function openApp(): Promise<void> {
   stopSignInPoll();
+  signInUrl = null;
   if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
   setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
   useAppSize();
@@ -316,6 +328,12 @@ function stopSignInPoll(): void {
   signInPoll = null;
 }
 
+/**
+ * Show the hosted sign-in (skynetml.com) full size in this window. The page
+ * links the account, the hosted service redirects to the local API callback,
+ * and the status poll opens the app. Without a hosted link (or on an error)
+ * the onboarding card offers a retry and "Use without signing in".
+ */
 async function signIn(): Promise<void> {
   if (state.kind !== "sign_in" || !hostedLink) return;
   const link = hostedLink;
@@ -328,11 +346,24 @@ async function signIn(): Promise<void> {
   if (state.kind !== "sign_in") return;
   if (!result.ok) {
     log(`sign-in start failed (${result.reason}): ${result.detail}`);
+    showOnboarding();
     setState({ ...state, signIn: result.reason, error: result.detail || undefined });
     return;
   }
-  await shell.openExternal(result.url);
+  signInUrl = result.url;
   setState({ ...state, signIn: "waiting", error: undefined });
+  useAppSize();
+  try {
+    await win?.loadURL(result.url, { userAgent: desktopUserAgent() });
+  } catch (err) {
+    // Offline or skynetml.com down: back to the card with retry and skip.
+    const detail = err instanceof Error ? err.message : String(err);
+    log(`sign-in page failed to load: ${detail}`);
+    signInUrl = null;
+    showOnboarding();
+    setState({ ...state, signIn: "failed", error: detail });
+    return;
+  }
   stopSignInPoll();
   const deadline = Date.now() + 15 * 60_000;
   signInPoll = setInterval(() => {
@@ -342,6 +373,37 @@ async function signIn(): Promise<void> {
       .then((done) => (done ? openApp() : undefined))
       .catch((err: Error) => log(`account status poll failed: ${err.message}`));
   }, 2_000);
+}
+
+/** The hosted pages show "Use without signing in" only for this suffix. */
+function desktopUserAgent(): string {
+  return `${win?.webContents.getUserAgent() ?? ""} SkynetDesktop`;
+}
+
+function skipSignIn(): void {
+  log("sign-in skipped");
+  void openApp();
+}
+
+/**
+ * Navigation rules while the hosted sign-in shows. Google refuses OAuth in an
+ * embedded browser, so that one round-trip moves to the default browser and
+ * this window keeps polling.
+ */
+function signInNavigation(target: string): "allow" | "skip" | "external" {
+  if (!signInUrl) return "external";
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return "external";
+  }
+  const hosted = new URL(signInUrl);
+  if (url.origin === hosted.origin && url.pathname === "/desktop/link/skip") return "skip";
+  if (url.hostname === "accounts.google.com") return "external";
+  if (url.origin === hosted.origin || url.hostname === "github.com") return "allow";
+  if (hostedLink && url.origin === hostedLink.apiOrigin) return "allow";
+  return "external";
 }
 
 function watchForCrash(proc: ManagedProcess, label: string): void {
@@ -407,7 +469,7 @@ function createWindow(): void {
     fullscreenable: false,
     show: false,
     title: "Skynet",
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea",
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload", "index.js"),
       contextIsolation: true,
@@ -422,7 +484,14 @@ function createWindow(): void {
   });
   win.webContents.on("will-navigate", (event, url) => {
     if (isAllowedUrl(url)) return;
+    const rule = signInNavigation(url);
+    if (rule === "allow") return;
     event.preventDefault();
+    if (rule === "skip") return skipSignIn();
+    if (rule === "external" && signInUrl && new URL(url).hostname === "accounts.google.com") {
+      void shell.openExternal(signInUrl);
+      return;
+    }
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
   win.on("closed", () => {
@@ -446,10 +515,7 @@ ipcMain.handle("onboarding:open-logs", () => shell.openPath(logsDir));
 ipcMain.handle("onboarding:sign-in", () => {
   void signIn();
 });
-ipcMain.handle("onboarding:skip-sign-in", () => {
-  log("sign-in skipped");
-  void openApp();
-});
+ipcMain.handle("onboarding:skip-sign-in", () => skipSignIn());
 ipcMain.handle("onboarding:open-docker", () => shell.openExternal("https://www.docker.com/products/docker-desktop/"));
 
 if (!app.requestSingleInstanceLock()) {
@@ -462,6 +528,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     log(`Skynet desktop ${app.getVersion()} starting`);
     createWindow();
+    applyTheme();
+    nativeTheme.on("updated", applyTheme);
     win?.webContents.once("did-finish-load", () => void check());
     startUpdateCheck(log);
   });

@@ -71,6 +71,10 @@ async function buildApp() {
   for (const file of FONT_FILES) {
     fs.copyFileSync(path.join(repoRoot, "frontend/public/fonts", file), path.join(rendererOut, "fonts", file));
   }
+  fs.mkdirSync(path.join(outDir, "icons"), { recursive: true });
+  for (const file of ["dock-light.png", "dock-dark.png"]) {
+    fs.copyFileSync(path.join(desktopDir, "build", file), path.join(outDir, "icons", file));
+  }
   console.log(`built ${path.relative(desktopDir, outDir)}/`);
 }
 

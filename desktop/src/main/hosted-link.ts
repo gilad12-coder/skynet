@@ -24,7 +24,7 @@ export type StartResult = { ok: true; url: string } | { ok: false; reason: "unav
 /** Talks to the local backend's /local/hosted-link routes as the local user. */
 export class HostedLinkClient {
   constructor(
-    private readonly apiOrigin: string,
+    readonly apiOrigin: string,
     private readonly secret: string,
   ) {}
 

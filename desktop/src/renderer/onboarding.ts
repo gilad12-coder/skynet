@@ -64,7 +64,6 @@ const INSTALL_COMMANDS: Record<Cli["id"], string> = {
   claude: "npm install -g @anthropic-ai/claude-code",
   codex: "npm install -g @openai/codex",
 };
-const STEPS = ["secrets", "runtime", "postgres", "sandbox", "python", "migrations", "api", "frontend"];
 
 function t(key: string, vars: Record<string, string> = {}): string {
   const text = messages[key] ?? en[key as keyof typeof en] ?? key;
@@ -196,22 +195,9 @@ function panelBody(state: State): Node[] {
       if (state.limitMessage) nodes.push(el("pre", { className: "detail", text: state.limitMessage, dir: "auto" }));
       nodes.push(actions(button(t("rate_capped.continue"), "primary", () => void bridge.continueAnyway()), button(t("action.recheck"), "secondary", () => void bridge.recheck())));
       break;
-    case "starting": {
-      const current = STEPS.indexOf(state.step ?? "");
-      nodes.push(
-        el(
-          "ol",
-          { className: "steps" },
-          STEPS.map((step, i) =>
-            el("li", { className: `step step-${i < current ? "done" : i === current ? "active" : "pending"}` }, [
-              el("span", { className: "dot" }),
-              el("span", { text: t(`step.${step}`) }),
-            ]),
-          ),
-        ),
-      );
+    case "starting":
+      nodes.push(el("div", { className: "spinner", text: "" }));
       break;
-    }
     case "sign_in": {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
       if (state.signIn === "waiting") {
