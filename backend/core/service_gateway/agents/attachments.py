@@ -17,19 +17,25 @@ import re
 import time
 import zipfile
 from collections.abc import Iterator
-from contextlib import closing
+from contextlib import AbstractContextManager, closing
 from pathlib import PurePosixPath
 from typing import IO
 from xml.etree import ElementTree as ET
+from xml.parsers import expat
 
 import xlrd
-from pypdf import PdfReader
+from pypdf import PdfReader, apply_configuration
+from pypdf.errors import LimitReachedError
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_ATTACHMENT_CHARS = 50_000
 # A DOCX/XLSX/PPTX is a zip. zipfile never inflates a member past its declared
 # size, so capping the declared total bounds the work a zip bomb can cause.
 _MAX_INFLATED_BYTES = 256 * 1024 * 1024
+# Each part is parsed as a stream, but a part can still be mostly markup with
+# little text, so reading one part stops at this many unpacked bytes.
+_MAX_PART_BYTES = 32 * 1024 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 # Workbook index parts (relationships, sheet list) are small; they are parsed
 # whole, so they get a tight cap of their own.
 _MAX_INDEX_PART_BYTES = 1024 * 1024
@@ -38,6 +44,9 @@ _MAX_INDEX_PART_BYTES = 1024 * 1024
 _MAX_XLSX_COLUMNS = 1000
 # Text-free PDF pages cost parse time but never reach the character cap.
 _MAX_PDF_PAGES = 500
+# pypdf inflates a whole content stream and parses it into operations before
+# it extracts text, so one small compressed stream can take hundreds of MB.
+_MAX_PDF_STREAM_BYTES = 8 * 1024 * 1024
 # Parsing runs on the request thread; a file that is slow to parse stops here.
 _MAX_PARSE_SECONDS = 10.0
 
@@ -48,6 +57,10 @@ _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
+
+
+class _PartTooLargeError(Exception):
+    """Raised when one zip part unpacks past ``_MAX_PART_BYTES``."""
 
 
 def _human_size(size: int) -> str:
@@ -138,29 +151,88 @@ def _read_member(archive: zipfile.ZipFile, name: str) -> bytes:
         return member.read(_MAX_INDEX_PART_BYTES)
 
 
-def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
-    """Yield each XML element as it closes, then drop it from the tree.
+def _qualified(name: str) -> str:
+    """Turn an expat ``uri}local`` name into ElementTree's ``{uri}local`` form.
 
-    Dropping every closed element keeps memory at one root-to-leaf path, so a
-    huge part never builds a full tree. A caller reads what it needs from an
-    element (text, attributes) while it holds it; its children are gone.
+    Args:
+        name: The name expat reported.
+
+    Returns:
+        The name in ElementTree notation.
+    """
+    return f"{{{name}" if "}" in name else name
+
+
+def _closed_elements(source: IO[bytes]) -> Iterator[ET.Element]:
+    """Yield each XML element as it closes, without children.
+
+    The part is fed to expat in chunks and only the open root-to-leaf path is
+    kept, so a huge part never builds a full tree. An element keeps its own
+    text only up to ``MAX_ATTACHMENT_CHARS + 1`` characters: ElementTree would
+    first build one huge text node in full, before any cap could apply.
 
     Args:
         source: The XML byte stream.
 
     Yields:
-        Each element, in closing order.
+        Each element with its tag, attributes and capped text, in closing
+        order.
+
+    Raises:
+        _PartTooLargeError: When the stream runs past ``_MAX_PART_BYTES``.
     """
-    open_elements: list[ET.Element] = []
-    for event, elem in ET.iterparse(source, events=("start", "end")):
-        if event == "start":
-            open_elements.append(elem)
-            continue
-        open_elements.pop()
-        yield elem
-        if open_elements:
-            # Earlier children were dropped as they closed, so this one is last.
-            del open_elements[-1][-1]
+    open_elements: list[tuple[ET.Element, list[str]]] = []
+    sizes: list[int] = []
+    closed: list[ET.Element] = []
+
+    def start(name: str, attributes: dict[str, str]) -> None:
+        """Open an element.
+
+        Args:
+            name: The expat element name.
+            attributes: The expat attributes.
+        """
+        elem = ET.Element(_qualified(name), {_qualified(k): v for k, v in attributes.items()})
+        open_elements.append((elem, []))
+        sizes.append(0)
+
+    def data(text: str) -> None:
+        """Add text to the innermost open element, up to the cap.
+
+        Args:
+            text: A piece of character data.
+        """
+        room = MAX_ATTACHMENT_CHARS + 1 - sizes[-1] if sizes else 0
+        if room > 0:
+            open_elements[-1][1].append(text[:room])
+            sizes[-1] += min(len(text), room)
+
+    def end(name: str) -> None:
+        """Close the innermost element and queue it for the caller.
+
+        Args:
+            name: The expat element name.
+        """
+        elem, parts = open_elements.pop()
+        sizes.pop()
+        elem.text = "".join(parts)
+        closed.append(elem)
+
+    parser = expat.ParserCreate(namespace_separator="}")
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.CharacterDataHandler = data
+    read = 0
+    while True:
+        chunk = source.read(min(_READ_CHUNK_BYTES, _MAX_PART_BYTES - read))
+        if not chunk and read >= _MAX_PART_BYTES and source.read(1):
+            raise _PartTooLargeError
+        read += len(chunk)
+        parser.Parse(chunk, not chunk)
+        yield from closed
+        closed.clear()
+        if not chunk:
+            return
 
 
 def _paragraphs(source: IO[bytes], ns: str) -> Iterator[str]:
@@ -175,17 +247,17 @@ def _paragraphs(source: IO[bytes], ns: str) -> Iterator[str]:
         element, so the caller can stop between elements.
     """
     parts: list[str] = []
+    size = 0
     for elem in _closed_elements(source):
         if elem.tag == f"{ns}p":
             yield "".join(parts).strip()
-            parts = []
+            parts, size = [], 0
             continue
-        if elem.tag == f"{ns}t":
-            parts.append(elem.text or "")
-        elif elem.tag == f"{ns}tab":
-            parts.append("\t")
-        elif elem.tag == f"{ns}br":
-            parts.append("\n")
+        # One paragraph can hold any number of runs; past the cap they are dropped.
+        piece = {f"{ns}t": elem.text or "", f"{ns}tab": "\t", f"{ns}br": "\n"}.get(elem.tag)
+        if piece is not None and size <= MAX_ATTACHMENT_CHARS:
+            parts.append(piece)
+            size += len(piece)
         yield ""
 
 
@@ -293,23 +365,28 @@ def _sheet_rows(source: IO[bytes], shared: list[str]) -> Iterator[str | None]:
     cells: list[str] = []
     texts: list[str] = []
     value: str | None = None
+    # One row can hold many long cells; past the cap, its text is dropped.
+    size = texts_size = 0
     for elem in _closed_elements(source):
         if elem.tag == f"{_S}t":
-            texts.append(elem.text or "")
+            if size + texts_size <= MAX_ATTACHMENT_CHARS:
+                texts.append(elem.text or "")
+                texts_size += len(texts[-1])
         elif elem.tag == f"{_S}v":
             value = elem.text
         elif elem.tag == f"{_S}c":
             # Empty cells are absent from the XML; pad to the cell's column so
             # values stay under the right header.
             column = _column_index(elem.get("r", ""))
-            if column is None or column < _MAX_XLSX_COLUMNS:
+            if size <= MAX_ATTACHMENT_CHARS and (column is None or column < _MAX_XLSX_COLUMNS):
                 if column is not None and column > len(cells):
                     cells.extend([""] * (column - len(cells)))
                 cells.append(_cell_value(elem.get("t"), value, texts, shared))
-            texts, value = [], None
+                size += len(cells[-1])
+            texts, value, texts_size = [], None, 0
         elif elem.tag == f"{_S}row":
             yield "\t".join(cells)
-            cells = []
+            cells, size = [], 0
             continue
         yield None
 
@@ -325,13 +402,17 @@ def _shared_strings(source: IO[bytes]) -> Iterator[str | None]:
         caller can stop between elements.
     """
     parts: list[str] = []
+    size = 0
     for elem in _closed_elements(source):
         if elem.tag == f"{_S}t":
-            parts.append(elem.text or "")
+            # One string can hold any number of runs; past the cap they are dropped.
+            if size <= MAX_ATTACHMENT_CHARS:
+                parts.append(elem.text or "")
+                size += len(parts[-1])
             yield None
         elif elem.tag == f"{_S}si":
             yield "".join(parts)
-            parts = []
+            parts, size = [], 0
         else:
             yield None
 
@@ -349,10 +430,16 @@ def _xlsx_text(data: bytes) -> Iterator[str]:
         names = set(archive.namelist())
         shared: list[str] = []
         if "xl/sharedStrings.xml" in names:
-            with archive.open("xl/sharedStrings.xml") as member:
-                for value in _shared_strings(member):
+            # Shared strings never reach _collect, so they count against the
+            # character cap here; strings past it read as empty cells.
+            size = 0
+            with archive.open("xl/sharedStrings.xml") as member, closing(_shared_strings(member)) as values:
+                for value in values:
                     if value is not None:
                         shared.append(value)
+                        size += len(value) + 1
+                        if size > MAX_ATTACHMENT_CHARS:
+                            break
                     yield ""
         rels = ET.fromstring(_read_member(archive, "xl/_rels/workbook.xml.rels"))
         targets = {rel.get("Id"): rel.get("Target", "") for rel in rels.iter(f"{_PKG_REL}Relationship")}
@@ -388,6 +475,24 @@ def _xls_text(data: bytes) -> Iterator[str]:
             yield "\n" + "\t".join(str(v) for v in sheet.row_values(r))
 
 
+def _pdf_limits() -> AbstractContextManager[object]:
+    """Cap how many bytes pypdf may inflate from one PDF stream.
+
+    Returns:
+        A context manager that applies the caps while it is open.
+    """
+    cap = _MAX_PDF_STREAM_BYTES
+    return apply_configuration(
+        zlib_maximum_output_length=cap,
+        lzw_maximum_output_length=cap,
+        run_length_maximum_output_length=cap,
+        brotli_maximum_output_length=cap,
+        jbig2_maximum_output_length=cap,
+        array_based_stream_maximum_output_length=cap,
+        stream_decoding_work_maximum_length=4 * cap,
+    )
+
+
 def _pdf_text(data: bytes) -> Iterator[str]:
     """Extract the text layer of a PDF, page by page.
 
@@ -398,12 +503,17 @@ def _pdf_text(data: bytes) -> Iterator[str]:
         Each page's text under a ``Page N`` heading, for at most
         ``_MAX_PDF_PAGES`` pages, then a note when pages were left out.
     """
-    reader = PdfReader(io.BytesIO(data))
-    if reader.is_encrypted:
-        reader.decrypt("")
-    count = len(reader.pages)
+    with _pdf_limits():
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            reader.decrypt("")
+        count = len(reader.pages)
     for number in range(1, min(count, _MAX_PDF_PAGES) + 1):
-        text = (reader.pages[number - 1].extract_text() or "").strip()
+        with _pdf_limits():
+            try:
+                text = (reader.pages[number - 1].extract_text() or "").strip()
+            except LimitReachedError:
+                text = "[This page is too large to read.]"
         yield f"Page {number}\n{text}" if number == 1 else f"\n\nPage {number}\n{text}"
     if count > _MAX_PDF_PAGES:
         yield f"\n\n[Truncated: read the first {_MAX_PDF_PAGES} of {count} pages.]"
@@ -417,20 +527,23 @@ def _collect(pieces: Iterator[str]) -> tuple[str, str | None]:
             stop.
 
     Returns:
-        The text read, and ``"chars"`` or ``"time"`` when reading stopped
-        early (``None`` when the parser finished).
+        The text read, and ``"chars"``, ``"time"`` or ``"size"`` when reading
+        stopped early (``None`` when the parser finished).
     """
     deadline = time.monotonic() + _MAX_PARSE_SECONDS
     parts: list[str] = []
     total = 0
     with closing(pieces):
-        for piece in pieces:
-            parts.append(piece)
-            total += len(piece)
-            if total > MAX_ATTACHMENT_CHARS:
-                return "".join(parts), "chars"
-            if time.monotonic() > deadline:
-                return "".join(parts), "time"
+        try:
+            for piece in pieces:
+                parts.append(piece)
+                total += len(piece)
+                if total > MAX_ATTACHMENT_CHARS:
+                    return "".join(parts), "chars"
+                if time.monotonic() > deadline:
+                    return "".join(parts), "time"
+        except _PartTooLargeError:
+            return "".join(parts), "size"
     return "".join(parts), None
 
 
@@ -471,7 +584,8 @@ def extract_attachment_text(name: str, content_type: str, data: bytes, size: int
         except Exception:
             return _note(name, content_type, size, "Its contents could not be read.")
         if not text.strip():
-            return _note(name, content_type, size, "It contains no readable text.")
+            reason = "It is too large to read." if stopped == "size" else "It contains no readable text."
+            return _note(name, content_type, size, reason)
         if stopped == "chars":
             return (
                 f"{text[:MAX_ATTACHMENT_CHARS]}\n\n"
@@ -479,6 +593,8 @@ def extract_attachment_text(name: str, content_type: str, data: bytes, size: int
             )
         if stopped == "time":
             return f"{text}\n\n[Truncated: {name} took too long to read, so only its first part is shown.]"
+        if stopped == "size":
+            return f"{text}\n\n[Truncated: {name} is too large to read in full, so only its first part is shown.]"
     elif content_type.startswith("image/") or suffix in _IMAGE_SUFFIXES:
         return _note(name, content_type, size, "It is an image; this chat cannot show images to the agent.")
     else:

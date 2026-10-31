@@ -24,7 +24,11 @@ import { agentSubscriptionFor } from "@/features/settings";
 import { cn } from "@/shared/lib/utils";
 
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
-import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
+import {
+  fitsInterview,
+  useTaskInterview,
+  type TaskInterviewState,
+} from "../../hooks/use-task-interview";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { taskAdvanceFrom } from "../../lib/auto-advance";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
@@ -307,6 +311,7 @@ function TaskInterviewPanel({
         onStop={interview.stop}
         streaming={interview.busy}
         midTurn={midTurn}
+        acceptsMidTurn={fitsInterview}
         placeholder={t("submit.v2.task.chat.placeholder")}
         modelMenu={
           <ComposerModelMenu

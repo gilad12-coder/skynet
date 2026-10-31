@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import zipfile
+import zlib
 
 import fakeredis
 import pytest
@@ -54,22 +55,26 @@ def _zip(members: dict[str, str]) -> bytes:
     return buffer.getvalue()
 
 
-def _pdf(text: str) -> bytes:
+def _pdf(text: str, compress: bool = False) -> bytes:
     """Build a one-page PDF whose text layer holds ``text``.
 
     Args:
         text: ASCII text without parentheses or backslashes.
+        compress: Whether to Flate-compress the content stream.
 
     Returns:
         The PDF bytes, with a correct cross-reference table.
     """
     stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    flate = b""
+    if compress:
+        stream, flate = zlib.compress(stream), b" /Filter /FlateDecode"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
         b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Length %d%s >>\nstream\n" % (len(stream), flate) + stream + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
     out = bytearray(b"%PDF-1.4\n")
@@ -162,11 +167,7 @@ def test_docx_paragraphs_are_extracted() -> None:
 
 def test_pptx_slides_are_extracted_in_numeric_order() -> None:
     """Slide 10 comes after slide 2, each under its own heading."""
-
-    def slide(body: str) -> str:
-        return f"<p:sld {_A_NS} xmlns:p='urn:p'><a:p><a:r><a:t>{body}</a:t></a:r></a:p></p:sld>"
-
-    data = _zip({f"ppt/slides/slide{n}.xml": slide(f"text {n}") for n in (10, 1, 2)})
+    data = _zip({f"ppt/slides/slide{n}.xml": _slide(f"text {n}") for n in (10, 1, 2)})
     assert extract_attachment_text("deck.pptx", "", data).split("\n\n") == [
         "Slide 1\ntext 1",
         "Slide 2\ntext 2",
@@ -225,6 +226,73 @@ def test_zip_formats_refuse_a_large_total_unpacked_size(monkeypatch: pytest.Monk
     monkeypatch.setattr(attachments, "_MAX_INFLATED_BYTES", 1000)
     data = _zip({f"ppt/slides/slide{n}.xml": _slide("x" * 600) for n in (1, 2)})
     assert extract_attachment_text("deck.pptx", "", data).endswith("Its contents could not be read.]")
+
+
+def test_one_huge_xml_text_node_is_held_only_up_to_the_character_cap() -> None:
+    """A single huge text node is cut while parsing, not built in full first."""
+    run = "\u05e9" * (MAX_ATTACHMENT_CHARS * 20)
+    document = f"<w:document {_W_NS}><w:body><w:p><w:r><w:t>{run}</w:t></w:r></w:p></w:body></w:document>"
+    texts = [elem.text or "" for elem in attachments._closed_elements(io.BytesIO(document.encode()))]
+    assert max(len(text) for text in texts) <= MAX_ATTACHMENT_CHARS + 1
+    text = extract_attachment_text("one-run.docx", "", _zip({"word/document.xml": document}))
+    assert "[Truncated: showing the first 50,000 characters of one-run.docx" in text
+
+
+def test_xlsx_shared_strings_stop_at_the_character_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shared strings count against the character cap, so a huge string table is not kept in full."""
+    kept: list[str] = []
+    read_shared = attachments._shared_strings
+
+    def counting_shared_strings(*args: object) -> object:
+        """Record each shared string the parser hands over.
+
+        Args:
+            *args: The arguments for the real parser.
+
+        Yields:
+            The real parser's values.
+        """
+        for value in read_shared(*args):
+            if value is not None:
+                kept.append(value)
+            yield value
+
+    monkeypatch.setattr(attachments, "_shared_strings", counting_shared_strings)
+    shared = f"<sst {_S_NS}>" + "".join(f"<si><t>{n:07d}</t></si>" for n in range(100_000)) + "</sst>"
+    workbook = f'<workbook {_S_NS} {_R_NS}><sheets><sheet name="s" r:id="rId1"/></sheets></workbook>'
+    rels = f'<Relationships {_PKG_NS}><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'
+    sheet = f'<worksheet {_S_NS}><sheetData><row><c t="s"><v>0</v></c></row></sheetData></worksheet>'
+    data = _zip(
+        {
+            "xl/workbook.xml": workbook,
+            "xl/_rels/workbook.xml.rels": rels,
+            "xl/sharedStrings.xml": shared,
+            "xl/worksheets/sheet1.xml": sheet,
+        }
+    )
+    assert extract_attachment_text("strings.xlsx", "", data) == "Sheet: s\n0000000"
+    assert sum(len(value) + 1 for value in kept) <= MAX_ATTACHMENT_CHARS + 16
+
+
+def test_zip_member_reading_stops_at_the_part_byte_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A zip member is read only up to the per-part byte cap, and the cut is noted."""
+    monkeypatch.setattr(attachments, "_MAX_PART_BYTES", 10_000)
+    paragraphs = "".join(f"<w:p><w:r><w:t>line {n}</w:t></w:r></w:p>" for n in range(2000))
+    document = f"<w:document {_W_NS}><w:body>{paragraphs}</w:body></w:document>"
+    text = extract_attachment_text("long.docx", "", _zip({"word/document.xml": document}))
+    assert text.startswith("line 0\nline 1\n")
+    assert "line 1999" not in text
+    assert text.endswith("[Truncated: long.docx is too large to read in full, so only its first part is shown.]")
+    one_run = f"<w:document {_W_NS}><w:body><w:p><w:r><w:t>{'x' * 20_000}</w:t></w:r></w:p></w:body></w:document>"
+    text = extract_attachment_text("one-run.docx", "", _zip({"word/document.xml": one_run}))
+    assert text.endswith("It is too large to read.]")
+
+
+def test_pdf_page_with_a_huge_content_stream_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A content stream that inflates past the cap is not decoded; the page says so."""
+    monkeypatch.setattr(attachments, "_MAX_PDF_STREAM_BYTES", 1000)
+    text = extract_attachment_text("dense.pdf", "application/pdf", _pdf("x" * 2000, compress=True))
+    assert text == "Page 1\n[This page is too large to read.]"
 
 
 def test_pptx_stops_opening_slides_past_the_character_cap(monkeypatch: pytest.MonkeyPatch) -> None:

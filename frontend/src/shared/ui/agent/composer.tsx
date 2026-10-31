@@ -50,6 +50,9 @@ interface ComposerProps {
    *  a turn streams, Enter steers (or queues) and Tab queues. Without it the
    *  composer locks while streaming. */
   midTurn?: MidTurnQueue;
+  /** Checks a message before it is steered or queued; false keeps it in the
+   *  draft. A queued message is sent later, when its rejection would lose it. */
+  acceptsMidTurn?: (text: string) => boolean;
   /** Claims a picked or pasted file before the composer reads it as text;
    *  return true when handled (the generalist sends datasets to its
    *  column-mapping card this way). */
@@ -81,6 +84,7 @@ export function Composer({
   layout = "stacked",
   className,
   midTurn,
+  acceptsMidTurn,
   onAttachFile,
 }: ComposerProps) {
   const inline = layout === "inline";
@@ -174,6 +178,7 @@ export function Composer({
 
   const sendMidTurn = (mode: "steer" | "queue") => {
     if (!midTurn || disabled || dictating || attaching > 0 || !hasDraft) return;
+    if (acceptsMidTurn && !acceptsMidTurn(value)) return;
     if (mode === "steer") midTurn.steer(value);
     else midTurn.queue(value);
     onChange("");

@@ -63,7 +63,7 @@ export interface TaskInterviewState {
 }
 
 /** Check a user turn's size; a turn over the limit is never saved, and the user is told why. */
-function fitsInterview(content: string): boolean {
+export function fitsInterview(content: string): boolean {
   if (fitsInterviewTurn(content)) return true;
   toast.error(
     msg("submit.code.interview.too_long", {

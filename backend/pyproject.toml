@@ -79,7 +79,7 @@ dependencies = [
     "sentry-sdk>=2.67,<3",
     "pip==26.2.1",
     "pyarrow>=17",
-    # Text extraction for files attached in agent chats (core.agent_attachments):
+    # Text extraction for files attached in agent chats (core.service_gateway.agents.attachments):
     # PDF and legacy .xls. Both are pure Python with no dependencies.
     "pypdf>=5",
     "xlrd>=2",
