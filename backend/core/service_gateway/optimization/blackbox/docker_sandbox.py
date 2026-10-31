@@ -59,10 +59,11 @@ _PROBE_TIMEOUT_SECONDS = 10.0
 _PROBE_CACHE_SECONDS = 5.0
 _probe_cache: dict[tuple[str, str], tuple[float, str | None]] = {}
 _probe_cache_lock = threading.Lock()
-# Reads NUL-separated NAME=value pairs from stdin, exports them, then runs the
-# command. Values travel neither on a command line (any local user can read
-# process arguments) nor in the Docker CLI's own environment.
-_ENV_LOADER = 'while IFS= read -r -d "" pair; do export -- "$pair"; done; exec "$@"'
+# Reads NUL-separated NAME=value pairs from stdin and runs the command under
+# them. Values travel neither on a host command line (any local user can read
+# process arguments) nor in the Docker CLI's own environment. `env`, unlike
+# bash's `export`, takes any name an environment can hold, as Vercel does.
+_ENV_LOADER = 'pairs=(); while IFS= read -r -d "" pair; do pairs+=("$pair"); done; exec env -- "${pairs[@]}" "$@"'
 _MISSING_FILE_EXIT = 3
 _READ_FILE_SCRIPT = f'test -f "$1" || exit {_MISSING_FILE_EXIT}; exec cat -- "$1"'
 # The proxy sidecar's own way out; the setup box never joins it.

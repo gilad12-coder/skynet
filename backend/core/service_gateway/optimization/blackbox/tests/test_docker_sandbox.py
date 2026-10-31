@@ -630,15 +630,16 @@ def test_live_box_and_command_environment_reach_the_command() -> None:
     )
     try:
         result = session.run(
-            'printf "%s|%s|%s|%s" "$BOX" "$SHARED" "$MULTI" "$HOME"',
-            env={"SHARED": "command", "MULTI": "a=b\nc d"},
+            'printf "%s|%s|%s|%s|%s|" "$BOX" "$SHARED" "$MULTI" "$HOME" "$pair"; env | grep -c "^A.B=1$"',
+            env={"SHARED": "command", "MULTI": "a=b\nc d", "pair": "kept", "A.B": "1"},
             timeout_seconds=30,
         )
     finally:
         session.close()
 
     assert result.ok
-    assert result.stdout == "box|command|a=b\nc d|/workspace"
+    assert result.stdout == "box|command|a=b\nc d|/workspace|kept|1\n"
+    assert result.stderr == ""
 
 
 @pytest.mark.docker
