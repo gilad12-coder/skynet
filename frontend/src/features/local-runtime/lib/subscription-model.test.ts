@@ -44,6 +44,7 @@ const {
   hiddenLocalPick,
   roleCli,
   menuKeyVerified,
+  nextKeyLoad,
   requestKeyRows,
   isOpenRouterModelId,
   resolveAgentModel,
@@ -1400,4 +1401,15 @@ test("choosing a CLI keeps the model only when that CLI serves it", () => {
     cli_provider: "codex",
   });
   assert.equal(withChosenCli(served, "claude", null).name, "");
+});
+
+test("a failed key model load keeps the rows an earlier load got for the same key", () => {
+  type Rows = NonNullable<Parameters<typeof nextKeyLoad>[2]>;
+  const rows = [{ value: "openai/gpt-5" }] as Rows;
+  const good = { stamp: "k1:t", models: rows };
+  assert.equal(nextKeyLoad(good, "k1:t", null), good);
+  assert.deepEqual(nextKeyLoad(good, "k2:t", null), { stamp: "k2:t", models: null });
+  assert.deepEqual(nextKeyLoad(null, "k1:t", null), { stamp: "k1:t", models: null });
+  const fresh = [{ value: "openai/gpt-6" }] as Rows;
+  assert.deepEqual(nextKeyLoad(good, "k1:t", fresh), { stamp: "k1:t", models: fresh });
 });

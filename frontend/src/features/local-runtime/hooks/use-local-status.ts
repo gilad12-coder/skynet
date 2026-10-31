@@ -16,6 +16,7 @@ import {
   localKeyRows,
   localKeyStamp,
   menuKeyVerified,
+  nextKeyLoad,
   OPENROUTER_ENGINE,
   requestKeyRows,
   resolveLocalAgentModel,
@@ -130,7 +131,7 @@ function useLocalKeyModels(enabled: boolean): CatalogModel[] | null {
       if (!active) return;
       // A failed load resolves an empty catalog and leaves the cache unset.
       const ok = cachedByokCatalog() !== null;
-      lastKeyLoad = { stamp, models: ok ? catalog.models : null };
+      lastKeyLoad = nextKeyLoad(lastKeyLoad, stamp, ok ? catalog.models : null);
       setLoaded(lastKeyLoad);
       if (ok) setModelTries(0);
       else retry = setTimeout(() => setModelTries((n) => n + 1), keyRetryDelayMs(modelTries));

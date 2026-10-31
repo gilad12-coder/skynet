@@ -13,7 +13,7 @@ import type { CatalogModel } from "@/shared/types/api";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { ComposerModelMenu } = await import("./composer-model-menu");
+const { ComposerModelMenu, hiddenPickEffortStale } = await import("./composer-model-menu");
 
 const SUBSCRIPTION: CatalogModel[] = [
   {
@@ -47,6 +47,21 @@ function render(value: string | null, models?: CatalogModel[]): string {
     />,
   );
 }
+
+void describe("hiddenPickEffortStale", () => {
+  const thinking = SUBSCRIPTION[0]!;
+  const plain = SUBSCRIPTION[1]!;
+  void it("clears a hidden pick's effort that the shown model does not take", () => {
+    assert.equal(hiddenPickEffortStale(true, "max", thinking, ["low", "high"]), true);
+    assert.equal(hiddenPickEffortStale(true, "high", plain, ["low", "high"]), true);
+  });
+  void it("keeps an effort that fits, a listed pick's effort, and any effort while the menu loads", () => {
+    assert.equal(hiddenPickEffortStale(true, "high", thinking, ["low", "high"]), false);
+    assert.equal(hiddenPickEffortStale(false, "max", thinking, ["low", "high"]), false);
+    assert.equal(hiddenPickEffortStale(true, "max", undefined, []), false);
+    assert.equal(hiddenPickEffortStale(true, null, thinking, ["low"]), false);
+  });
+});
 
 void describe("ComposerModelMenu", () => {
   void it("names the first listed model when the local build lists subscription models", () => {

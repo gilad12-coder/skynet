@@ -281,6 +281,20 @@ export function requestKeyRows(
   });
 }
 
+/**
+ * The key model load to keep after a load for `stamp` ends; `models` is null
+ * when it failed. A failed load keeps the rows an earlier load got for the
+ * same key, which other menus still show and requests still send.
+ */
+export function nextKeyLoad(
+  last: { stamp: string; models: CatalogModel[] | null } | null,
+  stamp: string,
+  models: CatalogModel[] | null,
+): { stamp: string; models: CatalogModel[] | null } {
+  if (!models && last?.stamp === stamp) return last;
+  return { stamp, models };
+}
+
 /** The longest wait between retries of a failed key list or key model list. */
 export const KEY_RETRY_MAX_MS = 30_000;
 

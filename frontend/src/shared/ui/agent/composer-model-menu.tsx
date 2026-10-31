@@ -61,6 +61,22 @@ interface ComposerModelMenuProps {
 // listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
 
+/**
+ * Whether a saved effort no longer fits the model the chip names while the
+ * menu hides the saved pick (a Local pick under the OpenRouter engine). The
+ * hidden pick stays saved, but its effort would go with another model. Judged
+ * only once the menu lists the model it runs.
+ */
+export function hiddenPickEffortStale(
+  hidden: boolean,
+  effort: string | null,
+  current: CatalogModel | undefined,
+  efforts: readonly string[],
+): boolean {
+  if (!hidden || !effort || !current) return false;
+  return !current.supports_thinking || !efforts.includes(effort);
+}
+
 function effortHint(level: string | null): string {
   switch (level) {
     case "none":
@@ -173,6 +189,15 @@ export function ComposerModelMenu({
   const canThink = !!current?.supports_thinking;
   const efforts = effortsFor(effective, available);
   const defaultEffort = unpickedEffort(current);
+  const effortStale = hiddenPickEffortStale(
+    !!savedValue && unlisted && !stale,
+    effort,
+    current,
+    efforts,
+  );
+  React.useEffect(() => {
+    if (effortStale) onEffortChange(null);
+  }, [effortStale, onEffortChange]);
 
   const pick = (model: string | null) => {
     onChange(model);
