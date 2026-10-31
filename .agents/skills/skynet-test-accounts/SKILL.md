@@ -85,22 +85,28 @@ cannot read email codes. When Devin needs an account that setup did not
 provide, it reports the setup failure and the coverage gap, as above.
 
 Use `devin-login.sh` in this folder. It reads the credentials from
-environment variables, sets `TOKEN`, and prints only the HTTP status:
+environment variables, sets `TOKEN` (and no other variable), and prints only
+the HTTP status. Export the variables first, then source the script in bash
+or zsh. Do not put them on the same line as the `.` command: the shell drops
+them after the script returns, and the next API call fails.
 
 ```bash
 # Staging, slot devin-1:
-N=1 APP=https://staging.skynetml.com API=https://api-staging.skynetml.com \
-  . .agents/skills/skynet-test-accounts/devin-login.sh
-# PR preview 812, with the preview account:
-PREFIX=SKYNET_PR_812 APP=https://pr-812.staging.skynetml.com API=https://api-pr-812.staging.skynetml.com \
-  . .agents/skills/skynet-test-accounts/devin-login.sh
+export N=1 APP=https://staging.skynetml.com API=https://api-staging.skynetml.com
+. .agents/skills/skynet-test-accounts/devin-login.sh
+# PR preview 812, with the preview account (PREFIX wins over N; unset it to go back):
+export PREFIX=SKYNET_PR_812 APP=https://pr-812.staging.skynetml.com API=https://api-pr-812.staging.skynetml.com
+. .agents/skills/skynet-test-accounts/devin-login.sh
 ```
+
+If `APP`, `API`, or both `N` and `PREFIX` are empty, the script stops with
+an error and makes no request.
 
 Expect `login check: HTTP 200`. Then call the API with the token in a header
 that curl reads from stdin, so the token stays out of the process list:
 
 ```bash
-printf 'authorization: Bearer %s\n' "$TOKEN" | curl -s "${DOH[@]}" -H @- "$API/account/experience"
+printf 'authorization: Bearer %s\n' "$TOKEN" | curl -s --doh-url https://cloudflare-dns.com/dns-query -H @- "$API/account/experience"
 ```
 
 **Never print `$TOKEN`**, and never put it in a command argument. If the check
