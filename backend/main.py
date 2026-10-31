@@ -8,7 +8,6 @@ the ``ServiceRegistry`` and the FastAPI ``app`` object, and exposes
 from __future__ import annotations
 
 import contextlib
-import os
 from pathlib import Path
 
 import dspy
@@ -17,6 +16,7 @@ from dotenv import load_dotenv
 
 from core.api.app import create_app
 from core.api.observability import configure_logging
+from core.config import settings
 from core.error_reporting import configure_error_reporting
 from core.registry import ServiceRegistry
 from core.service_gateway.react_compat import configure_native_tool_calling
@@ -51,9 +51,8 @@ app = create_app(registry=registry)
 
 def run_server() -> None:
     """Boot the FastAPI application using Uvicorn, honouring API_HOST / API_PORT."""
-    host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
-    uvicorn.run("main:app", host=host, port=port, reload=False)
+    host = settings.api_host
+    uvicorn.run("main:app", host=host, port=settings.port, reload=False)
 
 
 if __name__ == "__main__":

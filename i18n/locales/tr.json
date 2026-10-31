@@ -420,6 +420,9 @@
     "continuous.check_stuck": "Kontrol bitmeden {attempts} kez durdu, bu yüzden kapatıldı. Sonraki kontroller normal şekilde çalışır.",
     "continuous.review_ready": "Yeni aday aynı örneklerde mevcut sürümü geçti. Onayınızı bekliyor.",
     "continuous.review_approved": "Yeni adayı onayladınız. Artık mevcut sürüm bu.",
-    "continuous.review_rejected": "Yeni adayı reddettiniz. Önceki sürüm kalır."
+    "continuous.review_rejected": "Yeni adayı reddettiniz. Önceki sürüm kalır.",
+    "local.not_available": "Bu özellik yalnızca {term.appName} Mac uygulamasında kullanılabilir.",
+    "models.subscription_local_only": "Abonelik modelleri ve yerel CLI önericileri yalnızca {term.appName} Mac uygulamasında çalışır.",
+    "models.managed_unavailable_local": "Mac uygulaması yönetilen modelleri kullanamaz. Bir abonelik modeli veya kendi sağlayıcı anahtarınızı seçin."
   }
 }
