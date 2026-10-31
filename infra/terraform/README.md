@@ -58,11 +58,12 @@ There is no DynamoDB table.
 - ElastiCache Valkey 8.1 (TLS, AUTH token). One shared cache for app and litellm,
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
-  targets, backend latency, ECS CPU, memory and running < desired, RDS CPU, memory,
-  free storage and connections, Valkey CPU and memory, error lines in the logs,
-  RDS failure events, and no finished automated RDS backup in 30 hours. The
-  topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
-  under the AWS managed SNS key.
+  targets, backend latency, ECS CPU and memory, a crashed task (from ECS stop
+  events), no running tasks in 3 of 5 minutes, running tasks below desired for
+  10 minutes, RDS CPU, memory, free storage and connections, Valkey CPU and
+  memory, error lines in the logs, RDS failure events, and no finished
+  automated RDS backup in 30 hours. The topic uses its own KMS key: CloudWatch
+  and RDS cannot publish to a topic under the AWS managed SNS key.
 
 ### Choices
 
@@ -458,8 +459,8 @@ about $671 per month, above the $460 spend limit. Production full alone
 Container Insights is the largest CloudWatch item: about $40-50 per month per
 environment (custom metrics per task and service, plus performance log
 ingestion). Turning it off saves that, at the cost of the per-task CPU and
-memory views and the "running < desired" alarm, which reads a Container
-Insights metric.
+memory views and the "tasks-missing" and "tasks-below-desired" alarms,
+which read Container Insights metrics.
 
 Not included: data transfer out, NAT data processing ($0.045 per GB), LLM provider
 costs, RDS CPU credits beyond the baseline, WAF (off by default; about $10 per
