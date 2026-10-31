@@ -356,7 +356,8 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     log(`account status check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (linked) return openApp();
-  setState({ ...base, kind: "sign_in", signIn: "idle" });
+  // Straight to "waiting": the small window stays small until skynetml.com loads.
+  setState({ ...base, kind: "sign_in", signIn: "waiting" });
   await signIn();
 }
 
@@ -548,6 +549,10 @@ function createWindow(): void {
   });
   win.webContents.on("did-fail-load", (_event, code, detail, url, isMainFrame) => {
     if (isMainFrame) signInLoadFailed(code, detail, url);
+  });
+  // A 5xx or 404 page from skynetml.com loads without did-fail-load, and it has no skip link.
+  win.webContents.on("did-navigate", (_event, url, httpResponseCode, httpStatusText) => {
+    if (httpResponseCode >= 400) signInLoadFailed(httpResponseCode, httpStatusText || `HTTP ${httpResponseCode}`, url);
   });
   win.on("closed", () => {
     win = null;
