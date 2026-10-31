@@ -290,7 +290,7 @@ py-vapid==1.9.4
     # via pywebpush
 pyarrow==25.0.1
     # via skynet
-pyasn1==0.6.4
+pyasn1==0.6.5
     # via
     #   ldap3
     #   pyasn1-modules
