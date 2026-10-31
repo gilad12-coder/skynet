@@ -2780,7 +2780,8 @@ def _thinking_summaries(
     """Wire a turn's thinking labels to the summary model and the turn's stream.
 
     The model is built on the first label the turn needs and joins
-    ``usage_sink``, so its calls are metered with the turn.
+    ``usage_sink``, so its calls are metered with the turn. In local mode no
+    model is built and no stretch gets a label.
 
     Args:
         language: English name of the language labels are written in.
@@ -2801,6 +2802,10 @@ def _thinking_summaries(
         Returns:
             The label, or ``None``.
         """
+        # The summary model is a managed OpenRouter model, and the Mac app
+        # has no managed key; the turn shows unlabeled thinking instead.
+        if settings.local_mode:
+            return None
         if not built:
             built.append(_build_summary_lm())
             if usage_sink is not None:

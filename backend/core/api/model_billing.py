@@ -7,6 +7,7 @@ from typing import Any
 from ..billing.byok_bridge import payload_uses_token_source
 from ..config import settings
 from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED, TOKEN_SOURCE_SUBSCRIPTION
+from ..local.cli_catalog import parse_subscription_model_id
 from ..models import BlackboxRunRequest, RunRequest, UnifiedRunRequest
 from ..models.common import ModelConfig
 from ..models.submissions import _OptimizationRequestBase
@@ -69,7 +70,9 @@ def normalize_model_token_sources(
     """Resolve legacy job-level sources into explicit per-model sources.
 
     The run-level source becomes ``byok`` or ``subscription`` when every model
-    uses it, and ``managed`` otherwise.
+    uses it, and ``managed`` otherwise. In local mode a
+    ``subscription/<cli>/<slug>`` name is a subscription model on that CLI,
+    whatever source the request names.
 
     Args:
         payload: Run, Anything, or unified request to normalize in place.
@@ -83,6 +86,11 @@ def normalize_model_token_sources(
     configs = request_model_configs(payload)
     sources: dict[str, str] = {}
     for config in configs:
+        # The agent wizard submits a listed /models/for-agent name with no source.
+        subscription = parse_subscription_model_id(config.normalized_identifier()) if settings.local_mode else None
+        if subscription is not None:
+            config.token_source = TOKEN_SOURCE_SUBSCRIPTION
+            config.cli_provider = subscription[0]
         source = config.token_source or payload.token_source
         config.token_source = source
         config.base_url = None

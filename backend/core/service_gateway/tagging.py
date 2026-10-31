@@ -23,11 +23,13 @@ from typing import Any
 
 import dspy
 
+from ..api.errors import DomainError
 from ..api.model_catalog import REASONING_EFFORTS, agent_model_id
 from ..billing.pricing import ModelUsage
 from ..billing.service import run_cost_cents
 from ..config import settings
 from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
+from ..local.cli_catalog import parse_subscription_model_id
 from ..models import ModelConfig
 from .agents.code import ReasoningStreamListener, _reply_language
 from .agents.code_interview import INTERVIEW_TURN_ATTEMPTS, normalize_options
@@ -117,9 +119,37 @@ def assist_model_config(assist: dict[str, Any]) -> ModelConfig:
 
     Returns:
         A validated config with no inline connection secret or endpoint.
+
+    Raises:
+        DomainError: 422 in local mode when the config would run as managed
+            (see :func:`_refuse_local_managed`).
     """
     model_name = str((assist or {}).get("model") or "").strip() or assist_model_name()
-    return ModelConfig(name=model_name, **_sanitize_model_params((assist or {}).get("modelParams")))
+    config = ModelConfig(name=model_name, **_sanitize_model_params((assist or {}).get("modelParams")))
+    _refuse_local_managed(config)
+    return config
+
+
+def _refuse_local_managed(config: ModelConfig) -> None:
+    """Refuse a tagging model that would run on managed OpenRouter in local mode.
+
+    The Mac app has no managed key, so a managed call fails with a 401. A BYOK
+    pick runs on the user's own key, and a subscription config on their CLI.
+
+    Args:
+        config: The tagging model config about to run.
+
+    Raises:
+        DomainError: 422 ``tagger.assist.unknown_model`` in local mode for a
+            subscription id saved as a tagging-run model, which tagging runs
+            cannot use yet; 422 ``models.managed_unavailable_local`` in local
+            mode for any other managed config.
+    """
+    if not settings.local_mode or config.token_source in {TOKEN_SOURCE_BYOK, "subscription"}:
+        return
+    if parse_subscription_model_id(config.name) is not None:
+        raise DomainError("tagger.assist.unknown_model", status=422)
+    raise DomainError("models.managed_unavailable_local", status=422)
 
 
 def _build_assist_lm(
@@ -132,7 +162,8 @@ def _build_assist_lm(
 
     Args:
         model_name: LiteLLM model id to run on; falls back to the configured
-            tagging-assist model (then the generalist agent's) when empty.
+            tagging-assist model (then the generalist agent's) when empty. In
+            local mode a ``subscription/<cli>/<slug>`` id runs on that CLI.
         params: Sampling parameters saved alongside the chosen model
             (``assist.modelParams``); sanitized before use.
         reasoning_effort: Explicit ``reasoning_effort`` level chosen in the
@@ -143,20 +174,30 @@ def _build_assist_lm(
 
     Returns:
         A cache-disabled ``dspy.LM`` on the requested model.
+
+    Raises:
+        DomainError: 422 in local mode when the model would run as managed
+            (see :func:`_refuse_local_managed`).
     """
     kwargs = _sanitize_model_params(params)
+    subscription = parse_subscription_model_id(model_name or "") if settings.local_mode else None
     if model_config is not None:
         config = model_config
         if config.token_source != TOKEN_SOURCE_BYOK and not config.base_url:
             config = config.model_copy(
                 update={"base_url": settings.tagger_assist_base_url or settings.generalist_agent_base_url or None}
             )
+    elif subscription is not None:
+        kwargs.pop("token_source", None)
+        kwargs.pop("byok_provider", None)
+        config = ModelConfig(name=subscription[1], token_source="subscription", cli_provider=subscription[0], **kwargs)
     else:
         config = ModelConfig(
             name=model_name or assist_model_name(),
             base_url=settings.tagger_assist_base_url or settings.generalist_agent_base_url or None,
             **kwargs,
         )
+    _refuse_local_managed(config)
     config = apply_reasoning_effort(config, reasoning_effort)
     return build_language_model(apply_model_reasoning_config(config), disable_cache=True)
 
