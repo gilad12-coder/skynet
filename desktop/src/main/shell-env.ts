@@ -91,12 +91,15 @@ const defaultExec: ExecFileLike = (file, args, options) =>
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    const timer = setTimeout(() => {
+    const killGroup = () => {
       try {
         process.kill(-child.pid!, "SIGKILL");
       } catch {
         // Already gone.
       }
+    };
+    const timer = setTimeout(() => {
+      killGroup();
       child.stdout.destroy();
       reject(new Error("login shell timed out"));
     }, options.timeout);
@@ -111,7 +114,10 @@ const defaultExec: ExecFileLike = (file, args, options) =>
     };
     // A job the rc files put in the background can hold stdout open after the
     // shell exits, so "close" can come late. The output is in after a short grace.
+    // With the shell gone, the group holds only those jobs; each check would
+    // otherwise leave one more copy running after the app quits.
     child.on("exit", (code) => {
+      killGroup();
       if (code !== 0) return;
       setTimeout(() => {
         child.stdout.destroy();

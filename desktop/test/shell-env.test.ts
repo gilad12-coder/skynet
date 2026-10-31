@@ -112,6 +112,16 @@ describe("loginShellPath", () => {
       await expect.poll(() => alive(child), { timeout: 2_000 }).toBe(false);
     });
 
+    it("stops what .zshrc started in the background once the shell exits", async () => {
+      for (const job of ["sleep 30 &", "sleep 30 >/dev/null 2>&1 &"]) {
+        const home = homeWithZshrc(`export PATH=/from/zshrc:$PATH\n${job}\necho $! > "$HOME/child"\n`);
+        const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
+        expect(result.path.split(":")).toContain("/from/zshrc");
+        const child = Number(fs.readFileSync(path.join(home, "child"), "utf8").trim());
+        await expect.poll(() => alive(child), { timeout: 2_000 }).toBe(false);
+      }
+    });
+
     it("runs the shell in its own process group, so it never takes over a terminal", async () => {
       const home = homeWithZshrc('echo "$$ $(ps -o pgid= -p $$)" > "$HOME/pgid"\n');
       await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
