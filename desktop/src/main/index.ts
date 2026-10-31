@@ -115,6 +115,16 @@ function useAppSize(): void {
 // Matches --bg in onboarding.css and the web app, so no light flash shows in dark mode.
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? "#1c1814" : "#f5f0ea");
 
+/**
+ * The Helper binary runs Node without a Dock icon (its bundle sets LSUIElement);
+ * the main binary in Node mode still shows up as a second app in the Dock.
+ */
+function nodeBinary(): string {
+  const name = path.basename(process.execPath);
+  const helper = path.join(path.dirname(process.execPath), "..", "Frameworks", `${name} Helper.app`, "Contents", "MacOS", `${name} Helper`);
+  return fs.existsSync(helper) ? helper : process.execPath;
+}
+
 /** The Dock icon follows the system appearance; the .icns in Finder stays light. */
 function applyTheme(): void {
   app.dock?.setIcon(path.join(__dirname, "..", "icons", nativeTheme.shouldUseDarkColors ? "dock-dark.png" : "dock-light.png"));
@@ -145,7 +155,9 @@ function watchOwnBuild(): void {
   }
 }
 
-function showOnboarding(): void {
+/** Set the state first: the window size follows it, and getURL() still has the old page. */
+function showOnboarding(next?: OnboardingState): void {
+  if (next) setState(next);
   useSetupSize();
   void win?.loadFile(path.join(__dirname, "..", "renderer", "index.html"), { query: { lang: locale() } });
 }
@@ -305,7 +317,7 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
   });
 
   step("frontend");
-  frontend = new ManagedProcess("frontend", process.execPath, ["server.js"], {
+  frontend = new ManagedProcess("frontend", nodeBinary(), ["server.js"], {
     env: buildChildEnv(process.env, {
       PATH: loginPath,
       ELECTRON_RUN_AS_NODE: "1",
@@ -380,8 +392,7 @@ async function signIn(): Promise<void> {
   if (state.kind !== "sign_in") return;
   if (!result.ok) {
     log(`sign-in start failed (${result.reason}): ${result.detail}`);
-    showOnboarding();
-    setState({ ...state, signIn: result.reason, error: result.detail || undefined });
+    showOnboarding({ ...state, signIn: result.reason, error: result.detail || undefined });
     return;
   }
   signInUrl = result.url;
@@ -397,9 +408,9 @@ async function signIn(): Promise<void> {
   // rejects loadURL with ERR_ABORTED. Real failures arrive through did-fail-load.
   win?.loadURL(result.url, { userAgent: desktopUserAgent() }).catch(() => undefined);
   stopSignInPoll();
-  const deadline = Date.now() + 15 * 60_000;
+  // No deadline: a slow sign-up or Google round-trip still opens the app when it completes.
   signInPoll = setInterval(() => {
-    if (state.kind !== "sign_in" || Date.now() > deadline) return stopSignInPoll();
+    if (state.kind !== "sign_in") return stopSignInPoll();
     link
       .linked()
       .then((done) => (done ? openApp() : undefined))
@@ -418,8 +429,7 @@ function signInLoadFailed(code: number, detail: string, url: string): void {
   log(`sign-in page failed to load (${code} ${detail}): ${new URL(url).origin}`);
   stopSignInPoll();
   signInUrl = null;
-  showOnboarding();
-  setState({ ...state, signIn: "failed", error: detail });
+  showOnboarding({ ...state, signIn: "failed", error: detail });
 }
 
 function skipSignIn(): void {
@@ -450,13 +460,13 @@ function signInNavigation(target: string): "allow" | "skip" | "external" {
 
 function watchForCrash(proc: ManagedProcess, label: string): void {
   const timer = setInterval(() => {
-    if (quitting || (state.kind !== "ready" && state.kind !== "sign_in")) return clearInterval(timer);
+    // "starting" too: startStack checks the account after it starts the watchers.
+    if (quitting || (state.kind !== "starting" && state.kind !== "ready" && state.kind !== "sign_in")) return clearInterval(timer);
     if (!proc.exited) return;
     clearInterval(timer);
     stopSignInPoll();
     frontendUrl = null;
-    showOnboarding();
-    setState({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
+    showOnboarding({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
   }, 1_000);
 }
 

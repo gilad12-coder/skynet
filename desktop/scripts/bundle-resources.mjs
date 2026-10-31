@@ -101,16 +101,31 @@ async function dev() {
   for (const file of ["index.html", "onboarding.css"]) {
     fs.watch(path.join(desktopDir, "src/renderer", file), () => copyStatic());
   }
-  // macOS takes the Dock and menu bar name from the bundle, so name the local Electron.app Skynet.
-  if (process.platform === "darwin") {
-    const plist = path.join(desktopDir, "node_modules/electron/dist/Electron.app/Contents/Info.plist");
-    for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
-      execFileSync("plutil", ["-replace", key, "-string", "Skynet", plist]);
-    }
-  }
-  const electron = path.join(desktopDir, "node_modules/.bin/electron");
+  const electron = process.platform === "darwin" ? devAppBinary() : path.join(desktopDir, "node_modules/.bin/electron");
   spawn(electron, ["."], { cwd: desktopDir, stdio: "inherit", env: { ...process.env, SKYNET_DESKTOP_DEV: "1" } });
   console.log("watching src/ (Ctrl+C stops the watcher; quit the app with Cmd+Q)");
+}
+
+/**
+ * The Dock takes its hover name from the bundle folder and its menu bar name
+ * from Info.plist, so dev runs a copy of Electron.app named Skynet.app.
+ * Copied again only when the Electron version changes.
+ */
+function devAppBinary() {
+  const source = path.join(desktopDir, "node_modules/electron/dist");
+  const app = path.join(desktopDir, "dev-app/Skynet.app");
+  const stamp = path.join(desktopDir, "dev-app/version");
+  const version = fs.readFileSync(path.join(source, "version"), "utf8");
+  if (!fs.existsSync(stamp) || fs.readFileSync(stamp, "utf8") !== version) {
+    fs.rmSync(path.dirname(app), { recursive: true, force: true });
+    execFileSync("ditto", [path.join(source, "Electron.app"), app]);
+    const plist = path.join(app, "Contents/Info.plist");
+    for (const [key, value] of [["CFBundleName", "Skynet"], ["CFBundleDisplayName", "Skynet"], ["CFBundleIdentifier", "com.skynet.desktop.dev"]]) {
+      execFileSync("plutil", ["-replace", key, "-string", value, plist]);
+    }
+    fs.writeFileSync(stamp, version);
+  }
+  return path.join(app, "Contents/MacOS/Electron");
 }
 
 /** Copy the tracked backend files only, so .env files, .venv and caches never ship. */
