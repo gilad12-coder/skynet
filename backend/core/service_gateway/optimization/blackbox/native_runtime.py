@@ -163,7 +163,7 @@ _AUTOSADDLER_PINS = (
 class NativeOptions:
     """Bind an upstream proposer to the managed runtime and model gateway."""
 
-    runtime: Literal["vercel"]
+    runtime: Literal["vercel", "docker"]
     model: str
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
@@ -194,6 +194,20 @@ class NativeOptions:
             return [{"model": model, "usage": dict(usage)} for model, usage in self.usage_by_model.items()]
 
 
+def _runtime_allowed(runtime: str, settings: Settings) -> bool:
+    """Check that ``runtime`` names an execution environment this deployment offers.
+
+    Args:
+        runtime: Requested execution environment.
+        settings: Deployment configuration.
+
+    Returns:
+        True for Vercel, and for local Docker in local mode. Local mode opens
+        its boxes in Docker whichever of the two the request names.
+    """
+    return runtime == "vercel" or (runtime == "docker" and settings.local_mode)
+
+
 def native_runtime_unavailable_reason(runtime: str, settings: Settings) -> str | None:
     """Explain whether the selected native execution environment can launch.
 
@@ -204,12 +218,14 @@ def native_runtime_unavailable_reason(runtime: str, settings: Settings) -> str |
     Returns:
         An actionable unavailability reason, or ``None`` when checks pass.
     """
-    if runtime != "vercel":
+    if not _runtime_allowed(runtime, settings):
         return "Production optimizations run in the managed cloud sandbox."
     current = current_sandbox_runtime()
     if current is not None:
         return None
-    if gateway_from_settings(settings) is None:
+    # Local mode routes model calls through the run's own parent gateway
+    # (the user's CLI subscriptions), never through a deployment proxy.
+    if not settings.local_mode and gateway_from_settings(settings) is None:
         return "Native optimizers require a configured model gateway."
     return sandbox_unavailable_reason(settings)
 
@@ -423,7 +439,7 @@ def _selected_runtime(options: NativeOptions) -> SandboxRuntime:
         return options.sandbox_runtime
     runtime = sandbox_runtime_from_settings(settings)
     if runtime is None:
-        raise ServiceError(sandbox_unavailable_reason(settings) or "The cloud sandbox is unavailable.")
+        raise ServiceError(sandbox_unavailable_reason(settings) or "The sandbox runtime is unavailable.")
     return runtime
 
 
@@ -440,7 +456,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         ServiceError: When the managed runtime or its pinned dependencies cannot launch.
         UsagePendingError: When the readiness sandbox's usage still requires reconciliation.
     """
-    if options.budget_route is None or options.runtime != "vercel":
+    if options.budget_route is None or not _runtime_allowed(options.runtime, settings):
         raise ServiceError("Native readiness requires the protected cloud sandbox.")
     source = _source_archive()
     runtime = _selected_runtime(options)
@@ -984,7 +1000,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         Exception: The original parent evaluator exception, without retrying it.
     """
     options = ctx.native_options
-    if options is None or options.runtime != "vercel":
+    if options is None or not _runtime_allowed(options.runtime, settings):
         raise ServiceError("Native optimizers require the managed cloud sandbox.")
     if engine_id not in NATIVE_ENGINES:
         raise ServiceError("Unsupported native optimizer.")

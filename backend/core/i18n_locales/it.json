@@ -300,6 +300,8 @@
     "optimization.resume_not_resumable": "Questa ottimizzazione non ha alcun punto di ripresa salvato: eseguila di nuovo invece.",
     "optimization.resume_wrong_status": "Possono essere riprese solo le ottimizzazioni che si sono interrotte durante l'esecuzione: questa è nello stato '{status}'.",
     "optimization.protected_interactive_sandbox_required": "Questa ottimizzazione protetta non può essere valutata o servita nel processo API. È necessario un sandbox {runtime} con tariffazione separata, che non è ancora disponibile su questo endpoint.",
+    "sandbox.docker_unavailable": "Docker non è in esecuzione su questo computer. Avvia Docker Desktop o OrbStack e riprova.",
+    "sandbox.docker_image_missing": "L’immagine della sandbox locale non è ancora stata creata. Riavvia l’app per crearla.",
     "optimization.retry_no_payload": "L'ottimizzazione di origine non ha alcun payload salvato da riprovare.",
     "optimization.retry_wrong_status": "Possono essere riprovate solo le ottimizzazioni nello stato 'failed' o 'cancelled': questa è nello stato '{status}'. Clonala invece.",
     "quota.reached": "Hai raggiunto il limite di {quota, plural, one {1 ottimizzazione} other {# ottimizzazioni}}. Elimina le vecchie ottimizzazioni per crearne di nuove.",

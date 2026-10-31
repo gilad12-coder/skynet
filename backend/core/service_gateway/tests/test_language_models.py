@@ -11,10 +11,15 @@ from pydantic import SecretStr
 
 from core.api import model_catalog
 from core.api.model_catalog import CatalogModel, ModelCatalogResponse
+from core.billing.model_gateway import ROUTE_KEY
+from core.billing.openrouter_quotes import price_text_request
+from core.billing.operation_pricing import ChargePolicy
 from core.config import settings
 from core.exceptions import ServiceError
 from core.models import ModelConfig
 from core.service_gateway.language_models import (
+    _DEFAULT_REASONING_MAX_TOKENS,
+    _OPENAI_REASONING_MAX_TOKENS,
     CustomStreamWrapper,
     MeteredLM,
     _apply_managed_gateway,
@@ -174,13 +179,85 @@ def test_build_language_model_passes_base_url_when_set() -> None:
     assert call_kwargs["base_url"] == "http://localhost:8080"
 
 
-def test_build_language_model_omits_max_tokens_when_none() -> None:
-    """``max_tokens`` is omitted when not configured."""
+def _relay_cfg(name: str = "openai/gpt-4o-mini", **kwargs: Any) -> ModelConfig:
+    """Build a ``ModelConfig`` the budget relay routes, with optional overrides.
+
+    Args:
+        name: The routed model id.
+        **kwargs: Extra ``ModelConfig`` fields.
+
+    Returns:
+        A config whose ``extra`` carries a budget route for ``name``.
+    """
+    extra = {ROUTE_KEY: {"model": name, "url": "http://relay.invalid", "token": "route-token"}}
+    extra.update(kwargs.pop("extra", {}))
+    return _cfg(name=name, extra=extra, **kwargs)
+
+
+def test_build_language_model_without_max_tokens_builds_a_priceable_request() -> None:
+    """An unset ``max_tokens`` still yields a request the budget relay can price.
+
+    SKY-217: the relay rejects any request without a positive output limit, so
+    a wizard run that left max tokens empty failed at its first LLM call.
+    """
+    language_model = build_language_model(_relay_cfg(max_tokens=None))
+    request = {
+        **language_model.kwargs,
+        "model": "fixture/text",
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+    catalog = {
+        "id": "fixture/text",
+        "endpoints": [
+            {
+                "tag": "fixture",
+                "provider_name": "Fixture",
+                "context_length": 100000,
+                "max_completion_tokens": 100000,
+                "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+            }
+        ],
+    }
+
+    price_text_request(request, catalog, ChargePolicy("managed_model"))
+
+    assert language_model.kwargs["max_tokens"] == _DEFAULT_REASONING_MAX_TOKENS
+
+
+@pytest.mark.parametrize("name", ["openai/gpt-5", "openai/gpt-5-mini", "openai/o3-mini"])
+def test_build_language_model_relay_default_fits_openai_reasoning_models(name: str) -> None:
+    """dspy refuses an OpenAI reasoning model below 16000 output tokens, so the default must meet that.
+
+    Args:
+        name: A model id dspy treats as an OpenAI reasoning model.
+    """
+    language_model = build_language_model(_relay_cfg(name=name, max_tokens=None))
+
+    assert language_model.kwargs["max_completion_tokens"] == _OPENAI_REASONING_MAX_TOKENS
+
+
+def test_build_language_model_relay_keeps_an_output_limit_from_extra() -> None:
+    """An output limit in ``extra`` wins over the relay default."""
     with patch("core.service_gateway.language_models.MeteredLM") as mock_cls:
-        build_language_model(_cfg(max_tokens=None))
+        build_language_model(_relay_cfg(max_tokens=None, extra={"max_completion_tokens": 900}))
+
+    call_kwargs = mock_cls.call_args[1]
+    assert call_kwargs["max_completion_tokens"] == 900
+    assert "max_tokens" not in call_kwargs
+
+
+def test_build_language_model_omits_max_tokens_off_the_relay() -> None:
+    """Off the relay an unset ``max_tokens`` stays unset, so the provider default applies.
+
+    A fixed default there would undercut a direct Anthropic thinking budget
+    (LiteLLM sends 4096 for high effort) and turn a valid call into a 400.
+    """
+    with patch("core.service_gateway.language_models.MeteredLM") as mock_cls:
+        build_language_model(_cfg(max_tokens=None, extra={"api_key": "sk-test", "reasoning_effort": "high"}))
 
     call_kwargs = mock_cls.call_args[1]
     assert "max_tokens" not in call_kwargs
+    assert "max_completion_tokens" not in call_kwargs
 
 
 def test_build_language_model_passes_max_tokens_when_set() -> None:

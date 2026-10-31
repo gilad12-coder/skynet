@@ -84,6 +84,10 @@ from ..notifications.run_watcher import RunNotificationWatcher
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
+from ..service_gateway.optimization.blackbox.docker_sandbox import (
+    docker_runtime_from_settings,
+    remove_idle_sandbox_networks,
+)
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_from_settings
 from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME
@@ -2053,7 +2057,7 @@ class BackgroundWorker:
             logger.info("Optimization %s subprocess terminated", optimization_id)
 
     def _stop_blackbox_sandboxes(self, optimization_id: str) -> None:
-        """Stop the sandboxes a killed black-box job left running on Vercel.
+        """Stop the sandboxes a killed black-box job left running on Vercel or local Docker.
 
         The child closes its boxes on a normal exit, but a cancel, a stall or
         a shutdown kills it before its ``finally`` blocks run, and a scorer
@@ -2062,7 +2066,11 @@ class BackgroundWorker:
         Args:
             optimization_id: The job whose boxes to stop.
         """
-        runtime = sandbox_runtime_from_settings(settings)
+        # The local availability probe also checks the image; leftover boxes
+        # are removed by label, which needs only the Docker CLI.
+        runtime = (
+            docker_runtime_from_settings(settings) if settings.local_mode else sandbox_runtime_from_settings(settings)
+        )
         if runtime is None:
             return
         try:
@@ -2504,6 +2512,10 @@ def get_worker(
         if _worker is None or not _worker.threads_alive():
             num_workers = settings.worker_threads
             poll_interval = settings.worker_poll_interval
+            if settings.local_mode:
+                # A killed backend leaves setup networks behind; each holds a /16
+                # of Docker's small pool, so clear idle ones before any box opens.
+                remove_idle_sandbox_networks(settings.docker_bin)
             _worker = BackgroundWorker(
                 job_store=job_store,
                 num_workers=num_workers,

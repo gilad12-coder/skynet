@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
 
 import { useInbox, type Inbox } from "../hooks/use-inbox";
+import { useNativeNotifications } from "../hooks/use-native-notifications";
 import { itemLine, type FactFormatters } from "../lib/catalog";
 import { EVENT_ICONS } from "./icons";
 
@@ -403,6 +404,7 @@ export function NotificationBell({ className }: { className?: string }) {
   const [open, setOpen] = React.useState(false);
   const [tab, setTab] = React.useState<NotificationTab>("focused");
   const inbox = useInbox({ enabled: status === "authenticated", open, tab });
+  useNativeNotifications(status === "authenticated");
 
   if (status !== "authenticated") return null;
 
