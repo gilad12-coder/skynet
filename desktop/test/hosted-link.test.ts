@@ -47,3 +47,28 @@ describe("HostedLinkClient.start", () => {
     expect(await new HostedLinkClient("http://127.0.0.1:1", "s").start()).toMatchObject({ ok: false, reason: "failed" });
   });
 });
+
+describe("HostedLinkClient start and finish requests", () => {
+  it("asks for the skynet:// callback and posts the code and state to finish", async () => {
+    const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ authorize_url: "https://skynetml.com/x", linked: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new HostedLinkClient("http://127.0.0.1:1", "s");
+
+    await client.start();
+    expect(await client.finish("the-code", "the-state")).toEqual({ ok: true });
+
+    const [startUrl, startInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(startUrl).toBe("http://127.0.0.1:1/local/hosted-link/start");
+    expect(JSON.parse(startInit.body as string)).toEqual({ app_callback: true });
+    const [finishUrl, finishInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(finishUrl).toBe("http://127.0.0.1:1/local/hosted-link/finish");
+    expect(finishInit.method).toBe("POST");
+    expect((finishInit.headers as Record<string, string>)["content-type"]).toBe("application/json");
+    expect(JSON.parse(finishInit.body as string)).toEqual({ code: "the-code", state: "the-state" });
+  });
+
+  it("reports a refused finish with the backend detail", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Start the link again." }), { status: 400 })));
+    expect(await new HostedLinkClient("http://127.0.0.1:1", "s").finish("c", "s")).toEqual({ ok: false, detail: "Start the link again." });
+  });
+});

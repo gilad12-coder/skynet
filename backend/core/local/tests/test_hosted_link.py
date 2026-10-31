@@ -101,6 +101,21 @@ def test_start_builds_a_pkce_authorize_url(hosted: FakeHosted) -> None:
     assert len(query["state"]) > 40
 
 
+def test_start_with_app_callback_uses_the_app_url(engine: Engine, hosted: FakeHosted) -> None:
+    """The Mac app's flow sends the result to ``skynet://link/callback`` and the exchange repeats it.
+
+    Args:
+        engine: Local database.
+        hosted: The fake hosted server.
+    """
+    url = hosted_link.start_link(_USER, device_name="Test Mac", app_callback=True)
+
+    redirect, code, state = hosted.authorize(url)
+    assert redirect == "skynet://link/callback"
+    view = hosted_link.finish_link(engine, code=code, state=state)
+    assert view.account_label == "dana@example.test"
+
+
 def test_ipv6_loopback_uses_the_bracket_form(hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch) -> None:
     """An API bound on ``::1`` gets the ``[::1]`` callback the hosted rule accepts.
 

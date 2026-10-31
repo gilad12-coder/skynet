@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "使用托管模型，费用从你的余额中支付",
   "desktop_link.scope.connectors": "使用你已连接的数据源",
   "desktop_link.scope.web": "使用托管的网页搜索和浏览",
-  "desktop_link.unlink_note": "你可以随时在 Mac 应用中取消关联此 Mac。",
   "desktop_link.approve": "关联此 Mac",
   "desktop_link.cancel": "取消",
   "desktop_link.returning": "正在返回 Mac 应用…",

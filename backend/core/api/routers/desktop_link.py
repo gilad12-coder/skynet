@@ -59,7 +59,9 @@ MAX_LIVE_LINKS = 10
 # Matches LOW_BALANCE_USD in frontend/src/features/billing/lib/wallet.ts.
 LOW_BALANCE_CENTS = 50
 
+# Mac app builds before SKY-228 still send the loopback form; newer builds use the app URL.
 _LOOPBACK_REDIRECT = re.compile(r"^http://(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]{3,4})/local/hosted-link/callback$")
+APP_REDIRECT = "skynet://link/callback"
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 IdentityDep = Annotated[DesktopPrincipal, Depends(get_desktop_principal("identity"))]
@@ -156,7 +158,7 @@ def _canonical_scopes(raw: str) -> str:
 
 
 def _check_redirect(redirect_uri: str) -> None:
-    """Accept only the RFC 8252 loopback callback of the Mac app.
+    """Accept only the Mac app's callback: its app URL or the RFC 8252 loopback form.
 
     Args:
         redirect_uri: Redirect URI from the request.
@@ -164,6 +166,8 @@ def _check_redirect(redirect_uri: str) -> None:
     Raises:
         DomainError: 400 ``desktop.invalid_redirect`` for any other value.
     """
+    if redirect_uri == APP_REDIRECT:
+        return
     match = _LOOPBACK_REDIRECT.match(redirect_uri)
     if match is None or not 1024 <= int(match.group(1)) <= 65535:
         raise DomainError("desktop.invalid_redirect", status=400)
