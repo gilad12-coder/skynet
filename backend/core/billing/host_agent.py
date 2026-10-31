@@ -170,6 +170,28 @@ def host_cli_argv(
     return argv
 
 
+def _catalog_slug(cli: CliProvider, model: str) -> str | None:
+    """Find the catalog slug the CLI runs for the proposer's model id.
+
+    Args:
+        cli: The CLI that runs the turn.
+        model: ``subscription/<cli>/<slug>``, a plain catalog slug, or empty.
+
+    Returns:
+        The slug, or None when the CLI has no model for it and runs its own default.
+    """
+    model = model.removeprefix("openrouter/")
+    parsed = parse_subscription_model_id(model)
+    slug = parsed[1] if parsed else model
+    if not slug:
+        return None
+    try:
+        cli_model_arg(cli, slug)
+    except ValueError:
+        return None
+    return slug
+
+
 def _model_arg(cli: CliProvider, model: str) -> str | None:
     """Map the proposer's model id to the CLI's ``--model`` value.
 
@@ -180,15 +202,8 @@ def _model_arg(cli: CliProvider, model: str) -> str | None:
     Returns:
         The CLI's model name, or None to let the CLI use its own default.
     """
-    model = model.removeprefix("openrouter/")
-    parsed = parse_subscription_model_id(model)
-    slug = parsed[1] if parsed else model
-    if not slug:
-        return None
-    try:
-        return cli_model_arg(cli, slug)
-    except ValueError:
-        return None
+    slug = _catalog_slug(cli, model)
+    return cli_model_arg(cli, slug) if slug else None
 
 
 def _extract(archive_bytes: bytes, destination: Path) -> None:
@@ -1327,7 +1342,8 @@ def bind_host_agent(gateway: ModelGateway, settings: Settings, *, cli: str, perm
         if not isinstance(body, dict):
             return _reply(400, _error(FAILED_KEY, "The host agent request is not a JSON object."))
         request = {"cli": trusted_cli, "model": body.get("model"), "permission": trusted_permission}
-        model = str(body.get("model") or "").removeprefix("openrouter/") or None
+        # The bare slug the CLI ran, as a CLI dispatcher records it; None for the CLI's default.
+        model = _catalog_slug(trusted_cli, str(body.get("model") or ""))
         quote = operation_quote(
             {**request, "path": HOST_AGENT_PATH, "nonce": uuid.uuid4().hex},
             Decimal(0),

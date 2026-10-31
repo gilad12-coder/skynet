@@ -39,7 +39,7 @@ FAKE_CLAUDE = """
 import json, os, sys
 from pathlib import Path
 
-sys.stdin.read()
+Path(os.environ["FAKE_CLI_PROMPT"]).write_text(sys.stdin.read())
 Path(os.environ["FAKE_CLI_SEEN"]).write_text(json.dumps(sorted(p.as_posix() for p in Path(".").rglob("*"))))
 if os.environ.get("FAKE_CLI_MODE") == "limit":
     print(json.dumps({"type": "result", "subtype": "success", "is_error": True,
@@ -61,6 +61,7 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     script.write_text(f"#!{sys.executable}\n{FAKE_CLAUDE}")
     script.chmod(0o755)
     monkeypatch.setenv("FAKE_CLI_SEEN", str(tmp_path / "seen.json"))
+    monkeypatch.setenv("FAKE_CLI_PROMPT", str(tmp_path / "prompt.txt"))
     # The Seatbelt profile has its own macOS test; here the turn runs unwrapped so Linux CI covers it.
     monkeypatch.setattr(host_agent, "confine", lambda argv, **_: argv)
     # The CLI env is an allow-list; the fake CLI reads its test settings from FAKE_CLI_* variables.
@@ -208,6 +209,39 @@ def test_shim_applies_the_host_edit_to_the_guest_workspace(workspace: Path, gate
     text, usage = parse_host_agent_output(completed.stdout)
     assert text == "Raised the score."
     assert usage == {"input_tokens": 40, "output_tokens": 7}
+
+
+def test_shim_sends_the_engine_skills_as_prompt_text(workspace: Path, gateway: tuple[ModelGateway, str]) -> None:
+    """The skill folders stay in the sandbox, so the prompt carries the skills the engines point at."""
+    parent, token = gateway
+    skills = {
+        ".claude/skills/meta-harness/SKILL.md": "Run ./checkout.sh before each candidate.\n",
+        ".agents/skills/diagnose/SKILL.md": "Read the failing traces first.\n",
+    }
+    for relative, text in skills.items():
+        (workspace / relative).parent.mkdir(parents=True)
+        (workspace / relative).write_text(text)
+
+    completed = _run_shim(workspace, parent, token)
+
+    assert completed.returncode == 0, completed.stderr
+    prompt = (workspace.parent.parent / "prompt.txt").read_text()
+    assert prompt.startswith("Raise the score.")
+    for relative, text in skills.items():
+        assert f"{relative} ---\n{text}" in prompt
+    seen = json.loads((workspace.parent.parent / "seen.json").read_text())
+    assert not [name for name in seen if name.startswith((".claude", ".agents"))]
+
+
+def test_skill_text_skips_links_out_of_the_workspace(tmp_path: Path) -> None:
+    """A linked skill outside the workspace is not read into the prompt."""
+    outside = tmp_path / "secret.md"
+    outside.write_text("outside text")
+    skill = tmp_path / "work" / ".claude" / "skills" / "x"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").symlink_to(outside)
+
+    assert host_agent_shim.skill_text(tmp_path / "work") == ""
 
 
 def test_shim_reports_a_usage_cap(
