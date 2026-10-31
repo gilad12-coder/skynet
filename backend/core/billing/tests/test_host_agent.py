@@ -25,7 +25,7 @@ import pytest
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
-from core.billing import host_agent
+from core.billing import host_agent, run_usage
 from core.billing.budgets import BudgetService
 from core.billing.codex_auth_proxy import PLACEHOLDER_ACCOUNT
 from core.billing.host_agent import (
@@ -331,6 +331,22 @@ def test_turn_edits_a_copy_with_stripped_keys(
     assert document["usage"]["completion_tokens"] == 30
     assert document["usage"]["cost"] == 0.0
     assert document["usage"]["model_ms"] > 0
+
+
+@pytest.mark.parametrize("cli", ["codex", "claude"])
+def test_turn_prompt_carries_the_instructions_file(
+    cli: str, local: Settings, guest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The isolation flags skip project files, so the CLI reads its system context from the prompt."""
+    monkeypatch.setenv("FAKE_CLI_NAME", cli)
+    (guest / host_agent_shim.INSTRUCTIONS_FILES[cli]).write_text("Only edit solver.py.\n")
+    body = {"model": "", "prompt": "Improve solve().", "workspace_tar_b64": _workspace_tar(guest)}
+
+    document = run_host_agent(body, local, cli=cli, permission="workspace_only")
+
+    assert document["status"] == "ok", document
+    record = json.loads((tmp_path / "record.json").read_text())
+    assert record["prompt"] == "Only edit solver.py.\n\n\nImprove solve()."
 
 
 def test_usage_cap_reports_reset_and_records_the_limit(
@@ -683,6 +699,26 @@ def test_capability_records_a_zero_cost_turn(
     assert operations[0].actual_units == 0
     assert operations[0].actual_wallet_units == 0
     assert host_agent_failure(gateway) is None
+
+
+def test_host_turn_shows_its_model_tokens_and_latency_in_the_usage(
+    gateway: ModelGateway, local: Settings, guest: Path, database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run's usage breakdown reads a host turn like a CLI dispatcher call."""
+    monkeypatch.setenv("FAKE_CLI_NAME", "codex")
+    token = bind_host_agent(gateway, local, cli="codex", permission="workspace_only")
+    body = {"model": "subscription/codex/gpt-5.5", "prompt": "x", "workspace_tar_b64": _workspace_tar(guest)}
+
+    assert _post(gateway, token, body).status_code == 200
+
+    records = run_usage.load_records(database, str(gateway.runtime.budget_id))
+    [row] = run_usage.aggregate(records, proposer=True)
+    assert row.model == "subscription/codex/gpt-5.5"
+    assert row.calls == 1
+    assert (row.input_tokens, row.output_tokens) == (120, 30)
+    assert row.latency_calls == 1
+    assert row.latency_ms_total > 0
+    assert row.charged_units == 0
 
 
 def test_capped_turn_fails_the_run_with_its_reset_time(

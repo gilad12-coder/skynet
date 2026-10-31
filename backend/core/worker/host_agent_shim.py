@@ -37,6 +37,9 @@ EXCLUDED_TOP_LEVEL = frozenset({".app", ".app-bridge"})
 # Project config the host CLIs load (settings, hooks, MCP servers, skills).
 # It never leaves the sandbox, so guest code cannot run on the Mac through it.
 AGENT_CONFIG_NAMES = frozenset({".claude", ".codex", ".factory", ".agents", ".mcp.json", "CLAUDE.local.md"})
+# The rendered system context of each CLI's turn. The host CLIs run with their own
+# project-file loading off, so the parent puts this file into the prompt instead.
+INSTRUCTIONS_FILES = {"codex": "AGENTS.md", "claude": "CLAUDE.md"}
 # CLI login file names; the host turn must never send one back to the guest.
 LOGIN_FILE_NAMES = frozenset({"auth.json", ".credentials.json", ".claude.json"})
 # The Mac's home volume ignores case, so ".Claude" opens ".claude".
