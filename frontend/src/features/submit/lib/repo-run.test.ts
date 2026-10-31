@@ -20,6 +20,7 @@ const { initialWizardV2State, emptyRepoDraft } = await import("./wizard-v2.ts");
 const { stepPages } = await import("./wizard-pages.ts");
 const { computeStepIssue } = await import("./step-issue.ts");
 const { repoRunRequest } = await import("./repo-run.ts");
+const { prepareModelConfig } = await import("./model-config.ts");
 
 const model = { name: "openai/gpt-default", token_source: "managed" as const };
 
@@ -88,4 +89,30 @@ test("the task step names what a repository still lacks", () => {
   assert.equal(computeStepIssue(state, "task", null), "submit.v2.repo.issue.commit");
   state.task.repo = { ...emptyRepoDraft(), repository: "not a repo" };
   assert.equal(computeStepIssue(state, "task", null), "submit.v2.repo.issue.repository");
+});
+
+// A restored draft or a clone from an older build can still name Droid, which
+// the backend refuses at submit.
+const staleDroid = {
+  name: "openai/gpt-default",
+  token_source: "subscription",
+  cli_provider: "droid",
+} as never;
+
+test("a model config drops a CLI the app no longer offers", () => {
+  assert.equal(prepareModelConfig(staleDroid).cli_provider, null);
+  const kept = { ...model, token_source: "subscription" as const, cli_provider: "codex" as const };
+  assert.equal(prepareModelConfig(kept).cli_provider, "codex");
+  assert.equal("cli_provider" in prepareModelConfig(model), false);
+});
+
+test("a repository run sends no stale CLI for its reflection models", () => {
+  const state = repoState();
+  state.optimizer.choice = "shinka_evolve";
+  state.optimizer.reflectionModel = staleDroid;
+  state.optimizer.extraReflectionModels = [staleDroid];
+  const request = repoRunRequest(state, options);
+  assert.ok(request);
+  assert.equal(request.reflection_model_config?.cli_provider, null);
+  assert.equal(request.extra_reflection_model_configs?.[0]?.cli_provider, null);
 });

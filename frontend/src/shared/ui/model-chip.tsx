@@ -11,6 +11,7 @@ import {
   Brain,
   Info,
   Coins,
+  Desktop,
   Key,
 } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
@@ -90,9 +91,14 @@ function ReasoningPill({ value }: { value: string | null | undefined }) {
 function TokenSourcePill({ source }: { source: ModelConfig["token_source"] }) {
   // Keep this to a compact echo; the dialog owns the explanation and provider management.
   if (!source) return null;
-  const byok = source === "byok";
-  const Icon = byok ? Key : Coins;
-  const label = msg(byok ? "billing.mode.byok" : "billing.mode.managed");
+  const Icon = source === "byok" ? Key : source === "subscription" ? Desktop : Coins;
+  const label = msg(
+    source === "byok"
+      ? "billing.mode.byok"
+      : source === "subscription"
+        ? "subscription.mode"
+        : "billing.mode.managed",
+  );
   return (
     <MicroPill dir="auto">
       <Icon className="size-2.5" aria-hidden="true" />

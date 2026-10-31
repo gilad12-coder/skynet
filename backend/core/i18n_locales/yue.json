@@ -179,6 +179,7 @@
     "agent.status.tool_start": "Agent 正在調用工具…",
     "agent.turn.not_found": "搵唔到 Agent 回合，或者已經過期。",
     "analytics.other_bucket": "其他",
+    "auth.account_not_found": "呢個帳戶已經唔存在。請重新登入。",
     "auth.invalid_token": "身份驗證權杖無效或已過期。",
     "auth.missing_token": "需要提供身份驗證權杖。",
     "auth.not_configured": "後端尚未設定身份驗證。",

@@ -648,8 +648,28 @@ def test_unavailable_reason_reports_missing_package(monkeypatch: pytest.MonkeyPa
 
 @_needs_sdk
 def test_unavailable_reason_reports_missing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With the SDK present but no credentials, the reason names the env vars."""
+    """With the SDK present but no credentials, the reason says the sandbox is not configured."""
     assert sandbox_unavailable_reason(_settings(monkeypatch)) == _CREDENTIALS_MISSING
+
+
+@pytest.mark.parametrize("sdk_present", [True, False])
+def test_unavailable_reason_never_names_the_sandbox_vendor(monkeypatch: pytest.MonkeyPatch, sdk_present: bool) -> None:
+    """Users see the unavailable reason in the engine catalog and run errors, so it never names the vendor.
+
+    Args:
+        monkeypatch: Fixture that removes the SDK or the credentials.
+        sdk_present: Whether the sandbox SDK counts as installed.
+    """
+    if not sdk_present:
+        monkeypatch.setattr(sandbox_mod, "vercel_sync", None)
+        monkeypatch.setattr(sandbox_mod, "vercel_api", None)
+    elif not _SDK_PRESENT:
+        pytest.skip("the Vercel Sandbox SDK is not installed")
+
+    reason = sandbox_unavailable_reason(_settings(monkeypatch))
+
+    assert reason is not None
+    assert "vercel" not in reason.lower()
 
 
 @_needs_sdk

@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import Connection, func, text
 from sqlalchemy.orm import Session
@@ -25,7 +25,6 @@ from ...config import settings
 from ...storage.models import TelemetryEventModel
 from ..auth import AuthenticatedUser, get_authenticated_user, require_admin_user
 from ..errors import DomainError
-from ..posthog import export_telemetry_events
 
 # Hard caps the public ingest endpoint enforces so a single request can't be
 # used to bulk-load the table or smuggle large blobs in through ``properties``.
@@ -408,7 +407,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
     )
     def ingest_events(
         batch: TelemetryBatchIn,
-        background_tasks: BackgroundTasks,
         current_user: OptionalUserDep,
     ) -> TelemetryIngestResponse:
         """Persist a batch of interaction events, attributing the caller server-side.
@@ -421,7 +419,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
 
         Args:
             batch: The session-scoped batch of events from the browser SDK.
-            background_tasks: Post-response task queue for optional PostHog export.
             current_user: The token-resolved caller, or ``None`` when anonymous.
 
         Returns:
@@ -451,26 +448,6 @@ def create_telemetry_router(*, job_store) -> APIRouter:
         with Session(job_store.engine) as session:
             session.add_all(rows)
             session.commit()
-        if settings.posthog_project_api_key is not None:
-            export_events = [
-                {
-                    "name": event.name,
-                    "timestamp": (_occurred_at(event.ts) or received_at).isoformat(),
-                    "path": event.path,
-                    "locale": event.locale,
-                    "app_version": event.app_version,
-                    "properties": _clip(event.properties),
-                    "context": _clip(event.context),
-                }
-                for event in batch.events
-            ]
-            background_tasks.add_task(
-                export_telemetry_events,
-                username=username,
-                anonymous_id=batch.anonymous_id,
-                session_id=batch.session_id,
-                events=export_events,
-            )
         return TelemetryIngestResponse(accepted=len(rows))
 
     @router.get(

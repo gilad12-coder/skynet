@@ -2,7 +2,12 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { readPref } from "@/features/settings";
+import {
+  localAgentModel,
+  localModelRefusalMessage,
+  useLocalStatus,
+} from "@/features/local-runtime";
+import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY } from "@/shared/lib/i18n";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
@@ -240,6 +245,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   // queue above: these wait for their own chat's turn to end, then run in it.
   // Each queue's sender is attached by the effect further down.
   const [steerQueues] = React.useState(() => new Map<string, SteerQueue>());
+  // Loads the CLI list a role set to run locally maps its model onto.
+  useLocalStatus();
   const steerQueueFor = React.useCallback(
     (key: string): SteerQueue => {
       let queue = steerQueues.get(key);
@@ -482,247 +489,250 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
       // Every stream callback short-circuits on ``controller.signal.aborted``
       // so a slow stream replaced by a fresh ``send`` (or by the unmount-time
       // abort) cannot leak state writes or window events into the live view.
-      void streamGeneralistAgent(
-        {
-          user_message: run.message,
-          chat_history: run.chatHistory,
-          wizard_state: run.wizardState,
-          trust_mode: run.trustMode,
-          conversation_id: sessionsRef.current.get(key)?.conversationId ?? null,
-          regenerate: run.regenerate,
-          locale: getActiveLocale(),
-          model: modelRef.current ?? undefined,
-          reasoning_effort: effortRef.current ?? undefined,
-          steer_key: steerKey,
-        },
-        {
-          signal: controller.signal,
-          onSteerApplied: ({ ids, text }) => {
-            if (controller.signal.aborted) return;
-            steerQueue.applied(ids);
-            if (!text.trim()) return;
-            replyBeforeSteer = (replyBeforeSteer ?? "") + rt.replyBuf;
-            rt.replyBuf = "";
-            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
-            // The reply so far stays as its own bubble, tool activity and
-            // all; the rest of the turn streams into a new one after the
-            // user's message.
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              const kept =
-                last &&
-                last.role === "assistant" &&
-                !last.content &&
-                !last.toolCalls?.length &&
-                !last.thinkingSegments?.length &&
-                !last.plan
-                  ? prev.slice(0, -1)
-                  : prev;
-              return [
-                ...kept,
-                { role: "user", content: text },
-                { role: "assistant", content: "", toolCalls: [] },
-              ];
-            });
+      void localAgentModel(modelRef.current, agentSubscriptionFor("generalist")).then((sentModel) =>
+        streamGeneralistAgent(
+          {
+            user_message: run.message,
+            chat_history: run.chatHistory,
+            wizard_state: run.wizardState,
+            trust_mode: run.trustMode,
+            conversation_id: sessionsRef.current.get(key)?.conversationId ?? null,
+            regenerate: run.regenerate,
+            locale: getActiveLocale(),
+            model: sentModel ?? undefined,
+            reasoning_effort: effortRef.current ?? undefined,
+            steer_key: steerKey,
           },
-          onConversationMeta: (ev) => {
-            if (controller.signal.aborted) return;
-            if (!ev.conversation_id) return;
-            patchSession(key, { conversationId: ev.conversation_id });
-            callbacksRef.current.onConversationMeta?.(
-              ev.conversation_id,
-              ev.title,
-              eventContext(key),
-            );
-          },
-          onReasoningPatch: (chunk) => {
-            if (controller.signal.aborted) return;
-            patchThinking(key, (segments, toolCount, since) =>
-              appendReasoning(segments, chunk, Date.now(), toolCount, since),
-            );
-          },
-          onThinkingSummary: ({ index, text }) => {
-            if (controller.signal.aborted) return;
-            patchMessages(key, (prev) => summarizeThinking(prev, turnStart, index, text));
-          },
-          onPlan: (text) => {
-            if (controller.signal.aborted) return;
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              const next = prev.slice();
-              next[next.length - 1] = { ...last, plan: text };
-              return next;
-            });
-          },
-          onToolStart: (ev) => {
-            if (controller.signal.aborted) return;
-            // A tool call ends the current stretch of thinking; reasoning
-            // after it opens a new "Thought for" row below the tool.
-            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
-            patchSession(key, {
-              statusLabel: formatMsg(
-                "auto.features.agent.panel.hooks.use.generalist.agent.template.1",
-                { p1: ev.tool },
-              ),
-            });
-            pushToolCall(key, {
-              id: ev.id,
-              tool: ev.tool,
-              reason: ev.reason,
-              status: "running",
-              startedAt: Date.now(),
-              endedAt: null,
-              payload: { arguments: ev.arguments },
-            });
-            callbacksRef.current.onToolStart?.(ev, eventContext(key));
-          },
-          onToolEnd: (ev) => {
-            if (controller.signal.aborted) return;
-            finishToolCall(key, ev.id, ev.status === "ok" ? "done" : "error", ev.result);
-            patchSession(key, {
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
-            });
-            if (ev.status === "ok") {
-              if (OPTIMIZATION_MUTATING_TOOLS.has(ev.tool)) {
-                window.dispatchEvent(new Event("optimizations-changed"));
-              }
-              if (SUBMIT_TOOLS.has(ev.tool)) {
-                rt.persistentExtras = {};
-              }
-            }
-            callbacksRef.current.onToolEnd?.(ev, eventContext(key));
-          },
-          onPendingApproval: (ev) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              pendingApproval: ev,
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.2"),
-            });
-          },
-          onApprovalResolved: () => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              pendingApproval: null,
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.3"),
-            });
-          },
-          onMessagePatch: (chunk) => {
-            if (controller.signal.aborted) return;
-            if (rt.replyBuf === "") {
+          {
+            signal: controller.signal,
+            onSteerApplied: ({ ids, text }) => {
+              if (controller.signal.aborted) return;
+              steerQueue.applied(ids);
+              if (!text.trim()) return;
+              replyBeforeSteer = (replyBeforeSteer ?? "") + rt.replyBuf;
+              rt.replyBuf = "";
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              // The reply so far stays as its own bubble, tool activity and
+              // all; the rest of the turn streams into a new one after the
+              // user's message.
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                const kept =
+                  last &&
+                  last.role === "assistant" &&
+                  !last.content &&
+                  !last.toolCalls?.length &&
+                  !last.thinkingSegments?.length &&
+                  !last.plan
+                    ? prev.slice(0, -1)
+                    : prev;
+                return [
+                  ...kept,
+                  { role: "user", content: text },
+                  { role: "assistant", content: "", toolCalls: [] },
+                ];
+              });
+            },
+            onConversationMeta: (ev) => {
+              if (controller.signal.aborted) return;
+              if (!ev.conversation_id) return;
+              patchSession(key, { conversationId: ev.conversation_id });
+              callbacksRef.current.onConversationMeta?.(
+                ev.conversation_id,
+                ev.title,
+                eventContext(key),
+              );
+            },
+            onReasoningPatch: (chunk) => {
+              if (controller.signal.aborted) return;
+              patchThinking(key, (segments, toolCount, since) =>
+                appendReasoning(segments, chunk, Date.now(), toolCount, since),
+              );
+            },
+            onThinkingSummary: ({ index, text }) => {
+              if (controller.signal.aborted) return;
+              patchMessages(key, (prev) => summarizeThinking(prev, turnStart, index, text));
+            },
+            onPlan: (text) => {
+              if (controller.signal.aborted) return;
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                const next = prev.slice();
+                next[next.length - 1] = { ...last, plan: text };
+                return next;
+              });
+            },
+            onToolStart: (ev) => {
+              if (controller.signal.aborted) return;
+              // A tool call ends the current stretch of thinking; reasoning
+              // after it opens a new "Thought for" row below the tool.
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
               patchSession(key, {
-                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
+                statusLabel: formatMsg(
+                  "auto.features.agent.panel.hooks.use.generalist.agent.template.1",
+                  { p1: ev.tool },
+                ),
+              });
+              pushToolCall(key, {
+                id: ev.id,
+                tool: ev.tool,
+                reason: ev.reason,
+                status: "running",
+                startedAt: Date.now(),
+                endedAt: null,
+                payload: { arguments: ev.arguments },
+              });
+              callbacksRef.current.onToolStart?.(ev, eventContext(key));
+            },
+            onToolEnd: (ev) => {
+              if (controller.signal.aborted) return;
+              finishToolCall(key, ev.id, ev.status === "ok" ? "done" : "error", ev.result);
+              patchSession(key, {
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
+              });
+              if (ev.status === "ok") {
+                if (OPTIMIZATION_MUTATING_TOOLS.has(ev.tool)) {
+                  window.dispatchEvent(new Event("optimizations-changed"));
+                }
+                if (SUBMIT_TOOLS.has(ev.tool)) {
+                  rt.persistentExtras = {};
+                }
+              }
+              callbacksRef.current.onToolEnd?.(ev, eventContext(key));
+            },
+            onPendingApproval: (ev) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                pendingApproval: ev,
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.2"),
+              });
+            },
+            onApprovalResolved: () => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                pendingApproval: null,
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.3"),
+              });
+            },
+            onMessagePatch: (chunk) => {
+              if (controller.signal.aborted) return;
+              if (rt.replyBuf === "") {
+                patchSession(key, {
+                  statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.4"),
+                });
+                patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              }
+              rt.replyBuf += chunk;
+              appendReply(key, chunk);
+            },
+            onMessageReset: () => {
+              if (controller.signal.aborted) return;
+              rt.replyBuf = "";
+              patchThinking(key, reopenThinking);
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant" || last.content === "") return prev;
+                const next = prev.slice();
+                next[next.length - 1] = { ...last, content: "" };
+                return next;
+              });
+            },
+            onDone: (result) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                status: "done",
+                statusLabel: "",
               });
               patchThinking(key, (segments) => closeThinking(segments, Date.now()));
-            }
-            rt.replyBuf += chunk;
-            appendReply(key, chunk);
-          },
-          onMessageReset: () => {
-            if (controller.signal.aborted) return;
-            rt.replyBuf = "";
-            patchThinking(key, reopenThinking);
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant" || last.content === "") return prev;
-              const next = prev.slice();
-              next[next.length - 1] = { ...last, content: "" };
-              return next;
-            });
-          },
-          onDone: (result) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              status: "done",
-              statusLabel: "",
-            });
-            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              let reply = result.assistant_message;
-              if (replyBeforeSteer !== null) {
-                if (replyBeforeSteer && reply.startsWith(replyBeforeSteer)) {
-                  reply = reply.slice(replyBeforeSteer.length).trimStart();
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                let reply = result.assistant_message;
+                if (replyBeforeSteer !== null) {
+                  if (replyBeforeSteer && reply.startsWith(replyBeforeSteer)) {
+                    reply = reply.slice(replyBeforeSteer.length).trimStart();
+                  }
+                  reply = last.content || reply;
+                  // Nothing came after the steer: no hollow bubble.
+                  if (!reply && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                    return prev.slice(0, -1);
+                  }
                 }
-                reply = last.content || reply;
-                // Nothing came after the steer: no hollow bubble.
-                if (!reply && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                const fallback =
+                  last.content ||
+                  (last.toolCalls?.length
+                    ? ""
+                    : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
+                const next = prev.slice();
+                replyAt = next.length - 1;
+                next[replyAt] = {
+                  ...last,
+                  content: reply || fallback,
+                  model: result.model,
+                  servedModel: result.served_model,
+                  stats: parseTurnStats(result.stats),
+                };
+                return next;
+              });
+              releaseSlot();
+            },
+            onTurnStats: (raw) => {
+              if (controller.signal.aborted) return;
+              const stats = parseTurnStats(raw);
+              if (!stats) return;
+              patchMessages(key, (prev) => {
+                const at = replyAt;
+                const reply = at === null ? undefined : prev[at];
+                if (at === null || !reply || reply.role !== "assistant") return prev;
+                const next = prev.slice();
+                next[at] = { ...reply, stats };
+                return next;
+              });
+            },
+            onError: (message, code) => {
+              if (controller.signal.aborted) return;
+              patchSession(key, {
+                status: "error",
+                statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.6"),
+                // Known machine codes get a localized message; anything else
+                // shows the backend's text as-is.
+                error:
+                  localModelRefusalMessage(code) ??
+                  (code === "context_too_long"
+                    ? msg("agent.error.context_too_long")
+                    : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
+                      ? msg("agent.error.insufficient_funds")
+                      : message),
+                errorCode: code ?? null,
+              });
+              patchThinking(key, (segments) => closeThinking(segments, Date.now()));
+              patchMessages(key, (prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                if (!last.content && !last.toolCalls?.length && !last.thinkingSegments?.length) {
+                  // Nothing rendered yet — drop the empty assistant placeholder.
                   return prev.slice(0, -1);
                 }
-              }
-              const fallback =
-                last.content ||
-                (last.toolCalls?.length
-                  ? ""
-                  : msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.5"));
-              const next = prev.slice();
-              replyAt = next.length - 1;
-              next[replyAt] = {
-                ...last,
-                content: reply || fallback,
-                model: result.model,
-                servedModel: result.served_model,
-                stats: parseTurnStats(result.stats),
-              };
-              return next;
-            });
-            releaseSlot();
+                // Mark any in-flight tool pills as errored so they stop
+                // spinning forever when the SSE socket dies mid-tool (e.g.
+                // backend restart, network drop). Without this the chip
+                // sits at "פועל כעת" indefinitely with no recovery path.
+                const hasRunning = last.toolCalls?.some((t) => t.status === "running");
+                if (!hasRunning) return prev;
+                const next = prev.slice();
+                next[next.length - 1] = {
+                  ...last,
+                  toolCalls: last.toolCalls?.map((t) =>
+                    t.status === "running" ? { ...t, status: "error", endedAt: Date.now() } : t,
+                  ),
+                };
+                return next;
+              });
+              releaseSlot();
+            },
           },
-          onTurnStats: (raw) => {
-            if (controller.signal.aborted) return;
-            const stats = parseTurnStats(raw);
-            if (!stats) return;
-            patchMessages(key, (prev) => {
-              const at = replyAt;
-              const reply = at === null ? undefined : prev[at];
-              if (at === null || !reply || reply.role !== "assistant") return prev;
-              const next = prev.slice();
-              next[at] = { ...reply, stats };
-              return next;
-            });
-          },
-          onError: (message, code) => {
-            if (controller.signal.aborted) return;
-            patchSession(key, {
-              status: "error",
-              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.6"),
-              // Known machine codes get a localized message; anything else
-              // shows the backend's text as-is.
-              error:
-                code === "context_too_long"
-                  ? msg("agent.error.context_too_long")
-                  : code === I18N_KEY.BILLING_INSUFFICIENT_FUNDS
-                    ? msg("agent.error.insufficient_funds")
-                    : message,
-              errorCode: code ?? null,
-            });
-            patchThinking(key, (segments) => closeThinking(segments, Date.now()));
-            patchMessages(key, (prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.role !== "assistant") return prev;
-              if (!last.content && !last.toolCalls?.length && !last.thinkingSegments?.length) {
-                // Nothing rendered yet — drop the empty assistant placeholder.
-                return prev.slice(0, -1);
-              }
-              // Mark any in-flight tool pills as errored so they stop
-              // spinning forever when the SSE socket dies mid-tool (e.g.
-              // backend restart, network drop). Without this the chip
-              // sits at "פועל כעת" indefinitely with no recovery path.
-              const hasRunning = last.toolCalls?.some((t) => t.status === "running");
-              if (!hasRunning) return prev;
-              const next = prev.slice();
-              next[next.length - 1] = {
-                ...last,
-                toolCalls: last.toolCalls?.map((t) =>
-                  t.status === "running" ? { ...t, status: "error", endedAt: Date.now() } : t,
-                ),
-              };
-              return next;
-            });
-            releaseSlot();
-          },
-        },
+      ),
       );
     },
     [

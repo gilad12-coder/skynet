@@ -1,6 +1,6 @@
 """Monthly spend caps for the platform-paid services users never pay for directly.
 
-Dictation (Groq Whisper) and embeddings run on the platform's own keys and are
+Dictation (Whisper on OpenRouter) and embeddings run on the platform's own keys and are
 not metered against user balances, so nothing else bounds what a bug, a runaway
 client or an abusive account can spend on them. Each service gets a counter in
 Redis keyed by calendar month (UTC); callers check :func:`budget_open` before a
@@ -40,7 +40,7 @@ def _month_key(service: str, now: datetime | None) -> str:
     """Return the Redis counter key for ``service`` in the current UTC month.
 
     Args:
-        service: Short service tag, e.g. ``"groq"``.
+        service: Short service tag, e.g. ``"transcription"``.
         now: Clock override for tests; ``None`` reads the real UTC time.
 
     Returns:
@@ -54,7 +54,7 @@ def budget_open(service: str, cap: float, *, now: datetime | None = None) -> boo
     """Return whether ``service`` may still spend this month.
 
     Args:
-        service: Short service tag, e.g. ``"groq"``.
+        service: Short service tag, e.g. ``"transcription"``.
         cap: Monthly cap in the caller's unit; ``0`` or less disables it.
         now: Clock override for tests.
 
@@ -87,7 +87,7 @@ def record_spend(
     """Add ``amount`` to this month's counter and alert once when it crosses ``cap``.
 
     Args:
-        service: Short service tag, e.g. ``"groq"``.
+        service: Short service tag, e.g. ``"transcription"``.
         amount: Cost of the call just made, in the cap's unit.
         cap: Monthly cap; ``0`` or less disables counting.
         now: Clock override for tests.

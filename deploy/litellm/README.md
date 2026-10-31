@@ -36,71 +36,35 @@ LiteLLM's proprietary `enterprise/` code. `litellm[proxy]` depends on the
 proprietary `litellm-enterprise` package, so the proxy extra is listed by hand
 without it; keep those pins in step with litellm's own when upgrading.
 
-## Deploy on Railway (hosted)
+## Deploy on AWS ECS (hosted)
 
-The same `config.yaml` runs unchanged on Railway. Railway can't bind-mount a
-file, so the `Dockerfile` here also bakes `config.yaml` in; the proxy
-still listens on a fixed `4000`. The proxy keeps its own **dedicated** Postgres
-and Redis, separate from the Skynet app database.
+The same `config.yaml` runs unchanged on AWS ECS Fargate. ECS can't bind-mount
+a file, so the `Dockerfile` here also bakes `config.yaml` in; the proxy still
+listens on a fixed `4000`. Terraform (`infra/terraform`, see its README) builds
+everything around it:
 
-```bash
-# 1. Dedicated backends for the proxy (isolated from the app DB)
-railway add -d postgres        # virtual-key + spend tables
-railway add -d redis           # prompt cache
+- `infra/terraform/scripts/build-push.sh` builds this directory into the
+  `skynet/litellm` ECR image, and `deploy.sh` rolls it out with the other
+  services.
+- The proxy keeps its own `litellm` database on the shared RDS instance,
+  separate from the Skynet app database, and uses the shared Valkey cache
+  (TLS and AUTH). `LITELLM_DATABASE_URL` and `REDIS_PASSWORD` come from the
+  `skynet/<env>/litellm-generated` secret; `LITELLM_MASTER_KEY`,
+  `OPENROUTER_API_KEY` and `LITELLM_SEED_KEY` come from `skynet/<env>/litellm`.
+- The proxy is private: it has no public host. The backend and the worker reach
+  it at `http://litellm.<env>.skynet.internal:4000` (Cloud Map), and Terraform
+  sets their `LITELLM_PROXY_URL` to that address.
 
-# 2. The proxy service, wired via cross-service variable references so the
-#    OpenRouter master key is never copied around. <Postgres>/<Redis> are the
-#    generated service names (e.g. "Postgres-ZPeG", "Redis").
-railway add -s litellm \
-  -v 'OPENROUTER_API_KEY=${{backend.OPENROUTER_API_KEY}}' \
-  -v 'LITELLM_DATABASE_URL=${{<Postgres>.DATABASE_URL}}' \
-  -v 'REDIS_HOST=${{<Redis>.REDISHOST}}' \
-  -v 'REDIS_PORT=${{<Redis>.REDISPORT}}' \
-  -v 'REDIS_PASSWORD=${{<Redis>.REDISPASSWORD}}'
-# Strong master key, kept out of shell history:
-printf 'sk-%s' "$(openssl rand -hex 24)" | \
-  railway variable set LITELLM_MASTER_KEY --stdin --service litellm --skip-deploys
+The proxy binds `0.0.0.0` (see the Dockerfile). Admin endpoints
+(`/key/generate`, `/spend/logs`) take the master key. Call them from inside the
+litellm task (`aws ecs execute-command --cluster skynet-<env> --container
+litellm ...`), never through a public host. The image has Python but no
+`curl`.
 
-# 3. Build the Dockerfile here (--path-as-root makes this dir the build context)
-railway up . --path-as-root --service litellm --ci
-
-# 4. Keep the proxy private — its only caller is the backend, in the same
-#    project, so it needs NO public domain. The backend reaches it over Railway's
-#    internal network. Verify from inside that network:
-railway ssh --service backend -- \
-  curl -s http://litellm.railway.internal:4000/health/liveliness   # -> "I'm alive!"
-```
-
-The proxy binds `::` (see the Dockerfile) because Railway's private network is
-IPv6-only. Admin endpoints (`/key/generate`, `/spend/logs`) take the master key;
-run them from inside the network too — never expose them publicly:
-
-```bash
-# Mint a virtual key (the master key already lives in the litellm container env):
-railway ssh --service litellm -- sh -c \
-  'curl -s http://localhost:4000/key/generate \
-     -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-     -d "{\"max_budget\": 50, \"duration\": \"30d\"}"'             # returns {"key": "sk-..."}
-
-# Point the backend at the proxy over the internal domain — plain http, since TLS
-# is unnecessary inside the private network:
-railway variable set 'LITELLM_PROXY_URL=http://litellm.railway.internal:4000/v1' --service backend --skip-deploys
-echo "<virtual-key>" | railway variable set LITELLM_PROXY_API_KEY --stdin --service backend --skip-deploys
-railway redeploy --service backend --yes
-```
-
-If you ever need to reach the proxy from outside the project (local dev, a
-separate worker), attach a domain temporarily and delete it when done:
-`railway domain --port 4000 --service litellm` … `railway domain delete <id>`.
-
-The `litellm` service is deployed from a local build via `railway up`. To switch
-it to GitHub autodeploys once this is on `main`, connect the repo with this
-directory as the root:
-
-```bash
-railway service source connect --repo <owner>/<repo> --branch main --service litellm
-# then set the service's Root Directory to deploy/litellm in the dashboard
-```
+The backend's virtual key must exist in the proxy database. `start.py`
+registers `LITELLM_SEED_KEY` at boot, so put the same value in
+`skynet/<env>/app` as `LITELLM_PROXY_API_KEY` and in `skynet/<env>/litellm` as
+`LITELLM_SEED_KEY` (`infra/terraform/scripts/secrets.sh`), then redeploy.
 
 ## Enable it on the backend
 

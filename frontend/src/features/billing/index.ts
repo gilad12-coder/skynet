@@ -13,6 +13,7 @@ export {
   formatCentsUsd,
   formatUsd,
   type TokenSourceMode,
+  type CliProvider,
 } from "./lib/wallet";
 export {
   DEFAULT_PRICING_TERMS,

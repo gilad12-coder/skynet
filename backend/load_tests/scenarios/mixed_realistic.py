@@ -394,6 +394,8 @@ async def run(config: MixedRealisticConfig) -> ScenarioResult:
     """
     usernames = [f"load-mixed-{index}" for index in range(config.virtual_users)]
     db_inspector.truncate_test_users(usernames)
+    # Browsing-only users are not funded but still need an account row to authenticate.
+    db_inspector.ensure_test_accounts(usernames)
     db_inspector.fund_test_users(usernames[: config.submitting_users])
 
     journey_metrics = _JourneyMetrics()

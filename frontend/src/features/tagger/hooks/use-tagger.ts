@@ -45,12 +45,13 @@ import type {
 import {
   REVIEW_BATCH_SIZE,
   agreementOver,
+  assistFailureKind,
   assistModelPatch,
   calibrationTarget,
   flaggedRowIds,
   initialAssistState,
   interviewComposerEffort,
-  interviewComposerModel,
+  interviewRequestModel,
   labelsAgree,
   sampleRowIds,
 } from "../lib/assist";
@@ -718,7 +719,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             // role/content go over the wire.
             turns: turns.map(({ role, content }) => ({ role, content })),
             locale: getActiveLocale(),
-            model: interviewComposerModel(state) ?? undefined,
+            model: (await interviewRequestModel(state)) ?? undefined,
             reasoning_effort: interviewComposerEffort(state) ?? undefined,
           },
           {
@@ -829,8 +830,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       setColumns(result.columns);
       setConfig((prev) => (prev ? { ...prev, inputColumns: result.columns } : prev));
       return true;
-    } catch {
-      setAssistError("synthesize");
+    } catch (err) {
+      setAssistError(assistFailureKind(err, "synthesize"));
       return false;
     } finally {
       setGenerating(false);
@@ -909,8 +910,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
         // Predictions compile their few-shot examples server-side, so the
         // server must see the freshest labels before the first chunk runs.
         await flushNow();
-      } catch {
-        setAssistError("predict");
+      } catch (err) {
+        setAssistError(assistFailureKind(err, "predict"));
         setRoundLoading(false);
         return;
       }
@@ -964,7 +965,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             for (const [id, pred] of Object.entries(predictions)) applyPrediction(id, pred);
             completed = true;
           },
-          onError: () => setAssistError("predict"),
+          onError: (code) => setAssistError(assistFailureKind(code, "predict")),
           signal: controller.signal,
         });
         if (completed) await flushNow().catch(() => {});
@@ -1049,8 +1050,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       await taggerAssistAutotagStart(sessionId);
       pendingRef.current = null;
       setPhase("autotagging");
-    } catch {
-      setAssistError("autotag");
+    } catch (err) {
+      setAssistError(assistFailureKind(err, "autotag"));
     }
   }, [sessionId, flushNow]);
 

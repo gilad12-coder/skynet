@@ -21,6 +21,8 @@ export interface UsageGroup {
   chargedCents: number;
   /** Provider charge behind owner-key rows; null when no row in the group has one. */
   providerCents: number | null;
+  /** Subscription calls priced at API rates, never billed; null when no row in the group has one. */
+  apiRateCents: number | null;
   calls: number;
   inputTokens: number;
   outputTokens: number;
@@ -64,6 +66,7 @@ function empty(key: string, nonModel: boolean): Accumulator {
     nonModel,
     chargedCents: 0,
     providerCents: null,
+    apiRateCents: null,
     calls: 0,
     inputTokens: 0,
     outputTokens: 0,
@@ -77,6 +80,7 @@ function empty(key: string, nonModel: boolean): Accumulator {
 function add(acc: Accumulator, row: RunUsageRow): void {
   acc.chargedCents += row.charged_cents;
   if (row.provider_cents != null) acc.providerCents = (acc.providerCents ?? 0) + row.provider_cents;
+  if (row.api_rate_cents != null) acc.apiRateCents = (acc.apiRateCents ?? 0) + row.api_rate_cents;
   acc.calls += row.calls;
   acc.inputTokens += row.input_tokens;
   acc.outputTokens += row.output_tokens;
