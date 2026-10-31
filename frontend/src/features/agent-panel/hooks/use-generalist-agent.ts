@@ -3,6 +3,7 @@
 import * as React from "react";
 import { toast } from "react-toastify";
 import {
+  localAgentEffort,
   localAgentModel,
   localModelRefusalMessage,
   useLocalStatus,
@@ -500,7 +501,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             regenerate: run.regenerate,
             locale: getActiveLocale(),
             model: sentModel ?? undefined,
-            reasoning_effort: effortRef.current ?? undefined,
+            reasoning_effort:
+              localAgentEffort(modelRef.current, effortRef.current, sentModel) ?? undefined,
             steer_key: steerKey,
           },
           {

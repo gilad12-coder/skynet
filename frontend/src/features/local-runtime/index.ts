@@ -3,6 +3,7 @@ export {
   loadLocalStatus,
   peekLocalStatus,
   localAgentModel,
+  localAgentEffort,
   localModelRefusalMessage,
   useLocalAgentMenuModels,
 } from "./hooks/use-local-status";

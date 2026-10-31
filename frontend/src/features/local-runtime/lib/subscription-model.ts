@@ -8,6 +8,7 @@
  */
 import type { CliProvider } from "@/features/billing";
 import { CLI_PROVIDERS, isCliProvider } from "@/shared/lib/cli-providers";
+import { effortsFor } from "@/shared/lib/model-efforts";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import type { RunUsageRow } from "@/shared/types/run-usage";
 
@@ -279,6 +280,25 @@ export function requestKeyRows(
     loaded,
     cached,
   });
+}
+
+/**
+ * The effort an agent request sends with `sent`, the model it resolved for
+ * the saved `pick`. A pick the OpenRouter engine menu hides (a Local pick)
+ * keeps its effort saved for a CLI engine, but the request runs a key model
+ * (`sent`, or the key's default when null): the effort goes along only when
+ * that model takes it, as the chip shows. Every other request sends it as is.
+ */
+export function keyEngineEffort(
+  effort: string | null,
+  pick: string | null,
+  sent: string | null,
+  rows: CatalogModel[] | null,
+): string | null {
+  if (!effort || !pick || isOpenRouterModelId(pick)) return effort;
+  if (sent && !isOpenRouterModelId(sent)) return effort;
+  const row = sent ? rows?.find((model) => model.value === sent) : undefined;
+  return row?.supports_thinking && effortsFor(sent, rows).includes(effort) ? effort : null;
 }
 
 /**

@@ -51,7 +51,7 @@ function render(value: string | null, models?: CatalogModel[]): string {
 void describe("hiddenPickEffortStale", () => {
   const thinking = SUBSCRIPTION[0]!;
   const plain = SUBSCRIPTION[1]!;
-  void it("clears a hidden pick's effort that the shown model does not take", () => {
+  void it("sets aside a hidden pick's effort that the shown model does not take", () => {
     assert.equal(hiddenPickEffortStale(true, "max", thinking, ["low", "high"]), true);
     assert.equal(hiddenPickEffortStale(true, "high", plain, ["low", "high"]), true);
   });

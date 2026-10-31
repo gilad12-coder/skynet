@@ -10,6 +10,7 @@ import { peekByokKeys, useByokKeys } from "@/features/billing/providers/byok-pro
 import type { CatalogModel } from "@/shared/types/api";
 import {
   isLocalModelRefusal,
+  keyEngineEffort,
   keyRetryDelayMs,
   LOCAL_KEY_PROVIDER,
   localAgentMenu,
@@ -98,6 +99,22 @@ export async function localAgentModel(
     engine,
     engineLoaded: agentEngineLoaded(),
   });
+}
+
+/**
+ * The effort an agent request sends with `sent`, the model localAgentModel
+ * resolved for `pick`: the composer's effort, unless the OpenRouter engine
+ * hides the pick and its key model does not take that effort. Hosted builds
+ * send the composer's effort unchanged.
+ */
+export function localAgentEffort(
+  pick: string | null,
+  effort: string | null,
+  sent: string | null,
+): string | null {
+  if (!isLocalMode()) return effort;
+  const rows = requestKeyRows(peekByokKeys(), lastKeyLoad, cachedByokCatalog()?.models ?? null);
+  return keyEngineEffort(effort, pick, sent, rows);
 }
 
 /**

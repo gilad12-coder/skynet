@@ -30,6 +30,7 @@ const {
   isAgentEngine,
   isCliProvider,
   isLocalModelRefusal,
+  keyEngineEffort,
   keyMenuModels,
   KEY_RETRY_MAX_MS,
   keyRetryDelayMs,
@@ -1412,4 +1413,30 @@ test("a failed key model load keeps the rows an earlier load got for the same ke
   assert.deepEqual(nextKeyLoad(null, "k1:t", null), { stamp: "k1:t", models: null });
   const fresh = [{ value: "openai/gpt-6" }] as Rows;
   assert.deepEqual(nextKeyLoad(good, "k1:t", fresh), { stamp: "k1:t", models: fresh });
+});
+
+test("a hidden pick's effort goes with the key model only when that model takes it", () => {
+  type Rows = NonNullable<Parameters<typeof keyEngineEffort>[3]>;
+  const rows = [
+    {
+      value: "openrouter/openai/gpt-5",
+      supports_thinking: true,
+      reasoning_efforts: ["low", "high"],
+    },
+    { value: "openrouter/mistral/small", supports_thinking: false },
+  ] as Rows;
+  const local = "subscription:claude/opus";
+  assert.equal(keyEngineEffort("high", local, "openrouter/openai/gpt-5", rows), "high");
+  assert.equal(keyEngineEffort("max", local, "openrouter/openai/gpt-5", rows), null);
+  assert.equal(keyEngineEffort("high", local, "openrouter/mistral/small", rows), null);
+  // No key rows yet: the backend runs the key's default, which the chip does not name.
+  assert.equal(keyEngineEffort("high", local, null, null), null);
+  // A CLI ran the pick, a key pick, or no pick: the effort is sent as is.
+  assert.equal(keyEngineEffort("max", local, local, rows), "max");
+  assert.equal(
+    keyEngineEffort("max", "openrouter/openai/gpt-5", "openrouter/openai/gpt-5", rows),
+    "max",
+  );
+  assert.equal(keyEngineEffort("max", null, "openrouter/openai/gpt-5", rows), "max");
+  assert.equal(keyEngineEffort(null, local, null, rows), null);
 });

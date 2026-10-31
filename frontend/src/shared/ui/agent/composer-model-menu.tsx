@@ -62,10 +62,11 @@ interface ComposerModelMenuProps {
 const FALLBACK_LIST_CAP = 50;
 
 /**
- * Whether a saved effort no longer fits the model the chip names while the
- * menu hides the saved pick (a Local pick under the OpenRouter engine). The
- * hidden pick stays saved, but its effort would go with another model. Judged
- * only once the menu lists the model it runs.
+ * Whether the menu sets aside a saved effort while it hides the saved pick (a
+ * Local pick under the OpenRouter engine) and the model it names instead does
+ * not take that effort. The effort stays saved for the pick, but the chip and
+ * the request (keyEngineEffort) leave it out. Judged only once the menu lists
+ * the model it runs.
  */
 export function hiddenPickEffortStale(
   hidden: boolean,
@@ -195,9 +196,7 @@ export function ComposerModelMenu({
     current,
     efforts,
   );
-  React.useEffect(() => {
-    if (effortStale) onEffortChange(null);
-  }, [effortStale, onEffortChange]);
+  const shownEffort = effortStale ? null : effort;
 
   const pick = (model: string | null) => {
     onChange(model);
@@ -235,8 +234,8 @@ export function ComposerModelMenu({
           </span>
           {/* Codex-style chip: the effort reads as a lighter suffix after the
               model name ("gpt-5 High"), not a separated fragment. */}
-          {effective && effort && (
-            <span className="shrink-0 text-muted-foreground">{effortLabel(effort)}</span>
+          {effective && shownEffort && (
+            <span className="shrink-0 text-muted-foreground">{effortLabel(shownEffort)}</span>
           )}
           <CaretDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
@@ -283,7 +282,7 @@ export function ComposerModelMenu({
           <DropdownMenuSubTrigger disabled={!canThink || efforts.length === 0} className="py-2.5">
             <span className="shrink-0">{msg("agent.model_menu.effort_label")}</span>
             <span className="ms-auto truncate text-muted-foreground">
-              {effort ? effortLabel(effort) : msg("agent.model_menu.effort_default")}
+              {shownEffort ? effortLabel(shownEffort) : msg("agent.model_menu.effort_default")}
             </span>
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
@@ -291,7 +290,7 @@ export function ComposerModelMenu({
             {[null, ...efforts].map((level) => (
               <MenuItem
                 key={level ?? "default"}
-                selected={effort === level}
+                selected={shownEffort === level}
                 label={level ? effortLabel(level) : msg("agent.model_menu.effort_default")}
                 description={
                   level === null && defaultEffort
