@@ -7,9 +7,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ..config import settings as app_settings
 from ..storage.models import NotificationPreferenceModel
 from .catalog import (
     CHANNELS,
@@ -19,6 +23,8 @@ from .catalog import (
     DELIVERY_CHANNELS,
     INBOX,
     INBOX_ONLY_EVENTS,
+    LOCAL_CHANNELS,
+    LOCAL_DEFAULT_CELLS,
     MAX_HOLD_MINUTES,
     MIN_HOLD_MINUTES,
 )
@@ -30,13 +36,36 @@ _engine: Engine | None = None
 Grid = dict[str, dict[str, bool]]
 
 
+def grid_channels() -> tuple[str, ...]:
+    """Return the grid's channel columns on this deployment.
+
+    Returns:
+        The hosted channels, plus the Mac app's own channels in local mode.
+    """
+    return (*CHANNELS, *LOCAL_CHANNELS) if app_settings.local_mode else CHANNELS
+
+
+def delivery_channels() -> tuple[str, ...]:
+    """Return the channels :func:`core.notifications.dispatch.notify` routes to on this deployment.
+
+    Returns:
+        The hosted delivery channels, plus the Mac app's own channels in local mode.
+    """
+    return (*DELIVERY_CHANNELS, *LOCAL_CHANNELS) if app_settings.local_mode else DELIVERY_CHANNELS
+
+
 def default_grid() -> Grid:
     """Return a fresh copy of the default event x channel grid.
 
     Returns:
-        A mutable ``{event_type: {channel: enabled}}`` mapping.
+        A mutable ``{event_type: {channel: enabled}}`` mapping, with the
+        local channels' default cells in local mode.
     """
-    return {event: dict(row) for event, row in DEFAULT_GRID.items()}
+    grid = {event: dict(row) for event, row in DEFAULT_GRID.items()}
+    if app_settings.local_mode:
+        for event, cells in LOCAL_DEFAULT_CELLS.items():
+            grid[event].update(cells)
+    return grid
 
 
 def merge_grid(stored: Mapping[str, Any] | None) -> Grid:
@@ -53,15 +82,16 @@ def merge_grid(stored: Mapping[str, Any] | None) -> Grid:
         The complete effective grid.
     """
     grid = default_grid()
+    channels = grid_channels()
     if isinstance(stored, Mapping):
         for event, row in stored.items():
             if event not in grid or not isinstance(row, Mapping):
                 continue
             for channel, enabled in row.items():
-                if channel in CHANNELS and isinstance(enabled, bool):
+                if channel in channels and isinstance(enabled, bool):
                     grid[event][channel] = enabled
     for event in INBOX_ONLY_EVENTS:
-        grid[event] = {channel: channel == INBOX for channel in CHANNELS}
+        grid[event] = {channel: channel == INBOX for channel in channels}
     return grid
 
 
@@ -81,7 +111,7 @@ def clamp_hold_minutes(value: Any) -> int:
 
 
 def clean_held_channels(value: Any) -> tuple[str, ...]:
-    """Keep only known delivery channels, in canonical order.
+    """Keep only this deployment's delivery channels, in canonical order.
 
     Args:
         value: Candidate list of channel names, or ``None`` for the default.
@@ -94,7 +124,7 @@ def clean_held_channels(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list | tuple):
         return DEFAULT_HELD_CHANNELS
     chosen = set(value)
-    return tuple(channel for channel in DELIVERY_CHANNELS if channel in chosen)
+    return tuple(channel for channel in delivery_channels() if channel in chosen)
 
 
 @dataclass(frozen=True)
@@ -149,6 +179,33 @@ def settings_from_row(row: NotificationPreferenceModel | None) -> NotificationSe
         stuck_fraction=row.stuck_fraction,
         budget_alert_fraction=row.budget_alert_fraction,
     )
+
+
+def lock_preferences(session: Session, username: str) -> NotificationPreferenceModel:
+    """Lock ``username``'s preference row for a read-modify-write, creating it when missing.
+
+    The hosted preference route and the Mac app's macOS route both rebuild
+    ``held_channels`` and ``channel_grid`` from the stored row; without the
+    lock, two concurrent saves each drop the other's change. Call it first in
+    the session's transaction and commit to release the lock.
+
+    Args:
+        session: A session with no open transaction yet.
+        username: The identity whose row is changed.
+
+    Returns:
+        The locked row.
+    """
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        # SQLite ignores FOR UPDATE; an immediate transaction takes the write lock before the read.
+        session.execute(text("BEGIN IMMEDIATE"))
+    insert = postgresql_insert if dialect == "postgresql" else sqlite_insert
+    # Two first saves race to create the row; the loser locks the winner's row instead of failing.
+    session.execute(insert(NotificationPreferenceModel).values(username=username).on_conflict_do_nothing())
+    row = session.get(NotificationPreferenceModel, username, with_for_update=True)
+    assert row is not None
+    return row
 
 
 def configure_notification_preferences(engine: Engine | None) -> None:
