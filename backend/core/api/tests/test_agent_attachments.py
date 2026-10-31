@@ -383,6 +383,52 @@ def test_xls_sheets_are_extracted() -> None:
     assert text == "Sheet: Sheet 1\nname\tscore\nada\t3.0"
 
 
+def test_xls_loads_one_sheet_at_a_time_and_stops_at_the_character_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each XLS sheet is unloaded before the next loads, and later sheets never load past the cap."""
+    events: list[str] = []
+    row = "x" * 1000
+
+    class FakeSheet:
+        """A loaded sheet of 30 rows."""
+
+        def __init__(self, index: int) -> None:
+            """Name the sheet by its index."""
+            self.name = f"s{index}"
+            self.nrows = 30
+
+        def row_values(self, _r: int) -> list[str]:
+            """Return one wide text cell."""
+            return [row]
+
+    class FakeBook:
+        """A workbook of five sheets that records loads and unloads."""
+
+        nsheets = 5
+
+        def sheet_by_index(self, index: int) -> FakeSheet:
+            """Record the load."""
+            events.append(f"load {index}")
+            return FakeSheet(index)
+
+        def unload_sheet(self, index: int) -> None:
+            """Record the unload."""
+            events.append(f"unload {index}")
+
+    opened: dict[str, object] = {}
+
+    def fake_open_workbook(**kwargs: object) -> FakeBook:
+        """Record the open options."""
+        opened.update(kwargs)
+        return FakeBook()
+
+    monkeypatch.setattr(attachments.xlrd, "open_workbook", fake_open_workbook)
+    text = extract_attachment_text("big.xls", "", b"ignored")
+    assert opened["ragged_rows"] is True
+    assert opened["on_demand"] is True
+    assert events == ["load 0", "unload 0", "load 1", "unload 1"]
+    assert "[Truncated: showing the first 50,000 characters of big.xls" in text
+
+
 def test_images_binaries_and_corrupt_files_become_notes() -> None:
     """Unreadable files give a short note with name, type and size, never an error."""
     image = extract_attachment_text("photo.png", "image/png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)

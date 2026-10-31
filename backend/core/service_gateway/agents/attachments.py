@@ -530,14 +530,21 @@ def _xls_text(data: bytes) -> Iterator[str]:
         data: The file bytes.
 
     Yields:
-        Each sheet's rows under a ``Sheet: name`` heading.
+        Each sheet's rows under a ``Sheet: name`` heading. Sheets load one at
+        a time, so a reader that stops early never loads the later sheets.
     """
     # xlrd prints format warnings to stdout unless given its own log.
-    book = xlrd.open_workbook(file_contents=data, on_demand=True, logfile=io.StringIO())
-    for index, sheet in enumerate(book.sheets()):
-        yield f"Sheet: {sheet.name}" if index == 0 else f"\n\nSheet: {sheet.name}"
-        for r in range(sheet.nrows):
-            yield "\n" + "\t".join(str(v) for v in sheet.row_values(r))
+    # Without ragged_rows, xlrd pads every row to the widest column: a tiny
+    # file with cells at A1 and IV65536 then holds 16M cells per sheet.
+    book = xlrd.open_workbook(file_contents=data, on_demand=True, ragged_rows=True, logfile=io.StringIO())
+    for index in range(book.nsheets):
+        sheet = book.sheet_by_index(index)
+        try:
+            yield f"Sheet: {sheet.name}" if index == 0 else f"\n\nSheet: {sheet.name}"
+            for r in range(sheet.nrows):
+                yield "\n" + "\t".join(str(v) for v in sheet.row_values(r))
+        finally:
+            book.unload_sheet(index)
 
 
 def _pdf_limits() -> AbstractContextManager[object]:
