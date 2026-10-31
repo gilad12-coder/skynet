@@ -1,8 +1,9 @@
 """Egress proxy for a local setup box: HTTPS ``CONNECT`` to allowlisted hosts only.
 
-A local setup box sits on its own internal Docker network with no route out.
-This proxy runs in a sidecar container on that network and on ``bridge``, and
-is the box's only way out. It mirrors the Vercel allowlist: a tunnel opens only
+A local setup box sits on its own internal Docker network with no route to the
+internet (the network's gateway, the Docker VM itself, stays reachable). This
+proxy runs in a sidecar container on that network and on ``bridge``, and is the
+box's only way to the internet. It mirrors the Vercel allowlist: a tunnel opens only
 to an exact allowlisted host on port 443, and only when every address the host
 resolves to is a public one. That last check keeps the Mac itself out of reach
 (Docker Desktop routes ``host.docker.internal`` and its 192.168.65.0/24 range to

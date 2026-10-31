@@ -5,10 +5,11 @@ machine instead of Vercel microVMs. The guest contract stays the same: files
 and commands relative to a writable working directory, output streamed while
 a command runs (the model mailbox answers guest requests mid-command), and no
 network unless the parent asked for an allowlisted setup box. Such a box gets
-its own internal Docker network with no route out; its only way out is an
-egress proxy sidecar (``docker_egress_proxy``) that tunnels HTTPS to the
-allowlisted hosts alone, so the box cannot reach this Mac or any other private
-address, matching the Vercel allowlist. Containers run
+its own internal Docker network with no route to the internet or to this Mac's
+loopback; its only way to the internet is an egress proxy sidecar
+(``docker_egress_proxy``) that tunnels HTTPS to the allowlisted hosts alone,
+matching the Vercel allowlist. The network's gateway address is the Docker VM
+itself, so services listening there stay reachable from the box. Containers run
 with a read-only root filesystem, a fixed CPU and memory profile, a wall-time
 limit and the ``skynet.job`` label the desktop shell and the worker sweep use
 for cleanup. Local sandboxes are never billed, so the budget is never charged.
@@ -34,10 +35,7 @@ from ....billing.runtime import BudgetRuntime
 from ....config import Settings
 from ....exceptions import ServiceError
 from ....i18n import t
-
-# sandbox.py's settings factories build this runtime in local mode, so the two
-# modules import each other; names are read from the module at call time.
-from . import sandbox
+from . import sandbox_contract
 from .docker_egress_proxy import READY_MARKER
 from .sandbox_log import logged_command
 
@@ -274,8 +272,8 @@ class DockerSandboxSession:
         *,
         env: Mapping[str, str] | None = None,
         timeout_seconds: float | None = None,
-        on_output: sandbox.OutputSink | None = None,
-    ) -> sandbox.CommandResult:
+        on_output: sandbox_contract.OutputSink | None = None,
+    ) -> sandbox_contract.CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and stream its output.
 
         Args:
@@ -296,7 +294,7 @@ class DockerSandboxSession:
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = ["timeout", "--signal=KILL", f"{seconds}s", *inner]
-            deadline = seconds + sandbox.KILL_GRACE_SECONDS
+            deadline = seconds + sandbox_contract.KILL_GRACE_SECONDS
         argv = [self._docker_bin, "exec", "-w", WORKSPACE_DIR, *_env_args(env or {}), self.container, *inner]
         try:
             process = subprocess.Popen(
@@ -308,7 +306,7 @@ class DockerSandboxSession:
         # model mailbox must see a guest request while the command still runs.
         captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
         readers = [
-            threading.Thread(target=sandbox._pump, args=(name, pipe, captured[name], on_output), daemon=True)
+            threading.Thread(target=sandbox_contract._pump, args=(name, pipe, captured[name], on_output), daemon=True)
             for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr))
         ]
         for reader in readers:
@@ -319,17 +317,17 @@ class DockerSandboxSession:
             process.kill()
             process.wait()
             raise ServiceError(
-                f"command still running {sandbox.KILL_GRACE_SECONDS:.0f}s past its {seconds}s timeout: {sandbox._brief(command)}"
+                f"command still running {sandbox_contract.KILL_GRACE_SECONDS:.0f}s past its {seconds}s timeout: {sandbox_contract._brief(command)}"
             ) from error
         finally:
             for reader in readers:
                 reader.join()
         exit_code = process.returncode
-        return sandbox.CommandResult(
+        return sandbox_contract.CommandResult(
             exit_code=exit_code,
             stdout="".join(captured["stdout"]),
             stderr="".join(captured["stderr"]),
-            timed_out=timeout_seconds is not None and exit_code in sandbox._TIMEOUT_EXIT_CODES,
+            timed_out=timeout_seconds is not None and exit_code in sandbox_contract._TIMEOUT_EXIT_CODES,
         )
 
     def read_file(self, path: str) -> str | None:
@@ -421,7 +419,7 @@ class DockerSandboxRuntime:
         # The broker prices a Vercel box before it opens any; local boxes are free.
         self.billable = False
 
-    def open(self, spec: sandbox.SandboxSpec) -> sandbox.SandboxSession:
+    def open(self, spec: sandbox_contract.SandboxSpec) -> sandbox_contract.SandboxSession:
         """Start one container per ``spec``.
 
         Args:
@@ -442,9 +440,9 @@ class DockerSandboxRuntime:
             raise ServiceError("A local sandbox has no network edge to inject credentials with.")
         if spec.network_disabled and spec.allowed_hosts:
             raise ServiceError("An offline sandbox cannot reach allowlisted hosts.")
-        owner = spec.tags.get(sandbox.JOB_TAG)
-        labels = {**sandbox.SANDBOX_TAG, **spec.tags, **({DOCKER_JOB_LABEL: owner} if owner else {})}
-        name = sandbox.unique_sandbox_name(spec.name or "skynet-local")
+        owner = spec.tags.get(sandbox_contract.JOB_TAG)
+        labels = {**sandbox_contract.SANDBOX_TAG, **spec.tags, **({DOCKER_JOB_LABEL: owner} if owner else {})}
+        name = sandbox_contract.unique_sandbox_name(spec.name or "skynet-local")
         image = spec.image or self._image
         # The default for a box without hosts is offline: Docker has no edge
         # policy, and its default bridge reaches services that listen only on
@@ -459,7 +457,12 @@ class DockerSandboxRuntime:
         return DockerSandboxSession(self._docker_bin, container, env=spec.env, owner=owner, egress=egress)
 
     def _run_box(
-        self, name: str, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str, egress: _Egress | None
+        self,
+        name: str,
+        spec: sandbox_contract.SandboxSpec,
+        labels: Mapping[str, str],
+        image: str,
+        egress: _Egress | None,
     ) -> str:
         """Start the box's container.
 
@@ -514,7 +517,9 @@ class DockerSandboxRuntime:
             raise ServiceError(f"Could not start the local sandbox: {_stderr_line(result)}")
         return container
 
-    def _open_egress(self, name: str, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str) -> _Egress:
+    def _open_egress(
+        self, name: str, spec: sandbox_contract.SandboxSpec, labels: Mapping[str, str], image: str
+    ) -> _Egress:
         """Create a setup box's internal network and start its egress proxy on it and on ``bridge``.
 
         The proxy runs on the box's own image, which is already on this
@@ -543,7 +548,9 @@ class DockerSandboxRuntime:
             raise
         return egress
 
-    def _start_proxy(self, egress: _Egress, spec: sandbox.SandboxSpec, labels: Mapping[str, str], image: str) -> None:
+    def _start_proxy(
+        self, egress: _Egress, spec: sandbox_contract.SandboxSpec, labels: Mapping[str, str], image: str
+    ) -> None:
         """Start the proxy sidecar, give it its way out and wait until it listens.
 
         Args:
@@ -652,7 +659,9 @@ def remove_idle_sandbox_networks(docker_bin: str) -> int:
     Returns:
         How many networks were removed.
     """
-    filters = [arg for key, value in sandbox.SANDBOX_TAG.items() for arg in ("--filter", f"label={key}={value}")]
+    filters = [
+        arg for key, value in sandbox_contract.SANDBOX_TAG.items() for arg in ("--filter", f"label={key}={value}")
+    ]
     try:
         listed = _docker(docker_bin, ["network", "ls", "-q", *filters])
     except ServiceError as error:
