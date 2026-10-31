@@ -129,7 +129,8 @@ def enforce_local_mode_sources(
 
     Raises:
         DomainError: 422 ``models.subscription_local_only`` outside local mode;
-            422 ``local.not_available`` for a Docker runtime outside local mode;
+            422 ``local.not_available`` for a Docker execution or proposer
+            runtime outside local mode;
             422 ``models.managed_unavailable_local`` in local mode.
     """
     sources = {config.token_source for config in model_configs}
@@ -139,7 +140,8 @@ def enforce_local_mode_sources(
     if not settings.local_mode:
         if TOKEN_SOURCE_SUBSCRIPTION in sources or requested_source == TOKEN_SOURCE_SUBSCRIPTION or host_cli:
             raise DomainError("models.subscription_local_only", status=422)
-        if getattr(payload, "execution_runtime", None) == LOCAL_EXECUTION_RUNTIME:
+        runtimes = (getattr(payload, "execution_runtime", None), getattr(payload, "proposer_runtime", None))
+        if LOCAL_EXECUTION_RUNTIME in runtimes:
             raise DomainError("local.not_available", status=422)
         return
     if TOKEN_SOURCE_MANAGED in sources:
@@ -158,7 +160,8 @@ def enforce_raw_local_mode_sources(payload: dict[str, Any]) -> None:
     Raises:
         DomainError: 422 ``models.subscription_local_only`` outside local mode
             when a model uses a subscription or the proposer names a host CLI;
-            422 ``local.not_available`` for a Docker runtime.
+            422 ``local.not_available`` for a Docker execution or proposer
+            runtime.
     """
     if settings.local_mode:
         return
@@ -172,5 +175,5 @@ def enforce_raw_local_mode_sources(payload: dict[str, Any]) -> None:
         or payload_uses_token_source(payload, TOKEN_SOURCE_SUBSCRIPTION, default_token_source=requested)
     ):
         raise DomainError("models.subscription_local_only", status=422)
-    if payload.get("execution_runtime") == LOCAL_EXECUTION_RUNTIME:
+    if LOCAL_EXECUTION_RUNTIME in (payload.get("execution_runtime"), payload.get("proposer_runtime")):
         raise DomainError("local.not_available", status=422)

@@ -279,7 +279,7 @@ def test_save_route_and_clear_the_key(local: list[object]) -> None:
     assert caught.value.status_code == 422
 
     chosen = client.put("/account/agent-engine", json={"engine": "openrouter"})
-    assert (chosen.status_code, chosen.json()) == (200, {"engine": "openrouter"})
+    assert (chosen.status_code, chosen.json()) == (200, {"engine": "openrouter", "stored": True})
     with Session(engine) as session:
         assert session.get(AgentEnginePreferenceModel, _USER).engine == "openrouter"
     assert agent_engine.engine_agent_model(store, _USER, None) is None
@@ -306,18 +306,18 @@ def test_get_engine_reports_openrouter_when_turns_run_on_the_saved_key(local: li
         with Session(engine) as session:
             session.add(AgentEnginePreferenceModel(username=_USER, engine=stored))
             session.commit()
-    assert client.get("/account/agent-engine").json() == {"engine": None}
+    assert client.get("/account/agent-engine").json() == {"engine": None, "stored": False}
     assert model_router.route_local_byok_model(None, job_store=store, username=_USER) is None
 
     _save(client)
-    assert client.get("/account/agent-engine").json() == {"engine": "openrouter"}
+    assert client.get("/account/agent-engine").json() == {"engine": "openrouter", "stored": False}
     picked = agent_engine.engine_agent_model(store, _USER, None)
     routed = model_router.route_local_byok_model(picked, job_store=store, username=_USER)
     assert routed is not None
     assert (routed.token_source, routed.byok_provider) == (TOKEN_SOURCE_BYOK, "openrouter")
 
     client.delete("/billing/byok/keys/openrouter")
-    assert client.get("/account/agent-engine").json() == {"engine": None}
+    assert client.get("/account/agent-engine").json() == {"engine": None, "stored": False}
 
 
 def test_get_engine_prefers_a_ready_cli_over_the_saved_key(
@@ -334,7 +334,7 @@ def test_get_engine_prefers_a_ready_cli_over_the_saved_key(
     store = SimpleNamespace(engine=_engine())
     client = _client(store)
     _save(client)
-    assert client.get("/account/agent-engine").json() == {"engine": "codex"}
+    assert client.get("/account/agent-engine").json() == {"engine": "codex", "stored": False}
     assert (
         agent_engine.engine_agent_model(store, _USER, None) == f"subscription/codex/{next(iter(CLI_MODELS['codex']))}"
     )

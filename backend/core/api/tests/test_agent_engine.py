@@ -150,7 +150,7 @@ def local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[CliStatus]:
 def test_hosted_default_is_openrouter_without_a_database_read() -> None:
     """Answer ``openrouter`` in hosted mode, and leave an agent pick untouched, with no DB read."""
     client = _client(_NoDatabase())
-    assert client.get("/account/agent-engine").json() == {"engine": "openrouter"}
+    assert client.get("/account/agent-engine").json() == {"engine": "openrouter", "stored": False}
     assert agent_engine.engine_agent_model(_NoDatabase(), _USER, None) is None
     assert agent_engine.engine_agent_model(_NoDatabase(), _USER, "openai/gpt-5.5") == "openai/gpt-5.5"
 
@@ -167,7 +167,7 @@ def test_hosted_refuses_a_cli_engine(engine: str) -> None:
     response = client.put("/account/agent-engine", json={"engine": engine})
     assert (response.status_code, response.json()) == (422, {"code": "models.subscription_local_only"})
     put = client.put("/account/agent-engine", json={"engine": "openrouter"})
-    assert (put.status_code, put.json()) == (200, {"engine": "openrouter"})
+    assert (put.status_code, put.json()) == (200, {"engine": "openrouter", "stored": False})
 
 
 def test_local_default_is_the_first_ready_cli(local: list[CliStatus]) -> None:
@@ -177,14 +177,14 @@ def test_local_default_is_the_first_ready_cli(local: list[CliStatus]) -> None:
         local: The probe results, edited in place.
     """
     client = _client(SimpleNamespace(engine=_engine()))
-    assert client.get("/account/agent-engine").json() == {"engine": "codex"}
+    assert client.get("/account/agent-engine").json() == {"engine": "codex", "stored": False}
     local[0] = _status("codex", logged_in=False)
     local[1] = _status("claude", rate_limited_until="2099-01-01T00:00:00Z")
-    assert client.get("/account/agent-engine").json() == {"engine": None}
+    assert client.get("/account/agent-engine").json() == {"engine": None, "stored": False}
     local[1] = _status("claude")
-    assert client.get("/account/agent-engine").json() == {"engine": "claude"}
+    assert client.get("/account/agent-engine").json() == {"engine": "claude", "stored": False}
     local[1] = _status("claude", version_ok=False)
-    assert client.get("/account/agent-engine").json() == {"engine": None}
+    assert client.get("/account/agent-engine").json() == {"engine": None, "stored": False}
     assert agent_engine.engine_agent_model(None, _USER, None) is None
     with pytest.raises(DomainError) as caught:
         model_router.route_agent_model(agent_engine.engine_agent_model(None, _USER, None))
@@ -237,11 +237,11 @@ def test_stored_droid_falls_back_to_the_default(local: list[CliStatus]) -> None:
         session.add(AgentEnginePreferenceModel(username=_USER, engine="droid"))
         session.commit()
     store = SimpleNamespace(engine=engine)
-    assert _client(store).get("/account/agent-engine").json() == {"engine": "codex"}
+    assert _client(store).get("/account/agent-engine").json() == {"engine": "codex", "stored": False}
     assert agent_engine.engine_agent_model(store, _USER, None) == _CODEX_ID
     local[0] = _status("codex", path=None)
     local[1] = _status("claude", logged_in=False)
-    assert _client(store).get("/account/agent-engine").json() == {"engine": None}
+    assert _client(store).get("/account/agent-engine").json() == {"engine": None, "stored": False}
     assert agent_engine.engine_agent_model(store, _USER, None) is None
 
 
@@ -250,15 +250,35 @@ def test_local_setting_persists_per_user() -> None:
     """Keep the choice across a new router over the same database, for that caller only."""
     engine = _engine()
     assert _client(SimpleNamespace(engine=engine)).put("/account/agent-engine", json={"engine": "claude"}).json() == {
-        "engine": "claude"
+        "engine": "claude",
+        "stored": True,
     }
     restarted = SimpleNamespace(engine=engine)
-    assert _client(restarted).get("/account/agent-engine").json() == {"engine": "claude"}
-    assert _client(restarted, _OTHER).get("/account/agent-engine").json() == {"engine": "codex"}
+    assert _client(restarted).get("/account/agent-engine").json() == {"engine": "claude", "stored": True}
+    assert _client(restarted, _OTHER).get("/account/agent-engine").json() == {"engine": "codex", "stored": False}
     assert (
         agent_engine.engine_agent_model(restarted, _USER, None)
         == f"subscription/claude/{next(iter(CLI_MODELS['claude']))}"
     )
+
+
+def test_get_reports_whether_the_engine_is_stored(local: list[CliStatus]) -> None:
+    """Flag a saved engine as stored, and the automatic pick as not stored, also when both name one CLI.
+
+    Args:
+        local: The probe results, edited in place.
+    """
+    client = _client(SimpleNamespace(engine=_engine()))
+    assert client.get("/account/agent-engine").json() == {"engine": "codex", "stored": False}
+    client.put("/account/agent-engine", json={"engine": "codex"})
+    assert client.get("/account/agent-engine").json() == {"engine": "codex", "stored": True}
+    local[0] = _status("codex", logged_in=False)
+    assert client.get("/account/agent-engine").json() == {"engine": "codex", "stored": True}
+    app = FastAPI()
+    app.include_router(create_agent_engine_router(job_store=None))
+    schema = TestClient(app).get("/openapi.json").json()["components"]["schemas"]["AgentEnginePreference"]
+    assert schema["properties"]["stored"]["type"] == "boolean"
+    assert schema["required"] == ["engine", "stored"]
 
 
 @pytest.mark.usefixtures("local")

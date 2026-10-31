@@ -48,6 +48,9 @@ from ..storage.models import (
     DatasetModel,
     DatasetShareGrantModel,
     DatasetShareLinkModel,
+    DesktopLinkCodeModel,
+    DesktopLinkModel,
+    DesktopTokenModel,
     GepaCheckpointModel,
     GridPairResultModel,
     JobEmbeddingModel,
@@ -290,6 +293,22 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         else None
     )
 
+    desktop_link_rows = session.scalars(
+        select(DesktopLinkModel).where(DesktopLinkModel.username == username).order_by(DesktopLinkModel.created_at)
+    ).all()
+    desktop_links = [
+        {
+            "id": link.id,
+            "device_name": link.device_name,
+            "scopes": link.scopes.split(),
+            "created_at": _iso(link.created_at),
+            "last_used_at": _iso(link.last_used_at),
+            "revoked_at": _iso(link.revoked_at),
+            "absolute_expires_at": _iso(link.absolute_expires_at),
+        }
+        for link in desktop_link_rows
+    ]
+
     provider_keys = session.scalars(
         select(BillingProviderKeyModel).where(BillingProviderKeyModel.username == username)
     ).all()
@@ -404,6 +423,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "agent_conversations": conversations_out,
         "billing": billing,
         "api_token": api_token,
+        "desktop_links": desktop_links,
         "provider_keys": provider_keys_out,
         "passkeys": passkeys_out,
         "sign_in_methods": sign_in_methods,
@@ -509,11 +529,38 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(ConversationEmbeddingModel).where(ConversationEmbeddingModel.username == username))
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
-    _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
-    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
-    _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
+    # Passkey sign-in writes its passkey row, then the user row, so passkey
+    # rows go before the user lock. Email-code sign-in writes the user row,
+    # then deletes its code, so codes go after it. Either other order
+    # deadlocks with a concurrent sign-in (R782F-1, R782H-1).
     _run_delete(delete(WebAuthnCredentialModel).where(WebAuthnCredentialModel.user_email == username))
     _run_delete(delete(WebAuthnChallengeModel).where(WebAuthnChallengeModel.user_email == username))
+    # Authorize and the code exchange lock this row before they write, so
+    # they wait for the deletion and then find no account (R782E-1). An
+    # API-token create takes a share lock on it, so it either commits before
+    # the token sweep below or finds no account and adds no token (SKY-150).
+    session.execute(select(UserModel.email).where(UserModel.email == username).with_for_update())
+    # A first provider sign-in adds its identity row and writes the user row
+    # in one transaction, so identities go after the user lock. Before it, a
+    # sign-in could add an identity after this delete and outlive the
+    # account (R782I-1).
+    _run_delete(delete(UserIdentityModel).where(UserIdentityModel.username == username))
+    _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
+    _run_delete(delete(TwoFactorEmailCodeModel).where(TwoFactorEmailCodeModel.email == username))
+    # Codes, then links, then tokens. An exchange that got the user lock
+    # first commits before this runs, so the link delete sees its link
+    # (R782D-1). Links before tokens: a desktop refresh locks the link, then
+    # the token, and the opposite order deadlocks (R782C-1).
+    _run_delete(delete(DesktopLinkCodeModel).where(DesktopLinkCodeModel.username == username))
+    desktop_link_ids = list(
+        session.scalars(
+            delete(DesktopLinkModel).where(DesktopLinkModel.username == username).returning(DesktopLinkModel.id),
+            execution_options={"synchronize_session": False},
+        )
+    )
+    deleted += len(desktop_link_ids)
+    if desktop_link_ids:
+        _run_delete(delete(DesktopTokenModel).where(DesktopTokenModel.link_id.in_(desktop_link_ids)))
     _run_delete(delete(BillingProviderKeyModel).where(BillingProviderKeyModel.username == username))
     _run_delete(delete(BillingOpenRouterKeyModel).where(BillingOpenRouterKeyModel.username == username))
     _run_delete(delete(UserQuotaOverrideModel).where(UserQuotaOverrideModel.username == username))
