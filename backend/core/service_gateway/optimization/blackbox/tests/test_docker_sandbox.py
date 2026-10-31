@@ -206,6 +206,7 @@ def test_open_puts_an_allowlisted_box_behind_its_own_egress_proxy(fake_docker: t
     assert "bridge" not in box
     url = f"http://{proxy_name}:3128"
     assert {f"HTTPS_PROXY={url}", f"https_proxy={url}", f"HTTP_PROXY={url}"} <= set(_flag_values(box, "-e"))
+    assert {"NO_PROXY=localhost,127.0.0.1,::1", "no_proxy=localhost,127.0.0.1,::1"} <= set(_flag_values(box, "-e"))
     assert box[-2] == image
 
 
@@ -815,3 +816,19 @@ def test_live_setup_box_goes_offline_and_drops_its_proxy(live_setup_session: Doc
     assert result.exit_code != 0
     assert not _container_exists(egress.proxy)
     assert not _network_exists(egress.network)
+
+
+@pytest.mark.docker
+@_live
+def test_live_setup_box_reaches_loopback_after_going_offline(live_setup_session: DockerSandboxSession) -> None:
+    """The proxy variables stay in the box, so a scorer's loopback server must still answer after the switch."""
+    live_setup_session.disable_network()
+    script = (
+        "python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1; "
+        "python3 -c \"import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8765/').status)\""
+    )
+
+    result = live_setup_session.run(script, timeout_seconds=60)
+
+    assert result.ok, result.stderr
+    assert result.stdout.strip() == "200"

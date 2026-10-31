@@ -146,7 +146,10 @@ class _Egress:
         """
         url = f"http://{self.proxy}:{_EGRESS_PORT}"
         names = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "npm_config_https_proxy", "npm_config_proxy")
-        return dict.fromkeys(names, url)
+        # The variables outlive disable_network() and the same box later scores
+        # the repository, so loopback must never go through the removed proxy.
+        loopback = dict.fromkeys(("NO_PROXY", "no_proxy"), "localhost,127.0.0.1,::1")
+        return dict.fromkeys(names, url) | loopback
 
 
 def _remove_egress(docker_bin: str, egress: _Egress) -> None:
