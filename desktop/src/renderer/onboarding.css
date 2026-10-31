@@ -121,10 +121,6 @@ body[data-progress] .setup {
 }
 
 .setup {
-  flex: none;
-}
-
-.setup {
   flex: 1;
   min-height: 0;
   display: flex;
