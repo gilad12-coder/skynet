@@ -8,7 +8,9 @@ They are left out of the OpenAPI schema; their shapes are fixed by the RFCs.
 ``/oauth/authorize`` validates the request, then sends the browser to the
 hosted consent page ``/mcp/authorize``. The page calls ``/oauth/consent`` with
 the session JWT, like the Mac link consent page, and follows the returned
-redirect back to the client.
+redirect back to the client. ``/oauth/authorize`` shows an invalid request as
+an error and never redirects it: anyone can register a client, so its redirect
+is not trusted before the user sees consent (RFC 9700 section 4.11.2).
 """
 
 from __future__ import annotations
@@ -293,6 +295,7 @@ def create_mcp_oauth_router(*, job_store) -> APIRouter:
 
     @router.get("/oauth/authorize", include_in_schema=False)
     def authorize(
+        request: Request,
         client_id: str = "",
         redirect_uri: str = "",
         response_type: str = "",
@@ -304,10 +307,11 @@ def create_mcp_oauth_router(*, job_store) -> APIRouter:
     ) -> Any:
         """Check an authorization request and send the browser to the consent page.
 
-        A bad client or redirect gets a 400 here, because the redirect cannot be
-        trusted. Every other error goes back to the client's redirect.
+        Every error is a 400 here. Anyone can register a client or host a
+        metadata document, so an error redirect would make an open redirect.
 
         Args:
+            request: Incoming request, for the per-address limit.
             client_id: Registered client ID or metadata document URL.
             redirect_uri: Where the code goes.
             response_type: Must be ``code``.
@@ -318,31 +322,30 @@ def create_mcp_oauth_router(*, job_store) -> APIRouter:
             resource: RFC 8707 resource; must name this server when sent.
 
         Returns:
-            A 302 to the consent page or to the client, or a 400 JSON error.
+            A 302 to the consent page, or a 400 JSON error.
+
+        Raises:
+            DomainError: 404 ``mcp.not_configured``, or 429 ``rate_limit.exceeded``
+                over the per-address limit.
         """
-        issuer = issuer_url()
+        require_resource_url()
+        # Anonymous, and a metadata document client ID starts an outbound fetch.
+        _limit(f"mcp-authorize:{_client_address(request)}", limit=30, window_seconds=60)
         with Session(job_store.engine) as session:
             client = resolve_client(session, client_id)
         if client is None:
             return _oauth_error("invalid_client", description="Unknown client.")
         if not redirect_uri_matches(client.redirect_uris, redirect_uri):
             return _oauth_error("invalid_request", description="The redirect_uri is not registered for this client.")
-
-        def back(error: str) -> RedirectResponse:
-            """Send an error back to the client's redirect."""
-            return RedirectResponse(
-                _with_query(redirect_uri, {"error": error, "state": state, "iss": issuer}), status_code=302
-            )
-
         if response_type != "code":
-            return back("unsupported_response_type")
+            return _oauth_error("unsupported_response_type")
         if code_challenge_method != "S256" or not _CHALLENGE.match(code_challenge):
-            return back("invalid_request")
+            return _oauth_error("invalid_request", description="Send an S256 code_challenge.")
         scopes = canonical_scopes(scope)
         if scopes is None:
-            return back("invalid_scope")
+            return _oauth_error("invalid_scope")
         if not _check_resource(resource):
-            return back("invalid_target")
+            return _oauth_error("invalid_target")
         query = {
             "client_id": client_id,
             "redirect_uri": redirect_uri,

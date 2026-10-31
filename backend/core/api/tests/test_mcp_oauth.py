@@ -12,12 +12,21 @@ import base64
 import hashlib
 import json
 import secrets
+import socket
+import ssl
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import fakeredis
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -32,6 +41,7 @@ from ..account_data_service import delete_account
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..mcp_oauth import McpTokenError, resolve_principal
+from ..routers import mcp_oauth as mcp_oauth_router
 from ..routers.mcp_oauth import create_mcp_oauth_router
 
 RESOURCE = "https://mcp.example.test/mcp"
@@ -256,8 +266,8 @@ def test_authorize_redirects_to_consent_page(harness: Any) -> None:
         ({"resource": "https://evil.example.test/mcp"}, "invalid_target"),
     ],
 )
-def test_authorize_errors_go_back_to_the_client(harness: Any, override: dict[str, str], error: str) -> None:
-    """Return PKCE, scope and audience errors to the registered redirect, with iss."""
+def test_authorize_shows_errors_instead_of_redirecting(harness: Any, override: dict[str, str], error: str) -> None:
+    """Show PKCE, scope and audience errors here; never send the browser to an unseen client (RFC 9700 4.11.2)."""
     client, _store = harness
     client_id = _register(client)
     _verifier, challenge = _pkce()
@@ -271,12 +281,34 @@ def test_authorize_errors_go_back_to_the_client(harness: Any, override: dict[str
         **override,
     }
     resp = client.get("/oauth/authorize", params=params, follow_redirects=False)
-    assert resp.status_code == 302
-    location = resp.headers["location"]
-    assert location.startswith(REDIRECT)
-    query = parse_qs(urlsplit(location).query)
-    assert query["error"] == [error]
-    assert query["iss"] == [ISSUER]
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+    assert resp.json()["error"] == error
+
+
+def test_authorize_is_not_an_open_redirect(harness: Any) -> None:
+    """Refuse to bounce an anonymous caller to a redirect that anyone can register."""
+    client, _store = harness
+    client.app.dependency_overrides.clear()
+    client_id = _register(client, ["https://evil.example.test/landing"])
+    resp = client.get(
+        "/oauth/authorize",
+        params={"client_id": client_id, "redirect_uri": "https://evil.example.test/landing", "response_type": "x"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+
+
+def test_authorize_is_rate_limited_per_address(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Limit anonymous authorization requests, which can start metadata document fetches."""
+    client, _store = harness
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(mcp_oauth_router, "shared_redis_client", lambda: redis)
+    params = {"client_id": "mcpc_unknown", "redirect_uri": REDIRECT, "response_type": "code"}
+    statuses = [client.get("/oauth/authorize", params=params).status_code for _ in range(31)]
+    assert statuses[:30] == [400] * 30
+    assert statuses[30] == 429
 
 
 def test_authorize_refuses_an_unregistered_redirect(harness: Any) -> None:
@@ -699,3 +731,85 @@ def test_cimd_refuses_large_documents(harness: Any, monkeypatch: pytest.MonkeyPa
     _use_cimd(monkeypatch, _cimd_transport(_cimd_document(client_name="x" * 20_000)))
     resp = client.post("/oauth/consent/describe", json={"client_id": CIMD_URL, "redirect_uri": REDIRECT, "scope": ""})
     assert resp.status_code == 400
+
+
+def test_cimd_failure_is_cached(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remember a failed metadata document fetch for a short time, so a retry does not fetch again."""
+    client, _store = harness
+    transport = _cimd_transport(_cimd_document(), 404)
+    _use_cimd(monkeypatch, transport)
+    for _ in range(2):
+        resp = client.post(
+            "/oauth/consent/describe", json={"client_id": CIMD_URL, "redirect_uri": REDIRECT, "scope": ""}
+        )
+        assert resp.status_code == 400
+    assert transport.calls == [CIMD_URL]  # type: ignore[attr-defined]
+
+
+def _self_signed_tls_context(directory: Any) -> ssl.SSLContext:
+    """Return a server TLS context with a fresh self-signed localhost certificate.
+
+    Args:
+        directory: Temporary directory for the key and certificate files.
+
+    Returns:
+        The server context.
+    """
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(hours=1))
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = directory / "cert.pem", directory / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_path, key_path)
+    return context
+
+
+@pytest.mark.parametrize(
+    "head",
+    [b"HTTP/1.1 200 OK\r\n", b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n"],
+    ids=["headers", "body"],
+)
+def test_cimd_fetch_has_a_total_deadline(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, head: bytes) -> None:
+    """Stop a metadata document fetch from a server that sends one byte at a time."""
+    context = _self_signed_tls_context(tmp_path)
+    listener = socket.create_server(("127.0.0.1", 0))
+    done = threading.Event()
+
+    def drip() -> None:
+        """Answer one request, then send one byte every 0.2 s until the client goes."""
+        conn, _ = listener.accept()
+        with context.wrap_socket(conn, server_side=True) as tls:
+            tls.recv(4096)
+            tls.sendall(head)
+            while not done.wait(0.2):
+                try:
+                    tls.sendall(b"X")
+                except OSError:
+                    return
+
+    threading.Thread(target=drip, daemon=True).start()
+    monkeypatch.setattr(mcp_oauth, "_CIMD_DEADLINE_SECONDS", 1.0)
+    monkeypatch.setattr(mcp_oauth, "_resolve_host", lambda host, port: ["93.184.216.34"])
+    monkeypatch.setattr(mcp_oauth, "_http_client", lambda: httpx.Client(timeout=5.0, verify=False))
+    started = time.monotonic()
+    try:
+        result = mcp_oauth._fetch_metadata_document(f"https://localhost:{listener.getsockname()[1]}/client.json")
+    finally:
+        done.set()
+        listener.close()
+    assert result is None
+    assert time.monotonic() - started < 3.0

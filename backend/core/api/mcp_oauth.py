@@ -19,6 +19,7 @@ not a session JWT and has no PAT prefix. Only the remote MCP server reads it.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -63,9 +64,11 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 _CIMD_MAX_BYTES = 16 * 1024
 _CIMD_TIMEOUT_SECONDS = 5.0
+_CIMD_DEADLINE_SECONDS = 5.0
 _CIMD_CACHE_TTL_SECONDS = 300.0
+_CIMD_FAILURE_TTL_SECONDS = 60.0
 _CIMD_CACHE_MAX = 256
-_cimd_cache: dict[str, tuple[float, McpClient]] = {}
+_cimd_cache: dict[str, tuple[float, McpClient | None]] = {}
 _cimd_lock = threading.Lock()
 
 
@@ -260,11 +263,86 @@ def _http_client() -> httpx.Client:
     return httpx.Client(timeout=_CIMD_TIMEOUT_SECONDS, follow_redirects=False)
 
 
+def _shut_down(sock: socket.socket) -> None:
+    """Shut down ``sock`` in both directions, ignoring a socket that is already gone.
+
+    Args:
+        sock: The socket.
+    """
+    with contextlib.suppress(OSError):
+        sock.shutdown(socket.SHUT_RDWR)
+
+
+class _FetchDeadline:
+    """Shut down the sockets of one fetch when its total time runs out.
+
+    httpx timeouts apply to each read, so a server that sends one byte at a
+    time can hold a worker thread for hours. A shutdown wakes the waiting read,
+    and the fetch fails.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        """Prepare the timer; it starts on ``__enter__``.
+
+        Args:
+            seconds: Total time the fetch may take.
+        """
+        self._sockets: list[socket.socket] = []
+        self._expired = False
+        self._lock = threading.Lock()
+        self._timer = threading.Timer(seconds, self._expire)
+        self._timer.daemon = True
+
+    def __enter__(self) -> _FetchDeadline:
+        """Start the timer.
+
+        Returns:
+            This deadline.
+        """
+        self._timer.start()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Stop the timer.
+
+        Args:
+            *exc_info: Exception details; not used.
+        """
+        self._timer.cancel()
+
+    def trace(self, event: str, info: dict[str, Any]) -> None:
+        """Keep each socket that httpcore opens; used as the httpx ``trace`` extension.
+
+        The TLS socket replaces the TCP socket, so both events are kept.
+
+        Args:
+            event: httpcore trace event name.
+            info: Event details; ``return_value`` holds the network stream.
+        """
+        if event not in ("connection.connect_tcp.complete", "connection.start_tls.complete"):
+            return
+        sock = info["return_value"].get_extra_info("socket")
+        with self._lock:
+            self._sockets.append(sock)
+            expired = self._expired
+        if expired:
+            _shut_down(sock)
+
+    def _expire(self) -> None:
+        """Shut down every socket of the fetch."""
+        with self._lock:
+            self._expired = True
+            sockets = list(self._sockets)
+        for sock in sockets:
+            _shut_down(sock)
+
+
 def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
     """Fetch a client ID metadata document with SSRF checks.
 
     Only ``https`` URLs with a path are fetched. Every resolved address must be
-    public, redirects are not followed, and the body is capped at 16 KiB.
+    public, redirects are not followed, the body is capped at 16 KiB, and the
+    whole fetch must end in ``_CIMD_DEADLINE_SECONDS``.
 
     Args:
         url: The ``client_id`` URL.
@@ -295,7 +373,13 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
         return None
     body = bytearray()
     try:
-        with _http_client() as client, client.stream("GET", url, headers={"Accept": "application/json"}) as response:
+        with (
+            _FetchDeadline(_CIMD_DEADLINE_SECONDS) as deadline,
+            _http_client() as client,
+            client.stream(
+                "GET", url, headers={"Accept": "application/json"}, extensions={"trace": deadline.trace}
+            ) as response,
+        ):
             if response.status_code != 200:
                 return None
             for chunk in response.iter_bytes():
@@ -344,6 +428,9 @@ def _client_from_document(url: str, document: dict[str, Any]) -> McpClient | Non
 def _metadata_document_client(url: str) -> McpClient | None:
     """Return the client a metadata document describes, from a short cache.
 
+    A failure is cached for a shorter time, so a slow or broken URL is not
+    fetched again on every request.
+
     Args:
         url: The ``client_id`` URL.
 
@@ -357,11 +444,11 @@ def _metadata_document_client(url: str) -> McpClient | None:
             return cached[1]
     document = _fetch_metadata_document(url)
     client = _client_from_document(url, document) if document is not None else None
-    if client is not None:
-        with _cimd_lock:
-            if len(_cimd_cache) >= _CIMD_CACHE_MAX:
-                _cimd_cache.clear()
-            _cimd_cache[url] = (now + _CIMD_CACHE_TTL_SECONDS, client)
+    ttl = _CIMD_CACHE_TTL_SECONDS if client is not None else _CIMD_FAILURE_TTL_SECONDS
+    with _cimd_lock:
+        if len(_cimd_cache) >= _CIMD_CACHE_MAX:
+            _cimd_cache.clear()
+        _cimd_cache[url] = (time.monotonic() + ttl, client)
     return client
 
 
