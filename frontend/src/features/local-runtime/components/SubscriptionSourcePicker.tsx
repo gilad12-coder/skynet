@@ -69,7 +69,12 @@ export function hostCliValue(saved: string | null | undefined): string {
   return saved === null ? HOST_CLI_OFF : HOST_CLI_DEFAULT;
 }
 
-function stateText(state: CliState, version: string | null): string {
+/** The command that signs a CLI in, shown after "Signed out. To sign in, run". */
+export function cliLoginCommand(cli: CliProvider): string {
+  return LOGIN_COMMANDS[cli];
+}
+
+export function cliStateText(state: CliState, version: string | null): string {
   switch (state.kind) {
     case "ok":
       return version
@@ -120,7 +125,7 @@ export function SubscriptionSourcePicker({
   else if (!status) note = msg("subscription.state.loading");
   else if (!value) note = msg("subscription.pick_cli");
   else if (!chosen || !state) note = msg("subscription.state.missing");
-  else note = stateText(state, chosen.version);
+  else note = cliStateText(state, chosen.version);
   const warn = failed || (!!state && state.kind !== "ok") || (!!status && !!value && !chosen);
 
   return (

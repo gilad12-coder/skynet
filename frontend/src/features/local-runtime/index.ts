@@ -7,6 +7,18 @@ export {
   useLocalAgentMenuModels,
 } from "./hooks/use-local-status";
 export {
+  useAgentEngine,
+  loadAgentEngine,
+  peekAgentEngine,
+  peekAgentEngineStored,
+  saveAgentEngine,
+} from "./hooks/use-agent-engine";
+export {
+  agentEngineOptions,
+  isAgentEngine,
+  OPENROUTER_ENGINE,
+  type AgentEngine,
+  type AgentEngineOption,
   byokHintKey,
   runEstimateLabelKey,
   usageChargedKey,
@@ -35,6 +47,8 @@ export {
   SubscriptionSourcePicker,
   cliLabel,
   HostCliChoice,
+  cliLoginCommand,
+  cliStateText,
   hostCliChoices,
   hostCliValue,
 } from "./components/SubscriptionSourcePicker";

@@ -118,6 +118,7 @@ import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { isLocalMode } from "@/shared/lib/runtime-env";
+import { AgentEngineSetting } from "./AgentEngineSetting";
 import { AgentLocalRunSetting } from "./AgentLocalRunSetting";
 import { useLocalAgentMenuModels } from "@/features/local-runtime";
 import { agentSubscriptionFor } from "../lib/prefs";
@@ -248,6 +249,8 @@ function AgentTab() {
 
   return (
     <div className="space-y-1">
+      <AgentEngineSetting />
+
       <SettingsRow
         icon={Cpu}
         label={msg("settings.agent.default_model.label")}
