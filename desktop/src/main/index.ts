@@ -414,6 +414,11 @@ async function handleAppUrl(raw: string): Promise<void> {
   if (state.kind !== "sign_in" || state.signIn !== "waiting" || !hostedLink || finishingSignIn) {
     return log(`ignored a sign-in callback (state ${state.kind})`);
   }
+  // Only the browser tab this sign-in opened may end it; a stale or forged
+  // callback would otherwise leave "waiting" and drop the real one.
+  if (!signInUrl || callback.state !== new URL(signInUrl).searchParams.get("state")) {
+    return log("ignored a sign-in callback for another sign-in");
+  }
   if (callback.kind === "denied") {
     log("sign-in declined in the browser");
     return setState({ ...state, signIn: "declined", error: undefined });

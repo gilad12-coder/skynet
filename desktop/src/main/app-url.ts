@@ -6,8 +6,8 @@ export const LINK_CALLBACK = `${APP_SCHEME}://link/callback`;
 
 export type LinkCallback =
   | { kind: "code"; code: string; state: string }
-  | { kind: "denied" }
-  | { kind: "error"; error: string };
+  | { kind: "denied"; state: string | null }
+  | { kind: "error"; error: string; state: string | null };
 
 /**
  * Read a skynet:// URL from the browser. Only the exact link callback counts;
@@ -23,11 +23,11 @@ export function parseLinkCallback(raw: string): LinkCallback | null {
   }
   if (url.protocol !== `${APP_SCHEME}:` || url.host !== "link" || url.pathname !== "/callback" || url.username || url.password) return null;
   const error = url.searchParams.get("error");
-  if (error === "access_denied") return { kind: "denied" };
-  if (error) return { kind: "error", error };
-  const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  if (!code || !state) return { kind: "error", error: "invalid_request" };
+  if (error === "access_denied") return { kind: "denied", state };
+  if (error) return { kind: "error", error, state };
+  const code = url.searchParams.get("code");
+  if (!code || !state) return { kind: "error", error: "invalid_request", state };
   return { kind: "code", code, state };
 }
 

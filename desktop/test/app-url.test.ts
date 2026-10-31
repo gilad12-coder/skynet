@@ -9,13 +9,13 @@ describe("parseLinkCallback", () => {
   });
 
   it("reads a declined link", () => {
-    expect(parseLinkCallback("skynet://link/callback?error=access_denied&state=s")).toEqual({ kind: "denied" });
+    expect(parseLinkCallback("skynet://link/callback?error=access_denied&state=s")).toEqual({ kind: "denied", state: "s" });
   });
 
   it("reports other errors and a missing code or state", () => {
-    expect(parseLinkCallback("skynet://link/callback?error=server_error")).toEqual({ kind: "error", error: "server_error" });
-    expect(parseLinkCallback("skynet://link/callback?code=c")).toEqual({ kind: "error", error: "invalid_request" });
-    expect(parseLinkCallback("skynet://link/callback?state=s")).toEqual({ kind: "error", error: "invalid_request" });
+    expect(parseLinkCallback("skynet://link/callback?error=server_error")).toEqual({ kind: "error", error: "server_error", state: null });
+    expect(parseLinkCallback("skynet://link/callback?code=c")).toEqual({ kind: "error", error: "invalid_request", state: null });
+    expect(parseLinkCallback("skynet://link/callback?state=s")).toEqual({ kind: "error", error: "invalid_request", state: "s" });
   });
 
   it("ignores every other URL", () => {
