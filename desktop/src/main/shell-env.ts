@@ -82,10 +82,18 @@ export type ExecFileLike = (
 
 const defaultExec: ExecFileLike = (file, args, options) =>
   new Promise((resolve, reject) => {
-    execFile(file, args, { ...options, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" }, (err, stdout) => {
-      if (err) reject(err);
-      else resolve({ stdout });
-    });
+    // An interactive shell ignores SIGTERM, so the timeout must SIGKILL; and an
+    // rc file that reads stdin must get EOF, not wait on an open pipe forever.
+    const child = execFile(
+      file,
+      args,
+      { ...options, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024, encoding: "utf8" },
+      (err, stdout) => {
+        if (err) reject(err);
+        else resolve({ stdout });
+      },
+    );
+    child.stdin?.end();
   });
 
 /**

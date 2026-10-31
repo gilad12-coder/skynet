@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALLOWED_ENV_KEYS, ALLOWED_ENV_PREFIXES, buildChildEnv, fallbackPath, loginShellPath, parseEnvNul } from "../src/main/shell-env";
 
 describe("parseEnvNul", () => {
@@ -49,6 +50,35 @@ describe("loginShellPath", () => {
   it("falls back when the output has no PATH", async () => {
     const result = await loginShellPath({ home: "/Users/x", exec: async () => ({ stdout: "HOME=/Users/x\0" }) });
     expect(result.fromShell).toBe(false);
+  });
+
+  describe("with a real zsh", () => {
+    const zdotdir = process.env.ZDOTDIR;
+    beforeEach(() => delete process.env.ZDOTDIR);
+    afterEach(() => {
+      if (zdotdir !== undefined) process.env.ZDOTDIR = zdotdir;
+    });
+
+    function homeWithZshrc(zshrc: string): string {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "skynet-shell-env-"));
+      fs.writeFileSync(path.join(home, ".zshrc"), zshrc);
+      return home;
+    }
+
+    it("reads .zshrc, where nvm puts its PATH, even when it reads stdin", async () => {
+      const home = homeWithZshrc("read x\nexport PATH=/from/zshrc:$PATH\n");
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 5_000 });
+      expect(result.fromShell).toBe(true);
+      expect(result.path.split(":")).toContain("/from/zshrc");
+    });
+
+    it("falls back when .zshrc outlasts the timeout", async () => {
+      const home = homeWithZshrc("sleep 30\n");
+      const started = Date.now();
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });
+      expect(result.fromShell).toBe(false);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    });
   });
 });
 
