@@ -549,7 +549,6 @@ ipcMain.handle("onboarding:sign-in", () => {
   void signIn();
 });
 ipcMain.handle("onboarding:skip-sign-in", () => skipSignIn());
-ipcMain.handle("onboarding:reopen-sign-in", () => openSignInPage());
 ipcMain.handle("onboarding:open-docker", () => shell.openExternal("https://www.docker.com/products/docker-desktop/"));
 
 /**

@@ -28,8 +28,6 @@
   "sign_in.skip": "Use without signing in",
   "sign_in.unavailable": "Sign-in is not available in this build.",
   "sign_in.failed": "The sign-in did not finish.",
-  "sign_in.waiting": "Finish signing in in your browser. Skynet continues here when you are done.",
-  "sign_in.reopen": "Open the browser again",
   "sign_in.declined": "You did not link this Mac. Try again, or use Skynet without signing in.",
   "ready.title": "Skynet is ready",
   "error.title": "Skynet could not start",

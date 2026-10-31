@@ -45,7 +45,6 @@ interface Bridge {
   openDockerDownload(): Promise<void>;
   signIn(): Promise<void>;
   skipSignIn(): Promise<void>;
-  reopenSignIn(): Promise<void>;
   onState(listener: (state: State) => void): () => void;
 }
 
@@ -187,8 +186,7 @@ function panelBody(state: State): Node[] {
     case "sign_in": {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
       if (state.signIn === "waiting") {
-        nodes.push(el("p", { className: "lead", text: t("sign_in.waiting") }));
-        nodes.push(actions(button(t("sign_in.reopen"), "primary", () => void bridge.reopenSignIn()), skip));
+        // The browser shows the link page; the window shows only the timeline.
       } else if (state.signIn === "unavailable") {
         nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
         nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
@@ -210,7 +208,8 @@ function panelBody(state: State): Node[] {
 }
 
 const PROGRESS: Kind[] = ["checking", "starting", "ready"];
-const isProgress = (state: State) => PROGRESS.includes(state.kind);
+const isProgress = (state: State) =>
+  PROGRESS.includes(state.kind) || (state.kind === "sign_in" && state.signIn === "waiting");
 
 function render(state: State): void {
   document.body.dataset.state = state.kind;
