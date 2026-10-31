@@ -65,6 +65,18 @@ function render(
 }
 
 void describe("AgentEngineSelect", () => {
+  // First in the file: no test has loaded or saved an engine yet.
+  void it("an engine not loaded yet is not shown as automatic", () => {
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    try {
+      assert.equal(peekAgentEngineStored(), null);
+    } finally {
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+
   void it("hosted builds show OpenRouter with the hosted description and no warning", () => {
     const html = render(false, "openrouter", null);
     // The UI catalog does not load under jiti, so its strings render as their keys.

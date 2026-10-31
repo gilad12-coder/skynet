@@ -69,11 +69,12 @@ export function peekAgentEngine(): AgentEngine | null {
 
 /**
  * Whether the user saved the last loaded engine. False while it is the
- * backend's automatic pick, which an older backend reports by omission.
+ * backend's automatic pick, which an older backend reports by omission; null
+ * before any load succeeds, so the select does not flash "Automatic" on open.
  */
-export function peekAgentEngineStored(): boolean {
+export function peekAgentEngineStored(): boolean | null {
   if (!isLocalMode()) return true;
-  return cached?.stored ?? false;
+  return cached?.stored ?? null;
 }
 
 /**
@@ -91,7 +92,7 @@ export async function saveAgentEngine(engine: AgentEngine): Promise<AgentEngine 
 /** The caller's agent engine, re-rendering when any caller loads or saves it. */
 export function useAgentEngine(): {
   engine: AgentEngine | null;
-  stored: boolean;
+  stored: boolean | null;
   save: (engine: AgentEngine) => Promise<AgentEngine | null>;
 } {
   const [, rerender] = React.useReducer((n: number) => n + 1, 0);

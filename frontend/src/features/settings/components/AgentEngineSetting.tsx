@@ -262,7 +262,7 @@ export function AgentEngineSetting() {
       status={status}
       failed={failed}
       value={value}
-      automatic={local && !stored}
+      automatic={local && stored === false}
       saving={saving}
       onChange={onChange}
     />
