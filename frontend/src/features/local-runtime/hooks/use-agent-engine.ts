@@ -14,14 +14,14 @@ import {
 // when a CLI signs out or hits its cap. So each CLI status refresh marks the
 // engine stale (refreshAgentEngine). A failed load is not cached, so the next
 // caller tries again, and a failed reload keeps the last loaded engine.
-let cached: { engine: AgentEngine | null; stale: boolean } | null = null;
+let cached: { engine: AgentEngine | null; stored: boolean; stale: boolean } | null = null;
 let inflight: Promise<AgentEngine | null> | null = null;
 // Bumped by every save, so a load that started before a save cannot overwrite it.
 let saves = 0;
 const listeners = new Set<() => void>();
 
-function setCached(engine: AgentEngine | null) {
-  cached = { engine, stale: false };
+function setCached(engine: AgentEngine | null, stored: boolean) {
+  cached = { engine, stored, stale: false };
   listeners.forEach((notify) => notify());
 }
 
@@ -42,10 +42,10 @@ export function loadAgentEngine(): Promise<AgentEngine | null> {
   if (inflight) return inflight;
   const startSaves = saves;
   const promise = getAgentEngine()
-    .then(({ engine: raw }) => {
+    .then(({ engine: raw, stored }) => {
       if (startSaves !== saves && cached) return cached.engine;
       const engine = asEngine(raw);
-      setCached(engine);
+      setCached(engine, stored === true);
       return engine;
     })
     .catch(() => cached?.engine ?? null)
@@ -81,6 +81,16 @@ export function peekAgentEngine(): AgentEngine | null {
 }
 
 /**
+ * Whether the user saved the last loaded engine. False while it is the
+ * backend's automatic pick, which an older backend reports by omission; null
+ * before any load succeeds, so the select does not flash "Automatic" on open.
+ */
+export function peekAgentEngineStored(): boolean | null {
+  if (!isLocalMode()) return true;
+  return cached?.stored ?? null;
+}
+
+/**
  * Store the caller's engine (`PUT /account/agent-engine`). It throws an
  * `ApiError` with the backend's translated message when the backend refuses
  * the engine.
@@ -88,7 +98,7 @@ export function peekAgentEngine(): AgentEngine | null {
 export async function saveAgentEngine(engine: AgentEngine): Promise<AgentEngine | null> {
   const saved = asEngine((await updateAgentEngine(engine)).engine);
   saves += 1;
-  setCached(saved);
+  setCached(saved, true);
   return saved;
 }
 
@@ -100,6 +110,7 @@ export async function saveAgentEngine(engine: AgentEngine): Promise<AgentEngine 
 export function useAgentEngine(): {
   engine: AgentEngine | null;
   loaded: boolean;
+  stored: boolean | null;
   save: (engine: AgentEngine) => Promise<AgentEngine | null>;
 } {
   const [, rerender] = React.useReducer((n: number) => n + 1, 0);
@@ -126,5 +137,10 @@ export function useAgentEngine(): {
     };
   }, [tries]);
 
-  return { engine: peekAgentEngine(), loaded: agentEngineLoaded(), save: saveAgentEngine };
+  return {
+    engine: peekAgentEngine(),
+    loaded: agentEngineLoaded(),
+    stored: peekAgentEngineStored(),
+    save: saveAgentEngine,
+  };
 }

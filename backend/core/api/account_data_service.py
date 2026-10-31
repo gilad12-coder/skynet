@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from ..notifications.preferences import settings_from_row
 from ..storage.models import (
     AgentConversationModel,
+    AgentEnginePreferenceModel,
     AgentMessageModel,
     AgentStagedDatasetModel,
     ApiTokenModel,
@@ -166,6 +167,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
 
     registry_row = session.get(PackageRegistryPreferenceModel, username)
     privacy_row = session.get(ModelPrivacyPreferenceModel, username)
+    engine_row = session.get(AgentEnginePreferenceModel, username)
     notification_row = session.get(NotificationPreferenceModel, username)
     notification_settings = settings_from_row(notification_row)
     notification_preferences = {
@@ -431,6 +433,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "slack": slack,
         "notification_preferences": notification_preferences,
         "model_privacy": {"data_policy": privacy_row.data_policy if privacy_row is not None else "deny"},
+        "agent_engine": {"engine": engine_row.engine if engine_row is not None else None},
         "package_registry": {"index_url": registry_row.index_url if registry_row else "https://pypi.org/simple"},
     }
 
@@ -569,6 +572,7 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(SlackConnectionModel).where(SlackConnectionModel.username == username))
     _run_delete(delete(UserConnectorModel).where(UserConnectorModel.username == username))
     _run_delete(delete(ModelPrivacyPreferenceModel).where(ModelPrivacyPreferenceModel.username == username))
+    _run_delete(delete(AgentEnginePreferenceModel).where(AgentEnginePreferenceModel.username == username))
 
     _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))
 

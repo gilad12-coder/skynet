@@ -27,6 +27,24 @@ def resolve_email(username: str) -> str | None:
     return address
 
 
+# Domains no mail relay delivers to: ".local" is multicast DNS only (RFC 6762),
+# and the Mac app's default user is ``local@skynet.local``.
+_UNMAILABLE_SUFFIXES = (".local", ".localhost")
+
+
+def mailable(address: str) -> bool:
+    """Return whether a mail relay can deliver to ``address``.
+
+    Args:
+        address: A normalized address from :func:`resolve_email`.
+
+    Returns:
+        ``False`` for a ``.local`` or ``localhost`` domain.
+    """
+    domain = address.rsplit("@", 1)[-1]
+    return domain != "localhost" and not domain.endswith(_UNMAILABLE_SUFFIXES)
+
+
 def send_mail(to: str, subject: str, html_body: str, *, text_body: str | None = None) -> bool:
     """Send an HTML notification through the configured SMTP relay.
 

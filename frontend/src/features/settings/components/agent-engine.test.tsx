@@ -13,7 +13,7 @@ import type { AgentEngine, CliStatus, LocalStatus } from "@/features/local-runti
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { AgentEngineSelect, EngineChoice } = await import("./AgentEngineSetting");
+const { AgentEngineSelect, EngineChoice, engineToSave } = await import("./AgentEngineSetting");
 const { AgentRoleRow } = await import("./AgentLocalRunSetting");
 const { Select } = await import("@/shared/ui/primitives/select");
 const {
@@ -23,6 +23,7 @@ const {
   loadLocalStatus,
   localAgentModel,
   peekAgentEngine,
+  peekAgentEngineStored,
   saveAgentEngine,
 } = await import("@/features/local-runtime");
 
@@ -52,6 +53,7 @@ function render(
   value: AgentEngine,
   s: LocalStatus | null,
   keyVerified: boolean | null = false,
+  automatic = false,
 ): string {
   setClientLocale("en");
   return renderToStaticMarkup(
@@ -60,6 +62,7 @@ function render(
       status={s}
       value={value}
       keyVerified={keyVerified}
+      automatic={automatic}
       saving={false}
       onChange={() => {}}
     />,
@@ -68,6 +71,18 @@ function render(
 
 // Runs first: later tests load and save the engine into the shared module cache.
 void describe("agent engine load state (SKY-123 R11-1)", () => {
+  // First in the file: no test has loaded or saved an engine yet.
+  void it("an engine not loaded yet is not shown as automatic", () => {
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    try {
+      assert.equal(peekAgentEngineStored(), null);
+    } finally {
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+
   void it("a failed first load leaves the engine unknown, not a CLI engine; a later load settles it", async () => {
     const realFetch = globalThis.fetch;
     const realLocal = process.env.APP_LOCAL_MODE;
@@ -113,6 +128,21 @@ void describe("AgentEngineSelect", () => {
     assert.match(html, /subscription\.cli\.codex/);
     assert.match(html, /settings\.agent_engine\.description_local/);
     assert.doesNotMatch(html, /role="status"/);
+  });
+
+  void it("an engine the user never saved shows as Automatic, with the engine it runs on", () => {
+    const html = render(true, "claude", status([cli("claude"), cli("codex")]), false, true);
+    assert.match(html, /settings\.agent_engine\.automatic/);
+    assert.match(html, /data-engine-logo="claude"/);
+    assert.doesNotMatch(render(true, "claude", status([cli("claude")])), /agent_engine\.automatic/);
+  });
+
+  void it("choosing the shown engine saves it only while it is automatic", () => {
+    // Radix Select reports no change for the current value, so automatic uses its own value.
+    assert.equal(engineToSave("claude", "claude", true), "claude");
+    assert.equal(engineToSave("claude", "claude", false), null);
+    assert.equal(engineToSave("codex", "claude", false), "codex");
+    assert.equal(engineToSave("automatic", "claude", true), null);
   });
 
   void it("a signed-out local engine says why, with its sign-in command", () => {
@@ -270,6 +300,44 @@ void describe("loadAgentEngine", () => {
       );
       assert.equal(await refreshing, "codex");
       assert.equal(peekAgentEngine(), "codex");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;
+      else process.env.APP_LOCAL_MODE = realLocal;
+    }
+  });
+
+  void it("only an engine the backend says is stored counts as saved", async () => {
+    let body: Record<string, unknown> = { engine: "claude" };
+    const realFetch = globalThis.fetch;
+    const realLocal = process.env.APP_LOCAL_MODE;
+    process.env.APP_LOCAL_MODE = "1";
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const res = !String(url).endsWith("/account/agent-engine")
+        ? status([cli("claude"), cli("codex")])
+        : init?.method === "PUT"
+          ? { engine: "claude" }
+          : body;
+      return new Response(JSON.stringify(res), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      // An older backend sends no `stored` field: the engine is the automatic pick.
+      await loadLocalStatus(true);
+      assert.equal(await loadAgentEngine(), "claude");
+      assert.equal(peekAgentEngineStored(), false);
+      body = { engine: "claude", stored: false };
+      await loadLocalStatus(true);
+      await loadAgentEngine();
+      assert.equal(peekAgentEngineStored(), false);
+      assert.equal(await saveAgentEngine("claude"), "claude");
+      assert.equal(peekAgentEngineStored(), true);
+      body = { engine: "claude", stored: true };
+      await loadLocalStatus(true);
+      await loadAgentEngine();
+      assert.equal(peekAgentEngineStored(), true);
     } finally {
       globalThis.fetch = realFetch;
       if (realLocal === undefined) delete process.env.APP_LOCAL_MODE;

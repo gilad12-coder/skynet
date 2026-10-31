@@ -154,6 +154,21 @@ export function EngineChoice({
   );
 }
 
+// The select's value while the engine is the backend's automatic pick. Radix
+// Select reports no change for the current value, so with the engine itself
+// as the value, choosing the shown engine to keep it would never save it.
+const AUTOMATIC = "automatic";
+
+/** The engine to save when the user chooses `next`, or null to save nothing. */
+export function engineToSave(
+  next: string,
+  value: AgentEngine,
+  automatic: boolean,
+): AgentEngine | null {
+  if (!isAgentEngine(next)) return null;
+  return automatic || next !== value ? next : null;
+}
+
 /**
  * The "Agent engine" row. `value` is the stored engine; a disabled choice says
  * why, and a current engine that is no longer ready shows that reason under
@@ -168,6 +183,7 @@ export function AgentEngineSelect({
   value,
   keyVerified = false,
   keysFailed = false,
+  automatic = false,
   saving,
   onChange,
 }: {
@@ -177,6 +193,8 @@ export function AgentEngineSelect({
   value: AgentEngine;
   keyVerified?: boolean | null;
   keysFailed?: boolean;
+  /** True while `value` is the backend's automatic pick, not a saved choice. */
+  automatic?: boolean;
   saving: boolean;
   onChange: (engine: AgentEngine) => void;
 }) {
@@ -206,10 +224,11 @@ export function AgentEngineSelect({
             change for the value it holds, so with the key gone a choice of the
             shown CLI still saves it. The trigger names the shown engine. */}
         <Select
-          value={value}
+          value={automatic ? AUTOMATIC : value}
           disabled={saving}
           onValueChange={(next) => {
-            if (isAgentEngine(next) && next !== value) onChange(next);
+            const engine = engineToSave(next, value, automatic);
+            if (engine) onChange(engine);
           }}
         >
           <SelectTrigger
@@ -219,10 +238,20 @@ export function AgentEngineSelect({
           >
             <SelectValue>
               <EngineLogo engine={shown} />
-              {engineLabel(shown)}
+              {automatic
+                ? msg("settings.agent_engine.automatic", { engine: engineLabel(shown) })
+                : engineLabel(shown)}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
+            {automatic && (
+              <SelectItem value={AUTOMATIC}>
+                <span className="flex min-w-0 items-center gap-2">
+                  <EngineLogo engine={shown} />
+                  {msg("settings.agent_engine.automatic", { engine: engineLabel(shown) })}
+                </span>
+              </SelectItem>
+            )}
             {options.map((option) => (
               <SelectItem key={option.engine} value={option.engine} disabled={option.disabled}>
                 <EngineChoice
@@ -269,7 +298,7 @@ export function AgentEngineSelect({
 export function AgentEngineSetting() {
   const local = isLocalMode();
   const { status, failed } = useLocalStatus(local);
-  const { engine, save } = useAgentEngine();
+  const { engine, stored, save } = useAgentEngine();
   const keys = useByokKeys();
   const [saving, setSaving] = React.useState(false);
   let value: AgentEngine = OPENROUTER_ENGINE;
@@ -300,6 +329,7 @@ export function AgentEngineSetting() {
       value={value}
       keyVerified={keyVerified}
       keysFailed={keysFailed}
+      automatic={local && stored === false}
       saving={saving}
       onChange={onChange}
     />

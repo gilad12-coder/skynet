@@ -533,6 +533,48 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             session.commit()
         return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
 
+    @router.post("/auth/local/session", response_model=AccountInfo, include_in_schema=False)
+    def local_session(x_internal_auth: Annotated[str | None, Header()] = None) -> AccountInfo:
+        """Sign in the single local-mode user, creating it on first use.
+
+        Only the Mac app's own frontend holds the internal secret, and the
+        hosted-safety check keeps local mode off any network-reachable
+        deployment, so no password is needed. The row has an empty hash, so
+        ``/auth/login`` can never sign in to it.
+
+        Args:
+            x_internal_auth: Shared-secret header proving the caller is the
+                trusted frontend.
+
+        Returns:
+            The local account and whether this is its first sign-in.
+
+        Raises:
+            DomainError: 404 outside local mode; 403 on a bad internal secret.
+        """
+        if not settings.local_mode:
+            raise DomainError("local.not_available", status=404)
+        _require_internal_auth(x_internal_auth)
+        email = _normalise_email(settings.local_user_email)
+        now = datetime.now(UTC)
+        with Session(job_store.engine) as session:
+            row = session.get(UserModel, email)
+            if row is None:
+                row = UserModel(
+                    email=email,
+                    name=email,
+                    password_hash="",
+                    created_at=now,
+                    email_verified=True,
+                    intake_completed_at=new_account_intake_completed_at(),
+                )
+                session.add(row)
+            first_login = row.last_login_at is None
+            row.last_login_at = now
+            name = str(row.name)
+            session.commit()
+        return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
+
     @router.post(
         "/auth/oauth/link",
         response_model=AccountInfo,
@@ -565,7 +607,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         _require_internal_auth(x_internal_auth)
         username = _normalise_email(body.username)
         with Session(job_store.engine) as session:
-            row = session.get(UserModel, username)
+            row = session.get(UserModel, username, with_for_update=True)
             if row is None:
                 raise DomainError("accounts.not_found", status=404)
             existing = session.get(UserIdentityModel, (body.provider, body.provider_account_id))

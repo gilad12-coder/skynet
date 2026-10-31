@@ -215,7 +215,9 @@ def test_interview_returns_turn(monkeypatch) -> None:
     """The interview route forwards the transcript and returns the turn."""
     seen: dict = {}
 
-    def fake_turn(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    def fake_turn(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded arguments and return a canned turn."""
         seen.update(
             {
@@ -282,7 +284,9 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
     """The SSE interview route hands the chosen model to the engine."""
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update(
             {
@@ -311,7 +315,9 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     """Echoed turns with extra (even null) bookkeeping fields still validate."""
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded turns and finish immediately."""
         seen["turns"] = turns
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -347,7 +353,9 @@ def test_interview_stream_auto_runs_interview_default(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "interview_model_id", lambda: "openrouter/anthropic/claude-sonnet-5")
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update({"model": model})
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -423,6 +431,23 @@ def test_predict_excludes_requested_rows_from_examples(monkeypatch) -> None:
     resp = client.post(f"/tagging-sessions/{session_id}/assist/predict", json={"row_ids": ["999"]})
     assert resp.status_code == 404
     assert resp.json()["code"] == "tagger.assist.rows_not_found"
+
+
+def test_local_mode_refuses_managed_tagging_without_a_call(monkeypatch) -> None:
+    """In local mode, a session with no BYOK model gets 422 before any model call."""
+
+    def never_called(*args, **kwargs):
+        """Fail the test if a tagging model call is made."""
+        raise AssertionError("local mode called a managed tagging model")
+
+    monkeypatch.setattr(tagging, "predict_rows", never_called)
+    monkeypatch.setattr(settings, "local_mode", True)
+    client, _ = _client(_ALICE)
+    session_id = _create(client)
+    for path in ("predict", "predict/stream"):
+        resp = client.post(f"/tagging-sessions/{session_id}/assist/{path}", json={"row_ids": ["2"]})
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "models.managed_unavailable_local"
 
 
 def test_predict_stream_emits_rows_then_done(monkeypatch) -> None:

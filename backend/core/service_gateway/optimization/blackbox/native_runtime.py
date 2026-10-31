@@ -21,6 +21,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from .... import run_log
+from ....billing.host_agent import HOST_AGENT_TOKEN_KEY
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
@@ -204,7 +205,7 @@ def native_runtime_unavailable_reason(runtime: str, settings: Settings) -> str |
         An actionable unavailability reason, or ``None`` when checks pass.
     """
     if runtime != "vercel":
-        return "Production optimizations run in the managed Vercel sandbox."
+        return "Production optimizations run in the managed cloud sandbox."
     current = current_sandbox_runtime()
     if current is not None:
         return None
@@ -422,7 +423,7 @@ def _selected_runtime(options: NativeOptions) -> SandboxRuntime:
         return options.sandbox_runtime
     runtime = sandbox_runtime_from_settings(settings)
     if runtime is None:
-        raise ServiceError(sandbox_unavailable_reason(settings) or "Vercel runtime is unavailable.")
+        raise ServiceError(sandbox_unavailable_reason(settings) or "The cloud sandbox is unavailable.")
     return runtime
 
 
@@ -440,7 +441,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         UsagePendingError: When the readiness sandbox's usage still requires reconciliation.
     """
     if options.budget_route is None or options.runtime != "vercel":
-        raise ServiceError("Native readiness requires the protected Vercel execution authority.")
+        raise ServiceError("Native readiness requires the protected cloud sandbox.")
     source = _source_archive()
     runtime = _selected_runtime(options)
     lifetime = min(180.0, settings.vercel_sandbox_max_lifetime_seconds)
@@ -984,7 +985,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     """
     options = ctx.native_options
     if options is None or options.runtime != "vercel":
-        raise ServiceError("Native optimizers require the managed Vercel sandbox.")
+        raise ServiceError("Native optimizers require the managed cloud sandbox.")
     if engine_id not in NATIVE_ENGINES:
         raise ServiceError("Unsupported native optimizer.")
     own_venv = engine_id in _OWN_VENV_ENGINES
@@ -1032,6 +1033,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         ),
         GatewayConfig(url=options.gateway.url, api_key=harness_bridge.KEY_TOKEN),
         protected=options.budget_route is not None,
+        host_cli=proposer.host_cli,
+        host_agent_token=(options.budget_route or {}).get(HOST_AGENT_TOKEN_KEY),
     )
     input_price, output_price = model_token_costs(options.model)
     # Runs carry no wall-clock cap of their own: the budget and evaluation

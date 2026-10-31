@@ -7,7 +7,9 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..billing.host_agent import HOST_AGENT_PATH, HOST_AGENT_TOKEN_KEY
 from ..billing.model_dispatch import ModelHTTPResult
+from ..config import settings
 
 
 def model_forwarder(payload: dict[str, Any]) -> Any:
@@ -66,6 +68,9 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             register(route, model_paths)
             if isinstance(route, dict):
                 register(route.get("embedding"), frozenset({"/v1/embeddings", "/v1/_budget/state"}))
+                if route.get(HOST_AGENT_TOKEN_KEY):
+                    # Only a host proposer's own token reaches the host agent, and only there.
+                    register({**route, "token": route[HOST_AGENT_TOKEN_KEY]}, frozenset({HOST_AGENT_PATH}))
     register(payload.get("_skynet_target_route"), model_paths)
     register(payload.get("_skynet_tools_route"), frozenset({"/v1/_mcp", "/v1/_budget/state"}))
     register(payload.get("_skynet_packages_route"), frozenset({"/v1/_packages"}))
@@ -88,7 +93,11 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
         """
         if token not in routes or path not in routes[token][1]:
             raise ValueError("The guest requested an unknown metered model capability.")
-        with httpx.Client(trust_env=False, timeout=630 if path == "/v1/_evaluator" else 600) as client:
+        timeout = 630 if path == "/v1/_evaluator" else 600
+        if path == HOST_AGENT_PATH:
+            # One host CLI turn may run for its whole configured limit.
+            timeout = settings.host_agent_timeout_seconds + 30
+        with httpx.Client(trust_env=False, timeout=timeout) as client:
             response = client.request(
                 "GET" if path.endswith("/_budget/state") else "POST",
                 routes[token][0] + path,

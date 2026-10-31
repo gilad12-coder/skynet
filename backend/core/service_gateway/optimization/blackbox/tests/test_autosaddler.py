@@ -37,7 +37,7 @@ def test_autosaddler_forwards_text_and_named_parts_unchanged(
 def test_autosaddler_requires_a_native_runtime(tmp_path: Path) -> None:
     """Reject missing native execution instead of falling back to an in-process loop."""
     lm = MagicMock()
-    with pytest.raises(ServiceError, match="managed Vercel sandbox"):
+    with pytest.raises(ServiceError, match="managed cloud sandbox"):
         AutoSaddlerEngine().run(
             Task(seed_candidate="seed", cases=[{"id": "a"}, {"id": "b"}]),
             EvalServer(vowel_scorer, max_evals=5),

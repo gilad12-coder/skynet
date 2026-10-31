@@ -1,4 +1,5 @@
 import {
+  AppleLogo,
   CheckCircle,
   Envelope,
   GoogleChromeLogo,
@@ -13,7 +14,9 @@ import {
   XCircle,
   type Icon,
 } from "@/shared/ui/icons";
-import type { NotificationChannel, NotificationEventType } from "@/shared/lib/api";
+import type { NotificationEventType } from "@/shared/lib/api";
+
+import type { GridChannel } from "../lib/catalog";
 
 export const EVENT_ICONS: Record<NotificationEventType, Icon> = {
   needs_input: HandPalm,
@@ -26,9 +29,10 @@ export const EVENT_ICONS: Record<NotificationEventType, Icon> = {
   product_news: Megaphone,
 };
 
-export const CHANNEL_ICONS: Record<NotificationChannel, Icon> = {
+export const CHANNEL_ICONS: Record<GridChannel, Icon> = {
   inbox: Tray,
   email: Envelope,
   chrome: GoogleChromeLogo,
   slack: SlackLogo,
+  macos: AppleLogo,
 };

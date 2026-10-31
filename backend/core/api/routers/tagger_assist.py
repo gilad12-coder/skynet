@@ -49,10 +49,16 @@ from ...service_gateway import tagging
 from ...service_gateway.agents.kickoff import fits_kickoff_budget, oversized_kickoff
 from ...storage.models import TaggingSessionModel
 from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
+from ..agent_engine import engine_agent_model
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
-from ..model_router import effective_reasoning_effort, route_interview_model
+from ..model_router import (
+    effective_reasoning_effort,
+    metering_token_source,
+    route_interview_model,
+    route_local_byok_model,
+)
 from ..sharing_access import ShareRole
 from ..tagging_session_access import require_role
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
@@ -358,7 +364,9 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model = route_interview_model(req.model)
+        picked = engine_agent_model(job_store, user.username, req.model)
+        byok_config = route_local_byok_model(picked, job_store=job_store, username=user.username, interview=True)
+        model = byok_config.name if byok_config is not None else route_interview_model(picked)
         usage_sink: list = []
         try:
             turn = tagging.interview_turn(
@@ -370,13 +378,20 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 model=model,
                 reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                 usage_sink=usage_sink,
+                model_config=byok_config,
             )
         except Exception as exc:
             logger.exception("interview turn failed for session %s", session_id)
             raise DomainError("tagger.assist.llm_failed", status=502) from exc
         finally:
             # A failed turn's retries still consumed tokens; bill what ran.
-            meter_llm_run(job_store.engine, user.username, usage_sink, description="Tagging interview")
+            meter_llm_run(
+                job_store.engine,
+                user.username,
+                usage_sink,
+                description="Tagging interview",
+                token_source=metering_token_source(byok_config),
+            )
         return InterviewResponse(**turn)
 
     @router.post(
@@ -415,7 +430,11 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 sse_from_events(oversized_kickoff("data")), media_type="text/event-stream", headers=_SSE_HEADERS
             )
         await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
-        model = await asyncio.to_thread(route_interview_model, req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, user.username, req.model)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=user.username, interview=True
+        )
+        model = byok_config.name if byok_config is not None else await asyncio.to_thread(route_interview_model, picked)
         usage_sink: list = []
 
         async def source() -> Any:
@@ -430,6 +449,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                     model=model,
                     reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                     usage_sink=usage_sink,
+                    model_config=byok_config,
                 ):
                     yield event
             except Exception:
@@ -442,6 +462,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             username=user.username,
             description="Tagging interview",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         )
         return StreamingResponse(
             sse_from_events(metered),

@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from ...api.errors import DomainError
 from ...constants import OPTIMIZATION_TYPE_TAGGING, PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE
 from ...service_gateway import tagging
 from ...storage.models import Base, BillingCustomerModel, TaggingSessionModel
@@ -253,6 +254,25 @@ def test_run_autotag_job_failure_marks_session(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="provider down"):
         run_autotag_job(store, "job-1", _SESSION_ID, cancel_event=threading.Event(), heartbeat=lambda: None)
+    assert _autotag_state(store)["status"] == "failed"
+
+
+def test_run_autotag_job_local_mode_refuses_the_managed_default(monkeypatch) -> None:
+    """A local-mode job with no saved model fails before any managed call."""
+
+    def never_called(*args, **kwargs):
+        """Fail the test if the batch loop is ever reached."""
+        raise AssertionError("predict_rows must not run on a managed model in local mode")
+
+    monkeypatch.setattr(tagging, "predict_rows", never_called)
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    store = _MemStore()
+    _seed_session(store)
+    _seed_job(store, "job-1", status="running")
+
+    with pytest.raises(DomainError) as caught:
+        run_autotag_job(store, "job-1", _SESSION_ID, cancel_event=threading.Event(), heartbeat=lambda: None)
+    assert caught.value.code == "models.managed_unavailable_local"
     assert _autotag_state(store)["status"] == "failed"
 
 
