@@ -15,9 +15,10 @@ import type { CliStatus, LocalStatus } from "../lib/subscription-model";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
-const { SubscriptionSourcePicker, hostCliChoices, hostCliValue } = await import(
+const { HostCliChoice, SubscriptionSourcePicker, hostCliChoices, hostCliValue } = await import(
   "./SubscriptionSourcePicker"
 );
+const { MagicWand, Terminal } = await import("@/shared/ui/icons");
 const { HostAgentPermissionField } = await import("./HostAgentPermissionField");
 
 // The hints the local backend sends (backend/core/local/cli_probe.py).
@@ -119,6 +120,25 @@ void describe("proposer host CLI picker", () => {
     assert.equal(hostCliValue(undefined), "default");
     assert.equal(hostCliValue(null), "off");
     assert.equal(hostCliValue("claude"), "claude");
+  });
+
+  void it("shows the default-choice wand on the default, the terminal on each CLI, and none on off", () => {
+    const svg = (html: string) => html.match(/<svg[\s\S]*?<\/svg>/g) ?? [];
+    const wand = svg(renderToStaticMarkup(<MagicWand className="size-4" aria-hidden="true" />));
+    const terminal = svg(renderToStaticMarkup(<Terminal className="size-4" aria-hidden="true" />));
+    assert.notDeepEqual(wand, terminal);
+    const rows = Object.fromEntries(
+      hostCliChoices().map(({ value, label }) => [
+        value,
+        svg(renderToStaticMarkup(<HostCliChoice value={value} label={label} />)),
+      ]),
+    );
+    assert.deepEqual(rows, {
+      default: wand,
+      off: [],
+      codex: terminal,
+      claude: terminal,
+    });
   });
 
   void it("labels the default choice as the agent engine in every UI catalog", () => {

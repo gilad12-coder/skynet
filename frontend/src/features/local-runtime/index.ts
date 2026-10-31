@@ -34,6 +34,7 @@ export {
 export {
   SubscriptionSourcePicker,
   cliLabel,
+  HostCliChoice,
   hostCliChoices,
   hostCliValue,
 } from "./components/SubscriptionSourcePicker";
