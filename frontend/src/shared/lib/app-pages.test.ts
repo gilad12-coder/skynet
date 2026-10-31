@@ -13,7 +13,7 @@ const enCatalog = JSON.parse(
 ) as Record<string, string>;
 
 // Routes a signed-in user never navigates to by name.
-const NOT_SEARCHABLE = new Set(["/login"]);
+const NOT_SEARCHABLE = new Set(["/login", "/desktop/link"]);
 
 function staticRoutes(dir: string, segments: string[] = []): string[] {
   const routes: string[] = [];
