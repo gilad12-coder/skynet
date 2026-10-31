@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -10,8 +11,11 @@ from typing import Any
 
 import pytest
 
+from core.billing.budgets import BudgetBoundExceededError
+from core.billing.runtime import UsagePendingError
 from core.exceptions import ServiceError
 
+from .. import repo_workspace
 from ..repo_tree import unpack_tree, version_patch
 from ..repo_workspace import (
     _PROBE_OK,
@@ -229,6 +233,75 @@ def test_a_failed_network_cutoff_stops_the_workspace(tmp_path: Path, cutoff: str
     assert len(runtime.boxes) == 1
     assert runtime.boxes[0].closed
     assert all("version.patch" not in command for command, _, _ in runtime.boxes[0].commands)
+
+
+class _UnsettledBox(_Box):
+    """Close like a cloud box whose final usage cannot be settled."""
+
+    close_error: Exception = UsagePendingError("The cloud sandbox has not reported final network transfer.")
+
+    def close(self) -> None:
+        """Close the box, then report that its usage cannot be settled."""
+        super().close()
+        raise self.close_error
+
+
+class _UnsettledRuntime(_Runtime):
+    """Open boxes that cannot settle their usage when closed."""
+
+    def __init__(self, cutoff: str, close_error: Exception) -> None:
+        """Choose the network switch behavior and the settlement error.
+
+        Args:
+            cutoff: Passed to every box opened.
+            close_error: The error every box raises after it closes.
+        """
+        super().__init__(cutoff)
+        self._close_error = close_error
+
+    def open(self, spec: SandboxSpec) -> _Box:
+        """Open one recording box that fails to settle on close."""
+        box = _UnsettledBox(self._local.open(spec), online=not spec.network_disabled, cutoff=self._cutoff)
+        box.close_error = self._close_error
+        self.boxes.append(box)
+        return box
+
+
+@pytest.mark.parametrize(
+    "close_error",
+    [
+        UsagePendingError("The cloud sandbox has not reported final network transfer."),
+        BudgetBoundExceededError("The run budget bound is exceeded."),
+        RuntimeError("Vercel usage ledger write failed: database is locked."),
+    ],
+    ids=["usage-pending", "budget", "unexpected"],
+)
+@pytest.mark.parametrize(
+    ("cutoff", "setup", "expected"),
+    [("ok", "exit 3", RepoSetupError), ("refused", "true", NetworkCutoffError)],
+)
+def test_settlement_error_on_close_keeps_the_setup_error(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    cutoff: str,
+    setup: str,
+    expected: type[Exception],
+    close_error: Exception,
+) -> None:
+    """Show the setup or cutoff failure, and log only the close error type, when the failed box closes."""
+    archive = _archive(tmp_path, {"src/app.py": "x = 1\n"})
+    runtime = _UnsettledRuntime(cutoff, close_error)
+    space = _space(archive, runtime, setup=setup)
+
+    with caplog.at_level(logging.WARNING, logger=repo_workspace.__name__), pytest.raises(expected):
+        space.checkout(_patch(tmp_path / "one", archive, {"src/app.py": "x = 2\n"}))
+
+    assert runtime.boxes[0].closed
+    warnings = [r for r in caplog.records if r.name == repo_workspace.__name__ and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert type(close_error).__name__ in warnings[0].getMessage()
+    assert str(close_error) not in warnings[0].getMessage()
+    assert "vercel" not in warnings[0].getMessage().lower()
 
 
 def test_a_box_that_cannot_switch_its_network_off_is_refused(tmp_path: Path) -> None:
