@@ -1,7 +1,60 @@
-# AGENTS.md — Skynet Codebase Index
+# AGENTS.md — Skynet working rules
 
 > Full-stack optimization platform for prompts, programs, agents, workflows,
 > datasets, and other user-supplied artifacts.
+
+Every coding agent (Devin, Claude Code, Codex and others) reads this file
+first. The rules in this file always apply. Situational rules are in skills
+and reference files. Read the matching one when the task needs it:
+
+| When you | Read |
+| --- | --- |
+| Open, update, describe, review, record videos for, or merge a PR | `.agents/skills/skynet-pr-workflow/SKILL.md` |
+| Sign in to staging or a PR preview, or run acceptance checks there | `.agents/skills/skynet-test-accounts/SKILL.md` |
+| Work on or debug a PR preview environment | `docs/agents/pr-previews.md` |
+| Need the stack, layout, local URLs, persistence, auth or i18n facts | `docs/agents/architecture.md` |
+| Install a worktree or run maintenance | `docs/agents/install-and-maintain.md` |
+| Move code between files or add a router or feature slice | `docs/agents/refactoring.md` |
+
+Claude Code: the tracked `CLAUDE.md` imports this file. Claude Code does not
+list `.agents/skills/` itself, so open the skill file from the table above.
+
+## Core working rules (MANDATORY)
+
+- **Think first.** State your assumptions. If a request has more than one
+  meaning, name the meanings; do not pick one silently. If something is
+  unclear, stop and ask. If a simpler approach exists, say so.
+- **Simplicity.** Write the minimum code that solves the problem. No
+  features, abstractions, configuration or error handling that nobody asked
+  for. If 200 lines can be 50, rewrite them.
+- **Surgical changes.** Touch only what the task needs. Match the existing
+  style. Do not refactor or reformat code that is not broken. Remove only the
+  imports, variables and functions that your change made unused. Mention
+  unrelated dead code; do not delete it.
+- **Goal-driven.** Turn the task into checks you can verify ("write a test
+  that reproduces the bug, then make it pass"). For multi-step work, state a
+  short plan with a check for each step. Loop until the checks pass.
+- **Start fast.** Do not ask questions when the intent is clear. Do not read
+  unrelated files first.
+- **Generated code.** When code generates other code, edit the source, never
+  the output. Check that generated HTML/JS is valid.
+- **Hebrew and RTL.** Find-and-replace can corrupt Hebrew text. Check the
+  direction, alignment and position of RTL UI.
+
+## Writing rule (MANDATORY)
+
+Write every message, report, PR description, Linear comment and commit message
+in ASD-STE100 Simplified Technical English. The reader works with many agents
+and must understand the state quickly:
+
+- Short sentences: 20 words or fewer for instructions, 25 for descriptions.
+  One idea in each sentence.
+- Simple, common words. One word for one meaning, every time.
+- Active voice and simple tenses. No "has been" or "had done".
+- Instructions are direct commands ("Run the tests.").
+- Start each update with where the work is now, then what comes next.
+
+These rules do not change code, identifiers or quoted text.
 
 ## Feature gate: challenge every feature (MANDATORY)
 
@@ -31,19 +84,36 @@ Push hard once, then respect the user's decision and build it. Small fixes,
 bug fixes and refactors the user asked for skip the gate. For a full pass,
 run `/scope`.
 
+## Git, authorship and public-repo safety (MANDATORY)
+
+- **No AI attribution.** No `Co-Authored-By: <AI>` lines. Never name Claude,
+  Codex, Devin, OpenAI, Anthropic or any AI assistant as an author or
+  contributor in commits, tags, PR titles, PR bodies, issue comments,
+  release notes or changelogs. The author is the human who runs the session.
+- **Never push to `main` or `staging` directly.** Create one branch and one
+  worktree per issue from current `origin/staging`. Use a conventional
+  commit message. Push the branch and open a **draft** PR against `staging`.
+- The PR may touch only the files in its Linear issue's `## Files` list
+  (`.github/workflows/pr-files-scope.yml` checks this).
+- Never bypass branch protection or hooks. Never force-push over other work.
+- The repository is **public**. Never commit secrets, passwords, tokens,
+  emails, account data or videos. Secret names are fine. Keep
+  machine-specific rules in `CLAUDE.local.md` (gitignored).
+
 ## Merge policy (MANDATORY)
 
 Feature PRs target `staging`, never `main`. Each PR from this repository gets
 a PR environment (preview), a full copy of staging with an empty database, at
 `https://pr-<n>.staging.skynetml.com` (API `https://api-pr-<n>.staging.skynetml.com`).
 Run the acceptance checks and record the videos there, before the merge.
-`.github/workflows/preview.yml` builds it on every push and deletes it when the
-PR closes. At most 4 previews run at once; a preview with no push for 48 hours
-is deleted. PRs from forks or Dependabot, and PRs whose files cannot change
-the running app (docs, `droid-wiki/`, `tools/reel-skynet/`, tests), get no
-preview; add the label `preview` to ask for one.
+Details: `docs/agents/pr-previews.md`.
 
-**Backend PRs** (no file under `frontend/`) merge themselves into `staging`
+Only the orchestrator merges, in the daily merge window. Implementation and
+review agents never merge, and never post `Approved for merge` or
+`Changes requested:` comments. The full gate, review and Linear flow is in
+the `skynet-pr-workflow` skill.
+
+**Backend PRs** (no file under `frontend/`) merge into `staging`
 only when **all** of these gates pass:
 
 1. Agent code review is clean.
@@ -57,7 +127,9 @@ only when **all** of these gates pass:
 user. Attach a proof card: one line naming the decision and the Linear issue,
 a 15–30s video of a browser agent walking the acceptance criteria in the PR
 environment, the review verdict, and the diff size. Merge only after the user
-approves that specific PR in chat or on GitHub.
+approves that specific PR in chat or on GitHub (or with `Approved for merge`
+on the Linear issue). A frontend PR with no meaningful visible change can use
+the backend path; see the skill.
 
 **`staging` → `main`** needs the user's approval every time. Each morning,
 send one card: the backend changes that landed, staging smoke status, and a
@@ -80,45 +152,68 @@ bugs before you push. Follow this order for every PR:
 If the review gate or the acceptance checks find a bug, fix all findings
 locally, check them again, and then push them together in one push.
 
-### PR preview environments: keep them able to run an optimization
+## Commenting, docstring & import style (MANDATORY — apply to all backend Python, every session)
 
-The merger has to sign up and finish a real run in each `*-pr-<n>`
-environment. Five things broke that once; keep them true:
+These rules are durable. They apply to every backend Python file (under `backend/`, excluding `.venv/`, `__pycache__/`, and `alembic/versions/`) and to every future change. New code follows them; existing code is brought into compliance whenever it is touched.
 
-- **The proxy knows the backend's key.** Previews share the `staging`
-  `litellm`. If its database loses the virtual key in `LITELLM_PROXY_API_KEY`,
-  every managed call (the assistant included) fails with
-  `Invalid proxy server token`. `deploy/litellm/start.py` registers
-  `LITELLM_SEED_KEY` at boot; on `staging` it must equal the backend's
-  `LITELLM_PROXY_API_KEY`.
-- **Preview accounts verify email and get credit.** In a `*-pr-<n>`
-  environment, sign-up sends a real confirmation code, exactly like `staging`
-  (the test-account helper reads it from the owned inbox), and a new account gets
-  `PREVIEW_GRANT_CENTS` (from the `staging` app secrets, 1000 = $10)
-  that can fund a budget. Production and `staging` keep a 0 grant.
-- **Preview accounts skip the setup intake.** In a `*-pr-<n>` environment a
-  new account (password or OAuth sign-up) starts with the intake marked done
-  and default answers, so it lands straight in the app
-  (`new_account_intake_completed_at` in `core/api/routers/experience.py`).
-  To check a PR that changes the intake, open Settings → Account → Setup
-  questions → "Run the setup again". Production and `staging` keep the intake.
-- **The setup check routes the same models as the run.** An Auto run's
-  payload names its models under `models.*`. `run_preflight` must alias them
-  (`core/worker/unified_aliases.py`) before `ModelGateway.protect_payload`,
-  exactly like the worker does. Otherwise the metric model gets no metered
-  route, and the run fails with "Scorer models need a gateway the sandboxes
-  can reach". Any new payload shape must go through the same aliasing in both
-  places.
-- **A sandbox command's kill timer stays at or under five hours.** A Vercel
-  box may live 24 hours, but a process kill timer above 18,000,000 ms is
-  rejected with `timeout should be <= 18000000`, and every run fails starting
-  its model proxy. `Sandbox.run` caps `kill_after` at
-  `_VERCEL_KILL_TIMER_CEILING_SECONDS`; never cap it at the box lifetime.
-- **Diagnose before labeling `needs-human`.** Check each service's latest
-  deployment and its events (`aws ecs describe-services --cluster
-  skynet-<env> --services backend worker frontend litellm`; a preview's
-  services are `pr-<n>-backend`, `pr-<n>-worker` and `pr-<n>-frontend` in
-  `skynet-staging`, with logs in `/ecs/skynet-staging/preview`).
+- **Google-style docstrings on every function and method (public and private).** Format: a one-line imperative summary, then `Args:`, `Returns:`, and (only when the failure mode is non-obvious) `Raises:`. Skip the `Args:` / `Returns:` blocks only when **both** are trivially typed and the summary already covers them (e.g. tests that take no args and assert; private one-liners). Module docstrings are required at the top of every file.
+- **Imports only at the top of the file. No exceptions.** No `import` inside a function, method, conditional block, or `try/except` body anywhere except module top. Optional deps go in a module-level `try/except ImportError` that aliases the symbol to ``None``; tests that need fresh re-imports use ``importlib.import_module`` (a function call, not an ``import`` statement); circular imports are resolved structurally (slim `__init__.py`, leaf-module splits, `TYPE_CHECKING` blocks) — never with inline imports.
+- **No WHAT-comments.** Don't restate what code does, label sections, or echo identifiers ("# loop over users", "# call API"). If a competent reader can understand the line by reading the line, the comment is dead weight — delete it.
+- **WHY-comments only.** Comments are reserved for non-obvious intent: a hidden constraint, a workaround for a specific bug, surprising behavior, a subtle invariant, a non-trivial design decision, or a tracking ticket. If deleting the comment wouldn't confuse a future reader, the comment shouldn't exist.
+- **Pydantic class docstrings are part of the OpenAPI contract.** Pydantic
+  emits a `BaseModel` class docstring into `openapi.json` as
+  `components.schemas.<Name>.description`. Never add or remove one,
+  including when you move a class into another router. No test guards
+  this, so compare the schema before and after by hand. To document a
+  class for readers, put a comment above it. Details:
+  `docs/agents/refactoring.md`.
+
+## Verification (MANDATORY before every push)
+
+```bash
+# Backend: tests for the touched areas, and lint.
+cd backend && .venv/bin/python -m pytest <touched areas> -q   # or: uv run --extra dev pytest <paths> -q
+ruff check <touched files>                                     # full gate: just lint-backend
+cd backend && uv run --extra dev pytest core/ tests/unit/ -v   # credential-free core/unit suite
+
+# Frontend CI gates, and ESLint on touched files.
+cd frontend && npm run typecheck && npm run lint && npm run test:unit
+cd frontend && npm run build                                   # production build
+
+# i18n: catalog drift.
+just check-i18n
+```
+
+- New UI strings go into the source catalogs: `i18n/locales/ui/he.json` (base)
+  **and** `en.json`. Then run `python3 scripts/generate_i18n.py`.
+- `backend/tests/test_llm_integration.py` needs a running server and paid
+  model credentials. It is not part of the credential-free PR gate.
+- Billing changes must also pass `core/billing/tests/test_budgets_postgres.py`
+  against a real PostgreSQL URL in `SKYNET_BUDGET_TEST_DB_URL`.
+- Backend dependency or runtime changes must keep `uv.lock` and the pip
+  requirements files aligned, and pass the stable and preview Docker builds.
+- Lint, typecheck and build are not behavior tests. Say which is which.
+- Local frontend work: do not drive a browser unless the task asks for it.
+  Tell the user what to check at `localhost:3000`. PR acceptance checks and
+  videos still follow the `skynet-pr-workflow` skill.
+
+Local dev servers: backend `:8000` (`cd backend && .venv/bin/python main.py`
+or `just backend`), frontend `:3000` (`cd frontend && npm run dev` or
+`just frontend`), or both with `just dev`. The backend needs Postgres on
+`:5432` and, for LLM features, a LiteLLM proxy on `:4000` (see
+`deploy/litellm/` and `backend/.env.example`). More: `docs/agents/architecture.md`.
+
+## Test accounts and environments (MANDATORY)
+
+- Run acceptance checks on AWS staging (`https://staging.skynetml.com`, API
+  `https://api-staging.skynetml.com`) or the PR's preview. Never test against
+  production. Railway is deleted; never use it.
+- Use only the test account that you were given. Never sign up on shared
+  staging, and never sign up on a preview yourself. Never borrow a personal
+  session. Never print or commit passwords, tokens, cookies or email codes.
+- Never add funds, grant credits, change balances or change live billing
+  configuration. Never deploy production.
+- How to sign in and check the served commit: the `skynet-test-accounts` skill.
 
 ## Product and runtime model
 
@@ -137,255 +232,3 @@ environment. Five things broke that once; keep them true:
   work. Managed model usage, Skynet fees, and sandbox usage are metered. For
   BYOK model routes, the Skynet budget covers the platform fee and sandbox
   usage; the model provider charges the user's key directly.
-
-## Tech stack
-
-- **Backend**: Python 3.11+, FastAPI, Pydantic, SQLAlchemy, Alembic, DSPy,
-  pinned GEPA, LiteLLM/OpenRouter, Vercel Sandbox, PostgreSQL/pgvector, optional
-  Redis, and Stripe.
-- **Frontend**: Node 22, Next.js 16 App Router, React 19, TypeScript,
-  Tailwind CSS 4, Radix/shadcn primitives, Framer Motion, and NextAuth.
-- **Dependency management**: `uv` is authoritative for backend development and
-  CI; compiled `requirements*.txt` files support the pip/Docker paths. The
-  frontend uses npm and a committed lockfile.
-- **Deployment**: AWS ECS Fargate backend/worker/frontend containers and a
-  LiteLLM gateway (`infra/terraform`), and a pinned Vercel Container Registry
-  sandbox image.
-
-## Project layout
-
-```text
-├── backend/
-│   ├── main.py                  FastAPI process entry point
-│   ├── worker_main.py           Background worker entry point
-│   ├── manage.py                Administrative CLI
-│   ├── pyproject.toml           Python package, dependencies, Ruff/Pytest config
-│   ├── uv.lock                  Authoritative resolved dependency graph
-│   ├── requirements*.txt        Reproducible pip/Docker dependency paths
-│   ├── Dockerfile               API/worker and native optimizer runtime image
-│   ├── SANDBOX_RUNTIME.md       Pinned sandbox image build/publish contract
-│   ├── alembic/                 PostgreSQL schema migrations
-│   ├── sandbox-runtime/         Node harness runtime and lockfile
-│   ├── load_tests/              Locust/SLO release-gate tooling
-│   ├── core/
-│   │   ├── api/
-│   │   │   ├── app.py           App factory, middleware, and router wiring
-│   │   │   ├── auth.py          Backend token verification
-│   │   │   ├── rate_limit.py    Redis-backed/fail-open request limiting
-│   │   │   ├── static/scalar/   Bundled offline API-reference assets
-│   │   │   └── routers/         Account, billing, dataset, job, sandbox,
-│   │   │                        sharing, telemetry, wizard, and workflow APIs
-│   │   ├── billing/             Shared budgets, atomic reservations,
-│   │   │                        metering, BYOK vault/bridge, model gateway,
-│   │   │                        MCP broker, and Vercel reconciliation
-│   │   ├── models/              Pydantic API/domain models
-│   │   ├── notifications/       Preferences and webhook/chat notifications
-│   │   ├── registry/            DSPy module and optimizer registration
-│   │   ├── service_gateway/
-│   │   │   ├── agents/          Code/generalist agent services
-│   │   │   ├── datasets/        Dataset planning and profiling
-│   │   │   ├── embedding_pipeline/ Conversation embedding and summarization
-│   │   │   └── optimization/    DSPy workflow, metrics, artifacts, and limits
-│   │   │       ├── blackbox/    Pinned Optimize Anything engines, harnesses,
-│   │   │       │                scorers, sandbox broker, and remote evaluator
-│   │   │       └── training_ground/ Benchmark/training adapters
-│   │   ├── storage/             ORM, migrations, job/checkpoint/dataset stores
-│   │   ├── telemetry/           Server-side telemetry events
-│   │   └── worker/              Job orchestration, preflight, recovery,
-│   │                            scoped relay, and Vercel DSPy dispatch
-│   ├── tests/                   Integration, load, and release-gate tests
-│   └── usage_guide/             Notebooks and API-client examples
-│
-├── frontend/
-│   ├── package.json             Dev/build/typecheck/lint/unit commands
-│   ├── next.config.ts           Standalone build, headers, image/bundle config
-│   ├── public/                  Static assets and local font subsets
-│   ├── scripts/                 Frontend-specific validation utilities
-│   └── src/
-│       ├── app/                 Thin App Router entry points and layouts
-│       │   ├── (dashboard)/      Authenticated dashboard home
-│       │   ├── api/              NextAuth and account-security proxy routes
-│       │   ├── datasets/         Dataset list/detail/share routes
-│       │   ├── optimizations/    Job detail route
-│       │   ├── share/            Shared optimization route
-│       │   ├── submit/           Optimization submission route
-│       │   ├── tagger/           Tagging session and share routes
-│       │   ├── explore/          Public dataset discovery
-│       │   ├── storage/          Account storage management
-│       │   ├── login/            Sign-in and account recovery UI
-│       │   └── privacy/ terms/   Public legal pages
-│       ├── features/             Product feature slices
-│       │   ├── submit/           DSPy/Anything wizard, drafts, substeps,
-│       │   │                    preflight, budget UI, and workflow canvas
-│       │   ├── optimizations/    Results, logs, compare, export, and serve UI
-│       │   ├── dashboard/        Job list, analytics, and bulk actions
-│       │   ├── datasets/         Dataset library and editor
-│       │   ├── tagger/           Assisted tagging sessions
-│       │   ├── storage/          Storage usage and quota controls
-│       │   ├── explore/          Dataset discovery experience
-│       │   ├── auth/ billing/ settings/
-│       │   ├── agent-panel/ trajectory/
-│       │   └── sidebar/ tutorial/
-│       ├── shared/               Charts, hooks, layout, providers, types,
-│       │                        API/auth/i18n utilities, and UI primitives
-│       └── types/                App-wide ambient/shared TypeScript declarations
-│
-├── deploy/
-│   └── litellm/                 Gateway image, config, callbacks, and local stack
-├── docs/                        Auth, Stripe, and upstream-optimizer guides
-├── i18n/                        Locale source catalogs, schema, and glossary
-├── scripts/                     i18n generation, sample data,
-│   └── agent/                   install (`just setup`) and health-report scripts
-├── data/                        Repository datasets/fixtures
-├── submission-wizard-implementation-spec.md
-├── Justfile                     Canonical local task shortcuts
-└── README.md                    Product setup and API usage
-```
-
-Backend tests are primarily co-located under `core/**/tests/`; do not assume
-that `backend/tests/unit/` is the complete unit-test suite. FastAPI route files
-under `core/api/routers/optimizations/` are split further by lifecycle concern.
-
-## Key local URLs
-
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API reference**: http://localhost:8000/reference
-- **OpenAPI document**: http://localhost:8000/openapi.json
-
-## Install and maintain (agent-ready)
-
-One command installs a fresh clone or worktree. A second command keeps the
-codebase healthy. Each one is a script that writes a log, plus an agent
-prompt that reads the log.
-
-| Recipe | What it does |
-| --- | --- |
-| `just setup` | Deterministic install: `uv sync`, `npm ci`, env files (never overwritten), Postgres/LiteLLM checks, migrations, i18n check. Safe to run again. |
-| `just install-agent` | Runs the Setup hook (`claude --init-only`), then `/install`: the agent checks the log, fixes known issues, runs tests and reports. |
-| `just install-hil` | Same as `install-agent`, but the agent asks the human before each choice. |
-| `just maintain` | Report only: npm audit, pip-audit, Dependabot alerts, outdated deps, Alembic heads, merged worktrees, Docker, untracked files. |
-| `just maintain-agent` | Runs `just maintain`, then `/maintain`: the agent explains the findings and proposes fixes as a PR. |
-
-- Scripts: `scripts/agent/init.sh`, `scripts/agent/maintain.sh`.
-- Logs: `.claude/logs/init-latest.log`, `.claude/logs/maintain-latest.log`
-  (gitignored). Logs never hold secret values.
-- Prompts: `.claude/commands/install.md`, `install-hil.md`, `maintain.md`.
-  Each has a **Common issues** list. Add a Problem / Solution pair when you
-  solve a new failure.
-- Claude Code: `.claude/settings.json` wires the scripts to the `Setup` hook
-  (`init` matcher: `claude --init-only` or `claude -p --init`;
-  `maintenance` matcher: `claude -p --maintenance`).
-- Codex, Factory, Pi and other harnesses: run `just setup` or
-  `just maintain`, then follow the matching prompt file.
-
-## Running locally
-
-```bash
-# Install backend development dependencies.
-just install
-
-# Run both processes, or use `just backend` and `just frontend` separately.
-just dev
-```
-
-Direct equivalents are `cd backend && uv run python main.py` and
-`cd frontend && npm run dev`. Turbopack requires `frontend/node_modules` to be
-a real directory inside the current worktree. Do not symlink that directory to
-a sibling checkout; run `npm ci` in the worktree instead.
-
-## Validation
-
-```bash
-# Backend lint and credential-free core/unit tests.
-just lint-backend
-cd backend && uv run --extra dev pytest core/ tests/unit/ -v
-
-# Frontend CI gates.
-cd frontend && npm run typecheck && npm run lint && npm run test:unit
-
-# Production frontend build and generated-catalog drift.
-cd frontend && npm run build
-just check-i18n
-```
-
-`backend/tests/test_llm_integration.py` requires a running server and paid model
-credentials; it is not part of the credential-free PR gate. Billing changes
-must also pass `core/billing/tests/test_budgets_postgres.py` against a real
-PostgreSQL URL in `SKYNET_BUDGET_TEST_DB_URL`. Backend dependency/runtime
-changes must keep `uv.lock` and the pip requirements files aligned and pass both
-stable and preview Docker build paths.
-
-## Persistence and infrastructure
-
-- PostgreSQL is authoritative for jobs, accounts, datasets, shares, billing,
-  budgets, checkpoints, attempts, and usage. Configure it with `REMOTE_DB_URL`.
-- Alembic owns schema changes under `backend/alembic/versions/`.
-- Redis is optional and configured with `REDIS_URL`; distributed throttles fail
-  open when it is absent.
-- User workloads must not receive provider or MCP secrets. The control plane
-  brokers only the selected credentials/tools and meters protected work before
-  dispatch.
-
-## Authentication
-
-- There is no auth-off mode. Hosted deployments support backend-verified local
-  accounts plus optional Google and GitHub OAuth.
-- The frontend and backend share `BACKEND_AUTH_SECRET`; backend identity is the
-  user's email across local and OAuth providers.
-- See both `.env.example` files before changing auth.
-
-## Internationalization and direction
-
-- English is the default locale. Hebrew, Arabic, and Persian render RTL; the
-  remaining supported locales render LTR.
-- `i18n/locales/*.json` and `i18n/schema.json` are the source catalogs. Run
-  `python3 scripts/generate_i18n.py` after catalog changes and
-  `just check-i18n` before committing.
-- Preserve direction, alignment, Unicode text, and locale-aware formatting in
-  every shared component; do not hard-code Hebrew-only layout assumptions.
-
-## Commenting, docstring & import style (MANDATORY — apply to all backend Python, every session)
-
-These rules are durable. They apply to every backend Python file (under `backend/`, excluding `.venv/`, `__pycache__/`, and `alembic/versions/`) and to every future change. New code follows them; existing code is brought into compliance whenever it is touched.
-
-- **Google-style docstrings on every function and method (public and private).** Format: a one-line imperative summary, then `Args:`, `Returns:`, and (only when the failure mode is non-obvious) `Raises:`. Skip the `Args:` / `Returns:` blocks only when **both** are trivially typed and the summary already covers them (e.g. tests that take no args and assert; private one-liners). Module docstrings are required at the top of every file.
-- **Imports only at the top of the file. No exceptions.** No `import` inside a function, method, or conditional block anywhere except module top. Optional deps go in a module-level `try/except ImportError` that aliases the symbol to ``None``; tests that need fresh re-imports use ``importlib.import_module`` (a function call, not an ``import`` statement); circular imports are resolved structurally (slim `__init__.py`, leaf-module splits, `TYPE_CHECKING` blocks) — never with inline imports.
-- **No WHAT-comments.** Don't restate what code does, label sections, or echo identifiers ("# loop over users", "# call API"). If a competent reader can understand the line by reading the line, the comment is dead weight — delete it.
-- **WHY-comments only.** Comments are reserved for non-obvious intent: a hidden constraint, a workaround for a specific bug, surprising behavior, a subtle invariant, a non-trivial design decision, or a tracking ticket. If deleting the comment wouldn't confuse a future reader, the comment shouldn't exist.
-- **Pydantic class docstrings are part of the OpenAPI contract** — see "Backend — Pydantic docstring OpenAPI drift" below before adding/removing them on `BaseModel` subclasses.
-
-## Refactoring rules
-
-### Backend — Pydantic docstring OpenAPI drift
-
-When extracting a FastAPI route from `app.py` into a domain router, any
-inline `class FooRequest(BaseModel)` you move must **keep or drop docstrings
-exactly as in the source**. Pydantic emits the class docstring into the
-OpenAPI schema as `components.schemas.FooRequest.description` — add one
-where there wasn't one (or remove one that existed) and the published
-`openapi.json` changes. No test guards this any more (the old schema-hash
-regression test was removed), so compare the schema before and after by hand,
-e.g. with `.claude/skills/verify-skynet-api/scripts/openapi-hash.sh`. If you
-need to document the class for readers, use a comment above the class, not a
-docstring.
-
-### Backend — domain router factory pattern
-
-Extracted routers live under `backend/core/api/routers/`. Each exposes a
-`create_<domain>_router(*, deps...) -> APIRouter` factory. `create_app`
-wires them via `app.include_router(create_<domain>_router(...))`. Use
-closures over factory parameters, not module-level globals, so the routes
-can be tested in isolation with mocked dependencies.
-
-### Frontend — feature slice pattern
-
-Per-feature code lives under `frontend/src/features/<feature>/`:
-- `components/` — presentational + orchestrator
-- `hooks/` — state machines and data fetching
-- `lib/` — pure functions (validators, formatters, builders)
-- `constants.ts` — feature-local constants
-- `index.ts` — public API; other features import only from here
-
-`app/<feature>/page.tsx` should be a thin wrapper over the feature slice's
-orchestrator component.

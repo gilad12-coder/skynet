@@ -31,6 +31,7 @@ htmlcov/
 !.claude/settings.json
 !.claude/commands/
 CLAUDE.md
+!/CLAUDE.md
 
 # Jupyter
 .ipynb_checkpoints/
@@ -58,8 +59,12 @@ CLAUDE.md
 node_modules/
 *.tsbuildinfo
 
-# Agents/tools
-.agents/
+# Agents/tools. Locally installed skills stay out of git; the shared
+# skynet-* skills in .agents/skills/ are tracked.
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/skynet-*/
 .kiro/
 .windsurf/
 skills-lock.json
