@@ -27,7 +27,7 @@ With `APP_LOCAL_MODE=1` (the Mac app), the protected parent opens its boxes as c
 - **Cost.** Local boxes are never billed: no Vercel quote, no budget reservation, and `runtime_cost_profile(..., "docker")` reports zero bounds.
 - **Preflight.** `docker_sandbox_unavailable_reason` reports `sandbox.docker_unavailable` when the CLI is missing or the daemon does not answer, and `sandbox.docker_image_missing` when the image id is unset or not present.
 
-Known gaps against Vercel: the setup box's egress has no byte cap (Vercel's `SANDBOX_NETWORK_BYTES_CAP`), and the proxy allows port 443 only. Guest environment values are passed as `docker` arguments; they are non-secret by design. tmpfs pages count toward the container's memory limit.
+Known gaps against Vercel: the setup box's egress has no byte cap (Vercel's `SANDBOX_NETWORK_BYTES_CAP`), and the proxy allows port 443 only. The box and command environment reach each command over stdin, never as `docker` arguments, because the box environment can hold the gateway key. tmpfs pages count toward the container's memory limit.
 
 ## Offline dependencies
 

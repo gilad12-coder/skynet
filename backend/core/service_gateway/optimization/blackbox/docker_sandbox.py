@@ -17,11 +17,11 @@ for cleanup. Local sandboxes are never billed, so the budget is never charged.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
 import math
-import os
 import posixpath
 import shutil
 import subprocess
@@ -59,9 +59,10 @@ _PROBE_TIMEOUT_SECONDS = 10.0
 _PROBE_CACHE_SECONDS = 5.0
 _probe_cache: dict[tuple[str, str], tuple[float, str | None]] = {}
 _probe_cache_lock = threading.Lock()
-# The Docker CLI reads these itself, so a guest value for them stays on the
-# command line rather than changing how the CLI runs.
-_CLI_ENV_NAMES = frozenset({"HOME", "PATH", "TMPDIR", "XDG_CONFIG_HOME"})
+# Reads NUL-separated NAME=value pairs from stdin, exports them, then runs the
+# command. Values travel neither on a command line (any local user can read
+# process arguments) nor in the Docker CLI's own environment.
+_ENV_LOADER = 'while IFS= read -r -d "" pair; do export -- "$pair"; done; exec "$@"'
 _MISSING_FILE_EXIT = 3
 _READ_FILE_SCRIPT = f'test -f "$1" || exit {_MISSING_FILE_EXIT}; exec cat -- "$1"'
 # The proxy sidecar's own way out; the setup box never joins it.
@@ -192,7 +193,7 @@ def _label_args(labels: Mapping[str, str]) -> list[str]:
 
 
 def _env_args(env: Mapping[str, str]) -> list[str]:
-    """Turn a box's start environment into Docker ``-e`` arguments.
+    """Turn a box's fixed start environment into Docker ``-e`` arguments.
 
     Args:
         env: The box's non-secret start environment (home, temp dir, proxy).
@@ -206,28 +207,21 @@ def _env_args(env: Mapping[str, str]) -> list[str]:
     return args
 
 
-def _exec_env(env: Mapping[str, str]) -> tuple[list[str], dict[str, str]]:
-    """Split a command's environment into ``docker exec`` flags and the CLI's own environment.
-
-    A command's environment can hold run secrets (repository scorer keys, the
-    gateway key), and every local user can read a process's arguments. So a
-    value travels in the CLI's environment and the flag carries only its name.
+def _env_stream(env: Mapping[str, str]) -> str:
+    """Encode a command's environment for ``_ENV_LOADER``.
 
     Args:
         env: The command's environment.
 
     Returns:
-        The ``-e`` flags, and the environment to start the Docker CLI with.
+        NUL-terminated ``NAME=value`` pairs.
+
+    Raises:
+        ServiceError: When a name or value holds a NUL, which no environment can carry.
     """
-    args: list[str] = []
-    passed: dict[str, str] = {}
-    for name, value in env.items():
-        if name in _CLI_ENV_NAMES or name.startswith("DOCKER_"):
-            args += ["-e", f"{name}={value}"]
-        else:
-            args += ["-e", name]
-            passed[name] = value
-    return args, {**os.environ, **passed}
+    if any("\0" in name or "\0" in value for name, value in env.items()):
+        raise ServiceError("Sandbox environment names and values cannot contain NUL characters.")
+    return "".join(f"{name}={value}\0" for name, value in env.items())
 
 
 class DockerSandboxSession:
@@ -247,7 +241,7 @@ class DockerSandboxSession:
         Args:
             docker_bin: Docker CLI path.
             container: The container id ``docker run -d`` printed.
-            env: The box's environment, kept so its values are redacted from logged output.
+            env: The box's environment. Every command gets it, and its values are redacted from logged output.
             owner: Job the box belongs to, which its logged output is routed to.
             egress: The proxy sidecar and internal network of an allowlisted setup box.
         """
@@ -328,12 +322,13 @@ class DockerSandboxSession:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = ["timeout", "--signal=KILL", f"{seconds}s", *inner]
             deadline = seconds + sandbox_contract.KILL_GRACE_SECONDS
-        env_args, cli_env = _exec_env(env or {})
-        argv = [self._docker_bin, "exec", "-w", WORKSPACE_DIR, *env_args, self.container, *inner]
+        stream = _env_stream({**self._env, **(env or {})})
+        loader = ["bash", "-c", _ENV_LOADER, "skynet-env"]
+        argv = [self._docker_bin, "exec", "-i", "-w", WORKSPACE_DIR, self.container, *loader, *inner]
         try:
             process = subprocess.Popen(
                 argv,
-                env=cli_env,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -342,6 +337,12 @@ class DockerSandboxSession:
             )
         except FileNotFoundError as error:
             raise ServiceError(t("sandbox.docker_unavailable")) from error
+        # A CLI that exits early (a removed container) closes the pipe; its
+        # exit code and stderr then report why.
+        with contextlib.suppress(BrokenPipeError):
+            process.stdin.write(stream)
+        with contextlib.suppress(BrokenPipeError):
+            process.stdin.close()
         # One reader per pipe hands each line to the caller as it lands; the
         # model mailbox must see a guest request while the command still runs.
         captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
@@ -542,7 +543,8 @@ class DockerSandboxRuntime:
             *[item for mount in _TMPFS_MOUNTS for item in ("--tmpfs", mount)],
             "-w",
             WORKSPACE_DIR,
-            *_env_args({"HOME": WORKSPACE_DIR, "TMPDIR": "/tmp", **(egress.env if egress else {}), **spec.env}),
+            # spec.env can hold the gateway key, so each command gets it over stdin.
+            *_env_args({"HOME": WORKSPACE_DIR, "TMPDIR": "/tmp", **(egress.env if egress else {})}),
             *_label_args(labels),
             "--entrypoint",
             "sleep",

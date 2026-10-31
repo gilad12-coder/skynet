@@ -65,10 +65,10 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as log:
     log.write(json.dumps(args) + "\\n")
-if args[0] == "exec":
-    names = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == "-e" and "=" not in args[i + 1]]
+if "skynet-env" in args:
+    pairs = [pair.split("=", 1) for pair in sys.stdin.read().split("\\0") if pair]
     with open(os.environ["FAKE_DOCKER_LOG"] + ".env", "a") as log:
-        log.write(json.dumps({{name: os.environ.get(name) for name in names}}) + "\\n")
+        log.write(json.dumps(dict(pairs)) + "\\n")
 command = " ".join(args[:2]) if args[:1] in (["image"], ["network"]) else args[0]
 if command in os.environ.get("FAKE_DOCKER_FAIL", "").split(","):
     sys.stderr.write("Error response from daemon: refused\\n")
@@ -183,7 +183,7 @@ def test_open_starts_an_offline_read_only_box_labelled_with_its_job(fake_docker:
     assert _flag_values(argv, "--pids-limit") == ["1024"]
     assert [mount.split(":")[0] for mount in _flag_values(argv, "--tmpfs")] == ["/workspace", "/tmp"]
     assert _flag_values(argv, "-w") == ["/workspace"]
-    assert _flag_values(argv, "-e") == ["HOME=/workspace", "TMPDIR=/tmp", "A=1"]
+    assert _flag_values(argv, "-e") == ["HOME=/workspace", "TMPDIR=/tmp"]
     assert set(_flag_values(argv, "--label")) == {"skynet=blackbox", "skynet_job=job-7", f"{DOCKER_JOB_LABEL}=job-7"}
     assert argv[-4:] == ["--entrypoint", "sleep", _IMAGE, "91"]
     assert runtime.billable is False
@@ -428,7 +428,7 @@ def test_session_commands_address_the_container(fake_docker: tuple[str, Path]) -
     binary, log = fake_docker
     session = DockerSandboxSession(binary, "box1", env={}, owner=None)
 
-    result = session.run("echo hi", env={"K": "V"}, timeout_seconds=4.5)
+    result = session.run("echo hi", env={"K": "V=1\nnext"}, timeout_seconds=4.5)
     session.read_file("out/a.txt")
     session.close()
     session.close()
@@ -436,24 +436,41 @@ def test_session_commands_address_the_container(fake_docker: tuple[str, Path]) -
     run, read, remove = _calls(log)
     assert result.ok
     timeout = ["timeout", "--signal=KILL", "5s"]
-    assert run == ["exec", "-w", "/workspace", "-e", "K", "box1", *timeout, "bash", "-lc", "echo hi"]
-    assert json.loads(Path(f"{log}.env").read_text().splitlines()[0]) == {"K": "V"}
+    loader = ["bash", "-c", docker_sandbox._ENV_LOADER, "skynet-env"]
+    assert run == ["exec", "-i", "-w", "/workspace", "box1", *loader, *timeout, "bash", "-lc", "echo hi"]
+    assert json.loads(Path(f"{log}.env").read_text()) == {"K": "V=1\nnext"}
     assert read[:4] == ["exec", "-w", "/workspace", "box1"]
     assert read[-1] == "out/a.txt"
     assert remove == ["rm", "-f", "box1"]
 
 
-def test_session_commands_keep_secret_values_off_the_command_line(fake_docker: tuple[str, Path]) -> None:
-    """Pass run secrets to ``docker exec`` by name, so ``ps`` never shows their values."""
+def test_box_and_command_secrets_stay_off_every_command_line(fake_docker: tuple[str, Path]) -> None:
+    """Send the box's and each command's environment over stdin, so ``ps`` never shows a secret."""
+    binary, log = fake_docker
+    runtime = DockerSandboxRuntime(_IMAGE, docker_bin=binary)
+    session = runtime.open(SandboxSpec(lifetime_seconds=60, env={"APP_API_KEY": "gateway-key", "A": "box"}))
+
+    session.run("true", env={"DOCKER_TOKEN": "scorer-secret", "A": "command"}, timeout_seconds=5)
+
+    start, run = _calls(log)
+    assert not any("gateway-key" in arg or "scorer-secret" in arg for arg in start + run)
+    assert "-e" not in run
+    assert json.loads(Path(f"{log}.env").read_text()) == {
+        "APP_API_KEY": "gateway-key",
+        "A": "command",
+        "DOCKER_TOKEN": "scorer-secret",
+    }
+
+
+def test_session_refuses_a_nul_in_the_environment(fake_docker: tuple[str, Path]) -> None:
+    """Refuse an environment that no process can carry, before Docker runs anything."""
     binary, log = fake_docker
     session = DockerSandboxSession(binary, "box1", env={}, owner=None)
 
-    session.run("true", env={"SCORER_API_KEY": "sk-secret-value", "HOME": "/workspace"}, timeout_seconds=5)
+    with pytest.raises(ServiceError):
+        session.run("true", env={"K": "a\0b"})
 
-    (run,) = _calls(log)
-    assert not any("sk-secret-value" in arg for arg in run)
-    assert _flag_values(run, "-e") == ["SCORER_API_KEY", "HOME=/workspace"]
-    assert json.loads(Path(f"{log}.env").read_text()) == {"SCORER_API_KEY": "sk-secret-value"}
+    assert _calls(log) == []
 
 
 @pytest.mark.parametrize("path", ["/etc/passwd", "../escape", ""])
@@ -602,6 +619,26 @@ def test_live_box_writes_reads_and_streams(live_session: DockerSandboxSession) -
     assert live_session.read_file("out.txt") == "done\n"
     assert live_session.read_file("b.txt") == "beta"
     assert live_session.read_file("missing.txt") is None
+
+
+@pytest.mark.docker
+@_live
+def test_live_box_and_command_environment_reach_the_command() -> None:
+    """Merge the box's and the command's environment inside the box, newlines and all."""
+    session = DockerSandboxRuntime(_LIVE_IMAGE).open(
+        SandboxSpec(lifetime_seconds=120, env={"BOX": "box", "SHARED": "box"}, tags={JOB_TAG: "sky113-test"})
+    )
+    try:
+        result = session.run(
+            'printf "%s|%s|%s|%s" "$BOX" "$SHARED" "$MULTI" "$HOME"',
+            env={"SHARED": "command", "MULTI": "a=b\nc d"},
+            timeout_seconds=30,
+        )
+    finally:
+        session.close()
+
+    assert result.ok
+    assert result.stdout == "box|command|a=b\nc d|/workspace"
 
 
 @pytest.mark.docker
