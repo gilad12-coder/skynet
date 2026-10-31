@@ -54,9 +54,12 @@ jobs:
     environment: aws-preview
     # Per job, not per workflow: a run for another label skips this job, and
     # at workflow level it would still replace a pending deploy in the queue.
+    # Only a push cancels a running deploy: it deploys a newer commit, and
+    # deploy is safe to run again. Other events wait, so a reopen never
+    # cancels a running delete.
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
+      cancel-in-progress: ${{ github.event.action == 'synchronize' }}
     steps:
       # Uses the API, so it runs before the checkout and the AWS login.
       - name: Check that the PR can change the running app
@@ -131,6 +134,11 @@ jobs:
           exit "$code"
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.scope.outputs.skip != 'true' && steps.claim.outputs.full != 'true'
+
+      # Gives the build step ACTIONS_RUNTIME_TOKEN and ACTIONS_RESULTS_URL for
+      # the gha layer cache, which a plain run step does not get.
+      - uses: crazy-max/ghaction-github-runtime@v4
         if: steps.scope.outputs.skip != 'true' && steps.claim.outputs.full != 'true'
 
       - name: Build and push the preview images
