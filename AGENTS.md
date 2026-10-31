@@ -114,8 +114,9 @@ Implementation and review agents never merge, and never post `Approved for merge
 `Changes requested:` comments. The full gate, review and Linear flow is in
 the `skynet-pr-workflow` skill.
 
-**Backend PRs** (no file under `frontend/`) merge into `staging`
-only when **all** of these gates pass:
+**Backend PRs** (only files under `backend/`, at least one, plus optional
+Markdown under `docs/`) merge into `staging` only when **all** of these
+gates pass:
 
 1. Agent code review is clean.
 2. Tests and the Linear issue's acceptance checks pass in the PR environment.
@@ -131,6 +132,9 @@ environment, the review verdict, and the diff size. Merge only after the user
 approves that specific PR in chat or on GitHub (or with `Approved for merge`
 on the Linear issue). A frontend PR with no meaningful visible change can use
 the backend path; see the skill.
+
+Any other PR (files outside `backend/` and `docs/**/*.md`, or no backend
+file) also waits for the user's approval.
 
 **`staging` → `main`** needs the user's approval every time. Each morning,
 send one card: the backend changes that landed, staging smoke status, and a
