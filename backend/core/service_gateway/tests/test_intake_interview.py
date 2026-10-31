@@ -227,7 +227,7 @@ def test_intake_turn_stream_end_to_end_with_dummy_lm(monkeypatch) -> None:
     }
     built: list[dict] = []
 
-    def fake_lm(model, effort, max_tokens):
+    def fake_lm(model, effort, max_tokens, model_config=None):
         """Record the LM knobs and return a canned responder."""
         built.append({"model": model, "effort": effort, "max_tokens": max_tokens})
         return DummyLM([answer])

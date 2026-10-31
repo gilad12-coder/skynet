@@ -26,6 +26,7 @@ import dspy
 
 from ...api.model_catalog import agent_model_id
 from ...config import settings
+from ...models import ModelConfig
 from .answer_options import normalize_options
 from .code import _build_agent_lm, _reply_language
 from .code_interview import _parse_json, relay_interview_turn
@@ -317,6 +318,7 @@ async def intake_turn_stream(
     model: str | None,
     reasoning_effort: str | None = None,
     usage_sink: list | None = None,
+    model_config: ModelConfig | None = None,
 ) -> Any:
     """Run one intake turn, streaming the Signature & Metric interview's events.
 
@@ -334,9 +336,11 @@ async def intake_turn_stream(
         model: LiteLLM id conducting the turn; ``None`` runs the server default.
         reasoning_effort: Effort level for ``model``; ``None`` keeps its default.
         usage_sink: Optional list the built LM is appended to, for metering.
+        model_config: Optional resolved config for ``model`` (the Mac app's
+            BYOK route).
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_agent_lm(model, reasoning_effort, max_tokens=INTAKE_MAX_TOKENS)
+    lm = _build_agent_lm(model, reasoning_effort, max_tokens=INTAKE_MAX_TOKENS, model_config=model_config)
     if usage_sink is not None:
         usage_sink.append(lm)
     known = validate_profile_patch(profile, provider_slugs=provider_slugs)
