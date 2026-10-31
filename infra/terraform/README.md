@@ -25,7 +25,7 @@ The environment stacks follow "First apply (staging, then production)" below.
 | Path | Stack | Creates |
 |------|-------|---------|
 | `bootstrap/` | local state | The S3 state bucket (versioned, encrypted, TLS only). |
-| `global/` | `global/terraform.tfstate` | ECR repos `skynet/backend`, `skynet/frontend`, `skynet/litellm`. GitHub OIDC provider and four GitHub roles (see "GitHub roles"; `enable_github_oidc`, default `true`). |
+| `global/` | `global/terraform.tfstate` | ECR repos `skynet/backend`, `skynet/frontend`, `skynet/litellm`. GitHub OIDC provider and four GitHub roles (see "GitHub roles"; `enable_github_oidc`, default `true`). The `skynet/dev/*` secrets and the secret-change alarm (see "Secrets"). |
 | `environments/staging/` | `staging/terraform.tfstate` | One environment from `modules/environment`. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `environments/production/` | `production/terraform.tfstate` | The same module. Sizing in `terraform.tfvars` (lean) and `full.tfvars`. |
 | `modules/environment/` | module | VPC, ALB, ACM, ECS cluster, services, task definitions, RDS, Valkey, secrets, logs, alarms. |
@@ -58,11 +58,12 @@ There is no DynamoDB table.
 - ElastiCache Valkey 8.1 (TLS, AUTH token). One shared cache for app and litellm,
   as on Railway.
 - CloudWatch log group per family. Alarms go to one SNS topic: ALB 5xx, unhealthy
-  targets, backend latency, ECS CPU, memory and running < desired, RDS CPU, memory,
-  free storage and connections, Valkey CPU and memory, error lines in the logs,
-  RDS failure events, and no finished automated RDS backup in 30 hours. The
-  topic uses its own KMS key: CloudWatch and RDS cannot publish to a topic
-  under the AWS managed SNS key.
+  targets, backend latency, ECS CPU and memory, a crashed task (from ECS stop
+  events), no running tasks in 3 of 5 minutes, running tasks below desired for
+  10 minutes, RDS CPU, memory, free storage and connections, Valkey CPU and
+  memory, error lines in the logs, RDS failure events, and no finished
+  automated RDS backup in 30 hours. The topic uses its own KMS key: CloudWatch
+  and RDS cannot publish to a topic under the AWS managed SNS key.
 
 ### Choices
 
@@ -182,6 +183,59 @@ scripts/secrets.sh check staging
 
 Delete the local JSON files after `put`. The generated values are also in the
 Terraform state; the state bucket is private and encrypted.
+
+### Change one key
+
+`set` changes one key and keeps every other key. It reads the value from a
+hidden prompt, so the value is never on a command line or on the screen. It
+prints the key name only. The new JSON goes through a private temporary file
+(mode 600) that the script deletes on exit.
+
+```bash
+scripts/secrets.sh set staging app OPENROUTER_API_KEY   # prompts for the value
+scripts/secrets.sh check-empty staging                  # keys with an empty value
+```
+
+Secrets Manager keeps the previous value as `AWSPREVIOUS`. Two `set` runs at
+the same time on one secret can lose one change, so run them one at a time.
+
+### Local development keys (`skynet/dev/*`)
+
+The `global` root creates `skynet/dev/app`, `skynet/dev/frontend` and
+`skynet/dev/litellm` with no value. Put dev-only keys there (for example a
+separate OpenRouter key with a low limit), never staging or production
+values:
+
+```bash
+scripts/secrets.sh set dev app OPENROUTER_API_KEY
+```
+
+`scripts/dev-env.sh` (from the repository root, after `just setup`) copies
+the non-empty keys into the worktree's git-ignored `backend/.env`,
+`frontend/.env.local` and `deploy/litellm/.env`. It changes only those keys,
+skips a missing file, and prints key names only. It skips a value that
+contains a newline, `'`, `$` or `\` and names the key; add that key by hand. Agents run it instead of
+reading staging or production secrets.
+
+### Secret-change alarm
+
+The `global` root has a CloudTrail trail (write events, us-east-2) and an
+EventBridge rule. Every `PutSecretValue`, `UpdateSecret`, `DeleteSecret`,
+`RestoreSecret`, `UpdateSecretVersionStage`, `RotateSecret` or resource policy
+change on a `skynet/*` secret sends an email through the SNS topic
+`skynet-secret-changes`. The message names the call, the secret, the caller
+and the time, never a value. Set the receiver with
+`export TF_VAR_alert_email=<address>` before every global plan or apply, then
+confirm the subscription email once. A global apply without it deletes the
+subscription (the plan warns: `alert_email is empty`). The CI plan runs
+without it, so after the first apply each PR plan shows the email
+subscription as `1 to destroy`. That is expected; CI never applies.
+
+### Secret scan
+
+`.githooks/pre-commit` runs gitleaks on staged changes (`just setup` turns
+the hooks on), and `.github/workflows/gitleaks.yml` scans the full history on
+every PR.
 
 ## Build and push images
 
@@ -405,8 +459,8 @@ about $671 per month, above the $460 spend limit. Production full alone
 Container Insights is the largest CloudWatch item: about $40-50 per month per
 environment (custom metrics per task and service, plus performance log
 ingestion). Turning it off saves that, at the cost of the per-task CPU and
-memory views and the "running < desired" alarm, which reads a Container
-Insights metric.
+memory views and the "tasks-missing" and "tasks-below-desired" alarms,
+which read Container Insights metrics.
 
 Not included: data transfer out, NAT data processing ($0.045 per GB), LLM provider
 costs, RDS CPU credits beyond the baseline, WAF (off by default; about $10 per
