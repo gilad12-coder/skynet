@@ -432,13 +432,30 @@ def test_job_fields_count_toward_storage(
         lambda b: b["events"][0]["metrics"].update(baseline_test_metric=float("inf")),
         lambda b: b["job"].update(message="Fin\x00ished"),
         lambda b: b["job"]["latest_metrics"].update({"bad\x00key": 1}),
+        lambda b: b["job"].update(message="Fin\ud800ished"),
+        lambda b: b["job"]["latest_metrics"].update({"bad\udfffkey": 1}),
+        lambda b: b["optimization"]["payload_overview"].update(is_private=5),
+        lambda b: b["optimization"]["payload_overview"].update(is_private="1.0"),
     ],
-    ids=["nan-metric", "infinite-event-metric", "nul-message", "nul-key"],
+    ids=[
+        "nan-metric",
+        "infinite-event-metric",
+        "nul-message",
+        "nul-key",
+        "surrogate-message",
+        "surrogate-key",
+        "number-is-private",
+        "string-is-private",
+    ],
 )
 def test_values_postgres_cannot_store_are_422(
     hosted_store: _SQLiteJobStore, bundle: dict[str, Any], mutate: Any
 ) -> None:
-    """NaN, Infinity and NUL characters are refused before the write, though SQLite would accept them."""
+    """Values Postgres cannot store or cast are refused before the write, though SQLite would accept them.
+
+    A lone surrogate fails the JSONB write. A non-boolean ``is_private`` fails the
+    public dashboard's boolean cast for every user.
+    """
     mutate(bundle)
     resp = _client(hosted_store, HOSTED_USER).post("/optimizations/import", content=json.dumps(bundle))
     assert resp.status_code == 422

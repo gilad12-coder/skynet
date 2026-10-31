@@ -30,6 +30,7 @@ from ..constants import (
     PAYLOAD_OVERVIEW_DESCRIPTION,
     PAYLOAD_OVERVIEW_ESTIMATED_HIGH,
     PAYLOAD_OVERVIEW_ESTIMATED_LOW,
+    PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MAX_COST_CENTS,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
@@ -80,11 +81,30 @@ MAX_JOB_FIELD_BYTES = 64 * 1024
 _TIMESTAMP_YEARS = range(1970, 2101)
 
 
+def _is_storable_text(text: str) -> bool:
+    """Report whether PostgreSQL can store ``text`` in a JSONB or text column.
+
+    Args:
+        text: A decoded JSON string or key.
+
+    Returns:
+        ``True`` when ``text`` has no NUL character and encodes as UTF-8.
+    """
+    if "\x00" in text:
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _is_storable(value: Any, limit: int) -> bool:
     """Report whether ``value`` is JSON that PostgreSQL JSONB and text columns accept.
 
     Walks iteratively, so a hostile depth cannot exhaust the Python stack. JSONB
-    rejects NaN, Infinity and NUL characters, which ``json.loads`` accepts.
+    rejects NaN, Infinity, NUL characters and lone UTF-16 surrogates, which
+    ``json.loads`` accepts.
 
     Args:
         value: A decoded JSON value.
@@ -92,7 +112,7 @@ def _is_storable(value: Any, limit: int) -> bool:
 
     Returns:
         ``True`` when the deepest container is at most ``limit`` levels down, every
-        float is finite, and no string or key contains a NUL character.
+        float is finite, and every string and key is NUL-free valid UTF-8.
     """
     stack: list[tuple[Any, int]] = [(value, 1)]
     while stack:
@@ -102,12 +122,12 @@ def _is_storable(value: Any, limit: int) -> bool:
                 return False
             continue
         if isinstance(node, str):
-            if "\x00" in node:
+            if not _is_storable_text(node):
                 return False
             continue
         if isinstance(node, dict):
             children = list(node.values())
-            if any(not isinstance(key, str) or "\x00" in key for key in node):
+            if any(not isinstance(key, str) or not _is_storable_text(key) for key in node):
                 return False
         elif isinstance(node, list):
             children = node
@@ -318,7 +338,14 @@ def _imported_overview(overview: dict[str, Any], optimization_type: str, usernam
 
     Returns:
         The overview to store, labelled as imported and owned by ``username``.
+
+    Raises:
+        RunSyncError: 422 ``sync.invalid_bundle`` when ``is_private`` is not a
+            boolean. The public dashboard casts it to boolean in SQL, so one
+            bad row would fail that page for every user.
     """
+    if not isinstance(overview.get(PAYLOAD_OVERVIEW_IS_PRIVATE, False), bool):
+        raise RunSyncError("sync.invalid_bundle", 422)
     cleaned = {key: value for key, value in overview.items() if key not in _DROPPED_OVERVIEW_KEYS}
     description = cleaned.get(PAYLOAD_OVERVIEW_DESCRIPTION)
     if isinstance(description, str) and description.strip():
