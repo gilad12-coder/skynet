@@ -45,6 +45,10 @@ import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { Label } from "@/shared/ui/primitives/label";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import { shareLinkUrl } from "@/shared/lib/share-link";
+import { shareDialogPlan } from "@/shared/lib/share-dialog-plan";
+import { LocalShareNotice } from "@/shared/ui/local-share-notice";
 
 export const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
 
@@ -109,21 +113,19 @@ export function DatasetShareDialog({
 
   const isOwner = !!state?.owner && state.owner.toLowerCase() === me;
 
-  const shareUrl =
-    state?.token && typeof window !== "undefined"
-      ? `${window.location.origin}/datasets/share/${state.token}`
-      : null;
+  const plan = shareDialogPlan("dataset", isLocalMode());
+  const shareUrl = state?.token ? shareLinkUrl(`/datasets/share/${state.token}`) : null;
 
   const accessCount = state ? (state.owner ? 1 : 0) + state.members.length : 0;
 
   // Fetch on open rather than in the trigger's handler so a parent-driven open
   // loads the sharing state too.
   useEffect(() => {
-    if (!open || state !== null) return;
+    if (!open || state !== null || !plan.loadSharing) return;
     getDatasetSharing(datasetId)
       .then(setState)
       .catch((err) => toast.error(err instanceof Error ? err.message : msg("share.error")));
-  }, [open, state, datasetId]);
+  }, [open, state, datasetId, plan.loadSharing]);
 
   const handleOpenChange = (next: boolean) => setOpen(next);
 
@@ -233,7 +235,9 @@ export function DatasetShareDialog({
               <DialogTitle>{msg("share.dialog_title")}</DialogTitle>
             </DialogHeader>
 
-            {state === null ? (
+            {plan.showLocalNotice ? (
+              <LocalShareNotice />
+            ) : state === null ? (
               <div className="flex items-center justify-center gap-2 px-6 py-10 text-sm text-muted-foreground">
                 <CircleNotch className="size-4 animate-spin" />
                 {msg("share.loading")}
