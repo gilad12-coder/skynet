@@ -51,7 +51,8 @@ export interface TaskInterviewState {
   setReasoningEffort: (effort: string | null) => void;
   /** Send a user turn; false when it is too long and was not sent. */
   send: (content: string) => boolean;
-  editAndResend: (messageIndex: number, content: string) => void;
+  /** Resend an edited user turn; false when it is too long and was not sent. */
+  editAndResend: (messageIndex: number, content: string) => boolean;
   stop: () => void;
   /** Re-run the last turn: after an error, a stop, or a reload mid-turn. */
   retry: () => void;
@@ -236,8 +237,9 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
 
   const editAndResend = React.useCallback(
     (messageIndex: number, content: string) => {
-      if (fitsInterview(content))
-        runTurn([...turns.slice(0, messageIndex), { role: "user", content }]);
+      if (!fitsInterview(content)) return false;
+      runTurn([...turns.slice(0, messageIndex), { role: "user", content }]);
+      return true;
     },
     [runTurn, turns],
   );
