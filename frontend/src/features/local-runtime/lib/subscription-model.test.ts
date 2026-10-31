@@ -739,6 +739,11 @@ test("with the agent engine load failed, the request sends what the empty menu's
   // No pick (or the retired auto pick): the chip shows the default label, so nothing is sent.
   assert.equal(await resolveLocalAgentModel(null, null, deps()), null);
   assert.equal(await resolveLocalAgentModel("auto:intelligent", null, deps()), null);
+  // A role pinned to a CLI keeps its pin: the backend would fill no pick from its engine.
+  assert.match(
+    (await resolveLocalAgentModel(null, "claude", deps())) ?? "",
+    /^subscription\/claude\//,
+  );
   // A Local pick still runs on its CLI.
   const local = "subscription/claude/anthropic/claude-opus-4.1";
   assert.equal(await resolveLocalAgentModel(local, "claude", deps()), local);
