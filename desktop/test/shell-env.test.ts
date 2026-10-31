@@ -27,7 +27,7 @@ describe("loginShellPath", () => {
       home: "/Users/x",
       exec: async (file, args) => {
         expect(file).toBe("/bin/zsh");
-        expect(args).toEqual(["-lc", "env -0"]);
+        expect(args).toEqual(["-ilc", "env -0"]);
         return { stdout: "HOME=/Users/x\0PATH=/Users/x/.nvm/bin:/opt/homebrew/bin:/usr/bin\0" };
       },
     });

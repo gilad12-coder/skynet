@@ -100,7 +100,9 @@ export async function loginShellPath(
   const home = opts.home || os.homedir();
   const exec = opts.exec ?? defaultExec;
   try {
-    const { stdout } = await exec(shell, ["-lc", "env -0"], {
+    // Interactive too: zsh reads .zshrc only in interactive shells, and nvm's
+    // installer puts its PATH lines there.
+    const { stdout } = await exec(shell, ["-ilc", "env -0"], {
       timeout: opts.timeoutMs ?? LOGIN_SHELL_TIMEOUT_MS,
       env: { ...process.env, HOME: home, SHELL: shell, TERM: "dumb" },
     });

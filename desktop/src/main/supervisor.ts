@@ -185,6 +185,9 @@ export class ManagedProcess {
       this.child!.on("exit", (code) => {
         this.exited = true;
         this.exitCode = code;
+        // The leader can exit before its children. Sweep the group now: later the
+        // pid may belong to an unrelated process.
+        this.signal("SIGKILL");
         resolve();
       });
       this.child!.on("error", () => {
@@ -204,6 +207,8 @@ export class ManagedProcess {
     try {
       process.kill(-pid, sig);
     } catch {
+      // After the leader exits, its bare pid is free for reuse.
+      if (this.exited) return;
       try {
         process.kill(pid, sig);
       } catch {
@@ -214,18 +219,14 @@ export class ManagedProcess {
 
   /** SIGTERM the process group, then SIGKILL after the grace period. */
   async stop(graceMs = STOP_GRACE_MS): Promise<void> {
-    if (!this.child || !this.exitPromise) return;
-    if (!this.exited) {
-      this.signal("SIGTERM");
-      const timedOut = await Promise.race([
-        this.exitPromise.then(() => false),
-        new Promise<boolean>((r) => setTimeout(() => r(true), graceMs)),
-      ]);
-      if (timedOut) this.signal("SIGKILL");
-      await this.exitPromise;
-    }
-    // The leader can exit before its children; sweep the group once more.
-    this.signal("SIGKILL");
+    if (!this.child || !this.exitPromise || this.exited) return;
+    this.signal("SIGTERM");
+    const timedOut = await Promise.race([
+      this.exitPromise.then(() => false),
+      new Promise<boolean>((r) => setTimeout(() => r(true), graceMs)),
+    ]);
+    if (timedOut) this.signal("SIGKILL");
+    await this.exitPromise;
   }
 }
 
