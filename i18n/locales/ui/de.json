@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Jeder Agent läuft mit deinem gespeicherten OpenRouter-Schlüssel",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Benötigt einen gespeicherten, verifizierten OpenRouter-Schlüssel",
+  "settings.agent_engine.openrouter_keys_loading": "Dein gespeicherter OpenRouter-Schlüssel wird geprüft…",
+  "settings.agent_engine.openrouter_keys_failed": "Dein gespeicherter OpenRouter-Schlüssel konnte nicht geprüft werden",
   "settings.agent_engine.openrouter_fallback": "Kein gespeicherter, verifizierter OpenRouter-Schlüssel, daher laufen die Agenten auf {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

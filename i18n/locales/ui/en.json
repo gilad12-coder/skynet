@@ -4318,6 +4318,8 @@
   "settings.agent_engine.description_openrouter": "Every agent runs on your saved OpenRouter key",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Needs a saved, verified OpenRouter key",
+  "settings.agent_engine.openrouter_keys_loading": "Checking your saved OpenRouter key…",
+  "settings.agent_engine.openrouter_keys_failed": "Could not check your saved OpenRouter key",
   "settings.agent_engine.openrouter_fallback": "No saved, verified OpenRouter key, so agents run on {cli}",
   "tagger.assist.local_key_needed": "Tagging in the Mac app needs your own provider key. Choose a model under Your own key.",
   "submit.budget.local_note": "The Mac app sets no spending limit. Your provider key or your CLI plan pays for each model call.",

@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Tüm ajanlar kayıtlı OpenRouter anahtarınla çalışır",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Kaydedilmiş ve doğrulanmış bir OpenRouter anahtarı gerekir",
+  "settings.agent_engine.openrouter_keys_loading": "Kaydedilmiş OpenRouter anahtarınız denetleniyor…",
+  "settings.agent_engine.openrouter_keys_failed": "Kaydedilmiş OpenRouter anahtarınız denetlenemedi",
   "settings.agent_engine.openrouter_fallback": "Kayıtlı ve doğrulanmış bir OpenRouter anahtarı yok, bu yüzden ajanlar {cli} ile çalışır",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

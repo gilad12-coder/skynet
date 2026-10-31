@@ -690,10 +690,11 @@ export async function resolveAgentModel(
 
 /**
  * One choice in the Settings "Agent engine" select. A CLI carries its state
- * (null while the status loads); only a ready CLI can be chosen.
+ * (null while the status loads); only a ready CLI can be chosen. OpenRouter
+ * carries `keyPending`: the key list still loads or failed.
  */
 export type AgentEngineOption =
-  | { engine: typeof OPENROUTER_ENGINE; disabled: boolean }
+  | { engine: typeof OPENROUTER_ENGINE; disabled: boolean; keyPending: boolean }
   | { engine: CliProvider; disabled: boolean; state: CliState | null };
 
 /**
@@ -708,7 +709,7 @@ export function agentEngineOptions(
   now: Date = new Date(),
   keyVerified: boolean | null = false,
 ): AgentEngineOption[] {
-  if (!localMode) return [{ engine: OPENROUTER_ENGINE, disabled: false }];
+  if (!localMode) return [{ engine: OPENROUTER_ENGINE, disabled: false, keyPending: false }];
   const clis = CLI_PROVIDERS.map((cli): AgentEngineOption => {
     const entry = findCli(status, cli);
     let state: CliState | null = null;
@@ -716,7 +717,10 @@ export function agentEngineOptions(
     else if (status) state = { kind: "missing" };
     return { engine: cli, disabled: state?.kind !== "ok", state };
   });
-  return [...clis, { engine: OPENROUTER_ENGINE, disabled: keyVerified !== true }];
+  return [
+    ...clis,
+    { engine: OPENROUTER_ENGINE, disabled: keyVerified !== true, keyPending: keyVerified === null },
+  ];
 }
 
 /**

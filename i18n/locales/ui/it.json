@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Ogni agente usa la tua chiave OpenRouter salvata",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Serve una chiave OpenRouter salvata e verificata",
+  "settings.agent_engine.openrouter_keys_loading": "Controllo della chiave OpenRouter salvata…",
+  "settings.agent_engine.openrouter_keys_failed": "Impossibile controllare la chiave OpenRouter salvata",
   "settings.agent_engine.openrouter_fallback": "Nessuna chiave OpenRouter salvata e verificata, quindi gli agenti usano {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

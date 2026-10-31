@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Все агенты работают на вашем сохранённом ключе OpenRouter",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Нужен сохранённый и проверенный ключ OpenRouter",
+  "settings.agent_engine.openrouter_keys_loading": "Проверка сохранённого ключа OpenRouter…",
+  "settings.agent_engine.openrouter_keys_failed": "Не удалось проверить сохранённый ключ OpenRouter",
   "settings.agent_engine.openrouter_fallback": "Нет сохранённого и проверенного ключа OpenRouter, поэтому агенты работают на {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

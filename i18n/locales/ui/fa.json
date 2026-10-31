@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "همه عامل‌ها با کلید OpenRouter ذخیره‌شده شما اجرا می‌شوند",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "به یک کلید OpenRouter ذخیره‌شده و تأییدشده نیاز دارد",
+  "settings.agent_engine.openrouter_keys_loading": "در حال بررسی کلید OpenRouter ذخیره‌شده…",
+  "settings.agent_engine.openrouter_keys_failed": "بررسی کلید OpenRouter ذخیره‌شده ممکن نشد",
   "settings.agent_engine.openrouter_fallback": "کلید OpenRouter ذخیره‌شده و تأییدشده‌ای نیست، پس عامل‌ها روی {cli} اجرا می‌شوند",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

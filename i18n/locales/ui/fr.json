@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Chaque agent utilise votre clé OpenRouter enregistrée",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Nécessite une clé OpenRouter enregistrée et vérifiée",
+  "settings.agent_engine.openrouter_keys_loading": "Vérification de votre clé OpenRouter enregistrée…",
+  "settings.agent_engine.openrouter_keys_failed": "Impossible de vérifier votre clé OpenRouter enregistrée",
   "settings.agent_engine.openrouter_fallback": "Aucune clé OpenRouter enregistrée et vérifiée : les agents utilisent donc {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

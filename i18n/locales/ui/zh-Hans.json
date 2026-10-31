@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "所有代理都使用你保存的 OpenRouter 密钥运行",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "需要已保存并已验证的 OpenRouter 密钥",
+  "settings.agent_engine.openrouter_keys_loading": "正在检查已保存的 OpenRouter 密钥…",
+  "settings.agent_engine.openrouter_keys_failed": "无法检查已保存的 OpenRouter 密钥",
   "settings.agent_engine.openrouter_fallback": "没有已保存并已验证的 OpenRouter 密钥，因此代理在 {cli} 上运行",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

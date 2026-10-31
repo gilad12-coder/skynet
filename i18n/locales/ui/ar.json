@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "يعمل كل وكيل على مفتاح OpenRouter المحفوظ الخاص بك",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "يحتاج إلى مفتاح OpenRouter محفوظ وتم التحقق منه",
+  "settings.agent_engine.openrouter_keys_loading": "جارٍ فحص مفتاح OpenRouter المحفوظ…",
+  "settings.agent_engine.openrouter_keys_failed": "تعذّر فحص مفتاح OpenRouter المحفوظ",
   "settings.agent_engine.openrouter_fallback": "لا يوجد مفتاح OpenRouter محفوظ وموثَّق، لذلك يعمل الوكلاء على {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

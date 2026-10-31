@@ -78,18 +78,35 @@ export function EngineLogo({ engine }: { engine: AgentEngine }) {
   );
 }
 
-/** Why a choice is disabled, with the sign-in command for a signed-out CLI. */
+/**
+ * Why a choice is disabled, with the sign-in command for a signed-out CLI.
+ * `keysFailed` is whether the saved key list failed to load.
+ */
 function OptionReason({
   option,
   status,
   failed,
+  keysFailed,
 }: {
   option: AgentEngineOption;
   status: LocalStatus | null;
   failed: boolean;
+  keysFailed: boolean;
 }) {
   if (!option.disabled) return null;
   if (option.engine === OPENROUTER_ENGINE) {
+    // A user with a saved key must not read that the key is missing.
+    if (option.keyPending) {
+      return (
+        <>
+          {msg(
+            keysFailed
+              ? "settings.agent_engine.openrouter_keys_failed"
+              : "settings.agent_engine.openrouter_keys_loading",
+          )}
+        </>
+      );
+    }
     return <>{msg("settings.agent_engine.openrouter_local")}</>;
   }
   if (!option.state) {
@@ -113,10 +130,12 @@ export function EngineChoice({
   option,
   status,
   failed,
+  keysFailed = false,
 }: {
   option: AgentEngineOption;
   status: LocalStatus | null;
   failed: boolean;
+  keysFailed?: boolean;
 }) {
   return (
     <span className="flex min-w-0 items-start gap-2">
@@ -127,7 +146,7 @@ export function EngineChoice({
         <span>{engineLabel(option.engine)}</span>
         {option.disabled && (
           <span className="text-xs text-muted-foreground" dir="auto">
-            <OptionReason option={option} status={status} failed={failed} />
+            <OptionReason option={option} status={status} failed={failed} keysFailed={keysFailed} />
           </span>
         )}
       </span>
@@ -139,7 +158,7 @@ export function EngineChoice({
  * The "Agent engine" row. `value` is the stored engine; a disabled choice says
  * why, and a current engine that is no longer ready shows that reason under
  * the row. `keyVerified` is whether the saved OpenRouter key is verified (null
- * while the key list loads or failed). A stored OpenRouter engine whose key is
+ * while the key list loads or failed; `keysFailed` tells the two apart). A stored OpenRouter engine whose key is
  * gone shows the CLI agents run on instead, and says why.
  */
 export function AgentEngineSelect({
@@ -148,6 +167,7 @@ export function AgentEngineSelect({
   failed = false,
   value,
   keyVerified = false,
+  keysFailed = false,
   saving,
   onChange,
 }: {
@@ -156,6 +176,7 @@ export function AgentEngineSelect({
   failed?: boolean;
   value: AgentEngine;
   keyVerified?: boolean | null;
+  keysFailed?: boolean;
   saving: boolean;
   onChange: (engine: AgentEngine) => void;
 }) {
@@ -204,7 +225,12 @@ export function AgentEngineSelect({
           <SelectContent>
             {options.map((option) => (
               <SelectItem key={option.engine} value={option.engine} disabled={option.disabled}>
-                <EngineChoice option={option} status={status} failed={failed} />
+                <EngineChoice
+                  option={option}
+                  status={status}
+                  failed={failed}
+                  keysFailed={keysFailed}
+                />
               </SelectItem>
             ))}
           </SelectContent>
@@ -220,7 +246,12 @@ export function AgentEngineSelect({
             {keyGone ? (
               msg("settings.agent_engine.openrouter_fallback", { cli: engineLabel(shown) })
             ) : (
-              <OptionReason option={current} status={status} failed={failed} />
+              <OptionReason
+                option={current}
+                status={status}
+                failed={failed}
+                keysFailed={keysFailed}
+              />
             )}
           </span>
         </div>
@@ -268,6 +299,7 @@ export function AgentEngineSetting() {
       failed={failed}
       value={value}
       keyVerified={keyVerified}
+      keysFailed={keysFailed}
       saving={saving}
       onChange={onChange}
     />

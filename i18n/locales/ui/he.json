@@ -4318,6 +4318,8 @@
   "settings.agent_engine.description_openrouter": "כל הסוכנים רצים על מפתח ה-OpenRouter השמור שלך",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "נדרש מפתח OpenRouter שמור ומאומת",
+  "settings.agent_engine.openrouter_keys_loading": "בודקים את מפתח ה-OpenRouter השמור…",
+  "settings.agent_engine.openrouter_keys_failed": "לא הצלחנו לבדוק את מפתח ה-OpenRouter השמור",
   "settings.agent_engine.openrouter_fallback": "אין מפתח OpenRouter שמור ומאומת, ולכן הסוכנים רצים על {cli}",
   "tagger.assist.local_key_needed": "תיוג באפליקציית ה-Mac צריך מפתח ספק משלכם. בחרו מודל תחת „המפתח שלך”.",
   "submit.budget.local_note": "באפליקציית ה-Mac אין תקרת הוצאה. מפתח הספק שלכם או תוכנית ה-CLI שלכם משלמים על כל קריאה למודל.",

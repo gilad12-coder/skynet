@@ -370,6 +370,24 @@ void describe("OpenRouter engine (SKY-123 AC3)", () => {
     assert.match(html, /settings\.agent_engine\.openrouter_local/);
   });
 
+  void it("while the key list loads or failed, OpenRouter says so, not that the key is missing (SKY-134)", () => {
+    setClientLocale("en");
+    const option = agentEngineOptions(s, true, new Date(), null).find(
+      (o) => o.engine === "openrouter",
+    )!;
+    assert.equal(option.disabled, true);
+    const loading = renderToStaticMarkup(
+      <EngineChoice option={option} status={s} failed={false} />,
+    );
+    assert.match(loading, /settings\.agent_engine\.openrouter_keys_loading</);
+    assert.doesNotMatch(loading, /openrouter_local|openrouter_keys_failed/);
+    const failed = renderToStaticMarkup(
+      <EngineChoice option={option} status={s} failed={false} keysFailed />,
+    );
+    assert.match(failed, /settings\.agent_engine\.openrouter_keys_failed</);
+    assert.doesNotMatch(failed, /openrouter_local|openrouter_keys_loading/);
+  });
+
   void it("the selected OpenRouter engine shows its name and its own description", () => {
     const ok = render(true, "openrouter", s, true);
     assert.match(ok, /data-engine-logo="openrouter"/);

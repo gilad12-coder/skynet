@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "हर एजेंट आपकी सहेजी गई OpenRouter कुंजी पर चलता है",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "एक सहेजी गई, सत्यापित OpenRouter कुंजी चाहिए",
+  "settings.agent_engine.openrouter_keys_loading": "आपकी सहेजी गई OpenRouter कुंजी की जाँच हो रही है…",
+  "settings.agent_engine.openrouter_keys_failed": "आपकी सहेजी गई OpenRouter कुंजी की जाँच नहीं हो सकी",
   "settings.agent_engine.openrouter_fallback": "कोई सहेजी और सत्यापित OpenRouter कुंजी नहीं है, इसलिए एजेंट {cli} पर चलते हैं",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

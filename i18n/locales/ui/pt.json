@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "Todos os agentes usam a sua chave do OpenRouter guardada",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "Requer uma chave do OpenRouter guardada e verificada",
+  "settings.agent_engine.openrouter_keys_loading": "A verificar a chave do OpenRouter guardada…",
+  "settings.agent_engine.openrouter_keys_failed": "Não foi possível verificar a chave do OpenRouter guardada",
   "settings.agent_engine.openrouter_fallback": "Não há uma chave do OpenRouter guardada e verificada, por isso os agentes usam {cli}",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

@@ -4315,6 +4315,8 @@
   "settings.agent_engine.description_openrouter": "すべてのエージェントが保存済みの OpenRouter キーで動きます",
   "settings.agent_engine.openrouter": "OpenRouter",
   "settings.agent_engine.openrouter_local": "保存済みで検証済みの OpenRouter キーが必要です",
+  "settings.agent_engine.openrouter_keys_loading": "保存済みの OpenRouter キーを確認しています…",
+  "settings.agent_engine.openrouter_keys_failed": "保存済みの OpenRouter キーを確認できませんでした",
   "settings.agent_engine.openrouter_fallback": "保存済みで検証済みの OpenRouter キーがないため、エージェントは {cli} で動きます",
   "subscription.cli.label": "CLI",
   "subscription.cli.codex": "Codex",

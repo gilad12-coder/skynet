@@ -354,7 +354,7 @@ test("a role with no CLI runs on the engine; a role's own CLI overrides it", asy
 test("hosted builds offer only OpenRouter; local builds offer ready CLIs", () => {
   const now = new Date("2026-10-21T10:00:00Z");
   assert.deepEqual(agentEngineOptions(null, false, now), [
-    { engine: "openrouter", disabled: false },
+    { engine: "openrouter", disabled: false, keyPending: false },
   ]);
   const loaded = status([cli({ id: "codex" }), cli({ logged_in: false })]);
   const local = agentEngineOptions(loaded, true, now);
@@ -1145,14 +1145,19 @@ test("OpenRouter is a local engine choice only with a verified OpenRouter key", 
   const loaded = status([cli({ id: "codex" }), cli()]);
   const openRouter = (keyVerified: boolean | null | undefined) =>
     agentEngineOptions(loaded, true, now, keyVerified).find((o) => o.engine === "openrouter");
-  assert.deepEqual(openRouter(true), { engine: "openrouter", disabled: false });
-  // No key, an unverified key, or a key list that still loads or failed.
-  assert.deepEqual(openRouter(false), { engine: "openrouter", disabled: true });
-  assert.deepEqual(openRouter(null), { engine: "openrouter", disabled: true });
-  assert.deepEqual(openRouter(undefined), { engine: "openrouter", disabled: true });
+  assert.deepEqual(openRouter(true), { engine: "openrouter", disabled: false, keyPending: false });
+  // No key or an unverified key.
+  assert.deepEqual(openRouter(false), { engine: "openrouter", disabled: true, keyPending: false });
+  assert.deepEqual(openRouter(undefined), {
+    engine: "openrouter",
+    disabled: true,
+    keyPending: false,
+  });
+  // A key list that still loads or failed (SKY-134).
+  assert.deepEqual(openRouter(null), { engine: "openrouter", disabled: true, keyPending: true });
   // Hosted builds keep their one choice.
   assert.deepEqual(agentEngineOptions(null, false, now, false), [
-    { engine: "openrouter", disabled: false },
+    { engine: "openrouter", disabled: false, keyPending: false },
   ]);
 });
 
