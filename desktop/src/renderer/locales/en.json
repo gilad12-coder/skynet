@@ -1,6 +1,4 @@
 {
-  "tagline": "Local mode",
-  "footer": "Everything runs on this Mac. Jobs use your own CLI subscriptions.",
   "check.docker": "Docker",
   "check.cli": "Coding CLI",
   "check.login": "Signed in",

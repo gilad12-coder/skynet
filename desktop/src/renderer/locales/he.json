@@ -1,6 +1,4 @@
 {
-  "tagline": "מצב מקומי",
-  "footer": "הכול רץ על המק הזה. העבודות משתמשות במנויי ה-CLI שלך.",
   "check.docker": "Docker",
   "check.cli": "CLI לקוד",
   "check.login": "מחובר",

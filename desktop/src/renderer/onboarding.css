@@ -135,16 +135,6 @@ body {
   letter-spacing: -0.01em;
 }
 
-.tag {
-  margin-inline-start: auto;
-  padding: 2px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 500;
-  background: var(--surface-2);
-}
 
 .card {
   width: min(640px, 100%);
@@ -175,6 +165,38 @@ body {
   align-items: center;
   padding: 8px;
   border-radius: calc(var(--radius) - 2px);
+  position: relative;
+}
+
+/* Timeline connector: each step draws the half above and the half below its dot,
+   so a step with a note (taller row) still meets its neighbours at the dot center. */
+.check::before,
+.check::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 12px;
+  width: 2px;
+  background: var(--input);
+}
+
+.check::before {
+  top: 0;
+  height: calc(8px + 0.5lh);
+}
+
+.check::after {
+  top: calc(8px + 0.5lh);
+  bottom: -4px;
+}
+
+.check:first-child::before,
+.check:last-child::after {
+  display: none;
+}
+
+.check-ok::after,
+.check-ok + .check::before {
+  background: var(--success);
 }
 
 .check-label {
@@ -210,6 +232,13 @@ body {
   border-radius: 999px;
   border: 2px solid var(--input);
   background: transparent;
+}
+
+/* Fill the ring so the timeline line does not show through a pending dot. */
+.check .dot {
+  background: var(--surface-2);
+  position: relative;
+  z-index: 1;
 }
 
 .check-ok .dot,
@@ -403,12 +432,6 @@ h1 {
   animation: spin 0.9s linear infinite;
 }
 
-.foot {
-  width: min(640px, 100%);
-  color: var(--text-3);
-  font-size: 12px;
-  text-align: center;
-}
 
 @media (max-width: 720px) {
   .card {
