@@ -76,6 +76,11 @@ npm run bundle:stack   # once, or after backend/frontend changes
 npm start
 ```
 
+For desktop work, `npm run dev` rebuilds on every save. The setup screen
+reloads at once; a change in `src/main` or `src/preload` relaunches the app,
+which stops and restarts the local stack. Quit an installed Skynet.app first:
+both use the same data folder and ports.
+
 ## Where things live
 
 | Path | Contents |

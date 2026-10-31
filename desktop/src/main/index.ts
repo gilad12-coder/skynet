@@ -111,6 +111,30 @@ function applyTheme(): void {
   win?.setBackgroundColor(windowBackground());
 }
 
+/** `npm run dev`: reload the onboarding page or relaunch on a rebuild of out/. */
+function watchOwnBuild(): void {
+  const outDir = path.join(__dirname, "..");
+  let timer: NodeJS.Timeout | null = null;
+  const debounce = (fn: () => void) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(fn, 200);
+  };
+  fs.watch(path.join(outDir, "renderer"), () =>
+    debounce(() => {
+      if (win?.webContents.getURL().startsWith("file:")) win.webContents.reload();
+    }),
+  );
+  for (const dir of ["main", "preload"]) {
+    fs.watch(path.join(outDir, dir), () =>
+      debounce(() => {
+        log("dev: rebuilt, relaunching");
+        app.relaunch();
+        app.quit();
+      }),
+    );
+  }
+}
+
 function showOnboarding(): void {
   useSetupSize();
   void win?.loadFile(path.join(__dirname, "..", "renderer", "index.html"), { query: { lang: locale() } });
@@ -353,17 +377,9 @@ async function signIn(): Promise<void> {
   signInUrl = result.url;
   setState({ ...state, signIn: "waiting", error: undefined });
   useAppSize();
-  try {
-    await win?.loadURL(result.url, { userAgent: desktopUserAgent() });
-  } catch (err) {
-    // Offline or skynetml.com down: back to the card with retry and skip.
-    const detail = err instanceof Error ? err.message : String(err);
-    log(`sign-in page failed to load: ${detail}`);
-    signInUrl = null;
-    showOnboarding();
-    setState({ ...state, signIn: "failed", error: detail });
-    return;
-  }
+  // The hosted page redirects (/desktop/link to /login, then client-side), which
+  // rejects loadURL with ERR_ABORTED. Real failures arrive through did-fail-load.
+  win?.loadURL(result.url, { userAgent: desktopUserAgent() }).catch(() => undefined);
   stopSignInPoll();
   const deadline = Date.now() + 15 * 60_000;
   signInPoll = setInterval(() => {
@@ -378,6 +394,16 @@ async function signIn(): Promise<void> {
 /** The hosted pages show "Use without signing in" only for this suffix. */
 function desktopUserAgent(): string {
   return `${win?.webContents.getUserAgent() ?? ""} SkynetDesktop`;
+}
+
+/** Offline or skynetml.com down: back to the card with retry and skip. */
+function signInLoadFailed(code: number, detail: string, url: string): void {
+  if (code === -3 || !signInUrl || state.kind !== "sign_in") return;
+  log(`sign-in page failed to load (${code} ${detail}): ${new URL(url).origin}`);
+  stopSignInPoll();
+  signInUrl = null;
+  showOnboarding();
+  setState({ ...state, signIn: "failed", error: detail });
 }
 
 function skipSignIn(): void {
@@ -494,6 +520,9 @@ function createWindow(): void {
     }
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
+  win.webContents.on("did-fail-load", (_event, code, detail, url, isMainFrame) => {
+    if (isMainFrame) signInLoadFailed(code, detail, url);
+  });
   win.on("closed", () => {
     win = null;
   });
@@ -527,9 +556,13 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     log(`Skynet desktop ${app.getVersion()} starting`);
+    // Secure DNS first, the system resolver as fallback: some networks fail to
+    // resolve the hosted sign-in page through the system resolver.
+    app.configureHostResolver({ secureDnsMode: "automatic", secureDnsServers: ["https://cloudflare-dns.com/dns-query"] });
     createWindow();
     applyTheme();
     nativeTheme.on("updated", applyTheme);
+    if (process.env.SKYNET_DESKTOP_DEV === "1" && !app.isPackaged) watchOwnBuild();
     win?.webContents.once("did-finish-load", () => void check());
     startUpdateCheck(log);
   });

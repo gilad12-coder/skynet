@@ -2,8 +2,9 @@
 // Build steps for the desktop app.
 //   app:   compile main, preload and renderer into out/
 //   stack: stage the backend, the standalone frontend and a pinned uv binary into stage/
+//   dev:   build app, then rebuild on every save and run Electron (the app reloads itself)
 // electron-builder copies stage/ into Skynet.app/Contents/Resources (see electron-builder.yml).
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -37,33 +38,9 @@ function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: "inherit", ...opts });
 }
 
-async function buildApp() {
-  fs.rmSync(outDir, { recursive: true, force: true });
-  const common = { bundle: true, sourcemap: false, logLevel: "warning", target: "es2023" };
-  await esbuild.build({
-    ...common,
-    entryPoints: [path.join(desktopDir, "src/main/index.ts")],
-    outfile: path.join(outDir, "main/index.js"),
-    platform: "node",
-    format: "cjs",
-    external: ["electron", "electron-updater"],
-  });
-  await esbuild.build({
-    ...common,
-    entryPoints: [path.join(desktopDir, "src/preload/index.ts")],
-    outfile: path.join(outDir, "preload/index.js"),
-    platform: "node",
-    format: "cjs",
-    external: ["electron"],
-  });
-  await esbuild.build({
-    ...common,
-    entryPoints: [path.join(desktopDir, "src/renderer/onboarding.ts")],
-    outfile: path.join(outDir, "renderer/onboarding.js"),
-    platform: "browser",
-    format: "iife",
-  });
+function copyStatic() {
   const rendererOut = path.join(outDir, "renderer");
+  fs.mkdirSync(rendererOut, { recursive: true });
   fs.copyFileSync(path.join(desktopDir, "src/renderer/index.html"), path.join(rendererOut, "index.html"));
   fs.copyFileSync(path.join(desktopDir, "src/renderer/onboarding.css"), path.join(rendererOut, "onboarding.css"));
   // The web app's font files are the source of truth; copy them instead of committing a second set.
@@ -75,7 +52,58 @@ async function buildApp() {
   for (const file of ["dock-light.png", "dock-dark.png"]) {
     fs.copyFileSync(path.join(desktopDir, "build", file), path.join(outDir, "icons", file));
   }
+}
+
+function appBuilds() {
+  const common = { bundle: true, sourcemap: false, logLevel: "warning", target: "es2023" };
+  return [
+    {
+      ...common,
+      entryPoints: [path.join(desktopDir, "src/main/index.ts")],
+      outfile: path.join(outDir, "main/index.js"),
+      platform: "node",
+      format: "cjs",
+      external: ["electron", "electron-updater"],
+    },
+    {
+      ...common,
+      entryPoints: [path.join(desktopDir, "src/preload/index.ts")],
+      outfile: path.join(outDir, "preload/index.js"),
+      platform: "node",
+      format: "cjs",
+      external: ["electron"],
+    },
+    {
+      ...common,
+      entryPoints: [path.join(desktopDir, "src/renderer/onboarding.ts")],
+      outfile: path.join(outDir, "renderer/onboarding.js"),
+      platform: "browser",
+      format: "iife",
+    },
+  ];
+}
+
+async function buildApp() {
+  fs.rmSync(outDir, { recursive: true, force: true });
+  for (const options of appBuilds()) await esbuild.build(options);
+  copyStatic();
   console.log(`built ${path.relative(desktopDir, outDir)}/`);
+}
+
+/**
+ * Rebuild out/ on every save and run Electron once. With SKYNET_DESKTOP_DEV set,
+ * the main process reloads the onboarding page when out/renderer changes and
+ * relaunches itself (stopping the stack cleanly) when out/main or out/preload changes.
+ */
+async function dev() {
+  await buildApp();
+  for (const options of appBuilds()) await (await esbuild.context(options)).watch();
+  for (const file of ["index.html", "onboarding.css"]) {
+    fs.watch(path.join(desktopDir, "src/renderer", file), () => copyStatic());
+  }
+  const electron = path.join(desktopDir, "node_modules/.bin/electron");
+  spawn(electron, ["."], { cwd: desktopDir, stdio: "inherit", env: { ...process.env, SKYNET_DESKTOP_DEV: "1" } });
+  console.log("watching src/ (Ctrl+C stops the watcher; quit the app with Cmd+Q)");
 }
 
 /** Copy the tracked backend files only, so .env files, .venv and caches never ship. */
@@ -160,7 +188,8 @@ function stageStack() {
 const mode = process.argv[2];
 if (mode === "app") await buildApp();
 else if (mode === "stack") stageStack();
+else if (mode === "dev") await dev();
 else {
-  console.error("usage: bundle-resources.mjs app|stack");
+  console.error("usage: bundle-resources.mjs app|stack|dev");
   process.exit(2);
 }

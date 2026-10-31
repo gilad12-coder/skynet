@@ -136,8 +136,8 @@ body {
 .card {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 200px 1fr;
+  display: flex;
+  flex-direction: column;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 8px);
@@ -145,46 +145,44 @@ body {
   overflow: hidden;
 }
 
+/* Horizontal timeline: one column per step, the dot above its label. */
 .checklist {
   list-style: none;
   margin: 0;
-  padding: 20px 16px;
+  padding: 18px 12px 14px;
   background: var(--surface-2);
-  border-inline-end: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
 }
 
 .check {
-  display: grid;
-  grid-template-columns: 12px 1fr;
-  column-gap: 10px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 8px;
-  border-radius: calc(var(--radius) - 2px);
+  gap: 8px;
   position: relative;
+  text-align: center;
 }
 
-/* Timeline connector: each step draws the half above and the half below its dot,
-   so a step with a note (taller row) still meets its neighbours at the dot center. */
+/* Connector: each step draws the half before and the half after its dot. */
 .check::before,
 .check::after {
   content: "";
   position: absolute;
-  inset-inline-start: 12px;
-  width: 2px;
+  top: 4px;
+  height: 2px;
+  width: 50%;
   background: var(--input);
 }
 
 .check::before {
-  top: 0;
-  height: calc(8px + 0.5lh);
+  inset-inline-start: 0;
 }
 
 .check::after {
-  top: calc(8px + 0.5lh);
-  bottom: -4px;
+  inset-inline-end: 0;
 }
 
 .check:first-child::before,
@@ -198,29 +196,16 @@ body {
 }
 
 .check-label {
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-1);
-}
-
-.check-note {
-  grid-column: 2;
-  font-size: 12px;
-  color: var(--text-3);
-}
-
-.check-note:empty {
-  display: none;
 }
 
 .check-pending .check-label {
   color: var(--text-3);
 }
 
-.check-fail {
-  background: var(--surface-3);
-}
-
-.check-fail .check-note {
+.check-fail .check-label {
   color: var(--danger);
 }
 
@@ -416,16 +401,6 @@ h1 {
   align-items: center;
   gap: 10px;
   color: var(--text-2);
-}
-
-@media (max-width: 600px) {
-  .card {
-    grid-template-columns: 1fr;
-  }
-  .checklist {
-    border-inline-end: 0;
-    border-bottom: 1px solid var(--border-subtle);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

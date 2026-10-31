@@ -113,38 +113,22 @@ const CHECK_ORDER: Kind[][] = [
   ["sign_in", "ready"],
 ];
 
-function rowStatuses(state: State): { key: string; status: RowStatus; note: string }[] {
+function rowStatuses(state: State): { key: string; status: RowStatus }[] {
   const keys = ["check.docker", "check.cli", "check.login", "check.limits", "check.stack", "check.account"];
   const at = CHECK_ORDER.findIndex((kinds) => kinds.includes(state.kind));
-  const failNotes: Partial<Record<Kind, string>> = {
-    docker_missing: t("status.missing"),
-    docker_stopped: t("status.stopped"),
-    no_cli: t("status.missing"),
-    cli_too_old: t("status.old"),
-    not_logged_in: t("status.signed_out"),
-    rate_capped: t("status.capped"),
-  };
   return keys.map((key, i) => {
-    if (state.kind === "checking") return { key, status: i === 0 ? "active" : "pending", note: "" };
-    if (i < at) return { key, status: "ok", note: t("status.ok") };
-    if (i === at) {
-      if (state.kind === "ready") return { key, status: "ok", note: t("status.ok") };
-      if (state.kind === "starting" || state.kind === "sign_in") return { key, status: "active", note: "" };
-      return { key, status: "fail", note: state.kind === "error" ? "" : (failNotes[state.kind] ?? "") };
-    }
-    return { key, status: "pending", note: "" };
+    if (state.kind === "checking") return { key, status: i === 0 ? "active" : "pending" };
+    if (i < at || (i === at && state.kind === "ready")) return { key, status: "ok" };
+    if (i === at) return { key, status: state.kind === "starting" || state.kind === "sign_in" ? "active" : "fail" };
+    return { key, status: "pending" };
   });
 }
 
 function renderChecklist(state: State): void {
   const list = document.getElementById("checklist") as HTMLOListElement;
   list.replaceChildren(
-    ...rowStatuses(state).map(({ key, status, note }) =>
-      el("li", { className: `check check-${status}` }, [
-        el("span", { className: "dot" }),
-        el("span", { className: "check-label", text: t(key) }),
-        el("span", { className: "check-note", text: note }),
-      ]),
+    ...rowStatuses(state).map(({ key, status }) =>
+      el("li", { className: `check check-${status}` }, [el("span", { className: "dot" }), el("span", { className: "check-label", text: t(key) })]),
     ),
   );
 }
@@ -202,7 +186,7 @@ function panelBody(state: State): Node[] {
       const skip = button(t("sign_in.skip"), "secondary", () => void bridge.skipSignIn());
       if (state.signIn === "waiting") {
         nodes.push(el("p", { className: "waiting" }, [el("span", { className: "spinner spinner-small" }), el("span", { text: t("sign_in.waiting") })]));
-        nodes.push(actions(button(t("sign_in.reopen"), "primary", () => void bridge.signIn()), skip));
+        nodes.push(actions(skip));
       } else if (state.signIn === "unavailable") {
         nodes.push(el("pre", { className: "detail", text: t("sign_in.unavailable") }));
         nodes.push(actions(button(t("sign_in.skip"), "primary", () => void bridge.skipSignIn())));
