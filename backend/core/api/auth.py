@@ -41,6 +41,11 @@ _API_TOKEN_SECRET_BYTES = 32
 # The age comes from ``created_at``, so no schema change is needed.
 API_TOKEN_MAX_AGE = timedelta(days=365)
 
+# Desktop link tokens (SKY-124) carry this prefix. They work only on the
+# scoped desktop routes in :mod:`core.api.desktop_auth`; this module refuses
+# them so a linked Mac can never open a full-account session route.
+DESKTOP_TOKEN_PREFIX = "skyl_"
+
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
@@ -299,6 +304,8 @@ def get_authenticated_user(request: Request, authorization: str | None = Header(
     personal access token (``skyd_…``, resolved against the ``api_tokens``
     table) for programmatic API access, or the short-lived HS256 session JWT
     the frontend mints for the web app. The PAT prefix selects the path.
+    A desktop link token (``skyl_…``) is refused: it is valid only on the
+    scoped desktop routes.
 
     A PAT call is stamped ``request.state.auth_channel = "api_token"`` so
     downstream telemetry can tell a production integration from the web app
@@ -313,11 +320,14 @@ def get_authenticated_user(request: Request, authorization: str | None = Header(
         The authenticated backend user.
 
     Raises:
-        DomainError: When authentication is missing or invalid.
+        DomainError: When authentication is missing or invalid, or 401
+            ``auth.desktop_token_not_allowed`` for a desktop link token.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise DomainError("auth.missing_token", status=401)
     token = authorization.removeprefix("Bearer ").strip()
+    if token.startswith(DESKTOP_TOKEN_PREFIX):
+        raise DomainError("auth.desktop_token_not_allowed", status=401)
     if is_api_token(token):
         user = _authenticate_api_token(request, token)
         request.state.auth_channel = "api_token"

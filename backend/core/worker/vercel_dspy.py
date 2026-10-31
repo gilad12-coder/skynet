@@ -83,7 +83,7 @@ def _guest_failure(result: CommandResult) -> Exception:
         return RuntimeError(f"{BROKEN_IMAGE_MESSAGE} {last}")
     detail = f" {last}" if last else ""
     return InfrastructureInterruptionError(
-        f"The Vercel optimizer exited without a complete result (exit {result.exit_code}).{detail}"
+        f"The optimizer in the cloud sandbox exited without a complete result (exit {result.exit_code}).{detail}"
     )
 
 
