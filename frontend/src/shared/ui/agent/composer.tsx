@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Check, CircleNotch, Microphone, Square, X } from "@/shared/ui/icons";
+import { toast } from "react-toastify";
+import { Check, CircleNotch, Microphone, Plus, Square, X } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
+import { extractAttachmentText } from "@/shared/lib/api";
 
 import { useLocale } from "@/shared/providers";
 import { useUserPrefs } from "@/features/settings";
@@ -12,8 +14,15 @@ import { cn } from "@/shared/lib/utils";
 import { MarkdownPreviewField } from "@/shared/ui/markdown-preview-field";
 
 import { autoResizeTextarea } from "./auto-resize";
+import { MAX_ATTACHMENT_MB, readAttachments } from "./file-attachments";
 import { PastedTextCard } from "./pasted-text-card";
-import { joinPastes, shouldAttachPaste, splitPastes } from "./pasted-text";
+import {
+  attachedFile,
+  joinPastes,
+  shouldAttachPaste,
+  splitPastes,
+  type AttachedFile,
+} from "./pasted-text";
 import { PendingMessages } from "./pending-messages";
 import { appendToDraft, midTurnKeyAction, type MidTurnQueue } from "./steer-queue";
 import { formatRecSeconds, useDictation } from "./use-dictation";
@@ -30,8 +39,8 @@ interface ComposerProps {
   stopAriaLabel?: string;
   /** Optional model selector chip rendered at the inline start of the control row. */
   modelMenu?: React.ReactNode;
-  /** Optional controls rendered after the model selector, such as attachment
-   *  and permission controls. */
+  /** Optional controls rendered after the model selector, such as permission
+   *  controls. */
   leadingControls?: React.ReactNode;
   /** Keep controls below the draft by default; model-free playgrounds can opt
    *  into a single row. */
@@ -41,12 +50,17 @@ interface ComposerProps {
    *  a turn streams, Enter steers (or queues) and Tab queues. Without it the
    *  composer locks while streaming. */
   midTurn?: MidTurnQueue;
+  /** Claims a picked or pasted file before the composer reads it as text;
+   *  return true when handled (the generalist sends datasets to its
+   *  column-mapping card this way). */
+  onAttachFile?: (file: File) => boolean;
 }
 
 /**
  * The shared chat composer, laid out Codex-style: one bordered box holding a
- * borderless textarea with a control row docked under it — attachment and
- * permission controls follow the model chip at the inline start, while the
+ * borderless textarea with a control row docked under it — the + attach
+ * button (any file type, read as text by the backend), the model chip and
+ * permission controls sit at the inline start, while the
  * dictation mic and circular send/stop button sit at the inline end. While
  * dictating, the textarea swaps for a recording strip (pulsing dot, timer,
  * cancel) and the mic becomes the finish control; the transcript is appended
@@ -67,6 +81,7 @@ export function Composer({
   layout = "stacked",
   className,
   midTurn,
+  onAttachFile,
 }: ComposerProps) {
   const inline = layout === "inline";
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -103,10 +118,42 @@ export function Composer({
   // Long pastes live in `value` as tagged blocks; the textarea only edits
   // what was typed, and each block shows as a card above it.
   const draft = splitPastes(value);
-  const setPastes = (pastes: string[], text = draft.text) => onChange(joinPastes({ text, pastes }));
+  const setPastes = (pastes: string[], text = draft.text) =>
+    onChange(joinPastes({ ...draft, text, pastes }));
+  const setFiles = (files: AttachedFile[]) => onChange(joinPastes({ ...draft, files }));
+
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [attaching, setAttaching] = React.useState(0);
+  const attachFiles = async (picked: File[]) => {
+    const files = onAttachFile ? picked.filter((file) => !onAttachFile(file)) : picked;
+    if (!files.length) return;
+    setAttaching((n) => n + 1);
+    try {
+      const read = await readAttachments(files, extractAttachmentText);
+      for (const name of read.failed) toast.error(msg("agent.composer.attach_failed", { name }));
+      for (const name of read.tooLarge)
+        toast.error(msg("agent.composer.attach_too_large", { name, max_mb: MAX_ATTACHMENT_MB }));
+      if (read.attached.length) {
+        // The draft may have changed while the files uploaded; add to its latest value.
+        const latest = splitPastes(valueRef.current);
+        const added = read.attached.map((file) => attachedFile(file.name, file.text));
+        onChange(joinPastes({ ...latest, files: [...latest.files, ...added] }));
+      }
+    } finally {
+      setAttaching((n) => n - 1);
+    }
+  };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const pasted = e.clipboardData.getData("text/plain");
+    // Office apps put a picture of the copied cells beside the text; only a
+    // paste with no text is a file paste.
+    const pastedFiles = Array.from(e.clipboardData.files);
+    if (pastedFiles.length && !pasted) {
+      e.preventDefault();
+      void attachFiles(pastedFiles);
+      return;
+    }
     if (!shouldAttachPaste(pasted)) return;
     e.preventDefault();
     setPastes([...draft.pastes, pasted]);
@@ -126,7 +173,7 @@ export function Composer({
     });
 
   const sendMidTurn = (mode: "steer" | "queue") => {
-    if (!midTurn || disabled || dictating || !hasDraft) return;
+    if (!midTurn || disabled || dictating || attaching > 0 || !hasDraft) return;
     if (mode === "steer") midTurn.steer(value);
     else midTurn.queue(value);
     onChange("");
@@ -139,7 +186,7 @@ export function Composer({
       sendMidTurn(midTurn?.canSteer ? "steer" : "queue");
       return;
     }
-    if (disabled || dictating || !hasDraft) return;
+    if (disabled || dictating || attaching > 0 || !hasDraft) return;
     onSubmit();
     resetHeight();
   };
@@ -205,8 +252,16 @@ export function Composer({
           inline && "flex min-h-[44px] items-end gap-1 p-1",
         )}
       >
-        {draft.pastes.length > 0 && !inline && (
+        {draft.pastes.length + draft.files.length > 0 && !inline && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">
+            {draft.files.map((file, i) => (
+              <PastedTextCard
+                key={`file-${i}`}
+                name={file.name}
+                text={file.text}
+                onRemove={() => setFiles(draft.files.filter((_, j) => j !== i))}
+              />
+            ))}
             {draft.pastes.map((paste, i) => (
               <PastedTextCard
                 key={i}
@@ -233,7 +288,7 @@ export function Composer({
               ref={textareaRef}
               value={draft.text}
               onChange={(e) => {
-                onChange(joinPastes({ text: e.target.value, pastes: draft.pastes }));
+                onChange(joinPastes({ ...draft, text: e.target.value }));
                 autoResizeTextarea(e.target);
               }}
               onPaste={inline ? undefined : handlePaste}
@@ -308,6 +363,38 @@ export function Composer({
             inline ? "shrink-0" : "px-2 pb-2 pt-0.5",
           )}
         >
+          {!inline && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  void attachFiles(picked);
+                }}
+              />
+              <TooltipButton tooltip={msg("agent.composer.attach")} side="top">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled || locked}
+                  className="shrink-0 rounded-full text-muted-foreground hover:text-foreground [@media(hover:none)_and_(pointer:coarse)]:size-11"
+                  aria-label={msg("agent.composer.attach")}
+                >
+                  {attaching > 0 ? (
+                    <CircleNotch className="size-4 animate-spin" />
+                  ) : (
+                    <Plus className="size-4" />
+                  )}
+                </Button>
+              </TooltipButton>
+            </>
+          )}
           {modelMenu}
           {leadingControls && (
             <div className="flex min-w-0 items-center gap-1">{leadingControls}</div>
@@ -347,7 +434,7 @@ export function Composer({
                 size="icon"
                 autoTooltip={false}
                 className="shrink-0 rounded-full"
-                disabled={disabled || dictating || !hasDraft}
+                disabled={disabled || dictating || attaching > 0 || !hasDraft}
                 aria-label={sendAriaLabel}
               >
                 <svg viewBox="0 0 24 24" fill="none" className="size-4">

@@ -79,6 +79,10 @@ dependencies = [
     "sentry-sdk>=2.67,<3",
     "pip==26.2.1",
     "pyarrow>=17",
+    # Text extraction for files attached in agent chats (core.agent_attachments):
+    # PDF and legacy .xls. Both are pure Python with no dependencies.
+    "pypdf>=5",
+    "xlrd>=2",
     "pymysql>=1.1",
     # Browser web push (VAPID) for the Chrome notification channel
     # (core.notifications.channels.ChromeChannel).

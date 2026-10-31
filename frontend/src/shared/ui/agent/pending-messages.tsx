@@ -216,9 +216,12 @@ export function PendingMessages({
   );
 }
 
-/** A queued message's one-line preview, with pastes named instead of dumped. */
+/** A queued message's one-line preview, with files and pastes named instead of dumped. */
 function previewText(text: string): string {
-  const { text: typed, pastes } = splitPastes(text);
-  const label = pastes.map(() => `[${msg("shared.agent.pasted_text")}]`).join(" ");
+  const { text: typed, pastes, files } = splitPastes(text);
+  const label = [
+    ...files.map((file) => `[${file.name}]`),
+    ...pastes.map(() => `[${msg("shared.agent.pasted_text")}]`),
+  ].join(" ");
   return [label, typed].filter(Boolean).join(" ");
 }
