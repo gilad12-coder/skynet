@@ -1,0 +1,14 @@
+# gitleaks configuration: the default rules plus repo paths that hold no
+# secrets. Used by .githooks/pre-commit and .github/workflows/gitleaks.yml.
+# Known false positives in old commits are in .gitleaksignore (fingerprints).
+title = "skynet gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Lock files"
+paths = [
+  '''(^|/)\.terraform\.lock\.hcl$''',
+  '''(^|/)(package-lock\.json|uv\.lock|pnpm-lock\.yaml)$''',
+]

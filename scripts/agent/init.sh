@@ -26,6 +26,20 @@ for tool in just docker pg_isready gh; do
   have "$tool" || record WARN "tool:$tool" "not installed (optional)"
 done
 
+# --- Git hooks ---------------------------------------------------------------
+# .githooks/pre-commit runs gitleaks on staged changes. Keep a hooks path that
+# someone set on purpose.
+hooks_path="$(git config --get core.hooksPath || true)"
+if [ -z "$hooks_path" ]; then
+  git config core.hooksPath .githooks
+  record OK hooks "core.hooksPath set to .githooks"
+elif [ "$hooks_path" = .githooks ]; then
+  record OK hooks "core.hooksPath is .githooks"
+else
+  record WARN hooks "core.hooksPath is $hooks_path, not .githooks; the gitleaks hook is off"
+fi
+have gitleaks || record WARN "tool:gitleaks" "not installed; the pre-commit hook blocks commits (brew install gitleaks)"
+
 # --- Env files ---------------------------------------------------------------
 # A new copy gets random auth secrets, so the backend and frontend agree with
 # no human step. An existing file is never changed.
