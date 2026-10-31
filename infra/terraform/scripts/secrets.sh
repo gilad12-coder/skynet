@@ -9,6 +9,14 @@
 #       Stores the file as the secret value. Fails if a key is missing.
 #   secrets.sh check <env>
 #       Lists the keys that the task definitions read but the secrets lack.
+#   secrets.sh check-empty <env>
+#       Lists the keys of app, frontend and litellm whose value is empty or
+#       only spaces (a template placeholder). Prints names only.
+#   secrets.sh set <env|dev> <app|frontend|litellm> <KEY>
+#       Reads one value from a hidden prompt (or the first line of stdin when
+#       stdin is not a terminal) and stores it under KEY. All other keys stay
+#       as they are. The value never goes on a command line or to the screen.
+#       env "dev" is the local development secret skynet/dev/<name>.
 #
 # The key list comes from the latest task definitions, so run Terraform first.
 
@@ -17,7 +25,11 @@ need aws jq
 
 cmd="${1:-}"
 env="${2:-}"
-check_env "$env"
+if [[ "$cmd" == set && "$env" == dev ]]; then
+  :
+else
+  check_env "$env"
+fi
 
 # Families that read each secret.
 families_for() {
@@ -75,7 +87,81 @@ case "$cmd" in
     done
     [[ "$ok" == 1 ]] || exit 1
     ;;
+  check-empty)
+    ok=1
+    for name in app frontend litellm; do
+      # jq stderr is dropped and the error text is fixed: a jq message can
+      # quote part of a value.
+      empty="$(aws secretsmanager get-secret-value --secret-id "skynet/$env/$name" \
+        --query SecretString --output text |
+        jq -r 'if type == "object" then to_entries[] | select(.value | tostring | test("^\\s*$")) | .key
+               else error("not a JSON object") end' 2>/dev/null)" || {
+        ok=0
+        echo "skynet/$env/$name: cannot read it, or it is not a JSON object"
+        continue
+      }
+      if [[ -n "$empty" ]]; then
+        ok=0
+        echo "skynet/$env/$name has empty values: $(sort <<<"$empty" | tr '\n' ' ')"
+      else
+        echo "skynet/$env/$name: no empty values"
+      fi
+    done
+    [[ "$ok" == 1 ]] || exit 1
+    ;;
+  set)
+    name="${3:-}"
+    key="${4:-}"
+    families_for "$name" >/dev/null
+    [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || die "KEY must be upper case letters, digits and _"
+    id="skynet/$env/$name"
+
+    # The value stays in shell variables and pipes from builtins (printf,
+    # read), so it is never in a process argument list.
+    value=""
+    if [[ -t 0 ]]; then
+      IFS= read -r -s -p "value for $key in $id (hidden): " value || true
+      echo >&2
+    else
+      IFS= read -r value || true
+    fi
+    [[ -n "$value" ]] || die "empty value; $id not changed"
+
+    # A secret that Terraform just created has no version yet: start from {}.
+    # Any read error stops the script (set -e), so a failed read can never
+    # turn into a write that drops the other keys.
+    stages="$(aws secretsmanager describe-secret --secret-id "$id" --query VersionIdsToStages --output json)"
+    has_current="$(printf '%s' "$stages" | jq 'any((. // {})[]; index("AWSCURRENT") != null)')"
+    current="{}"
+    if [[ "$has_current" == true ]]; then
+      current="$(aws secretsmanager get-secret-value --secret-id "$id" --query SecretString --output text)"
+    fi
+
+    # Read-modify-write of one key. jq fails (stderr dropped: it can quote a
+    # value) unless the old value is an object of strings and every old key
+    # is still in the new object.
+    new="$({
+      printf '%s\n' "$current"
+      printf '%s' "$value" | jq -Rs .
+    } | jq -nc --arg k "$key" '
+      input as $old | input as $v
+      | if ($old | type) == "object" and ($old | all(.[]; type == "string"))
+        then . else error("bad") end
+      | ($old + {($k): $v}) as $new
+      | if (($old | keys) - ($new | keys)) != [] then error("bad") else $new end
+    ' 2>/dev/null)" || die "$id is not a JSON object of string values; not changed"
+
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    (
+      umask 077
+      printf '%s' "$new" >"$tmp/secret.json"
+    )
+    aws secretsmanager put-secret-value --secret-id "$id" \
+      --secret-string "file://$tmp/secret.json" --query VersionId --output text >/dev/null
+    echo "set $key in $id ($(printf '%s' "$new" | jq 'length') keys)"
+    ;;
   *)
-    die "usage: secrets.sh template|put|check <env> ..."
+    die "usage: secrets.sh template|put|check|check-empty|set <env> ..."
     ;;
 esac
