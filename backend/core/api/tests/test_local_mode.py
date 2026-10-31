@@ -39,7 +39,7 @@ from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
-from .test_agent_engine import _status
+from .test_agent_engine import _CODEX_ID, _status
 from .test_protected_submissions import _Harness, _payload
 from .test_protected_submissions import harness as _harness_fixture
 from .test_submissions_router import (
@@ -669,27 +669,103 @@ def test_explicit_proposer_pick_overrides_the_agent_engine(
     assert _stored_proposer(store, resp)["host_cli"] == expected
 
 
+def _save_openrouter_key(monkeypatch: pytest.MonkeyPatch, store: Any, status: str | None) -> None:
+    """Save an OpenRouter key for ``alice`` with the given status.
+
+    Args:
+        monkeypatch: Pytest fixture used to install the vault key.
+        store: Job store whose engine holds the key vault.
+        status: The key's status, or ``None`` to save no key.
+    """
+    if status is None:
+        return
+    row = _verified_byok_row(monkeypatch)
+    row.status = status
+    with Session(store.engine) as session:
+        session.add(row)
+        session.commit()
+
+
+@pytest.mark.parametrize("key", [None, "unverified", "invalid"])
+def test_local_proposer_follows_the_default_cli_when_the_openrouter_key_is_gone(
+    monkeypatch: pytest.MonkeyPatch, key: str | None
+) -> None:
+    """A stored OpenRouter engine with no verified key runs the proposer on the default CLI.
+
+    Settings shows that CLI in this state ("agents run on Codex"), so the
+    proposer must not stay in the sandbox.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        key: The status of the caller's saved OpenRouter key, or ``None`` for no key.
+    """
+    client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=("codex", "claude"), stored="openrouter")
+    _save_openrouter_key(monkeypatch, store, key)
+
+    resp = client.post("/optimize", json=unified_payload(token_source="subscription", models=_SUBSCRIPTION_MODELS))
+
+    assert _stored_proposer(store, resp)["host_cli"] == "codex"
+
+
 @pytest.mark.parametrize(
-    ("ready", "stored", "proposer"),
+    ("ready", "key", "expected"),
     [
-        (("codex",), "openrouter", {}),
-        ((), None, {}),
-        (("codex",), None, {"harness": "custom", "run_command": "my-agent --model {model}"}),
+        (("codex", "claude"), None, _CODEX_ID),
+        (("codex", "claude"), "unverified", _CODEX_ID),
+        (("codex", "claude"), "verified", None),
+        ((), None, None),
+    ],
+)
+def test_local_agent_turn_with_no_model_follows_the_default_cli_when_the_openrouter_key_is_gone(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], key: str | None, expected: str | None
+) -> None:
+    """A stored OpenRouter engine with no verified key fills an empty agent pick from the default CLI.
+
+    With the verified key the pick stays empty, so the router runs it on the
+    key. With no ready CLI it also stays empty, and the router refuses it.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        key: The status of the caller's saved OpenRouter key, or ``None`` for no key.
+        expected: The filled model, or ``None`` for an unchanged empty pick.
+    """
+    _client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored="openrouter")
+    _save_openrouter_key(monkeypatch, store, key)
+
+    assert agent_engine.engine_agent_model(store, "alice", None) == expected
+
+
+@pytest.mark.parametrize(
+    ("ready", "stored", "key", "proposer"),
+    [
+        (("codex",), "openrouter", "verified", {}),
+        ((), "openrouter", None, {}),
+        ((), None, None, {}),
+        (("codex",), None, None, {"harness": "custom", "run_command": "my-agent --model {model}"}),
     ],
 )
 def test_local_proposer_stays_in_the_sandbox_without_an_engine_cli(
-    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], stored: str | None, proposer: dict[str, Any]
+    monkeypatch: pytest.MonkeyPatch,
+    ready: tuple[str, ...],
+    stored: str | None,
+    key: str | None,
+    proposer: dict[str, Any],
 ) -> None:
-    """The OpenRouter engine, no ready CLI, or a custom harness leaves ``host_cli`` unset.
+    """The OpenRouter engine with its key, no ready CLI, or a custom harness leaves ``host_cli`` unset.
 
     Args:
         monkeypatch: Pytest fixture used to set local mode and the probe.
         ready: The CLIs the probe reports as ready.
         stored: The engine stored in Settings, if any.
+        key: The status of the caller's saved OpenRouter key, or ``None`` for no key.
         proposer: The run's proposer settings.
     """
     client, store = _local_submit_client(monkeypatch, local_mode=True)
     _engine_setup(monkeypatch, store, ready=ready, stored=stored)
+    _save_openrouter_key(monkeypatch, store, key)
 
     resp = client.post(
         "/optimize",

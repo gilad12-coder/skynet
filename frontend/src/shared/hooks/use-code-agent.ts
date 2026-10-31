@@ -243,6 +243,8 @@ export interface UseCodeAgentArgs {
   /** Maps `model` to the id a request sends, at send time (local CLI roles). */
   resolveModel?: (model: string | null) => Promise<string | null>;
   reasoningEffort?: string | null;
+  /** Maps the effort to the one a request sends with the resolved model (local CLI roles). */
+  resolveEffort?: (model: string | null, effort: string | null, sent: string | null) => string | null;
   /** The chat a reload brings back; read once, on mount. */
   initialMessages?: AgentMessage[];
 }
@@ -278,6 +280,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     model,
     resolveModel,
     reasoningEffort,
+    resolveEffort,
     unified = null,
     onBrief,
     files,
@@ -682,6 +685,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       let metricLaneDone = false;
       let runLaneDone = false;
 
+      // The effort goes with the model the request resolved.
+      const effortField = (sent: string | null | undefined) => {
+        const effort = resolveEffort
+          ? resolveEffort(model ?? null, reasoningEffort ?? null, sent ?? null)
+          : reasoningEffort;
+        return effort ? { reasoning_effort: effort } : {};
+      };
       void (resolveModel ? resolveModel(model ?? null) : Promise.resolve(model)).then((sentModel) =>
         streamCodeAgent(
           {
@@ -708,7 +718,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 }
               : {}),
             ...(sentModel ? { model: sentModel } : {}),
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...effortField(sentModel),
             ...(unified ? { unified } : {}),
             ...(unified && Object.keys(latestFiles).length > 0 ? { prior_files: latestFiles } : {}),
             ...(steerKey ? { steer_key: steerKey } : {}),
@@ -1192,6 +1202,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       model,
       resolveModel,
       reasoningEffort,
+      resolveEffort,
       setSignatureCode,
       setMetricCode,
       setSignatureValidation,

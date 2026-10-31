@@ -51,6 +51,7 @@ import {
   flaggedRowIds,
   initialAssistState,
   interviewComposerEffort,
+  interviewRequestEffort,
   interviewRequestModel,
   labelsAgree,
   sampleRowIds,
@@ -711,6 +712,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       const controller = new AbortController();
       interviewAbortRef.current = controller;
       try {
+        const sentModel = await interviewRequestModel(state);
         await streamInterviewTurn(
           sessionId,
           {
@@ -719,8 +721,8 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             // role/content go over the wire.
             turns: turns.map(({ role, content }) => ({ role, content })),
             locale: getActiveLocale(),
-            model: (await interviewRequestModel(state)) ?? undefined,
-            reasoning_effort: interviewComposerEffort(state) ?? undefined,
+            model: sentModel ?? undefined,
+            reasoning_effort: interviewRequestEffort(state, sentModel) ?? undefined,
           },
           {
             signal: controller.signal,

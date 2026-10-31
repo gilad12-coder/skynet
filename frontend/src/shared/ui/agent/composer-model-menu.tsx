@@ -1,6 +1,12 @@
 "use client";
 
 import * as React from "react";
+import {
+  MENU_GROUP_LABELS,
+  menuModelGroup,
+  menuPickState,
+  RETIRED_AUTO_MODEL,
+} from "@/features/local-runtime";
 import { Check, CaretDown, CaretRight } from "@/shared/ui/icons";
 
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
@@ -19,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -43,15 +50,32 @@ interface ComposerModelMenuProps {
    * subscription models. The first one runs with no pick.
    */
   models?: CatalogModel[];
+  /**
+   * The given list is the OpenRouter engine menu, which hides Local models.
+   * A saved Local pick it does not list stays saved for a CLI engine.
+   */
+  openRouterEngine?: boolean;
 }
-
-// The retired "Auto · Intelligent" entry; saved prefs and conversations may
-// still carry it, and the backend runs the default for it like for null.
-const RETIRED_AUTO_MODEL = "auto:intelligent";
 
 // Caps the fallback list when the catalog flags no featured models (a
 // listing that carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
+
+/**
+ * Whether the menu sets aside a saved effort while it hides the saved pick (a
+ * Local pick under the OpenRouter engine): the menu names no model yet, or
+ * one that does not take that effort. The effort stays saved for the pick,
+ * but the chip and the request (keyEngineEffort) leave it out.
+ */
+export function hiddenPickEffortStale(
+  hidden: boolean,
+  effort: string | null,
+  current: CatalogModel | undefined,
+  efforts: readonly string[],
+): boolean {
+  if (!hidden || !effort) return false;
+  return !current?.supports_thinking || !efforts.includes(effort);
+}
 
 function effortHint(level: string | null): string {
   switch (level) {
@@ -92,6 +116,7 @@ export function ComposerModelMenu({
   disabled,
   defaultFlag = "is_default",
   models,
+  openRouterEngine = false,
 }: ComposerModelMenuProps) {
   const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
@@ -121,10 +146,10 @@ export function ComposerModelMenu({
   const listed = models ?? catalog?.models;
   // A saved pick the live catalog no longer lists (a withdrawn model) would
   // name a dead id on the chip. Only judged against a loaded, non-empty
-  // catalog so a gateway outage never wipes a valid pick.
-  const stale =
-    !!savedValue && !!listed && listed.length > 0 && !listed.some((m) => m.value === savedValue);
-  const value = savedValue && !stale ? savedValue : null;
+  // catalog so a gateway outage never wipes a valid pick. A Local pick the
+  // OpenRouter engine menu hides is no pick here, but it stays saved for a CLI engine.
+  const { unlisted, stale } = menuPickState(savedValue, listed, models, openRouterEngine);
+  const value = savedValue && !unlisted ? savedValue : null;
   React.useEffect(() => {
     if (stale) {
       onChange(null);
@@ -140,6 +165,10 @@ export function ComposerModelMenu({
     const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [models, available]);
+  // A given list that mixes groups labels each group, since two groups can
+  // list the same model name. A local agent menu lists one engine's models, so
+  // it shows no labels.
+  const grouped = !!models && new Set(models.map(menuModelGroup)).size > 1;
   // A previously chosen model outside the shortlist keeps its checkmarked
   // row next time the menu opens.
   const currentExtra =
@@ -160,6 +189,13 @@ export function ComposerModelMenu({
   const canThink = !!current?.supports_thinking;
   const efforts = effortsFor(effective, available);
   const defaultEffort = unpickedEffort(current);
+  const effortStale = hiddenPickEffortStale(
+    !!savedValue && unlisted && !stale,
+    effort,
+    current,
+    efforts,
+  );
+  const shownEffort = effortStale ? null : effort;
 
   const pick = (model: string | null) => {
     onChange(model);
@@ -197,8 +233,9 @@ export function ComposerModelMenu({
           </span>
           {/* Codex-style chip: the effort reads as a lighter suffix after the
               model name ("gpt-5 High"), not a separated fragment. */}
-          {effective && effort && (
-            <span className="shrink-0 text-muted-foreground">{effortLabel(effort)}</span>
+          {/* With no model shown the request still sends the effort, so the chip names it too. */}
+          {shownEffort && (
+            <span className="shrink-0 text-muted-foreground">{effortLabel(shownEffort)}</span>
           )}
           <CaretDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
@@ -222,14 +259,21 @@ export function ComposerModelMenu({
                   onSelect={() => pick(currentExtra.value)}
                 />
               )}
-              {featured.map((m) => (
-                <MenuItem
-                  key={m.value}
-                  selected={effective === m.value}
-                  label={modelDisplayName(m.value, available)}
-                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
-                  onSelect={() => pick(m.value)}
-                />
+              {featured.map((m, i) => (
+                <React.Fragment key={m.value}>
+                  {grouped &&
+                    (i === 0 || menuModelGroup(featured[i - 1]!) !== menuModelGroup(m)) && (
+                      <DropdownMenuLabel>
+                        {msg(MENU_GROUP_LABELS[menuModelGroup(m)])}
+                      </DropdownMenuLabel>
+                    )}
+                  <MenuItem
+                    selected={effective === m.value}
+                    label={modelDisplayName(m.value, available)}
+                    icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
+                    onSelect={() => pick(m.value)}
+                  />
+                </React.Fragment>
               ))}
             </div>
           </DropdownMenuSubContent>
@@ -238,7 +282,7 @@ export function ComposerModelMenu({
           <DropdownMenuSubTrigger disabled={!canThink || efforts.length === 0} className="py-2.5">
             <span className="shrink-0">{msg("agent.model_menu.effort_label")}</span>
             <span className="ms-auto truncate text-muted-foreground">
-              {effort ? effortLabel(effort) : msg("agent.model_menu.effort_default")}
+              {shownEffort ? effortLabel(shownEffort) : msg("agent.model_menu.effort_default")}
             </span>
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
@@ -246,7 +290,7 @@ export function ComposerModelMenu({
             {[null, ...efforts].map((level) => (
               <MenuItem
                 key={level ?? "default"}
-                selected={effort === level}
+                selected={shownEffort === level}
                 label={level ? effortLabel(level) : msg("agent.model_menu.effort_default")}
                 description={
                   level === null && defaultEffort

@@ -138,7 +138,10 @@ export function TaggerInterview({
   onConfirmRubric,
 }: Props) {
   useCompletionNotification(busy, () => msg("notify.interview.turn"));
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("tagger"));
+  const localMenu = useLocalAgentMenuModels(
+    agentSubscriptionFor("tagger"),
+    interviewComposerModel(assist),
+  );
   const [draft, setDraft] = useState("");
   const done = assist.interview.done;
   // A synthetic session has no rows until the interview has specified them.
@@ -279,7 +282,8 @@ export function TaggerInterview({
                 effort={interviewComposerEffort(assist)}
                 onEffortChange={onSetInterviewEffort}
                 defaultFlag="is_interview_default"
-                models={localMenuModels}
+                models={localMenu.models}
+                openRouterEngine={localMenu.openRouterEngine}
               />
             }
           />

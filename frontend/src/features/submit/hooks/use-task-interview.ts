@@ -2,7 +2,11 @@
 
 import * as React from "react";
 
-import { localAgentModel, localModelRefusalMessage } from "@/features/local-runtime";
+import {
+  localAgentEffort,
+  localAgentModel,
+  localModelRefusalMessage,
+} from "@/features/local-runtime";
 import { agentSubscriptionFor, readPref } from "@/features/settings";
 import { useAgentKickoff } from "@/shared/hooks/use-agent-kickoff";
 import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
@@ -140,7 +144,7 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
             starting_version: current.startingVersion,
             locale: getActiveLocale(),
             model: sentModel ?? undefined,
-            reasoning_effort: reasoningEffort ?? undefined,
+            reasoning_effort: localAgentEffort(model, reasoningEffort, sentModel) ?? undefined,
           },
           {
             onReasoning: (chunk: string) =>

@@ -10,7 +10,7 @@ import {
   type ProviderKeyResponse,
   type SaveProviderKeyOptions,
 } from "@/shared/lib/api";
-import { type KeyStatus, type ProviderKey } from "../lib/byok";
+import { joinInFlight, type KeyStatus, type ProviderKey } from "../lib/byok";
 import { invalidateByokModelCatalog } from "@/shared/lib/model-catalog";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 
@@ -19,6 +19,10 @@ interface ByokContextValue {
   keys: ProviderKey[];
   /** True while the saved keys are being fetched on mount. */
   loading: boolean;
+  /** True when the last fetch of the saved keys failed, so `keys` may be incomplete. */
+  failed: boolean;
+  /** Fetch the saved keys again, for example to retry after a failed fetch. */
+  reload: () => Promise<void>;
   /** Whether "Continue with OpenRouter" is offered (the backend vault is configured). */
   openrouterOAuthAvailable: boolean;
   /** The saved key for a provider slug, or null. */
@@ -37,6 +41,19 @@ interface ByokContextValue {
 }
 
 const ByokContext = React.createContext<ByokContextValue | null>(null);
+
+type ByokKeysSnapshot = Pick<ByokContextValue, "keys" | "loading" | "failed">;
+
+let snapshot: ByokKeysSnapshot | null = null;
+
+/**
+ * The mounted provider's key state, for code outside React (agent requests),
+ * so a request decides from the same keys the composer menu shows. Null when
+ * no provider is mounted.
+ */
+export function peekByokKeys(): ByokKeysSnapshot | null {
+  return snapshot;
+}
 
 /** Map a backend masked-connection response onto the UI's ProviderKey shape. */
 function toProviderKey(r: ProviderKeyResponse): ProviderKey {
@@ -84,8 +101,55 @@ export function ByokKeysProvider({
 }) {
   const [keys, setKeys] = React.useState<ProviderKey[]>(initialKeys);
   const [loading, setLoading] = React.useState(true);
+  const [failed, setFailed] = React.useState(false);
   const [openrouterOAuthAvailable, setOpenrouterOAuthAvailable] = React.useState(false);
   const { status: sessionStatus } = useSession();
+  // Bumped when a save, verify, or remove sets the keys: a list fetch that
+  // started before then may hold the older server list, so it is dropped.
+  const keysGen = React.useRef(0);
+
+  React.useEffect(() => {
+    snapshot = { keys, loading, failed };
+  }, [keys, loading, failed]);
+  React.useEffect(
+    () => () => {
+      snapshot = null;
+    },
+    [],
+  );
+
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // The pending reload, which concurrent reload calls share.
+  const reloading = React.useRef<Promise<void> | null>(null);
+
+  const reload = React.useCallback(() => {
+    const load = (): Promise<void> => {
+      const gen = keysGen.current;
+      return getProviderKeys()
+        .then((r) => {
+          if (!mounted.current) return;
+          // A save, verify, or remove set the keys meanwhile, so this result
+          // may be older: fetch again. Only a key change starts another fetch.
+          if (gen !== keysGen.current) return load();
+          setKeys(r.keys.map(toProviderKey));
+          setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
+          setFailed(false);
+        })
+        .catch(() => {
+          if (!mounted.current) return;
+          if (gen !== keysGen.current) return load();
+          setFailed(true);
+        });
+    };
+    return joinInFlight(reloading, load);
+  }, []);
 
   React.useEffect(() => {
     // The vault only answers a signed-in caller; skip it on signed-out pages.
@@ -95,14 +159,21 @@ export function ByokKeysProvider({
       return;
     }
     let active = true;
+    const gen = keysGen.current;
     getProviderKeys()
       .then((r) => {
         if (!active) return;
+        // A save, verify, or remove set the keys meanwhile, so this result may be older: fetch again.
+        if (gen !== keysGen.current) return reload();
         setKeys(r.keys.map(toProviderKey));
         setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
+        setFailed(false);
       })
       .catch(() => {
-        /* keep the current keys — no backend */
+        if (!active) return;
+        if (gen !== keysGen.current) return reload();
+        // Keep the current keys (no backend), but say the list is not known.
+        setFailed(true);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -110,17 +181,23 @@ export function ByokKeysProvider({
     return () => {
       active = false;
     };
-  }, [sessionStatus]);
+  }, [sessionStatus, reload]);
 
   const keyFor = React.useCallback(
     (provider: string) => keys.find((k) => k.provider === provider) ?? null,
     [keys],
   );
 
-  const upsert = React.useCallback((next: ProviderKey) => {
-    invalidateByokModelCatalog();
-    setKeys((prev) => [...prev.filter((k) => k.provider !== next.provider), next]);
-  }, []);
+  const upsert = React.useCallback(
+    (next: ProviderKey) => {
+      keysGen.current += 1;
+      invalidateByokModelCatalog();
+      setKeys((prev) => [...prev.filter((k) => k.provider !== next.provider), next]);
+      // One key does not make a failed list complete, so fetch the list again.
+      if (failed) void reload();
+    },
+    [failed, reload],
+  );
 
   const saveKey = React.useCallback(
     async (provider: string, secret: string, opts?: SaveProviderKeyOptions): Promise<KeyStatus> => {
@@ -143,13 +220,35 @@ export function ByokKeysProvider({
 
   const removeKey = React.useCallback(async (provider: string): Promise<void> => {
     const remaining = await removeProviderKey(provider);
+    keysGen.current += 1;
     invalidateByokModelCatalog();
     setKeys(remaining.keys.map(toProviderKey));
+    setFailed(false);
   }, []);
 
   const value = React.useMemo<ByokContextValue>(
-    () => ({ keys, loading, openrouterOAuthAvailable, keyFor, saveKey, verifyKey, removeKey }),
-    [keys, loading, openrouterOAuthAvailable, keyFor, saveKey, verifyKey, removeKey],
+    () => ({
+      keys,
+      loading,
+      failed,
+      reload,
+      openrouterOAuthAvailable,
+      keyFor,
+      saveKey,
+      verifyKey,
+      removeKey,
+    }),
+    [
+      keys,
+      loading,
+      failed,
+      reload,
+      openrouterOAuthAvailable,
+      keyFor,
+      saveKey,
+      verifyKey,
+      removeKey,
+    ],
   );
 
   return <ByokContext.Provider value={value}>{children}</ByokContext.Provider>;

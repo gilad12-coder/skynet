@@ -42,7 +42,7 @@ export function CodingAgentPanel({
   guided: boolean;
 }) {
   const { agent } = coding;
-  const localMenuModels = useLocalAgentMenuModels(agentSubscriptionFor("code"));
+  const localMenu = useLocalAgentMenuModels(agentSubscriptionFor("code"), coding.model);
   const renderToolCall = React.useCallback(
     (call: AgentToolCall) => <CodingCallRows calls={[call]} onOpenFile={onOpenFile} />,
     [onOpenFile],
@@ -119,7 +119,8 @@ export function CodingAgentPanel({
             onChange={coding.setModel}
             effort={coding.effort}
             onEffortChange={coding.setEffort}
-            models={localMenuModels}
+            models={localMenu.models}
+            openRouterEngine={localMenu.openRouterEngine}
           />
         }
       />
