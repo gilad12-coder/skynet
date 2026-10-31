@@ -31,6 +31,7 @@ from ...errors import DomainError
 from ...rate_limit import enforce_submission_rate
 from .._helpers import build_summary, enforce_job_quota, enforce_storage_quota
 from ..local_runtime import require_local_mode
+from ._local import execution_budget_view
 from .listing import build_sidebar_item
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
@@ -85,6 +86,7 @@ def _check_readable(job: dict[str, Any], events: list[dict[str, Any]]) -> None:
             stop_reason=job.get("stop_reason"),
             result_availability=job.get("result_availability"),
             terminal_evidence=job.get("terminal_evidence"),
+            execution_budget=execution_budget_view(None, job),
             stored_bytes=job.get("stored_bytes", 0),
             latest_metrics=job.get("latest_metrics", {}),
             progress_events=events,

@@ -450,6 +450,16 @@ def test_oversized_job_field_is_422(hosted_store: _SQLiteJobStore, bundle: dict[
     assert _count(hosted_store, JobModel) == 0
 
 
+@pytest.mark.parametrize("budget", ["x", 5, [1, 2]])
+def test_non_object_execution_budget_is_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any], budget: Any) -> None:
+    """A terminal-evidence budget the detail view cannot read is refused, so the run's detail page cannot 500."""
+    bundle["job"]["terminal_evidence"] = {"execution_budget": budget}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
 def test_job_fields_count_toward_storage(
     hosted_store: _SQLiteJobStore, bundle: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
