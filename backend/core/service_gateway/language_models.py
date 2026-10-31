@@ -16,12 +16,15 @@ import httpx
 import litellm
 
 from ..api.model_catalog import default_effort_for
+from ..billing.cli_dispatch import local_subscription_route
 from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
+from ..billing.operation_pricing import UnpricedOperationError
 from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
 from ..config import app_env, settings
 from ..exceptions import InfrastructureInterruptionError, ServiceError
+from ..local.cli_catalog import parse_subscription_model_id
 from ..models import ModelConfig
 
 try:
@@ -41,6 +44,10 @@ _OPENAI_REASONING_MAX_TOKENS = 16000
 ``max_tokens >= 16000`` (and ``temperature == 1.0``) at ``dspy.LM`` init."""
 
 _TRANSIENT_GATEWAY_CODES = frozenset({"provider_interrupted", "provider_transport_interruption"})
+
+SUBSCRIPTION_ROLE_KEY = "_skynet_subscription_role"
+"""``ModelConfig.extra`` key naming a subscription model's loopback route role.
+It never reaches the client; the default is ``"agent"``."""
 
 
 def _gateway_failure_code(error: BaseException) -> str | None:
@@ -282,8 +289,9 @@ class LmUsageTotals:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    model_ms: int = 0
 
-    def add_split(self, usage: object, split: tuple[int, int]) -> None:
+    def add_split(self, usage: object, split: tuple[int, int], *, subscription: bool = False) -> None:
         """Fold one call's input/output split and its cost evidence into the totals.
 
         A call whose provider reported its own cost adds that cost and marks its
@@ -293,11 +301,14 @@ class LmUsageTotals:
         Args:
             usage: The call's ``usage`` block.
             split: The call's ``(input_tokens, output_tokens)``.
+            subscription: The user's own CLI subscription paid for the call, so
+                it is folded at zero cost whatever its ``usage`` carries.
         """
         self.input_tokens += split[0]
         self.output_tokens += split[1]
         self.split_found = True
-        cost = _usage_reported_cost(usage)
+        self.model_ms += _count(_field(usage, "model_ms"))
+        cost = 0.0 if subscription else _usage_reported_cost(usage)
         if cost is not None:
             self.reported_cost_usd += cost
             self.reported_input_tokens += split[0]
@@ -415,6 +426,7 @@ class MeteredLM(dspy.LM):
         """Construct the LM and attach a fresh usage aggregate."""
         super().__init__(*args, **kwargs)
         self.usage_totals = LmUsageTotals()
+        self.subscription = False
         self.last_request_model: str | None = None
         self.last_response_model: str | None = None
         registry = _job_lm_registry
@@ -492,7 +504,7 @@ class MeteredLM(dspy.LM):
                 totals.total_tokens += total
                 totals.total_found = True
             if split is not None:
-                totals.add_split(usage, split)
+                totals.add_split(usage, split, subscription=self.subscription)
 
 
 def lm_call_count(language_model: object) -> int | None:
@@ -513,6 +525,30 @@ def lm_call_count(language_model: object) -> int | None:
         return totals.calls
     history = getattr(language_model, "history", None)
     return len(history) if isinstance(history, list) else None
+
+
+def _apply_subscription_route(lm_kwargs: dict[str, object], config: ModelConfig, role: str) -> None:
+    """Point an API-side subscription model at the local CLI endpoint.
+
+    Args:
+        lm_kwargs: The ``dspy.LM`` kwargs assembled so far, mutated in place.
+        config: A ``token_source == "subscription"`` model config.
+        role: The route's role; :data:`THINKING_LABEL_ROLE` runs in the label pool.
+
+    Raises:
+        ServiceError: Outside local mode, or when its CLI cannot run the model.
+    """
+    name = config.name.strip("/").removeprefix("openrouter/")
+    parsed = parse_subscription_model_id(name)
+    cli, slug = parsed if parsed is not None else (config.cli_provider, name)
+    try:
+        route = local_subscription_route(slug, cli, role)  # type: ignore[arg-type]
+    except UnpricedOperationError as error:
+        raise ServiceError(f"Failed to build language model '{config.name}': {error}") from error
+    lm_kwargs["model"] = f"litellm_proxy/{route['model']}"
+    lm_kwargs["base_url"] = route["url"]
+    lm_kwargs["api_key"] = route["token"]
+    lm_kwargs.pop("api_base", None)
 
 
 def build_language_model(config: ModelConfig, *, disable_cache: bool = False) -> dspy.LM:
@@ -569,6 +605,9 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         if effort:
             lm_kwargs["reasoning_effort"] = effort
     budget_route = lm_kwargs.pop(ROUTE_KEY, None)
+    subscription_role = str(lm_kwargs.pop(SUBSCRIPTION_ROLE_KEY, "agent"))
+    if budget_route is None and config.token_source == "subscription":
+        _apply_subscription_route(lm_kwargs, config, subscription_role)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)
     if disable_cache:
@@ -595,6 +634,9 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
         raise ServiceError(f"Failed to build language model '{config.name}': {exc}") from exc
 
     language_model.budget_route = budget_route
+    # LiteLLM rebuilds a streamed call's usage and drops the gateway's
+    # ``token_source`` mark, so the LM itself carries the zero-cost flag.
+    language_model.subscription = config.token_source == "subscription"
     return language_model
 
 
@@ -734,6 +776,10 @@ def _usage_reported_cost(usage: object) -> float | None:
     Returns:
         The call's full provider cost, or ``None`` when it was not reported.
     """
+    if _field(usage, "token_source") == "subscription":
+        # ``cost`` is the public list price, kept for the cost score; the
+        # user's own subscription paid for the call, so nothing is billed.
+        return 0.0
     cost = _field(usage, "cost")
     if isinstance(cost, bool) or not isinstance(cost, int | float) or cost < 0:
         return None

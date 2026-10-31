@@ -447,6 +447,25 @@ class ModelPrivacyPreferenceModel(Base):
     )
 
 
+class AgentEnginePreferenceModel(Base):
+    """Which engine runs a caller's agent turns when no model is picked.
+
+    Only local mode stores a row; a hosted caller always runs on OpenRouter.
+    A missing row means the first ready subscription CLI.
+    """
+
+    __tablename__ = "agent_engine_preferences"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    engine: Mapped[str] = mapped_column(String(16), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class PackageRegistryPreferenceModel(Base):
     """Store a caller's package index independently of local password accounts."""
 

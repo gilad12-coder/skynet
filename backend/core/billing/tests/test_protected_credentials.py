@@ -550,3 +550,48 @@ def test_repo_secret_without_value_or_reference_is_refused(harness: _Harness) ->
         protect_execution_credentials(
             _repo_payload([{"name": "API_KEY"}]), username="alice", binding_id=binding_id, vault=vault
         )
+
+
+def test_local_subscription_model_passes_without_provider_credentials(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a local subscription role on its CLI and drop any endpoint or key it carries.
+
+    Args:
+        harness: Encrypted vault with no saved connections.
+        monkeypatch: Turns local mode on.
+    """
+    monkeypatch.setattr(settings, "local_mode", True)
+    payload = {
+        "model_config": {
+            "name": "anthropic/claude-haiku-4.5",
+            "token_source": "subscription",
+            "cli_provider": "claude",
+            "base_url": "https://openrouter.ai/api/v1",
+            "byok_provider": "openrouter",
+            "extra": {"api_key": "fixture-leak", "temperature": 0},
+        }
+    }
+
+    resolved = prepare_protected_credentials(payload, username="alice", vault=harness.vault)
+
+    assert resolved["model_config"] == {
+        "name": "anthropic/claude-haiku-4.5",
+        "token_source": "subscription",
+        "cli_provider": "claude",
+        "extra": {"temperature": 0},
+    }
+
+
+def test_hosted_subscription_model_is_refused(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a subscription role outside local mode, where no CLI can serve it.
+
+    Args:
+        harness: Encrypted vault with no saved connections.
+        monkeypatch: Keeps local mode off.
+    """
+    monkeypatch.setattr(settings, "local_mode", False)
+    payload = {"model_config": {"name": "anthropic/claude-haiku-4.5", "token_source": "subscription"}}
+
+    with pytest.raises(ValueError, match="only in local mode"):
+        prepare_protected_credentials(payload, username="alice", vault=harness.vault)

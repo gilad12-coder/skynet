@@ -428,7 +428,8 @@ def attempt_record(role: str, status: int, seconds: float, body: bytes) -> dict[
         body: The response body.
 
     Returns:
-        The attempt: status, success, time, tokens and cost. A failed attempt
+        The attempt: status, success, time (the usage block's ``model_ms``
+        when present), tokens and cost. A failed attempt
         without a usage block cost nothing (the provider refused it before
         anything billable existed); any other attempt without a stated cost
         has ``cost_usd`` ``None``.
@@ -442,11 +443,14 @@ def attempt_record(role: str, status: int, seconds: float, body: bytes) -> dict[
     cost = metered_cost(usage)
     if cost is None and not ok and not isinstance(usage, dict):
         cost = 0.0
+    # A CLI subscription call reports the model's own time; wall time would
+    # also count the CLI's start-up, which is not the model's speed.
+    model_ms = _count(usage.get("model_ms")) if isinstance(usage, dict) else None
     return {
         "role": role,
         "status": status,
         "ok": ok,
-        "ms": _milliseconds(seconds),
+        "ms": _milliseconds(model_ms / 1000 if model_ms is not None else seconds),
         "prompt_tokens": _count(usage.get("prompt_tokens")) if isinstance(usage, dict) else None,
         "completion_tokens": _count(usage.get("completion_tokens")) if isinstance(usage, dict) else None,
         "total_tokens": _count(usage.get("total_tokens")) if isinstance(usage, dict) else None,

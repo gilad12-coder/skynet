@@ -24,6 +24,7 @@ from ...models import (
     DataMode,
     InputsInferenceRequest,
     InputsInferenceResponse,
+    ModelConfig,
 )
 from ...models.common import SplitFractions
 from .code import _build_agent_lm, _reply_language
@@ -177,17 +178,19 @@ def _single_input(raw: Any, fields: list[str], rows: list[dict[str, Any]]) -> di
     return None
 
 
-def _predict(req: InputsInferenceRequest, usage_sink: list | None) -> Any:
+def _predict(req: InputsInferenceRequest, usage_sink: list | None, model_config: ModelConfig | None = None) -> Any:
     """Run the inference predictor once.
 
     Args:
         req: The inference request.
         usage_sink: Optional list the built LM is appended to, for metering.
+        model_config: Optional resolved config for ``req.model`` (the Mac
+            app's BYOK route).
 
     Returns:
         The raw prediction.
     """
-    lm = _build_agent_lm(req.model, max_tokens=INFERENCE_MAX_TOKENS)
+    lm = _build_agent_lm(req.model, max_tokens=INFERENCE_MAX_TOKENS, model_config=model_config)
     if usage_sink is not None:
         usage_sink.append(lm)
     version = "" if req.starting_version is None else json.dumps(req.starting_version, ensure_ascii=False)
@@ -205,7 +208,12 @@ def _predict(req: InputsInferenceRequest, usage_sink: list | None) -> Any:
         )
 
 
-def infer_inputs(req: InputsInferenceRequest, *, usage_sink: list | None = None) -> InputsInferenceResponse:
+def infer_inputs(
+    req: InputsInferenceRequest,
+    *,
+    usage_sink: list | None = None,
+    model_config: ModelConfig | None = None,
+) -> InputsInferenceResponse:
     """Decide single vs pairs and the input/expected columns for step 2.
 
     A failed model call falls back to a column-only guess (pairs when there
@@ -215,12 +223,14 @@ def infer_inputs(req: InputsInferenceRequest, *, usage_sink: list | None = None)
     Args:
         req: The task and the data sample.
         usage_sink: Optional list the built LM is appended to, for metering.
+        model_config: Optional resolved config for ``req.model`` (the Mac
+            app's BYOK route).
 
     Returns:
         The validated proposal, with a deterministic split and held-out count.
     """
     try:
-        pred: Any = _predict(req, usage_sink)
+        pred: Any = _predict(req, usage_sink, model_config)
     except Exception:
         logger.warning("inputs inference failed; falling back to the column guess", exc_info=True)
         pred = None
