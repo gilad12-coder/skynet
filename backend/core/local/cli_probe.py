@@ -1,8 +1,8 @@
 """Detect the coding CLIs and Docker that local mode depends on.
 
-Every probe runs the real binary with a short timeout and an environment that
-has no provider API keys, so a probe never bills an account and a key in the
-shell never makes a CLI look logged in.
+Every probe runs the real binary with a short timeout and an allow-listed
+environment, so a probe never bills an account and a key in the shell never
+makes a CLI look logged in.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,9 +25,39 @@ from core.local.cli_catalog import CLI_MODELS, MIN_VERSIONS, CliProvider
 
 CLI_IDS: tuple[CliProvider, ...] = ("codex", "claude")
 
-# Each key makes a CLI bill an API account instead of the user's
-# subscription.
-STRIPPED_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
+# An allow-list, not a deny-list: each CLI has many variables that move it to
+# an API account, a cloud provider or another endpoint (three review rounds
+# found new ones), so a CLI gets only what it needs to run, sign in with the
+# user's subscription, and reach the network through the user's proxy and CA.
+CLI_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "LANG",
+        "TERM",
+        "TZ",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        "CODEX_CA_CERTIFICATE",
+    }
+)
+CLI_ENV_PREFIXES = ("LC_", "XDG_")
 
 CLI_LIMITS_FILENAME = "cli_limits.json"
 
@@ -35,7 +66,10 @@ _PROBE_CACHE_SECONDS = 30.0
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 _LOGIN_HINTS: dict[CliProvider, str] = {
-    "codex": "Run `codex login` in a terminal.",
+    # Skynet reads the codex login from auth.json, so a Keychain-only login looks signed out.
+    "codex": (
+        'Sign in to codex with ChatGPT: set `cli_auth_credentials_store = "file"` in `~/.codex/config.toml`, then run `codex login` in a terminal.'
+    ),
     "claude": "Run `claude auth login` in a terminal.",
 }
 
@@ -59,13 +93,25 @@ class CliStatus:
     models: list[str]
 
 
-def cli_env() -> dict[str, str]:
-    """Return this process's environment without provider API keys.
+def cli_child_env(source: Mapping[str, str]) -> dict[str, str]:
+    """Return the allow-listed part of an environment for a CLI subprocess.
+
+    Args:
+        source: The environment to copy from.
 
     Returns:
-        A copy of ``os.environ`` without the keys in ``STRIPPED_ENV_KEYS``.
+        The variables in ``CLI_ENV_KEYS`` or with a prefix in ``CLI_ENV_PREFIXES``.
     """
-    return {key: value for key, value in os.environ.items() if key not in STRIPPED_ENV_KEYS}
+    return {key: value for key, value in source.items() if key in CLI_ENV_KEYS or key.startswith(CLI_ENV_PREFIXES)}
+
+
+def cli_env() -> dict[str, str]:
+    """Return the allow-listed part of this process's environment.
+
+    Returns:
+        :func:`cli_child_env` of ``os.environ``.
+    """
+    return cli_child_env(os.environ)
 
 
 def cli_binary(cli: CliProvider, settings: Settings) -> str:
@@ -119,6 +165,42 @@ def _version_tuple(text: str) -> tuple[int, int, int] | None:
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
+def codex_subscription_login(document: object) -> bool:
+    """Tell whether a codex ``auth.json`` is a ChatGPT subscription login, by codex's own rule.
+
+    Codex takes an explicit ``auth_mode`` first. Without one, a non-empty
+    ``OPENAI_API_KEY`` makes it an API-key login, else a ChatGPT login. An
+    API-key login bills the user's API account, so only a ChatGPT login with
+    an access token counts.
+
+    Args:
+        document: The parsed ``auth.json``.
+
+    Returns:
+        True for a ChatGPT login with an access token.
+    """
+    if not isinstance(document, dict):
+        return False
+    mode = document.get("auth_mode")
+    if mode is None:
+        mode = "apikey" if document.get("OPENAI_API_KEY") else "chatgpt"
+    tokens = document.get("tokens")
+    return mode == "chatgpt" and isinstance(tokens, dict) and bool(tokens.get("access_token"))
+
+
+def _codex_login_file() -> object:
+    """Read the codex login file the probe's CLI uses.
+
+    Returns:
+        The parsed ``auth.json``, or None when it is missing or not JSON.
+    """
+    home = os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    try:
+        return json.loads((Path(home) / "auth.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def _logged_in(cli: CliProvider, path: str) -> bool | None:
     """Ask a CLI whether it has a signed-in subscription.
 
@@ -134,7 +216,9 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
         result = _run([path, "login", "status"])
         if result is None:
             return None
-        return result.returncode == 0 and "logged in" in (result.stdout + result.stderr).lower()
+        status = (result.stdout + result.stderr).lower()
+        # The host turn reads the same file with the same rule, so the app and the turn agree.
+        return result.returncode == 0 and "logged in" in status and codex_subscription_login(_codex_login_file())
     result = _run([path, "auth", "status"])
     if result is None:
         return None
@@ -145,7 +229,13 @@ def _logged_in(cli: CliProvider, path: str) -> bool | None:
     if not isinstance(payload, dict):
         return None
     flag = payload.get("loggedIn")
-    return flag if isinstance(flag, bool) else None
+    if not isinstance(flag, bool):
+        return None
+    # claude also says loggedIn for an apiKeyHelper or a CLAUDE_CODE_OAUTH_TOKEN it
+    # never checks; only a claude.ai login is a subscription the runners can use.
+    if flag:
+        return payload.get("authMethod") == "claude.ai"
+    return flag
 
 
 def _active_limit(limits: dict[str, dict[str, str]], cli: CliProvider, now: datetime) -> str | None:

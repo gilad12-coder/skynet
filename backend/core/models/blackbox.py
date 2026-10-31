@@ -273,6 +273,8 @@ class BlackboxTarget(BaseModel):
 # harness is stopped once it starts one more, and the edits it already made
 # stand. It also bounds each ShinkaEvolve agent-editor session. Harnesses whose
 # output reports no tool calls as they happen (a custom command) are not capped.
+# ``host_cli`` offers only Codex and Claude Code: Droid has no flag that skips
+# the user's own config, hooks and MCP servers, so it cannot run isolated.
 class BlackboxProposer(BaseModel):
     harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None

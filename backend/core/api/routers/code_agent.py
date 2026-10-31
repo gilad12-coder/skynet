@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from ...config import settings
 from ...models import (
     InputsInferenceRequest,
     InputsInferenceResponse,
@@ -34,11 +35,18 @@ from ...service_gateway.agents.kickoff import fits_kickoff_budget, measured_byte
 from ...service_gateway.agents.steering import STEER_KEY_MAX_CHARS, get_steer_store
 from ...service_gateway.agents.task_interview import task_interview_turn_stream
 from ...storage.models import UserModel
+from ..agent_engine import engine_agent_model
 from ..agent_turns import AgentTurnRegistry
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort, get_catalog_cached
-from ..model_router import effective_reasoning_effort, route_interview_model, route_menu_model
+from ..model_router import (
+    effective_reasoning_effort,
+    metering_token_source,
+    route_interview_model,
+    route_local_byok_model,
+    route_menu_model,
+)
 from ..wizard_agent_quota import consume_wizard_agent_turn
 from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 from .experience import INTAKE_MAX_BYTES
@@ -518,7 +526,11 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         billed_store = await asyncio.to_thread(
             gate_interactive_turn, job_store, current_user.username, req.unified is not None
         )
-        model = route_menu_model(req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username
+        )
+        model = byok_config.name if byok_config is not None else route_menu_model(picked)
         effort = effective_reasoning_effort(model, req.reasoning_effort)
         if req.unified is not None and not req.user_message.strip() and not req.reasoning_effort:
             # The wizard's seed lanes write two short functions; at the catalog
@@ -551,6 +563,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             steer_owner=current_user.username,
             steer_key=req.steer_key,
             prior_files=req.prior_files,
+            model_config=byok_config,
         )
         metered = stream_with_llm_metering(
             source,
@@ -558,6 +571,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Code authoring",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         )
         return await _turn_response(metered, current_user.username)
 
@@ -599,7 +613,11 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         ):
             return await _turn_response(oversized_kickoff("data"), current_user.username)
         billed_store = await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
-        model = await asyncio.to_thread(route_interview_model, req.model)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username, interview=True
+        )
+        model = byok_config.name if byok_config is not None else await asyncio.to_thread(route_interview_model, picked)
         usage_sink: list = []
 
         async def source() -> AsyncIterator[dict]:
@@ -616,6 +634,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
                     model=model,
                     reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                     usage_sink=usage_sink,
+                    model_config=byok_config,
                 ):
                     yield event
             except Exception:
@@ -631,6 +650,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Task interview",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         )
         return await _turn_response(metered, current_user.username)
 
@@ -657,8 +677,12 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         """
         # A free turn has no billed store, so there is no usage to meter.
         await asyncio.to_thread(gate_interactive_turn, job_store, current_user.username, True)
-        model = await asyncio.to_thread(route_interview_model, req.model)
-        return await asyncio.to_thread(infer_inputs, req.model_copy(update={"model": model}))
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, req.model)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username, interview=True
+        )
+        model = byok_config.name if byok_config is not None else await asyncio.to_thread(route_interview_model, picked)
+        return await asyncio.to_thread(infer_inputs, req.model_copy(update={"model": model}), model_config=byok_config)
 
     @router.post(
         "/account/intake-interview",
@@ -687,7 +711,13 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         """
         billed_store, platform_paid = await asyncio.to_thread(gate_intake_turn, job_store, current_user.username)
         catalog_models, provider_slugs = await asyncio.to_thread(_intake_catalog)
-        model = await asyncio.to_thread(route_interview_model, None if platform_paid else req.model)
+        picked = await asyncio.to_thread(
+            engine_agent_model, job_store, current_user.username, None if platform_paid else req.model
+        )
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username, interview=True
+        )
+        model = byok_config.name if byok_config is not None else await asyncio.to_thread(route_interview_model, picked)
         if req.reasoning_effort and not platform_paid:
             effort = effective_reasoning_effort(model, req.reasoning_effort)
         else:
@@ -706,6 +736,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
                     model=model,
                     reasoning_effort=effort,
                     usage_sink=usage_sink,
+                    model_config=byok_config,
                 ):
                     yield event
             except Exception:
@@ -721,6 +752,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Onboarding interview",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         )
         return await _turn_response(metered, current_user.username)
 
@@ -747,9 +779,23 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             optional assistant message.
 
         Raises:
-            DomainError: 502 when the code agent emits an ``error`` event.
+            DomainError: 502 when the code agent emits an ``error`` event; 422
+                ``models.managed_unavailable_local`` in local mode when the
+                caller has no verified OpenRouter key and no subscription
+                engine.
         """
         await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
+        picked = await asyncio.to_thread(engine_agent_model, job_store, current_user.username, None)
+        byok_config = await asyncio.to_thread(
+            route_local_byok_model, picked, job_store=job_store, username=current_user.username
+        )
+        # Hosted keeps the code agent's own default (settings.code_agent_model);
+        # only the Mac app, which has no managed key, routes the turn here.
+        model = None
+        if byok_config is not None:
+            model = byok_config.name
+        elif settings.local_mode:
+            model = route_menu_model(picked)
         final_signature = req.current_signature
         final_metric = req.current_metric
         assistant_message = ""
@@ -764,7 +810,9 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             chat_history=[],
             prior_signature=req.current_signature,
             prior_metric=req.current_metric,
+            model=model,
             usage_sink=usage_sink,
+            model_config=byok_config,
         )
         async for event in stream_with_llm_metering(
             source,
@@ -772,6 +820,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             username=current_user.username,
             description="Code authoring",
             usage_sink=usage_sink,
+            token_source=metering_token_source(byok_config),
         ):
             name = event["event"]
             data = event["data"]

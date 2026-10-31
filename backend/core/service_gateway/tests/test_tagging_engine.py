@@ -13,6 +13,9 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
+from ...api.errors import DomainError
 from .. import tagging
 from ..tagging import (
     MAX_EXAMPLES,
@@ -541,3 +544,128 @@ def test_synthesize_rows_raises_when_nothing_usable(monkeypatch) -> None:
         pass
     else:
         raise AssertionError("expected RuntimeError")
+
+
+_LOCAL_REFUSED = (422, "models.managed_unavailable_local")
+
+
+@pytest.mark.parametrize(
+    "assist",
+    [
+        {},
+        {"model": "  "},
+        {"model": "openai/gpt-4o-mini"},
+        {"model": "openai/gpt-4o-mini", "modelParams": {"token_source": "managed"}},
+    ],
+    ids=["no_model", "blank_model", "explicit_managed", "explicit_managed_source"],
+)
+def test_local_mode_refuses_a_managed_tagging_model(monkeypatch: pytest.MonkeyPatch, assist: dict) -> None:
+    """Refuse a managed tagging model in local mode instead of calling OpenRouter.
+
+    Args:
+        monkeypatch: Turns local mode on.
+        assist: A session's assist state that selects no BYOK model.
+    """
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    with pytest.raises(DomainError) as caught:
+        assist_model_config(assist)
+    assert (caught.value.status_code, caught.value.code) == _LOCAL_REFUSED
+
+
+def test_local_mode_keeps_a_byok_tagging_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a BYOK tagging pick in local mode, because the user's own key pays.
+
+    Args:
+        monkeypatch: Turns local mode on.
+    """
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    config = assist_model_config(
+        {"model": "openai/gpt-4o-mini", "modelParams": {"token_source": "byok", "byok_provider": "openai"}}
+    )
+    assert (config.name, config.token_source, config.byok_provider) == ("openai/gpt-4o-mini", "byok", "openai")
+
+
+def test_local_mode_refuses_a_subscription_tagging_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a subscription id for tagging runs, which cannot use one yet.
+
+    Args:
+        monkeypatch: Turns local mode on.
+    """
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    with pytest.raises(DomainError) as caught:
+        assist_model_config({"model": "subscription/claude/anthropic/claude-haiku-4.5"})
+    assert (caught.value.status_code, caught.value.code) == (422, "tagger.assist.unknown_model")
+
+
+def test_hosted_mode_keeps_the_managed_tagging_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the managed default for a hosted session with no saved model.
+
+    Args:
+        monkeypatch: Keeps local mode off.
+    """
+    monkeypatch.setattr(tagging.settings, "local_mode", False)
+    config = assist_model_config({})
+    assert (config.name, config.token_source) == (assist_model_name(), None)
+
+
+def test_local_mode_synthesis_never_builds_a_managed_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse synthesis with no chosen model before any model is built.
+
+    Args:
+        monkeypatch: Turns local mode on and fails any model build.
+    """
+
+    def no_model(*args: object, **kwargs: object) -> None:
+        """Fail the test if a tagging model is built."""
+        raise AssertionError("local mode built a managed tagging model")
+
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    monkeypatch.setattr(tagging, "_build_assist_lm", no_model)
+    with pytest.raises(DomainError) as caught:
+        synthesize_rows("support tickets", ["text"], 5)
+    assert (caught.value.status_code, caught.value.code) == _LOCAL_REFUSED
+
+
+@pytest.mark.parametrize("model", [None, "openai/gpt-4o-mini"], ids=["default", "explicit_managed"])
+def test_local_mode_interview_lm_refuses_a_managed_model(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
+    """Refuse a managed interview model in local mode before it is built.
+
+    Args:
+        monkeypatch: Turns local mode on and fails any model build.
+        model: The interview's routed model id.
+    """
+
+    def no_model(config: object, disable_cache: bool) -> None:
+        """Fail the test if a managed model is built."""
+        raise AssertionError("local mode built a managed tagging model")
+
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    monkeypatch.setattr(tagging, "build_language_model", no_model)
+    with pytest.raises(DomainError) as caught:
+        tagging._build_assist_lm(model)
+    assert (caught.value.status_code, caught.value.code) == _LOCAL_REFUSED
+
+
+def test_local_mode_interview_lm_runs_a_subscription_pick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build a subscription interview model on the user's CLI, not on managed OpenRouter.
+
+    Args:
+        monkeypatch: Turns local mode on and records the built config.
+    """
+    captured: list = []
+
+    def fake_build(config: object, disable_cache: bool) -> str:
+        """Record the config instead of building a model."""
+        captured.append(config)
+        return "lm"
+
+    monkeypatch.setattr(tagging.settings, "local_mode", True)
+    monkeypatch.setattr(tagging, "build_language_model", fake_build)
+    tagging._build_assist_lm("subscription/claude/anthropic/claude-haiku-4.5")
+    (config,) = captured
+    assert (config.name, config.token_source, config.cli_provider) == (
+        "anthropic/claude-haiku-4.5",
+        "subscription",
+        "claude",
+    )
+    assert config.base_url is None

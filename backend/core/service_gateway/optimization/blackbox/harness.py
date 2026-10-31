@@ -16,9 +16,10 @@ import json
 import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from ....config import with_legacy_env
+from ....config import settings, with_legacy_env
 from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_HARNESS_CODEX,
@@ -28,9 +29,11 @@ from ....models.blackbox import (
     BLACKBOX_HARNESS_PRIME,
     BlackboxTarget,
 )
+from ....worker import host_agent_shim
 from .harness_bridge import (
     PARSERS,
     parse_codex_output,
+    parse_host_agent_output,
     parse_opencode_output,
     parse_pi_output,
     parse_plain_output,
@@ -444,6 +447,53 @@ def pi_editor_launch(
     )
 
 
+HOST_AGENT_SHIM_FILE = ".app/host-agent/shim.py"
+
+
+def host_cli_launch(model: str, gateway: GatewayConfig, host_cli: str, host_agent_token: str | None) -> HarnessLaunch:
+    """Build the launch that hands each proposer turn to a CLI on the user's machine.
+
+    The sandbox runs only the stdlib shim; the parent runs the CLI on a copy
+    of the workspace (:mod:`core.billing.host_agent`). The parent picks the CLI
+    and its permission from the run settings, so the shim sends neither.
+
+    Args:
+        model: Proposer model id, passed through to the parent.
+        gateway: Gateway URL the shim reaches the parent through.
+        host_cli: ``codex`` or ``claude``.
+        host_agent_token: The token the parent minted for this proposer.
+
+    Returns:
+        The launch.
+
+    Raises:
+        ServiceError: When local mode is off, the CLI is unknown, or the token is missing.
+    """
+    if not settings.local_mode:
+        raise ServiceError("Host CLI proposers run only in the Mac app.")
+    instructions = host_agent_shim.INSTRUCTIONS_FILES.get(host_cli)
+    if instructions is None:
+        raise ServiceError(f"Unknown host CLI '{host_cli}'.")
+    if not host_agent_token:
+        raise ServiceError("This run has no host proposer token.")
+    env = _base_env(model, gateway)
+    env.update(
+        with_legacy_env(
+            {
+                "APP_HOST_AGENT_TOKEN": host_agent_token,
+                "APP_HOST_AGENT_TIMEOUT": str(settings.host_agent_timeout_seconds),
+            }
+        )
+    )
+    return HarnessLaunch(
+        instructions_file=instructions,
+        run_command=f'python3 "$PWD/{HOST_AGENT_SHIM_FILE}"',
+        files={HOST_AGENT_SHIM_FILE: Path(host_agent_shim.__file__).read_text(encoding="utf-8")},
+        env=env,
+        parse_output=parse_host_agent_output,
+    )
+
+
 def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected: bool = False) -> str | None:
     """Substitute the custom-harness placeholders into ``command``.
 
@@ -478,16 +528,26 @@ _CATALOG: dict[str, Callable[[str, GatewayConfig], HarnessLaunch]] = {
 }
 
 
-def build_launch(target: BlackboxTarget, gateway: GatewayConfig, *, protected: bool = False) -> HarnessLaunch:
+def build_launch(
+    target: BlackboxTarget,
+    gateway: GatewayConfig,
+    *,
+    protected: bool = False,
+    host_cli: str | None = None,
+    host_agent_token: str | None = None,
+) -> HarnessLaunch:
     """Resolve the launch for a job's target: catalog harness or custom command.
 
     ``target.install_command`` and ``target.run_command`` override the
     catalog defaults when set; a custom harness is nothing but those two.
+    A ``host_cli`` replaces both with the host-agent shim (local mode only).
 
     Args:
         target: The job's agent target.
         gateway: Gateway URL and key the harness routes its model calls through.
         protected: Require preinstalled pinned dependencies and the isolated model mailbox.
+        host_cli: The user's own CLI that runs each proposer turn, if any.
+        host_agent_token: The token the parent minted for that host proposer.
 
     Returns:
         The launch.
@@ -496,6 +556,8 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig, *, protected: b
         ServiceError: When the harness id is unknown.
     """
     model = str(target.model).removeprefix(_OPENROUTER_PREFIX)
+    if host_cli is not None:
+        return host_cli_launch(model, gateway, host_cli, host_agent_token)
     if target.harness == BLACKBOX_HARNESS_CUSTOM:
         run_command = _fill(target.run_command, model, gateway, protected=protected)
         if run_command is None:
