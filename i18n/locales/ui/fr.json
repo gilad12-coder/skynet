@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "Réessayer",
   "submit.code.interview.skip": "Passer l'entretien",
   "submit.code.interview.title": "Entretien sur la tâche",
+  "submit.code.interview.too_long": "Ce message est trop long pour l’entretien ({count} sur {max} caractères). Retirez un fichier joint ou raccourcissez-le.",
   "submit.code_validation_failed": "Échec de la validation du code",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Image",

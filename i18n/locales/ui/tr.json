@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "Yeniden dene",
   "submit.code.interview.skip": "Görüşmeyi atla",
   "submit.code.interview.title": "Görev görüşmesi",
+  "submit.code.interview.too_long": "Bu mesaj görüşme için çok uzun ({count}/{max} karakter). Ekli bir dosyayı kaldırın veya mesajı kısaltın.",
   "submit.code_validation_failed": "Kod doğrulaması başarısız oldu",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Görüntü",

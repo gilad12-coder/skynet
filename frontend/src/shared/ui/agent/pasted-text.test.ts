@@ -29,17 +29,32 @@ test("only long pastes become cards", () => {
   assert.equal(shouldAttachPaste("x".repeat(5000)), true);
 });
 
-test("attached files round-trip ahead of pastes and typed text", () => {
+test("typed text comes first, then attached files, then pastes, and round-trips", () => {
   const parts = {
     text: "compare them",
     pastes: ["a long paste"],
     files: [attachedFile("report.pdf", "Page 1\nrevenue"), attachedFile("notes", "")],
   };
   const joined = joinPastes(parts);
+  // History turns are cut from the start, so the question must lead.
   assert.ok(
-    joined.startsWith('<attached_file name="report.pdf">\nPage 1\nrevenue\n</attached_file>'),
+    joined.startsWith(
+      'compare them\n\n<attached_file name="report.pdf">\nPage 1\nrevenue\n</attached_file>',
+    ),
   );
   assert.deepEqual(splitPastes(joined), parts);
+});
+
+test("trailing spaces and newlines typed beside a file survive the round-trip", () => {
+  for (const text of ["hello ", "hello\n", "two words  "]) {
+    const parts = { text, pastes: [], files: [attachedFile("a.txt", "body")] };
+    assert.deepEqual(splitPastes(joinPastes(parts)), parts);
+  }
+});
+
+test("a message saved with the blocks first still splits", () => {
+  const saved = "<pasted_text>\nold paste\n</pasted_text>\n\nwhat is this?";
+  assert.deepEqual(splitPastes(saved), { text: "what is this?", pastes: ["old paste"], files: [] });
 });
 
 test("a file name or body cannot break out of its block", () => {

@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "Riprova",
   "submit.code.interview.skip": "Salta l'intervista",
   "submit.code.interview.title": "Intervista sull'attività",
+  "submit.code.interview.too_long": "Questo messaggio è troppo lungo per l’intervista ({count} di {max} caratteri). Rimuovi un file allegato o accorcialo.",
   "submit.code_validation_failed": "Convalida del codice non riuscita",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Immagine",

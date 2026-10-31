@@ -12,13 +12,17 @@ import base64
 import io
 import zipfile
 
+import fakeredis
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
 
+from ...config import settings
 from ...service_gateway.agents import attachments
 from ...service_gateway.agents.attachments import MAX_ATTACHMENT_CHARS, extract_attachment_text
 from ..auth import AuthenticatedUser, get_authenticated_user
+from ..routers import agent_attachments
 from ..routers.agent_attachments import create_agent_attachments_router
 
 _W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
@@ -79,6 +83,55 @@ def _pdf(text: str) -> bytes:
         out += b"%010d 00000 n \n" % offset
     out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
     return bytes(out)
+
+
+def _xlsx(rows: str) -> bytes:
+    """Build a one-sheet XLSX whose sheet data is ``rows``.
+
+    Args:
+        rows: The ``row`` elements of the sheet.
+
+    Returns:
+        The XLSX bytes.
+    """
+    workbook = f'<workbook {_S_NS} {_R_NS}><sheets><sheet name="s" r:id="rId1"/></sheets></workbook>'
+    rels = f'<Relationships {_PKG_NS}><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'
+    return _zip(
+        {
+            "xl/workbook.xml": workbook,
+            "xl/_rels/workbook.xml.rels": rels,
+            "xl/worksheets/sheet1.xml": f"<worksheet {_S_NS}><sheetData>{rows}</sheetData></worksheet>",
+        }
+    )
+
+
+def _slide(body: str) -> str:
+    """Build one PPTX slide holding a single paragraph.
+
+    Args:
+        body: The paragraph text.
+
+    Returns:
+        The slide XML.
+    """
+    return f"<p:sld {_A_NS} xmlns:p='urn:p'><a:p><a:r><a:t>{body}</a:t></a:r></a:p></p:sld>"
+
+
+def _blank_pdf(pages: int) -> bytes:
+    """Build a PDF of blank pages.
+
+    Args:
+        pages: The page count.
+
+    Returns:
+        The PDF bytes.
+    """
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(100, 100)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 
 def test_text_files_decode_whatever_the_extension() -> None:
@@ -143,6 +196,73 @@ def test_xlsx_sheets_are_extracted_with_empty_cells_padded() -> None:
     assert extract_attachment_text("scores.xlsx", "", data) == "Sheet: Scores\nname\t\tscore\nada\t\t3"
 
 
+def test_xlsx_far_right_cells_do_not_pad_rows() -> None:
+    """A cell in the last column must not pad its row with thousands of empty columns."""
+    text = extract_attachment_text("wide.xlsx", "", _xlsx('<row><c r="A1"><v>1</v></c><c r="XFD1"><v>2</v></c></row>'))
+    assert text.startswith("Sheet: s\n1")
+    assert "\t" * 2000 not in text
+
+
+def test_xlsx_stops_reading_rows_past_the_character_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rows past the character cap are not parsed at all."""
+    calls: list[int] = []
+    read_cell = attachments._cell_value
+
+    def counting_cell_value(*args: object) -> str:
+        """Count each parsed cell."""
+        calls.append(1)
+        return read_cell(*args)
+
+    monkeypatch.setattr(attachments, "_cell_value", counting_cell_value)
+    row = f'<row><c t="inlineStr"><is><t>{"x" * 1000}</t></is></c></row>'
+    text = extract_attachment_text("long.xlsx", "", _xlsx(row * 500))
+    assert "[Truncated: showing the first 50,000 characters of long.xlsx" in text
+    assert len(calls) < 100
+
+
+def test_zip_formats_refuse_a_large_total_unpacked_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Members whose declared sizes add up past the cap are never inflated."""
+    monkeypatch.setattr(attachments, "_MAX_INFLATED_BYTES", 1000)
+    data = _zip({f"ppt/slides/slide{n}.xml": _slide("x" * 600) for n in (1, 2)})
+    assert extract_attachment_text("deck.pptx", "", data).endswith("Its contents could not be read.]")
+
+
+def test_pptx_stops_opening_slides_past_the_character_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Slides after the character cap are not inflated or parsed."""
+    opened: list[str] = []
+    open_member = zipfile.ZipFile.open
+
+    def counting_open(self: zipfile.ZipFile, name: str, *args: object, **kwargs: object) -> object:
+        """Record each member opened."""
+        opened.append(str(name))
+        return open_member(self, name, *args, **kwargs)
+
+    data = _zip({f"ppt/slides/slide{n}.xml": _slide("y" * 5000) for n in range(1, 51)})
+    monkeypatch.setattr(zipfile.ZipFile, "open", counting_open)
+    text = extract_attachment_text("deck.pptx", "", data)
+    assert "[Truncated: showing the first 50,000 characters of deck.pptx" in text
+    assert len(opened) < 15
+
+
+def test_pdf_reads_at_most_the_page_cap() -> None:
+    """A PDF with more pages than the cap stops at the cap and says so."""
+    text = extract_attachment_text("long.pdf", "application/pdf", _blank_pdf(attachments._MAX_PDF_PAGES + 5))
+    assert f"Page {attachments._MAX_PDF_PAGES}\n" in text
+    assert f"Page {attachments._MAX_PDF_PAGES + 1}\n" not in text
+    assert text.endswith(
+        f"[Truncated: read the first {attachments._MAX_PDF_PAGES} of {attachments._MAX_PDF_PAGES + 5} pages.]"
+    )
+
+
+def test_parsing_stops_when_the_time_budget_runs_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Past the time budget, extraction stops and notes the cut."""
+    monkeypatch.setattr(attachments, "_MAX_PARSE_SECONDS", 0.0)
+    text = extract_attachment_text("slow.pdf", "application/pdf", _blank_pdf(3))
+    assert text.startswith("Page 1")
+    assert "Page 2" not in text
+    assert text.endswith("[Truncated: slow.pdf took too long to read, so only its first part is shown.]")
+
+
 def test_xls_sheets_are_extracted() -> None:
     """A legacy XLS workbook gives its rows as tab-separated text."""
     text = extract_attachment_text("scores.xls", "application/vnd.ms-excel", base64.b64decode(_XLS_B64))
@@ -205,6 +325,19 @@ def test_route_returns_the_extracted_text(client: TestClient) -> None:
         "/agent/attachments/extract", files={"file": ("blob.bin", b"\x00\x01", "application/octet-stream")}
     )
     assert resp.json()["text"].startswith("[Attached file blob.bin (application/octet-stream, 2 B).")
+
+
+def test_route_enforces_the_hourly_attachment_cap(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    """A caller over the hourly attachment cap gets a 429 before any parsing."""
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    monkeypatch.setattr(agent_attachments, "shared_redis_client", lambda: redis)
+    monkeypatch.setattr(settings, "rate_limit_attachments_per_hour", 2)
+
+    statuses = [
+        client.post("/agent/attachments/extract", files={"file": ("a.txt", b"a", "text/plain")}).status_code
+        for _ in range(3)
+    ]
+    assert statuses == [200, 200, 429]
 
 
 def test_route_requires_sign_in() -> None:

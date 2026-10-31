@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "फिर से कोशिश करें",
   "submit.code.interview.skip": "इंटरव्यू छोड़ें",
   "submit.code.interview.title": "कार्य इंटरव्यू",
+  "submit.code.interview.too_long": "यह संदेश इंटरव्यू के लिए बहुत लंबा है ({max} में से {count} अक्षर)। कोई संलग्न फ़ाइल हटाएँ या इसे छोटा करें।",
   "submit.code_validation_failed": "कोड मान्यकरण विफल",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "छवि",

@@ -226,8 +226,8 @@ function TaskInterviewPanel({
   const submit = () => {
     const content = draft.trim();
     if (!content || interview.busy) return;
-    setDraft("");
-    interview.send(content);
+    // A turn that is too long stays in the composer, so the user can fix it.
+    if (interview.send(content)) setDraft("");
   };
 
   // Answers typed while the interviewer is replying wait for it to finish.

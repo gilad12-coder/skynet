@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "重试",
   "submit.code.interview.skip": "跳过访谈",
   "submit.code.interview.title": "任务访谈",
+  "submit.code.interview.too_long": "这条消息对访谈来说太长（{count} / {max} 个字符）。请移除附件或缩短内容。",
   "submit.code_validation_failed": "代码验证失败",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "图像",

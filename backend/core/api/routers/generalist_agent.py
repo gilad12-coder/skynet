@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
@@ -58,6 +59,11 @@ logger = logging.getLogger(__name__)
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
 TITLE_MAX_CHARS = 40
+# Composer blocks for attached files and long pastes (frontend
+# ``shared/ui/agent/pasted-text.ts``); their bodies are not the user's words.
+_COMPOSER_BLOCK_RE = re.compile(
+    r'<pasted_text>.*?</pasted_text>|<attached_file name="([^"]*)">.*?</attached_file>', re.DOTALL
+)
 
 # The history is re-sent in full every turn, so an unbounded thread grows the
 # prompt without limit. Recent turns carry the working context.
@@ -220,7 +226,9 @@ def _derive_title(user_message: str) -> str:
     """Auto-title a fresh conversation from the user's opening message.
 
     Truncates whitespace-collapsed text to ``TITLE_MAX_CHARS`` and appends an
-    ellipsis when truncation actually loses characters.
+    ellipsis when truncation actually loses characters. Attached-file and
+    pasted-text blocks are left out; a message with only files is titled
+    from the first file's name.
 
     Args:
         user_message: The first user turn's text.
@@ -228,7 +236,11 @@ def _derive_title(user_message: str) -> str:
     Returns:
         A short, single-line title suitable for the conversation header.
     """
-    collapsed = " ".join(user_message.split())
+    typed = _COMPOSER_BLOCK_RE.sub(" ", user_message)
+    if not typed.strip():
+        files = [m.group(1) for m in _COMPOSER_BLOCK_RE.finditer(user_message) if m.group(1)]
+        typed = files[0] if files else ""
+    collapsed = " ".join(typed.split())
     if len(collapsed) <= TITLE_MAX_CHARS:
         return collapsed
     return collapsed[: TITLE_MAX_CHARS - 1].rstrip() + "…"

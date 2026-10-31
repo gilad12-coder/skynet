@@ -36,17 +36,22 @@ export function splitPastes(value: string): SplitMessage {
     },
   );
   const found = pastes.length + files.length > 0;
-  return { text: found ? text.replace(/^\s+/, "") : text, pastes, files };
+  // Drop only the one separator before the blocks: the composer re-splits on
+  // every keystroke, so trimming more would eat a space the user just typed.
+  return { text: found ? text.replace(/^\s+/, "").replace(/\n\n$/, "") : text, pastes, files };
 }
 
-/** Rebuild the message string, files and pastes first so the agent reads them as context. */
+/**
+ * Rebuild the message string: typed text first, then files and pastes. The
+ * backend cuts long history turns from the start, so the question must lead.
+ */
 export function joinPastes({ text, pastes, files }: SplitMessage): string {
   if (!pastes.length && !files.length) return text;
   const blocks = [
     ...files.map((f) => `<attached_file name="${f.name}">\n${f.text}\n</attached_file>`),
     ...pastes.map((p) => `<pasted_text>\n${p}\n</pasted_text>`),
   ].join("\n\n");
-  return text ? `${blocks}\n\n${text}` : blocks;
+  return text ? `${text}\n\n${blocks}` : blocks;
 }
 
 /** Build an attached file whose name and text cannot break out of its block. */

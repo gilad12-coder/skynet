@@ -13,8 +13,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 
+from ...config import settings
 from ...service_gateway.agents.attachments import MAX_ATTACHMENT_BYTES, extract_attachment_text
 from ..auth import AuthenticatedUser, get_authenticated_user
+from ..rate_limit import RateLimiter, shared_redis_client
 
 
 class AttachmentTextResponse(BaseModel):
@@ -45,13 +47,20 @@ def create_agent_attachments_router() -> APIRouter:
 
         Args:
             user: Authenticated caller; attachments are login-gated like the
-                chats that host them.
+                chats that host them, and the caller keys the hourly cap.
             file: The attached file, of any type.
 
         Returns:
             The extracted text, or a short note when the file cannot be read.
+
+        Raises:
+            DomainError: 429 when the caller is over the hourly attachment cap.
         """
-        del user
+        RateLimiter(shared_redis_client()).enforce(
+            f"attachments:{user.username}",
+            limit=settings.rate_limit_attachments_per_hour,
+            window_seconds=3600,
+        )
         data = file.file.read(MAX_ATTACHMENT_BYTES + 1)
         size = file.size if file.size is not None else len(data)
         text = extract_attachment_text(file.filename or "file", file.content_type or "", data, size)

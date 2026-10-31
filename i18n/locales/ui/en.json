@@ -2154,6 +2154,7 @@
   "submit.code.interview.retry": "Retry",
   "submit.code.interview.skip": "Skip the interview",
   "submit.code.interview.title": "Task interview",
+  "submit.code.interview.too_long": "This message is too long for the interview ({count} of {max} characters). Remove an attached file or shorten it.",
   "submit.code_validation_failed": "Code validation failed",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Image",

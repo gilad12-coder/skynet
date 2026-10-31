@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "تلاش مجدد",
   "submit.code.interview.skip": "رد کردن مصاحبه",
   "submit.code.interview.title": "مصاحبه‌ی وظیفه",
+  "submit.code.interview.too_long": "این پیام برای مصاحبه خیلی طولانی است ({count} از {max} نویسه). یک فایل پیوست را حذف کنید یا آن را کوتاه کنید.",
   "submit.code_validation_failed": "اعتبارسنجی کد ناموفق بود",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "تصویر",

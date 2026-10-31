@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "Повторить",
   "submit.code.interview.skip": "Пропустить интервью",
   "submit.code.interview.title": "Интервью о задаче",
+  "submit.code.interview.too_long": "Это сообщение слишком длинное для интервью ({count} из {max} символов). Удалите вложенный файл или сократите его.",
   "submit.code_validation_failed": "Проверка кода не пройдена",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Изображение",

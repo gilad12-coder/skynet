@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "إعادة المحاولة",
   "submit.code.interview.skip": "تخطّي المقابلة",
   "submit.code.interview.title": "مقابلة المهمة",
+  "submit.code.interview.too_long": "هذه الرسالة طويلة جدًا للمقابلة ({count} من {max} حرف). أزل ملفًا مرفقًا أو اختصرها.",
   "submit.code_validation_failed": "فشل التحقّق من الكود",
   "submit.cost_ceiling.cap_unit": "دولار",
   "submit.dataset.column_kind.image": "صورة",

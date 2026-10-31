@@ -2875,6 +2875,7 @@
   "submit.code.interview.retry": "重試",
   "submit.code.interview.skip": "略過訪談",
   "submit.code.interview.title": "任務訪談",
+  "submit.code.interview.too_long": "呢個訊息對訪談嚟講太長（{count} / {max} 個字元）。請移除附加檔案或者縮短佢。",
   "submit.code_validation_failed": "代碼驗證失敗",
   "submit.composition.back": "返回",
   "submit.composition.single_desc": "單獨優化單一模組。",

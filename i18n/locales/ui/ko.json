@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "다시 시도",
   "submit.code.interview.skip": "인터뷰 건너뛰기",
   "submit.code.interview.title": "작업 인터뷰",
+  "submit.code.interview.too_long": "이 메시지는 인터뷰에 너무 깁니다({count}/{max}자). 첨부 파일을 제거하거나 줄여 주세요.",
   "submit.code_validation_failed": "코드 검증 실패",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "이미지",

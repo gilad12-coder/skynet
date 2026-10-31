@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "Повторити",
   "submit.code.interview.skip": "Пропустити інтерв'ю",
   "submit.code.interview.title": "Інтерв'ю про завдання",
+  "submit.code.interview.too_long": "Це повідомлення задовге для інтерв’ю ({count} з {max} символів). Вилучіть вкладений файл або скоротіть його.",
   "submit.code_validation_failed": "Перевірку коду не пройдено",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "Зображення",

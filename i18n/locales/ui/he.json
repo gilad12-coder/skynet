@@ -2382,6 +2382,7 @@
   "submit.code.interview.retry": "ניסיון נוסף",
   "submit.code.interview.skip": "דילוג על הראיון",
   "submit.code.interview.title": "ראיון על המשימה",
+  "submit.code.interview.too_long": "ההודעה ארוכה מדי לראיון ({count} מתוך {max} תווים). הסירו קובץ מצורף או קצרו אותה.",
   "submit.code_validation_failed": "שגיאה באימות הקוד",
   "submit.composition.back": "חזרה",
   "submit.composition.single_desc": "אופטימיזציה של מודול יחיד בפני עצמו.",

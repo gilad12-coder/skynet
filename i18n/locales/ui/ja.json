@@ -3234,6 +3234,7 @@
   "submit.code.interview.retry": "再試行",
   "submit.code.interview.skip": "インタビューをスキップ",
   "submit.code.interview.title": "タスクインタビュー",
+  "submit.code.interview.too_long": "このメッセージはインタビューには長すぎます（{count} / {max} 文字）。添付ファイルを外すか、短くしてください。",
   "submit.code_validation_failed": "コードの検証に失敗しました",
   "submit.cost_ceiling.cap_unit": "USD",
   "submit.dataset.column_kind.image": "画像",
