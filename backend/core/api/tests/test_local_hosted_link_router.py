@@ -119,6 +119,7 @@ def test_routes_are_hidden_outside_local_mode(client: TestClient, monkeypatch: p
 
     assert client.post("/local/hosted-link/start", json={}).status_code == 404
     assert client.get("/local/hosted-link/callback", params={"code": "c", "state": "s"}).status_code == 404
+    assert client.post("/local/hosted-link/finish", json={"code": "c", "state": "s"}).status_code == 404
     assert client.get("/local/hosted-link/status").status_code == 404
     assert client.post("/local/hosted-link/unlink").status_code == 404
 
@@ -222,3 +223,42 @@ def test_connector_state_gives_the_state_invalid_page(client: TestClient, hosted
     assert page.status_code == 400
     assert html.escape(t_en("hosted_link.state_invalid")) in page.text
     assert hosted.calls == []
+
+
+def test_app_callback_flow_finishes_through_the_finish_route(client: TestClient, hosted: FakeHosted) -> None:
+    """The Mac app asks for the skynet:// callback and posts the code and state it receives.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    url = client.post("/local/hosted-link/start", json={"device_name": "Test Mac", "app_callback": True}).json()[
+        "authorize_url"
+    ]
+    redirect, code, state = hosted.authorize(url)
+    assert redirect == hosted_link.APP_CALLBACK_URI == "skynet://link/callback"
+
+    response = client.post("/local/hosted-link/finish", json={"code": code, "state": state})
+
+    assert response.status_code == 200
+    assert response.json() == {"linked": True, "account_email": "dana@example.test"}
+    assert "skyl_" not in response.text
+    assert client.get("/local/hosted-link/status").json()["linked"] is True
+    replay = client.post("/local/hosted-link/finish", json={"code": code, "state": state})
+    assert replay.status_code == 400
+    assert replay.json()["code"] == "hosted_link.state_invalid"
+
+
+def test_finish_refuses_a_forged_state(client: TestClient, hosted: FakeHosted) -> None:
+    """A skynet:// URL with a state this Mac did not make never reaches hosted.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    response = client.post("/local/hosted-link/finish", json={"code": "c", "state": "forged"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "hosted_link.state_invalid"
+    assert hosted.calls == []
+    assert client.get("/local/hosted-link/status").json() == {"linked": False}

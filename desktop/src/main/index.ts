@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
+import { APP_SCHEME, appUrlFromArgv, parseLinkCallback } from "./app-url";
 import { HostedLinkClient } from "./hosted-link";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
@@ -63,8 +64,8 @@ let frontendUrl: string | null = null;
 let sweptOrphans = false;
 let sweptSandboxes = false;
 let hostedLink: HostedLinkClient | null = null;
-let signInPoll: NodeJS.Timeout | null = null;
 let signInUrl: string | null = null;
+let finishingSignIn = false;
 
 // Setup screens are small; the window grows for the web app. Progress screens
 // show only the timeline, so they are shorter than screens that ask for an action.
@@ -72,7 +73,7 @@ const SETUP_SIZE = { width: 600, height: 120 };
 const SETUP_ACTION_HEIGHT = 540;
 
 function setupHeight(s: OnboardingState): number {
-  const progress = s.kind === "checking" || s.kind === "starting" || s.kind === "ready" || (s.kind === "sign_in" && s.signIn === "waiting");
+  const progress = s.kind === "checking" || s.kind === "starting" || s.kind === "ready";
   return progress ? SETUP_SIZE.height : SETUP_ACTION_HEIGHT;
 }
 
@@ -356,13 +357,11 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     log(`account status check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (linked) return openApp();
-  // Straight to "waiting": the small window stays small until skynetml.com loads.
   setState({ ...base, kind: "sign_in", signIn: "waiting" });
   await signIn();
 }
 
 async function openApp(): Promise<void> {
-  stopSignInPoll();
   signInUrl = null;
   if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
   setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
@@ -370,93 +369,77 @@ async function openApp(): Promise<void> {
   await win?.loadURL(frontendUrl);
 }
 
-function stopSignInPoll(): void {
-  if (signInPoll) clearInterval(signInPoll);
-  signInPoll = null;
-}
-
 /**
- * Show the hosted sign-in (skynetml.com) full size in this window. The page
- * links the account, the hosted service redirects to the local API callback,
- * and the status poll opens the app. Without a hosted link (or on an error)
- * the onboarding card offers a retry and "Use without signing in".
+ * Open the hosted sign-in (skynetml.com) in the default browser. The page
+ * links the account and opens skynet://link/callback, which brings the result
+ * back to handleAppUrl. Without a hosted link (or on an error) the onboarding
+ * card offers a retry and "Use without signing in".
  */
 async function signIn(): Promise<void> {
   if (state.kind !== "sign_in" || !hostedLink) return;
-  const link = hostedLink;
   let result;
   try {
-    result = await link.start();
+    result = await hostedLink.start();
   } catch (err) {
     result = { ok: false as const, reason: "failed" as const, detail: err instanceof Error ? err.message : String(err) };
   }
   if (state.kind !== "sign_in") return;
   if (!result.ok) {
     log(`sign-in start failed (${result.reason}): ${result.detail}`);
-    showOnboarding({ ...state, signIn: result.reason, error: result.detail || undefined });
+    setState({ ...state, signIn: result.reason, error: result.detail || undefined });
     return;
   }
   signInUrl = result.url;
   setState({ ...state, signIn: "waiting", error: undefined });
-  // Stay small until skynetml.com commits, so no half-empty full-size window shows first.
-  const grow = (_event: Electron.Event, url: string) => {
-    if (url.startsWith("file:")) return;
-    win?.webContents.off("did-navigate", grow);
-    if (signInUrl) useAppSize();
-  };
-  win?.webContents.on("did-navigate", grow);
-  // The hosted page redirects (/desktop/link to /login, then client-side), which
-  // rejects loadURL with ERR_ABORTED. Real failures arrive through did-fail-load.
-  win?.loadURL(result.url, { userAgent: desktopUserAgent() }).catch(() => undefined);
-  stopSignInPoll();
-  // No deadline: a slow sign-up or Google round-trip still opens the app when it completes.
-  signInPoll = setInterval(() => {
-    if (state.kind !== "sign_in") return stopSignInPoll();
-    link
-      .linked()
-      .then((done) => (done ? openApp() : undefined))
-      .catch((err: Error) => log(`account status poll failed: ${err.message}`));
-  }, 2_000);
+  await openSignInPage();
 }
 
-/** The hosted pages show "Use without signing in" only for this suffix. */
-function desktopUserAgent(): string {
-  return `${win?.webContents.getUserAgent() ?? ""} SkynetDesktop`;
+async function openSignInPage(): Promise<void> {
+  if (!signInUrl) return;
+  try {
+    await shell.openExternal(signInUrl);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log(`could not open the browser: ${detail}`);
+    if (state.kind === "sign_in") setState({ ...state, signIn: "failed", error: detail });
+  }
 }
 
-/** Offline or skynetml.com down: back to the card with retry and skip. */
-function signInLoadFailed(code: number, detail: string, url: string): void {
-  if (code === -3 || !signInUrl || state.kind !== "sign_in") return;
-  log(`sign-in page failed to load (${code} ${detail}): ${new URL(url).origin}`);
-  stopSignInPoll();
-  signInUrl = null;
-  showOnboarding({ ...state, signIn: "failed", error: detail });
+/** The browser opened skynet://link/callback: finish the link, or show the retry card. */
+async function handleAppUrl(raw: string): Promise<void> {
+  const callback = parseLinkCallback(raw);
+  if (!callback) return log("ignored an unknown skynet:// URL");
+  if (win?.isMinimized()) win.restore();
+  win?.focus();
+  if (state.kind !== "sign_in" || state.signIn !== "waiting" || !hostedLink || finishingSignIn) {
+    return log(`ignored a sign-in callback (state ${state.kind})`);
+  }
+  if (callback.kind === "denied") {
+    log("sign-in declined in the browser");
+    return setState({ ...state, signIn: "declined", error: undefined });
+  }
+  if (callback.kind === "error") {
+    log(`sign-in failed in the browser: ${callback.error}`);
+    return setState({ ...state, signIn: "failed", error: undefined });
+  }
+  finishingSignIn = true;
+  try {
+    const result = await hostedLink.finish(callback.code, callback.state);
+    if (result.ok) return void (await openApp());
+    log(`sign-in finish failed: ${result.detail}`);
+    if (state.kind === "sign_in") setState({ ...state, signIn: "failed", error: result.detail });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log(`sign-in finish failed: ${detail}`);
+    if (state.kind === "sign_in") setState({ ...state, signIn: "failed", error: detail });
+  } finally {
+    finishingSignIn = false;
+  }
 }
 
 function skipSignIn(): void {
   log("sign-in skipped");
   void openApp();
-}
-
-/**
- * Navigation rules while the hosted sign-in shows. Google refuses OAuth in an
- * embedded browser, so that one round-trip moves to the default browser and
- * this window keeps polling.
- */
-function signInNavigation(target: string): "allow" | "skip" | "external" {
-  if (!signInUrl) return "external";
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    return "external";
-  }
-  const hosted = new URL(signInUrl);
-  if (url.origin === hosted.origin && url.pathname === "/desktop/link/skip") return "skip";
-  if (url.hostname === "accounts.google.com") return "external";
-  if (url.origin === hosted.origin || url.hostname === "github.com") return "allow";
-  if (hostedLink && url.origin === hostedLink.apiOrigin) return "allow";
-  return "external";
 }
 
 function watchForCrash(proc: ManagedProcess, label: string): void {
@@ -465,7 +448,6 @@ function watchForCrash(proc: ManagedProcess, label: string): void {
     if (quitting || (state.kind !== "starting" && state.kind !== "ready" && state.kind !== "sign_in")) return clearInterval(timer);
     if (!proc.exited) return;
     clearInterval(timer);
-    stopSignInPoll();
     frontendUrl = null;
     showOnboarding({ ...state, kind: "error", error: `${label} stopped unexpectedly (exit ${proc.exitCode}). See ${logsDir}.` });
   }, 1_000);
@@ -479,8 +461,8 @@ function recordStarted(role: string, pid: number | undefined): void {
 /** Stop in §1.7 order: frontend, API, Postgres, then sandbox containers. */
 async function stopStack(): Promise<void> {
   killActiveCommands();
-  stopSignInPoll();
   hostedLink = null;
+  signInUrl = null;
   const fe = frontend;
   const be = api;
   frontend = null;
@@ -537,22 +519,8 @@ function createWindow(): void {
   });
   win.webContents.on("will-navigate", (event, url) => {
     if (isAllowedUrl(url)) return;
-    const rule = signInNavigation(url);
-    if (rule === "allow") return;
     event.preventDefault();
-    if (rule === "skip") return skipSignIn();
-    if (rule === "external" && signInUrl && new URL(url).hostname === "accounts.google.com") {
-      void shell.openExternal(signInUrl);
-      return;
-    }
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-  });
-  win.webContents.on("did-fail-load", (_event, code, detail, url, isMainFrame) => {
-    if (isMainFrame) signInLoadFailed(code, detail, url);
-  });
-  // A 5xx or 404 page from skynetml.com loads without did-fail-load, and it has no skip link.
-  win.webContents.on("did-navigate", (_event, url, httpResponseCode, httpStatusText) => {
-    if (httpResponseCode >= 400) signInLoadFailed(httpResponseCode, httpStatusText || `HTTP ${httpResponseCode}`, url);
   });
   win.on("closed", () => {
     win = null;
@@ -576,17 +544,39 @@ ipcMain.handle("onboarding:sign-in", () => {
   void signIn();
 });
 ipcMain.handle("onboarding:skip-sign-in", () => skipSignIn());
+ipcMain.handle("onboarding:reopen-sign-in", () => openSignInPage());
 ipcMain.handle("onboarding:open-docker", () => shell.openExternal("https://www.docker.com/products/docker-desktop/"));
+
+/**
+ * Make this app the handler of skynet:// URLs. macOS takes the scheme from
+ * CFBundleURLTypes in Info.plist (electron-builder.yml `protocols`; the dev
+ * copy gets it in scripts/bundle-resources.mjs). In `electron .` the app path
+ * is an argument, which the Windows and Linux handlers need.
+ */
+function registerAppScheme(): void {
+  const ok = process.defaultApp && process.argv[1]
+    ? app.setAsDefaultProtocolClient(APP_SCHEME, process.execPath, [path.resolve(process.argv[1])])
+    : app.setAsDefaultProtocolClient(APP_SCHEME);
+  log(`${APP_SCHEME}:// handler ${ok ? "registered" : "not registered"}`);
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  // Registered before ready: macOS sends the URL of a cold launch early.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    void handleAppUrl(url);
+  });
+  app.on("second-instance", (_event, argv) => {
     if (win?.isMinimized()) win.restore();
     win?.focus();
+    const url = appUrlFromArgv(argv);
+    if (url) void handleAppUrl(url);
   });
   app.whenReady().then(() => {
     log(`Skynet desktop ${app.getVersion()} starting`);
+    registerAppScheme();
     // Secure DNS first, the system resolver as fallback: some networks fail to
     // resolve the hosted sign-in page through the system resolver.
     app.configureHostResolver({ secureDnsMode: "automatic", secureDnsServers: ["https://cloudflare-dns.com/dns-query"] });

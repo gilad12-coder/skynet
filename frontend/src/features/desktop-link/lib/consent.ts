@@ -2,10 +2,10 @@
  * Request checks and callback URLs for the Mac link consent page.
  *
  * The Mac app opens ``/desktop/link`` with an OAuth 2.0 PKCE request (RFC 8252)
- * and waits on a loopback callback. These rules mirror
- * ``backend/core/api/routers/desktop_link.py``, so the page refuses a bad
- * request before it calls the backend, and never sends the browser to a URL
- * that is not the Mac app's own loopback callback.
+ * and waits on its ``skynet://`` URL (older builds: a loopback callback). These
+ * rules mirror ``backend/core/api/routers/desktop_link.py``, so the page refuses
+ * a bad request before it calls the backend, and never sends the browser to a
+ * URL that is not the Mac app's own callback.
  *
  * Kept import-free so the Node unit test can load it directly.
  */
@@ -26,6 +26,8 @@ export type DesktopScope = (typeof DESKTOP_SCOPES)[number];
 // Same rule as _LOOPBACK_REDIRECT in the backend router.
 const LOOPBACK_CALLBACK =
   /^http:\/\/(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]{3,4})\/local\/hosted-link\/callback$/;
+// Same value as APP_REDIRECT in the backend router; the browser asks to open the Mac app.
+export const APP_CALLBACK = "skynet://link/callback";
 const CODE_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const MAX_DEVICE_NAME = 128;
 
@@ -56,10 +58,15 @@ function isDesktopScope(value: string): value is DesktopScope {
   return (DESKTOP_SCOPES as readonly string[]).includes(value);
 }
 
+/** Whether ``uri`` is a callback of the Mac app: its ``skynet://`` URL or a loopback one. */
+export function isAppCallback(uri: string): boolean {
+  return uri === APP_CALLBACK || isLoopbackCallback(uri);
+}
+
 /** Check the query of a ``/desktop/link`` request and return the link request. */
 export function parseLinkRequest(params: URLSearchParams): ParsedLinkRequest {
   const redirectUri = params.get("redirect_uri") ?? "";
-  if (!isLoopbackCallback(redirectUri)) return { ok: false, problem: "invalid_redirect" };
+  if (!isAppCallback(redirectUri)) return { ok: false, problem: "invalid_redirect" };
   const state = params.get("state") ?? "";
   const codeChallenge = params.get("code_challenge") ?? "";
   const deviceName = (params.get("device_name") ?? "").trim();
@@ -84,10 +91,10 @@ export function parseLinkRequest(params: URLSearchParams): ParsedLinkRequest {
 
 /**
  * Build the callback URL that hands ``params`` back to the Mac app, or null
- * when ``redirectUri`` is not its loopback callback.
+ * when ``redirectUri`` is not one of its callbacks.
  */
 export function callbackUrl(redirectUri: string, params: Record<string, string>): string | null {
-  if (!isLoopbackCallback(redirectUri)) return null;
+  if (!isAppCallback(redirectUri)) return null;
   return `${redirectUri}?${new URLSearchParams(params).toString()}`;
 }
 
