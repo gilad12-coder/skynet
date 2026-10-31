@@ -404,9 +404,12 @@ deploy() {
     APP_ENVIRONMENT: $e, APP_GIT_SHA: $sha, SENTRY_ENVIRONMENT: $e, ALERT_ENVIRONMENT: $e,
     ALLOWED_ORIGINS: $app, APP_PUBLIC_URL: $app, FRONTEND_URL: $app,
     DB_POOL_SIZE: "3", DB_POOL_MAX_OVERFLOW: "2"}')"
-  frontend_env="$(jq -cn --arg e "$app_env" --arg sha "$sha" --arg app "https://$app" --arg api "https://$api" '{
+  # Google and GitHub know only staging's callback URL; staging forwards it here.
+  frontend_env="$(jq -cn --arg e "$app_env" --arg sha "$sha" --arg app "https://$app" --arg api "https://$api" \
+    --arg proxy "https://$domain/api/auth" '{
     APP_ENVIRONMENT: $e, APP_GIT_SHA: $sha, SENTRY_ENVIRONMENT: $e, NEXT_PUBLIC_SENTRY_ENVIRONMENT: $e,
-    API_URL: $api, NEXT_PUBLIC_API_URL: $api, NEXT_PUBLIC_SITE_URL: $app, AUTH_URL: $app}')"
+    API_URL: $api, NEXT_PUBLIC_API_URL: $api, NEXT_PUBLIC_SITE_URL: $app, AUTH_URL: $app,
+    AUTH_REDIRECT_PROXY_URL: $proxy}')"
 
   migrate_td="$(register migrate "$backend_img" "$backend_env" "$slot" "$cfg" "$acct")"
   echo "creating the database if needed, then migrating"
