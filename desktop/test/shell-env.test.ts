@@ -82,6 +82,14 @@ describe("loginShellPath", () => {
       expect(result.path.split(":")).toContain("/from/zshrc");
     });
 
+    it("keeps the output when .zshrc leaves a background job on stdout", async () => {
+      const home = homeWithZshrc("export PATH=/from/zshrc:$PATH\nsleep 5 &\n");
+      const started = Date.now();
+      const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 3_000 });
+      expect(result.path.split(":")).toContain("/from/zshrc");
+      expect(Date.now() - started).toBeLessThan(2_000);
+    });
+
     it("reads a plain login shell when .zshrc outlasts the timeout", async () => {
       const home = homeWithZshrc("sleep 30\n", "export PATH=/from/zprofile:$PATH\n");
       const result = await loginShellPath({ shell: "/bin/zsh", home, timeoutMs: 500 });

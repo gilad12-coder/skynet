@@ -104,11 +104,21 @@ const defaultExec: ExecFileLike = (file, args, options) =>
       clearTimeout(timer);
       reject(err);
     });
-    child.on("close", (code) => {
+    const settle = (code: number | null) => {
       clearTimeout(timer);
       if (code === 0) resolve({ stdout });
       else reject(new Error(`login shell exited with ${code}`));
+    };
+    // A job the rc files put in the background can hold stdout open after the
+    // shell exits, so "close" can come late. The output is in after a short grace.
+    child.on("exit", (code) => {
+      if (code !== 0) return;
+      setTimeout(() => {
+        child.stdout.destroy();
+        settle(code);
+      }, 100);
     });
+    child.on("close", settle);
   });
 
 /**
