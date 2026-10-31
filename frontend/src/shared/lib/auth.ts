@@ -539,4 +539,14 @@ export const { handlers, auth } = NextAuth({
   // compares Host with AUTH_URL. Local mode refuses a foreign Host in the proxy
   // (shared/lib/proxy-route.ts), and AUTH_URL fixes the URLs Auth.js builds.
   trustHost: true,
+  // Google and GitHub accept only registered callback URLs, and every PR
+  // preview has its own host. Previews send their OAuth callback to staging
+  // (preview.sh sets AUTH_REDIRECT_PROXY_URL), and staging forwards it to the
+  // host sealed in the state. Previews copy staging's AUTH_SECRET, so staging
+  // can open that state.
+  redirectProxyUrl:
+    process.env.AUTH_REDIRECT_PROXY_URL ??
+    (process.env.APP_ENVIRONMENT === "staging" && process.env.AUTH_URL
+      ? `${process.env.AUTH_URL}/api/auth`
+      : undefined),
 });
