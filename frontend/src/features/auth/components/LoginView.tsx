@@ -35,6 +35,7 @@ import { tI18n } from "@/shared/lib/i18n";
 import { cn } from "@/shared/lib/utils";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
+import { DesktopSkipLink } from "@/features/desktop-link";
 import { LoginHalo } from "./LoginHalo";
 
 const ENTER_EASE = [0.16, 1, 0.3, 1] as const;
@@ -1417,6 +1418,10 @@ export function LoginView() {
                 )}
               </CardContent>
             </Card>
+
+            <div className="mt-4 flex justify-center">
+              <DesktopSkipLink onLogin />
+            </div>
 
             <p className="mt-4 flex min-h-[44px] flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:mt-6 lg:min-h-0">
               <Link

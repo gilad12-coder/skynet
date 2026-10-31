@@ -76,7 +76,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (pathname === "/login") {
+  // The Mac link consent page is a single focused decision, like /login.
+  if (pathname === "/login" || pathname === "/desktop/link") {
     return (
       <main className="min-h-dvh" dir={dir}>
         {children}
