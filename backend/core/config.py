@@ -216,6 +216,12 @@ class Settings(BaseSettings):
         alias="APP_PUBLIC_URL",
         description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
     )
+    mcp_resource_url: str = Field(
+        default="",
+        alias="MCP_RESOURCE_URL",
+        description="Public URL of the hosted remote MCP server, e.g. https://mcp.skynetml.com/mcp. Its origin "
+        "is the OAuth issuer and tokens are bound to it. Empty turns the remote MCP server off.",
+    )
     app_environment: str = Field(
         default="",
         alias="APP_ENVIRONMENT",
