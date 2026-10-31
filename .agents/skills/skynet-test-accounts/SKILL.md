@@ -1,6 +1,6 @@
 ---
 name: skynet-test-accounts
-description: Use this skill before any signed-in check on Skynet shared staging or a PR preview (pr-<n>.staging.skynetml.com), for acceptance checks, Before/After evidence or API calls with a user token. It says which target to use, how to confirm the served commit with /api/version and /health, how Devin signs in with SKYNET_DEVIN_<n> or SKYNET_PR_<n> secrets, how agents on Gilad's Mac use the test-account pool, the DNS-over-HTTPS fallback, and the rules for secrets and test data.
+description: Use this skill before any signed-in check on Skynet shared staging or a PR preview (pr-<n>.staging.skynetml.com), for acceptance checks, video evidence or API calls with a user token. It says which target to use, how to confirm the served commit with /api/version and /health, how Devin signs in with SKYNET_DEVIN_<n> or SKYNET_PR_<n> secrets, how local agents use the orchestrator's account pool, the DNS-over-HTTPS fallback, and the rules for secrets and test data.
 ---
 
 # Skynet test accounts and targets
@@ -58,9 +58,14 @@ failure.
   is needed for these accounts.
 - **Never sign up on shared staging** for a normal check (see the
   exceptions below).
-- Preview databases are empty. Ask Gilad for a preview account. He stores it
-  as `SKYNET_PR_<n>_EMAIL` / `SKYNET_PR_<n>_PASSWORD`. **Never sign up on a
-  preview yourself** to get a working account.
+- Preview databases are empty, so a preview needs its own account. Setup
+  provisions it, and it then appears as the secrets `SKYNET_PR_<n>_EMAIL` /
+  `SKYNET_PR_<n>_PASSWORD`.
+- If an account or its secrets are missing, report the exact setup failure in
+  the PR handoff. Record the signed-in check as a coverage gap. **Do not ask
+  Gilad to create an account.**
+- **Do not sign up on a preview yourself.** This is a capability limit, not a
+  policy exception: sign-up needs an email code, and Devin cannot read it.
 
 ### Sign-up exceptions
 
@@ -71,12 +76,13 @@ The sign-up ban covers normal checks. It has two exceptions:
    a sign-up is part of the test. Do it only when the issue covers an auth
    change. Put the issue label in the account name, and record each account
    you create in the PR.
-2. **Sign-ups by the orchestrator's tools**: the pool `preview` command
+2. **Sign-ups by the orchestrator's tools**: its account-pool tools
    (section 5) and the preview merger, which signs up and runs a real
    optimization in each preview (`docs/agents/pr-previews.md`).
 
-Devin does not have these tools. For an ordinary preview check, Devin still
-asks Gilad for a preview account.
+Devin cannot use either exception: it has no access to these tools and
+cannot read email codes. When Devin needs an account that setup did not
+provide, it reports the setup failure and the coverage gap, as above.
 
 Use `devin-login.sh` in this folder. It reads the credentials from
 environment variables, sets `TOKEN`, and prints only the HTTP status:
@@ -90,45 +96,35 @@ PREFIX=SKYNET_PR_812 APP=https://pr-812.staging.skynetml.com API=https://api-pr-
   . .agents/skills/skynet-test-accounts/devin-login.sh
 ```
 
-Expect `login check: HTTP 200`. Then call the API with
-`-H "authorization: Bearer $TOKEN"`. **Never print `$TOKEN`.** If the check
+Expect `login check: HTTP 200`. Then call the API with the token in a header
+that curl reads from stdin, so the token stays out of the process list:
+
+```bash
+printf 'authorization: Bearer %s\n' "$TOKEN" | curl -s "${DOH[@]}" -H @- "$API/account/experience"
+```
+
+**Never print `$TOKEN`**, and never put it in a command argument. If the check
 is not 200, run the script once more. If it still fails, stop and report the
 exact status.
 
-## 5. Sign in: agents on Gilad's Mac only
+## 5. Sign in: local agents with the orchestrator's account pool
 
-These paths exist only on Gilad's Mac. Other agents skip this section.
+Cloud agents such as Devin skip this section.
 
 - The orchestrator claims an account for you and gives you: the target
   (`staging` or `preview <n>`), the slot (`pool-1` to `pool-4` for staging,
-  or `pr-<n>` for a preview), a secret access-file path and a context-file
-  path. Read the context file first.
+  or `pr-<n>` for a preview), a secret access-file path, a context-file
+  path, and the tools to use. Read the context file first.
 - If you did not get these and your task needs a signed-in check, stop and
   report "no test account was handed over". Do not claim a slot yourself
   unless the orchestrator tells you to.
-- The full guideline is
-  `~/Library/Application Support/Skynet Test Access/GUIDELINE.md`. The tools
-  are in the `tools/` folder next to it. Use Node 22.
-
-```sh
-T="$HOME/Library/Application Support/Skynet Test Access/tools"
-P="$T/pool.mjs"
-# Confirm the served commit.
-node "$T/test-target-preflight.mjs" --target staging --commit <FULL_STAGING_SHA> --wait-seconds 60
-node "$T/test-target-preflight.mjs" --target preview --pr https://github.com/gilad12-coder/skynet/pull/<n> \
-  --commit <PR_HEAD_SHA> --services backend,worker,frontend --wait-seconds 60   # leave out litellm: previews share it
-# Check the login (expects "ok": true, HTTP 200).
-node "$P" check <slot>
-# If the session expired, then run check again.
-node "$P" refresh pool-<k>      # staging slot
-node "$P" preview <n> <label>   # preview account: signs in again, or signs up if the preview was recreated
-```
-
+- Use the orchestrator's tools to confirm the served commit and to check or
+  refresh the login. The tool paths are machine-local; they are never in
+  this repository.
 - `STALE_DEPLOYMENT` means the target does not run your head yet. Wait, or
   report it.
 - `PR preview <n> is not running.` means the preview is down or deleted.
   Report it. Do not create previews yourself.
-- The tools work around the DNS timeout themselves.
 - When you finish, also after a failed check, tell the orchestrator. It
   releases the slot (`release <slot> <claimId>`). A forgotten claim blocks
   other agents for up to 6 hours.

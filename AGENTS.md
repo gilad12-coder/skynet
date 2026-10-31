@@ -216,10 +216,12 @@ or `just backend`), frontend `:3000` (`cd frontend && npm run dev` or
 - Run acceptance checks on AWS staging (`https://staging.skynetml.com`, API
   `https://api-staging.skynetml.com`) or the PR's preview. Never test against
   production. Railway is deleted; never use it.
-- Use only the test account that you were given. Never sign up on shared
-  staging, and never sign up on a preview yourself. Exceptions: acceptance
-  checks of auth changes (fresh accounts, real codes), and sign-ups that the
-  orchestrator's tools do. Never borrow a personal session. Never print or commit passwords, tokens, cookies or email codes.
+- Use only the test account that setup gave you. If it is missing, report
+  the exact setup failure and record the coverage gap. Do not ask Gilad to
+  create one. Never sign up on shared staging or a preview for a normal
+  check. Exceptions: acceptance checks of auth changes (fresh accounts, real
+  codes), and sign-ups that the orchestrator's tools do. An agent that cannot
+  read email codes (Devin) cannot sign up at all. Never borrow a personal session. Never print or commit passwords, tokens, cookies or email codes.
 - Never add funds, grant credits, change balances or change live billing
   configuration. Never deploy production.
 - How to sign in and check the served commit: the `skynet-test-accounts` skill.
