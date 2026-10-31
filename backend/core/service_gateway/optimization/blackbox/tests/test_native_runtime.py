@@ -1531,3 +1531,11 @@ def test_the_child_names_the_candidate_and_case_of_each_request(tmp_path: Path) 
     server.evaluate("seed", list(server._examples.values())[1])
     server.evaluate("unregistered", None)
     assert labels == [(0, "1"), (None, None)]
+
+
+def test_unsupported_runtime_reason_names_the_cloud_sandbox_not_its_vendor() -> None:
+    """Keep the sandbox vendor out of the reason a user sees for an unsupported runtime."""
+    reason = native_runtime.native_runtime_unavailable_reason("docker", SimpleNamespace())
+
+    assert reason == "Production optimizations run in the managed cloud sandbox."
+    assert "vercel" not in reason.lower()

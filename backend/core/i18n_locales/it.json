@@ -420,6 +420,9 @@
     "continuous.check_stuck": "Il controllo si è interrotto {attempts} volte prima di finire, quindi è stato chiuso. I controlli successivi procedono normalmente.",
     "continuous.review_ready": "Il nuovo candidato ha superato la versione attuale sugli stessi casi. Attende la tua approvazione.",
     "continuous.review_approved": "Hai approvato il nuovo candidato. Ora è la versione attuale.",
-    "continuous.review_rejected": "Hai rifiutato il nuovo candidato. Resta la versione precedente."
+    "continuous.review_rejected": "Hai rifiutato il nuovo candidato. Resta la versione precedente.",
+    "local.not_available": "Questa funzione è disponibile solo nell'app {term.appName} per Mac.",
+    "models.subscription_local_only": "I modelli in abbonamento e i proposer CLI locali funzionano solo nell'app {term.appName} per Mac.",
+    "models.managed_unavailable_local": "L'app per Mac non può usare i modelli gestiti. Scegli un modello in abbonamento o la tua chiave del provider."
   }
 }

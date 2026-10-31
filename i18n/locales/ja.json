@@ -420,6 +420,9 @@
     "continuous.check_stuck": "チェックが完了前に{attempts}回停止したため、終了しました。以降のチェックは通常どおり実行されます。",
     "continuous.review_ready": "新しい候補は同じケースで現在のバージョンを上回りました。あなたの承認を待っています。",
     "continuous.review_approved": "新しい候補を承認しました。これが現在のバージョンになりました。",
-    "continuous.review_rejected": "新しい候補を却下しました。以前のバージョンを維持します。"
+    "continuous.review_rejected": "新しい候補を却下しました。以前のバージョンを維持します。",
+    "local.not_available": "この機能は {term.appName} の Mac アプリでのみ使用できます。",
+    "models.subscription_local_only": "サブスクリプションモデルとホスト CLI プロポーザーは {term.appName} の Mac アプリでのみ実行されます。",
+    "models.managed_unavailable_local": "Mac アプリではマネージドモデルを使用できません。サブスクリプションモデルか、ご自身のプロバイダーキーを選択してください。"
   }
 }

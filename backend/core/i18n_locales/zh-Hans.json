@@ -420,6 +420,9 @@
     "continuous.check_stuck": "检查在完成前中断了 {attempts} 次，因此已关闭。后续检查照常进行。",
     "continuous.review_ready": "在相同用例上，新的候选项超过了当前版本，正在等待你的批准。",
     "continuous.review_approved": "你已批准新的候选项。它现在是当前版本。",
-    "continuous.review_rejected": "你已拒绝新的候选项。之前的版本保持不变。"
+    "continuous.review_rejected": "你已拒绝新的候选项。之前的版本保持不变。",
+    "local.not_available": "此功能仅在 {term.appName} Mac 应用中可用。",
+    "models.subscription_local_only": "订阅模型和本机 CLI 提议器仅在 {term.appName} Mac 应用中运行。",
+    "models.managed_unavailable_local": "Mac 应用无法使用托管模型。请选择订阅模型或您自己的提供商密钥。"
   }
 }
