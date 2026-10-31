@@ -47,6 +47,7 @@ from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
 from ...i18n import t_locale
+from ...local.cli_catalog import parse_subscription_model_id
 from ...models import ModelConfig, WorkflowSpec
 from ...models.unified import (
     METRIC_FILE,
@@ -2249,9 +2250,12 @@ def _build_agent_lm(
     )
     if is_native_minimax:
         extra["extra_body"] = {"reasoning_split": True}
+    subscription = parse_subscription_model_id(model_name)
     config = ModelConfig(
-        name=model_name,
-        base_url=settings.code_agent_base_url or None,
+        name=subscription[1] if subscription else model_name,
+        token_source="subscription" if subscription else None,
+        cli_provider=subscription[0] if subscription else None,
+        base_url=None if subscription else settings.code_agent_base_url or None,
         # Reasoning models spend their thinking tokens against this same
         # budget, and on real datasets the seed's reasoning alone can run
         # thousands of tokens; keep enough headroom that code is never cut

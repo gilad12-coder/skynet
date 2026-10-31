@@ -20,6 +20,7 @@ from .byok_vault import (
     VaultSnapshot,
     byok_provider_for_litellm,
 )
+from .cli_dispatch import CliDispatcher, SubscriptionRateLimitedError, local_subscription_route
 from .issuing_float import FundingResult, IssuingFundingSweeper, fund_issuing_once, start_issuing_funding_sweeper
 from .openrouter_float import (
     FloatStatus,
@@ -44,6 +45,7 @@ from .service import (
 __all__ = [
     "FREE_GRANT_CENTS",
     "PACK_CENTS",
+    "CliDispatcher",
     "FloatStatus",
     "FundingResult",
     "IssuingFundingSweeper",
@@ -53,6 +55,7 @@ __all__ = [
     "ProviderKeyVault",
     "ProviderKeyView",
     "StripeBillingService",
+    "SubscriptionRateLimitedError",
     "VaultSnapshot",
     "WalletSnapshot",
     "byok_prefix_routable",
@@ -63,6 +66,7 @@ __all__ = [
     "fund_issuing_once",
     "inject_byok_connections",
     "inject_provisioned_openrouter_key",
+    "local_subscription_route",
     "notify_low_float",
     "payload_uses_token_source",
     "provider_slug_for_model",

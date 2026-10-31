@@ -425,6 +425,23 @@ def test_predict_excludes_requested_rows_from_examples(monkeypatch) -> None:
     assert resp.json()["code"] == "tagger.assist.rows_not_found"
 
 
+def test_local_mode_refuses_managed_tagging_without_a_call(monkeypatch) -> None:
+    """In local mode, a session with no BYOK model gets 422 before any model call."""
+
+    def never_called(*args, **kwargs):
+        """Fail the test if a tagging model call is made."""
+        raise AssertionError("local mode called a managed tagging model")
+
+    monkeypatch.setattr(tagging, "predict_rows", never_called)
+    monkeypatch.setattr(settings, "local_mode", True)
+    client, _ = _client(_ALICE)
+    session_id = _create(client)
+    for path in ("predict", "predict/stream"):
+        resp = client.post(f"/tagging-sessions/{session_id}/assist/{path}", json={"row_ids": ["2"]})
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "models.managed_unavailable_local"
+
+
 def test_predict_stream_emits_rows_then_done(monkeypatch) -> None:
     """The SSE predict route relays per-row events, then the terminal summary."""
     captured: dict = {}

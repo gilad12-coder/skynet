@@ -809,15 +809,18 @@ def prepare_protected_credentials(
         Parent-only copy with authoritative BYOK credentials and endpoint metadata.
 
     Raises:
-        ValueError: When a role has no verified connection or attempts an unsupported managed endpoint.
+        ValueError: When a role has no verified connection, attempts an unsupported managed endpoint,
+            or names a subscription model outside local mode.
         TypeError: When model parameters do not have their required dictionary shape.
     """
     result = copy.deepcopy(payload)
     fallback = default_token_source or result.get("token_source") or "managed"
     for config in _model_configs(result):
         source = config.get("token_source") or fallback
-        if source not in {"managed", "byok"}:
-            raise ValueError("The model credential source must be managed or byok.")
+        if source == "subscription" and not settings.local_mode:
+            raise ValueError("Subscription models run only in local mode.")
+        if source not in {"managed", "byok", "subscription"}:
+            raise ValueError("The model credential source must be managed, byok or subscription.")
         config["token_source"] = source
         extra = config.get("extra") or {}
         if not isinstance(extra, dict):
@@ -830,7 +833,9 @@ def prepare_protected_credentials(
         for field in _CONNECTION_FIELDS:
             config.pop(field, None)
         config["extra"] = {key: value for key, value in extra.items() if key not in _CONNECTION_FIELDS | {"model"}}
-        if source == "managed":
+        # A subscription role runs on the user's own CLI login through the
+        # gateway's subscription route, so it takes no provider key or endpoint.
+        if source in {"managed", "subscription"}:
             config.pop("byok_provider", None)
             continue
         provider = str(config.get("byok_provider") or "").strip()

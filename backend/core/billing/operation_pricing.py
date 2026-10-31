@@ -59,7 +59,7 @@ class OperationCharge:
 class ChargePolicy:
     """Retain the approved conversion policy with each operation's price snapshot."""
 
-    kind: Literal["managed_model", "byok_model", "sandbox"]
+    kind: Literal["managed_model", "byok_model", "sandbox", "subscription_model"]
     cent_usd: Decimal = Decimal(str(CENT_USD_VALUE))
     # Read at construction, not import, so a policy snapshots the markup in force when it was quoted.
     model_markup: Decimal = field(default_factory=lambda: Decimal(str(usage_markup())))
@@ -75,6 +75,9 @@ class ChargePolicy:
             Exact scope and wallet amounts rounded only to ledger precision.
         """
         raw = exact_nonnegative(provider_usd) / self.cent_usd
+        if self.kind == "subscription_model":
+            # The user's own CLI subscription pays the provider; Skynet charges nothing.
+            return OperationCharge(Decimal(0), Decimal(0))
         if self.kind == "byok_model":
             # BYOK pays only the platform fee on the at-cost model price; the markup is for platform-paid spend.
             wallet = total = raw * self.byok_fee_fraction

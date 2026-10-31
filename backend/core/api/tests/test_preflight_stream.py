@@ -95,3 +95,31 @@ def test_stream_reports_admission_failure_without_success(monkeypatch: pytest.Mo
     assert "event: error" in response.text
     assert "event: result" not in response.text
     assert "Please wait" in response.text
+
+
+def test_stream_logs_an_unexpected_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Log the cause of a failure the stream shows only as a generic line."""
+
+    def crash(request: Any, user: Any, store: Any) -> Any:
+        """Fail the check with an error the stream does not frame."""
+        raise ValueError("The model credential source must be managed or byok.")
+
+    monkeypatch.setattr(wizard_preflight, "run_preflight", crash)
+    monkeypatch.setattr(wizard_preflight, "enforce_submission_rate", lambda username: None)
+    app = FastAPI()
+    app.include_router(wizard_preflight.create_wizard_preflight_router(job_store=object()))
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("alice", "user", ())
+    with caplog.at_level("ERROR", logger=wizard_preflight.__name__), TestClient(app) as client:
+        response = client.post(
+            "/wizard/preflight/stream",
+            json={
+                "workflow": "anything",
+                "scope": "evaluation",
+                "payload": {"scorer": {"metric_code": "def metric(output): return 1.0"}},
+                "execution_budget_id": "draft",
+                "execution_budget_revision": 1,
+            },
+        )
+    assert "Setup validation could not finish" in response.text
+    assert "credential source" not in response.text
+    assert any("credential source" in str(record.exc_info[1]) for record in caplog.records if record.exc_info)
