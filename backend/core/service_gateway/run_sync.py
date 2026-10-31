@@ -33,8 +33,11 @@ from ..constants import (
     PAYLOAD_OVERVIEW_ESTIMATED_LOW,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MAX_COST_CENTS,
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
     PAYLOAD_OVERVIEW_SIGNATURE_CODE,
     PAYLOAD_OVERVIEW_SOURCE_DATASET_ID,
     PAYLOAD_OVERVIEW_USERNAME,
@@ -80,6 +83,16 @@ MAX_JOB_FIELD_BYTES = 64 * 1024
 # A time near year 1 or 9999 with a large offset leaves the datetime range once
 # converted to UTC, and every later read of the row (delete included) fails.
 _TIMESTAMP_YEARS = range(1970, 2101)
+# The embedding sweep copies these values into job_embeddings columns of these
+# widths. A longer or non-text value fails that write on every pass, and the
+# oldest-first sweep then never reaches anyone else's missing embedding.
+_EMBEDDED_OVERVIEW_WIDTHS = {
+    PAYLOAD_OVERVIEW_NAME: 255,
+    PAYLOAD_OVERVIEW_MODEL_NAME: 255,
+    PAYLOAD_OVERVIEW_MODULE_NAME: 128,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME: 64,
+}
+_ENGINE_USED_WIDTH = 64
 
 
 def _is_storable_text(text: str) -> bool:
@@ -368,6 +381,25 @@ def _imported_overview(overview: dict[str, Any], optimization_type: str, usernam
     return cleaned
 
 
+def _fits_embedding_columns(overview: dict[str, Any], result: dict[str, Any] | None) -> bool:
+    """Report whether the embedding sweep can write this run's display fields.
+
+    Args:
+        overview: The overview the copy will store.
+        result: The result the copy will store, or ``None``.
+
+    Returns:
+        ``True`` when each embedded overview value is absent or text that fits
+        its column, and the result's ``engine_used`` fits ``optimizer_name``.
+    """
+    for key, width in _EMBEDDED_OVERVIEW_WIDTHS.items():
+        value = overview.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > width):
+            return False
+    engine_used = (result or {}).get("engine_used")
+    return engine_used is None or len(str(engine_used)) <= _ENGINE_USED_WIDTH
+
+
 def _validated_result(bundle: _Bundle, overview: dict[str, Any]) -> dict[str, Any] | None:
     """Return the result to store, checked against the response model the detail page reads.
 
@@ -440,8 +472,9 @@ def import_run(
     Raises:
         RunSyncError: 422 ``sync.unsupported_schema`` for another schema version
             and 422 ``sync.invalid_bundle`` for a malformed or too deeply
-            nested bundle, a value PostgreSQL cannot store, or job metrics or
-            terminal evidence over ``MAX_JOB_FIELD_BYTES``.
+            nested bundle, a value PostgreSQL cannot store, job metrics or
+            terminal evidence over ``MAX_JOB_FIELD_BYTES``, or a display field
+            too long for its embedding column.
     """
     if not isinstance(bundle, dict):
         raise RunSyncError("sync.invalid_bundle", 422)
@@ -462,6 +495,8 @@ def import_run(
     optimization_type = parsed.optimization.optimization_type
     overview = _imported_overview(parsed.optimization.payload_overview, optimization_type, username)
     result = _validated_result(parsed, overview)
+    if not _fits_embedding_columns(overview, result):
+        raise RunSyncError("sync.invalid_bundle", 422)
     created_at = _parse_time(parsed.job.created_at, default=now) or now
     started_at = _parse_time(parsed.job.started_at, default=None)
     completed_at = _parse_time(parsed.job.completed_at, default=created_at)

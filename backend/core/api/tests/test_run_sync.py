@@ -468,6 +468,39 @@ def test_values_postgres_cannot_store_are_422(
 
 
 @pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("name", "n" * 256),
+        ("model_name", "m" * 256),
+        ("module_name", "d" * 129),
+        ("optimizer_name", "o" * 65),
+        ("model_name", {"id": "gpt"}),
+    ],
+    ids=["long-name", "long-model", "long-module", "long-optimizer", "dict-model"],
+)
+def test_display_fields_the_embedding_sweep_cannot_write_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], key: str, value: Any
+) -> None:
+    """A display field that cannot fit its job_embeddings column is refused.
+
+    Postgres would fail the embedding write on every sweep, and the oldest-first
+    sweep would then never repair another user's embedding.
+    """
+    bundle["optimization"]["payload_overview"][key] = value
+    resp = _client(hosted_store, HOSTED_USER).post("/optimizations/import", content=json.dumps(bundle))
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
+def test_embedding_column_widths_bound_the_engine_and_allow_the_limit() -> None:
+    """``engine_used`` must fit ``optimizer_name``, and values at a column's width pass."""
+    at_limit = {"name": "n" * 255, "model_name": "m" * 255, "module_name": "d" * 128, "optimizer_name": "o" * 64}
+    assert run_sync._fits_embedding_columns(at_limit, {"engine_used": "e" * 64})
+    assert not run_sync._fits_embedding_columns({}, {"engine_used": "e" * 65})
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("created_at", "0001-01-01T00:00:00+14:00"),
