@@ -396,6 +396,50 @@ def test_deeply_nested_metrics_are_422(hosted_store: _SQLiteJobStore, bundle: di
     assert _count(hosted_store, JobModel) == 0
 
 
+def test_too_many_values_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A body with more values than the cap is refused, so a small-number flood cannot exhaust API memory."""
+    count = len(json.dumps(bundle))
+    monkeypatch.setattr(run_sync, "MAX_BUNDLE_NODES", count)
+    assert run_sync._is_storable([0] * count, run_sync.MAX_BUNDLE_DEPTH) is False
+    assert run_sync._is_storable([0] * (count - 1), run_sync.MAX_BUNDLE_DEPTH) is True
+    assert _import(hosted_store, bundle).status_code == 201
+
+    bundle["job"]["result"] = {"flood": [0] * count}
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 1
+
+
+@pytest.mark.parametrize(
+    "model_settings",
+    [{"name": "openai/gpt-4o-mini", "temperature": 9}, ["openai/gpt-4o-mini"]],
+    ids=["temperature-out-of-range", "not-a-mapping"],
+)
+def test_invalid_model_settings_are_422(
+    hosted_store: _SQLiteJobStore, bundle: dict[str, Any], model_settings: Any
+) -> None:
+    """Model settings serve cannot rebuild are refused at import, so the copy can never make serve answer 500."""
+    bundle["optimization"]["payload_overview"]["model_settings"] = model_settings
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == t_en("sync.invalid_bundle")
+    assert _count(hosted_store, JobModel) == 0
+
+
+def test_valid_model_settings_are_kept(hosted_store: _SQLiteJobStore, bundle: dict[str, Any]) -> None:
+    """Model settings that validate are stored unchanged on the copy."""
+    settings_value = {"name": "openai/gpt-4o-mini", "temperature": 0.5}
+    bundle["optimization"]["payload_overview"]["model_settings"] = settings_value
+    resp = _import(hosted_store, bundle)
+    assert resp.status_code == 201, resp.text
+    with Session(hosted_store.engine) as session:
+        row = session.execute(select(JobModel)).scalar_one()
+    assert row.payload_overview["model_settings"] == settings_value
+
+
 @pytest.mark.parametrize("field", ["latest_metrics", "terminal_evidence"])
 def test_oversized_job_field_is_422(hosted_store: _SQLiteJobStore, bundle: dict[str, Any], field: str) -> None:
     """Metrics or terminal evidence over the field cap are refused, so no import can store them uncounted."""

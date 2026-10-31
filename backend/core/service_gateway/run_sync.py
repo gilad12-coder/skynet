@@ -15,7 +15,7 @@ import binascii
 import json
 import math
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
@@ -34,6 +34,7 @@ from ..constants import (
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MAX_COST_CENTS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_MODEL_SETTINGS,
     PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
@@ -43,7 +44,7 @@ from ..constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     PAYLOAD_OVERVIEW_WORKFLOW,
 )
-from ..models import BlackboxRunResponse, RunResponse
+from ..models import BlackboxRunResponse, ModelConfig, RunResponse
 from ..storage.models import JobModel, ProgressEventModel
 from ..storage.usage import IMPORTED_FROM_DESKTOP, IMPORTED_FROM_KEY, json_byte_size
 
@@ -76,6 +77,10 @@ _MAX_MESSAGE_CHARS = 10_000
 # Deep nesting passes json.loads but later breaks Python-side reads and
 # serialization of the caller's run list and detail, so it is refused up front.
 MAX_BUNDLE_DEPTH = 64
+# json.loads of a body under MAX_BUNDLE_BYTES can hold tens of millions of small
+# values, and walking them all holds the API worker for seconds with gigabytes
+# resident. A real export holds far fewer values than this.
+MAX_BUNDLE_NODES = 2_000_000
 # The worker writes these columns itself on a normal run, so the store does not
 # meter them; an import takes them from the caller, so they are capped and counted.
 # latest_metrics also ships in every row of the run list.
@@ -93,6 +98,7 @@ _EMBEDDED_OVERVIEW_WIDTHS = {
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME: 64,
 }
 _ENGINE_USED_WIDTH = 64
+_END = object()
 
 
 def _is_storable_text(text: str) -> bool:
@@ -126,12 +132,21 @@ def _is_storable(value: Any, limit: int) -> bool:
         limit: Largest allowed number of nested lists or dicts.
 
     Returns:
-        ``True`` when the deepest container is at most ``limit`` levels down, every
-        number fits a finite float, and every string and key is NUL-free valid UTF-8.
+        ``True`` when the deepest container is at most ``limit`` levels down, the
+        value holds at most ``MAX_BUNDLE_NODES`` values, every number fits a finite
+        float, and every string and key is NUL-free valid UTF-8.
     """
-    stack: list[tuple[Any, int]] = [(value, 1)]
+    stack: list[tuple[Iterator[Any], int]] = [(iter((value,)), 1)]
+    nodes = 0
     while stack:
-        node, depth = stack.pop()
+        siblings, depth = stack[-1]
+        node = next(siblings, _END)
+        if node is _END:
+            stack.pop()
+            continue
+        nodes += 1
+        if nodes > MAX_BUNDLE_NODES:
+            return False
         if isinstance(node, float):
             if not math.isfinite(node):
                 return False
@@ -147,16 +162,18 @@ def _is_storable(value: Any, limit: int) -> bool:
                 return False
             continue
         if isinstance(node, dict):
-            children = list(node.values())
+            children = iter(node.values())
             if any(not isinstance(key, str) or not _is_storable_text(key) for key in node):
                 return False
         elif isinstance(node, list):
-            children = node
+            children = iter(node)
         else:
             continue
         if depth > limit:
             return False
-        stack.extend((child, depth + 1) for child in children)
+        # One iterator per open container keeps the walk's memory bound to the
+        # depth, not to the number of values.
+        stack.append((children, depth + 1))
     return True
 
 
@@ -362,11 +379,19 @@ def _imported_overview(overview: dict[str, Any], optimization_type: str, usernam
 
     Raises:
         RunSyncError: 422 ``sync.invalid_bundle`` when ``is_private`` is not a
-            boolean. The public dashboard casts it to boolean in SQL, so one
-            bad row would fail that page for every user.
+            boolean, or when ``model_settings`` is not a valid model config. The
+            public dashboard casts ``is_private`` to boolean in SQL, so one bad
+            row would fail that page for every user; serve and chat rebuild the
+            model from ``model_settings`` and would answer 500.
     """
     if not isinstance(overview.get(PAYLOAD_OVERVIEW_IS_PRIVATE, False), bool):
         raise RunSyncError("sync.invalid_bundle", 422)
+    model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS)
+    if model_settings:
+        try:
+            ModelConfig.model_validate(model_settings)
+        except ValidationError:
+            raise RunSyncError("sync.invalid_bundle", 422) from None
     cleaned = {key: value for key, value in overview.items() if key not in _DROPPED_OVERVIEW_KEYS}
     description = cleaned.get(PAYLOAD_OVERVIEW_DESCRIPTION)
     if isinstance(description, str) and description.strip():
