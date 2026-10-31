@@ -607,7 +607,7 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         _require_internal_auth(x_internal_auth)
         username = _normalise_email(body.username)
         with Session(job_store.engine) as session:
-            row = session.get(UserModel, username)
+            row = session.get(UserModel, username, with_for_update=True)
             if row is None:
                 raise DomainError("accounts.not_found", status=404)
             existing = session.get(UserIdentityModel, (body.provider, body.provider_account_id))
