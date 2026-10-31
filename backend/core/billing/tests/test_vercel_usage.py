@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import time
 from collections.abc import Iterator
@@ -15,6 +16,7 @@ from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 from vercel.sandbox import SandboxApiError
 
+from core.billing import vercel_usage
 from core.billing.budget_amounts import cent_units
 from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
@@ -145,8 +147,25 @@ def test_unbounded_creation_is_not_quoted(change: dict[str, Any]) -> None:
 )
 def test_unconfirmed_usage_is_not_fabricated_or_misclassified(change: dict[str, Any]) -> None:
     """Leave absent metrics and ambiguous transfer pending instead of charging estimates."""
-    with pytest.raises(UsagePendingError):
+    with pytest.raises(UsagePendingError) as pending:
         vercel_actual_usd({**RECEIPT, **change}, session_id="session-one", vcpus=2)
+    assert "Vercel" not in str(pending.value)
+
+
+def test_pending_usage_messages_never_name_the_sandbox_vendor() -> None:
+    """Keep the vendor name out of every pending-usage message, because failed runs show it to users."""
+    tree = ast.parse(Path(vercel_usage.__file__).read_text())
+    messages = [
+        "".join(part.value for part in ast.walk(node.args[0]) if isinstance(part, ast.Constant))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "UsagePendingError"
+        and node.args
+    ]
+
+    assert len(messages) >= 15
+    assert [message for message in messages if "vercel" in message.lower()] == []
 
 
 def test_control_plane_transfer_settles_only_under_an_offline_admission() -> None:
