@@ -53,10 +53,27 @@ failure.
   `SKYNET_DEVIN_<n>_PASSWORD`. Use one slot per parallel session.
 - Sign in through the normal login page or the script below. No email code
   is needed for these accounts.
-- **Never sign up on shared staging.**
+- **Never sign up on shared staging** for a normal check (see the
+  exceptions below).
 - Preview databases are empty. Ask Gilad for a preview account. He stores it
   as `SKYNET_PR_<n>_EMAIL` / `SKYNET_PR_<n>_PASSWORD`. **Never sign up on a
-  preview yourself.**
+  preview yourself** to get a working account.
+
+### Sign-up exceptions
+
+The sign-up ban covers normal checks. It has two exceptions:
+
+1. **Acceptance checks of an authentication change** (sign-up, email
+   verification, login). These need fresh accounts and real email codes, so
+   a sign-up is part of the test. Do it only when the issue covers an auth
+   change. Put the issue label in the account name, and record each account
+   you create in the PR.
+2. **Sign-ups by the orchestrator's tools**: the pool `preview` command
+   (section 5) and the preview merger, which signs up and runs a real
+   optimization in each preview (`docs/agents/pr-previews.md`).
+
+Devin does not have these tools. For an ordinary preview check, Devin still
+asks Gilad for a preview account.
 
 Use `devin-login.sh` in this folder. It reads the credentials from
 environment variables, sets `TOKEN`, and prints only the HTTP status:
@@ -124,8 +141,8 @@ node "$P" preview <n> <label>   # preview account: signs in again, or signs up i
 - In a browser, sign in through the normal login page. Keep the password out
   of recordings.
 - A test-account login is access setup, not proof of email verification.
-  Test authentication changes with fresh accounts and real codes, as the
-  issue allows.
+  Test authentication changes with fresh accounts and real codes (sign-up
+  exception 1 in section 4).
 
 ## 7. Test data
 
@@ -140,7 +157,8 @@ node "$P" preview <n> <label>   # preview account: signs in again, or signs up i
 - Do not start expensive or scheduled runs only to see their UI. Follow the
   costly-workflow rule in the `skynet-pr-workflow` skill.
 - Never borrow another agent's slot, Gilad's session or a personal account.
-  Never create extra one-off accounts.
+  Never create extra one-off accounts, except for the sign-up exceptions in
+  section 4.
 
 ## 8. What to write in the PR
 

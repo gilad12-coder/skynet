@@ -65,6 +65,7 @@ node_modules/
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/skynet-*/
+/*/**/.agents/
 .kiro/
 .windsurf/
 skills-lock.json

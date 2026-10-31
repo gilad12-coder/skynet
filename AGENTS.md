@@ -108,8 +108,9 @@ a PR environment (preview), a full copy of staging with an empty database, at
 Run the acceptance checks and record the videos there, before the merge.
 Details: `docs/agents/pr-previews.md`.
 
-Only the orchestrator merges, in the daily merge window. Implementation and
-review agents never merge, and never post `Approved for merge` or
+Only the orchestrator merges. The cloud merger routine merges in the daily
+window (03:00 America/Los_Angeles), or earlier when Gilad explicitly asks.
+Implementation and review agents never merge, and never post `Approved for merge` or
 `Changes requested:` comments. The full gate, review and Linear flow is in
 the `skynet-pr-workflow` skill.
 
@@ -209,8 +210,9 @@ or `just backend`), frontend `:3000` (`cd frontend && npm run dev` or
   `https://api-staging.skynetml.com`) or the PR's preview. Never test against
   production. Railway is deleted; never use it.
 - Use only the test account that you were given. Never sign up on shared
-  staging, and never sign up on a preview yourself. Never borrow a personal
-  session. Never print or commit passwords, tokens, cookies or email codes.
+  staging, and never sign up on a preview yourself. Exceptions: acceptance
+  checks of auth changes (fresh accounts, real codes), and sign-ups that the
+  orchestrator's tools do. Never borrow a personal session. Never print or commit passwords, tokens, cookies or email codes.
 - Never add funds, grant credits, change balances or change live billing
   configuration. Never deploy production.
 - How to sign in and check the served commit: the `skynet-test-accounts` skill.
