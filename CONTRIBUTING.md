@@ -23,6 +23,12 @@ just backend    # :8000
 just frontend   # :3000
 ```
 
+`just setup` also turns on the repo git hooks (`git config core.hooksPath
+.githooks`). The pre-commit hook runs [gitleaks](https://github.com/gitleaks/gitleaks)
+on the staged changes and blocks a commit that adds a secret. Install it with
+`brew install gitleaks`. Without gitleaks the hook blocks the commit; set
+`SKIP_GITLEAKS=1` to commit once without the scan. CI scans every PR as well.
+
 ## Tests — run the right suites
 
 Backend tests live in **two** places; run both before opening a PR:

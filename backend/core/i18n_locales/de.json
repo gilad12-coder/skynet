@@ -420,6 +420,9 @@
     "continuous.check_stuck": "Die Prüfung brach {attempts}-mal vor dem Ende ab und wurde deshalb geschlossen. Spätere Prüfungen laufen normal.",
     "continuous.review_ready": "Der neue Kandidat war auf denselben Fällen besser als die aktuelle Version. Er wartet auf Ihre Genehmigung.",
     "continuous.review_approved": "Sie haben den neuen Kandidaten genehmigt. Er ist jetzt die aktuelle Version.",
-    "continuous.review_rejected": "Sie haben den neuen Kandidaten abgelehnt. Die frühere Version bleibt."
+    "continuous.review_rejected": "Sie haben den neuen Kandidaten abgelehnt. Die frühere Version bleibt.",
+    "local.not_available": "Diese Funktion gibt es nur in der {term.appName}-App für Mac.",
+    "models.subscription_local_only": "Abo-Modelle und lokale CLI-Proposer laufen nur in der {term.appName}-App für Mac.",
+    "models.managed_unavailable_local": "Die Mac-App kann keine verwalteten Modelle nutzen. Wählen Sie ein Abo-Modell oder Ihren eigenen Anbieterschlüssel."
   }
 }
