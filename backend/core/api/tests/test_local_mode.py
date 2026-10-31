@@ -39,7 +39,7 @@ from ..routers import wizard_preflight
 from ..routers.accounts import create_accounts_router
 from ..routers.local_runtime import create_local_runtime_router
 from .conftest import bypass_auth
-from .test_agent_engine import _status
+from .test_agent_engine import _CODEX_ID, _status
 from .test_protected_submissions import _Harness, _payload
 from .test_protected_submissions import harness as _harness_fixture
 from .test_submissions_router import (
@@ -706,6 +706,36 @@ def test_local_proposer_follows_the_default_cli_when_the_openrouter_key_is_gone(
     resp = client.post("/optimize", json=unified_payload(token_source="subscription", models=_SUBSCRIPTION_MODELS))
 
     assert _stored_proposer(store, resp)["host_cli"] == "codex"
+
+
+@pytest.mark.parametrize(
+    ("ready", "key", "expected"),
+    [
+        (("codex", "claude"), None, _CODEX_ID),
+        (("codex", "claude"), "unverified", _CODEX_ID),
+        (("codex", "claude"), "verified", None),
+        ((), None, None),
+    ],
+)
+def test_local_agent_turn_with_no_model_follows_the_default_cli_when_the_openrouter_key_is_gone(
+    monkeypatch: pytest.MonkeyPatch, ready: tuple[str, ...], key: str | None, expected: str | None
+) -> None:
+    """A stored OpenRouter engine with no verified key fills an empty agent pick from the default CLI.
+
+    With the verified key the pick stays empty, so the router runs it on the
+    key. With no ready CLI it also stays empty, and the router refuses it.
+
+    Args:
+        monkeypatch: Pytest fixture used to set local mode and the probe.
+        ready: The CLIs the probe reports as ready.
+        key: The status of the caller's saved OpenRouter key, or ``None`` for no key.
+        expected: The filled model, or ``None`` for an unchanged empty pick.
+    """
+    _client, store = _local_submit_client(monkeypatch, local_mode=True)
+    _engine_setup(monkeypatch, store, ready=ready, stored="openrouter")
+    _save_openrouter_key(monkeypatch, store, key)
+
+    assert agent_engine.engine_agent_model(store, "alice", None) == expected
 
 
 @pytest.mark.parametrize(

@@ -118,6 +118,25 @@ def _has_verified_key(job_store: object | None, username: str) -> bool:
     return engine is not None and ProviderKeyVault(engine=engine).has_verified_connection(username, OPENROUTER_ENGINE)
 
 
+def _turn_engine(job_store: object | None, username: str) -> AgentEngine | None:
+    """Return the engine that runs a local agent turn or proposer with no pick.
+
+    Args:
+        job_store: Job store whose ORM engine holds the setting, or ``None``.
+        username: The caller.
+
+    Returns:
+        The effective engine, except that a stored OpenRouter engine with no
+        saved, verified key gives the default engine.
+    """
+    engine = effective_agent_engine(job_store, username)
+    # Settings shows the default CLI, not OpenRouter, once the OpenRouter key
+    # is removed or unverified, so agent turns and proposers follow that CLI too.
+    if engine == OPENROUTER_ENGINE and not _has_verified_key(job_store, username):
+        return default_agent_engine()
+    return engine
+
+
 def engine_agent_model(job_store: object | None, username: str, model: str | None) -> str | None:
     """Fill an agent turn's empty model pick from the caller's engine.
 
@@ -128,7 +147,8 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
 
     Returns:
         ``model`` unchanged when it names a model, in hosted mode, or when the
-        engine is OpenRouter or unknown (in local mode the model router then
+        turn engine (see :func:`_turn_engine`) is OpenRouter or unknown (in
+        local mode the model router then
         runs the turn on the caller's verified OpenRouter key, or refuses it).
         Otherwise ``subscription/<cli>/<slug>`` on the engine
         CLI's first catalog model.
@@ -140,7 +160,7 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
     # subscription slugs, so it runs only after the subscription check.
     if name and name != _RETIRED_AUTO_ID and not is_removed_model(name):
         return model
-    engine = effective_agent_engine(job_store, username)
+    engine = _turn_engine(job_store, username)
     if engine is None or engine == OPENROUTER_ENGINE:
         return model
     cli: CliProvider = engine
@@ -164,10 +184,6 @@ def fill_proposer_host_cli(job_store: object | None, username: str, payload: Any
     # would replace.
     if proposer is None or "host_cli" in proposer.model_fields_set or proposer.harness == BLACKBOX_HARNESS_CUSTOM:
         return
-    engine = effective_agent_engine(job_store, username)
-    # Settings shows the default CLI, not OpenRouter, once the OpenRouter key
-    # is removed or unverified, so the proposer follows that CLI too.
-    if engine == OPENROUTER_ENGINE and not _has_verified_key(job_store, username):
-        engine = default_agent_engine()
+    engine = _turn_engine(job_store, username)
     if engine is not None and engine != OPENROUTER_ENGINE:
         proposer.host_cli = engine

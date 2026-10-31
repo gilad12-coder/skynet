@@ -205,7 +205,8 @@ export function AgentEngineSelect({
   const keyGone = shown !== value;
   const current = options.find((option) => option.engine === shown);
   // A key list that still loads is no reason to warn about the OpenRouter engine.
-  const warn = !keyGone && !!current?.disabled && current.engine !== OPENROUTER_ENGINE && !!status;
+  const down = !!current?.disabled && current.engine !== OPENROUTER_ENGINE && !!status;
+  const warn = !keyGone && down;
   let description: MessageKey = "settings.agent_engine.description";
   if (local) {
     description =
@@ -273,7 +274,20 @@ export function AgentEngineSelect({
           <Warning className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1" dir="auto">
             {keyGone ? (
-              msg("settings.agent_engine.openrouter_fallback", { cli: engineLabel(shown) })
+              <>
+                {msg("settings.agent_engine.openrouter_fallback", { cli: engineLabel(shown) })}
+                {/* The fallback CLI may not run either; keep its reason and sign-in command. */}
+                {down && (
+                  <span className="block">
+                    <OptionReason
+                      option={current}
+                      status={status}
+                      failed={failed}
+                      keysFailed={keysFailed}
+                    />
+                  </span>
+                )}
+              </>
             ) : (
               <OptionReason
                 option={current}

@@ -476,6 +476,17 @@ void describe("OpenRouter engine (SKY-123 AC3)", () => {
     assert.match(gone, /settings\.agent_engine\.description_local</);
     assert.match(gone, /role="status"/);
     assert.match(gone, /settings\.agent_engine\.openrouter_fallback/);
+    // A ready fallback CLI needs no reason.
+    assert.doesNotMatch(gone, /subscription\.state\./);
+  });
+
+  void it("with the key gone and the fallback CLI signed out, the warning keeps its sign-in command", () => {
+    const html = render(true, "openrouter", status([cli("claude", { logged_in: false })]), false);
+    assert.match(html, /data-engine-logo="claude"/);
+    assert.match(html, /settings\.agent_engine\.openrouter_fallback/);
+    const warning = html.slice(html.indexOf('role="status"'));
+    assert.match(warning, /subscription\.state\.logged_out/);
+    assert.match(warning, /<code[^>]*>claude auth login<\/code>/);
   });
 
   void it("with the key gone, choosing the shown CLI stores it", () => {
