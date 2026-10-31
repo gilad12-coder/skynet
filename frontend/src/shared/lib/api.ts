@@ -1036,6 +1036,74 @@ export function updateNotificationPreferences(patch: NotificationPreferencesPatc
   });
 }
 
+export interface LocalNotificationChannels {
+  /** Delivery channel -> whether this Mac can deliver on it now. */
+  channels: Record<NotificationHeldChannel | "macos", boolean>;
+  /** Event type -> whether it shows as a macOS notification. */
+  macos: Record<NotificationEventType, boolean>;
+  /** Whether non-urgent macOS notifications wait the hold. */
+  macos_held: boolean;
+}
+
+/** One queued macOS notification for the Mac app to show. */
+export interface NativeNotification {
+  id: string;
+  title: string;
+  body: string;
+  /** App path the notification opens. */
+  url: string;
+  tag: string;
+}
+
+/**
+ * Read the Mac app's channel states and macOS cells. Hosted servers answer
+ * 404 on this local-only route; that resolves to null so callers keep the
+ * hosted UI.
+ */
+export async function getLocalNotificationChannels(): Promise<LocalNotificationChannels | null> {
+  try {
+    return await request<LocalNotificationChannels>("/local/notifications/channels");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Change macOS cells in the Mac app; untouched cells keep their value. */
+export function updateLocalMacosCells(grid: Partial<Record<NotificationEventType, boolean>>) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ grid }),
+  });
+}
+
+/** Add macOS to, or take it out of, the held channels in the Mac app. */
+export function updateLocalMacosHeld(held: boolean) {
+  return request<LocalNotificationChannels>("/local/notifications/macos", {
+    method: "PATCH",
+    body: JSON.stringify({ held }),
+  });
+}
+
+/**
+ * Lease the queued macOS notifications in the UI locale. A lease that is not
+ * confirmed runs out, and the server hands those notifications out again.
+ */
+export function claimNativeNotifications() {
+  return request<{ items: NativeNotification[] }>("/local/notifications/native/claim", {
+    method: "POST",
+    body: JSON.stringify({ locale: getActiveLocale() }),
+  });
+}
+
+/** Tell the server which claimed macOS notifications the app showed. */
+export function confirmNativeNotifications(ids: string[]) {
+  return request<{ confirmed: number }>("/local/notifications/native/confirm", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export type NotificationTab = "focused" | "everything";
 
 export interface NotificationFacts {
