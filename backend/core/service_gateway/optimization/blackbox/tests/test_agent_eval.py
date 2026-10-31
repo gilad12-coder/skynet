@@ -152,7 +152,7 @@ def test_agent_readiness_reports_missing_offline_dependency() -> None:
     runtime = FakeSandboxRuntime(session_factory=lambda: FakeSandboxSession(script=script))
     runtime.protected = True
 
-    with pytest.raises(ServiceError, match="offline Vercel sandbox: No matching distribution found"):
+    with pytest.raises(ServiceError, match="offline cloud sandbox: No matching distribution found"):
         _scorer_of(runtime, _target(install_command="pip install unavailable-package")).check_ready()
 
     assert runtime.sessions[0].closed is True
