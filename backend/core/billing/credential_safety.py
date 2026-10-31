@@ -9,6 +9,10 @@ from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 REDACTED_CREDENTIAL = "[REDACTED]"
+# Hosted desktop-link tokens (SKY-124). Their fixed prefix lets every boundary
+# scrub them even when the caller does not know the exact token value.
+DESKTOP_LINK_TOKEN_RE = re.compile(r"skyl_(?:at|rt)_[A-Za-z0-9_-]+")
+_DESKTOP_LINK_TOKEN_BYTES_RE = re.compile(DESKTOP_LINK_TOKEN_RE.pattern.encode("ascii"))
 _SECRET_KEYS = frozenset(
     {
         "access_token",
@@ -96,6 +100,18 @@ def endpoint_has_private_components(url: str) -> bool:
     return "@" in parsed.netloc or bool(parsed.query) or bool(parsed.fragment)
 
 
+def scrub_desktop_link_tokens(text: str) -> str:
+    """Replace every hosted desktop-link token (``skyl_at_``/``skyl_rt_``) in text.
+
+    Args:
+        text: Text that may hold a token.
+
+    Returns:
+        The text with each token replaced by the redaction marker.
+    """
+    return DESKTOP_LINK_TOKEN_RE.sub(REDACTED_CREDENTIAL, text)
+
+
 def _scrub_model_value(value: Any) -> Any:
     """Recursively strip credentials from one model configuration value.
 
@@ -105,6 +121,8 @@ def _scrub_model_value(value: Any) -> Any:
     Returns:
         Secret-free deep copy.
     """
+    if isinstance(value, str):
+        return scrub_desktop_link_tokens(value)
     if isinstance(value, list):
         return [_scrub_model_value(item) for item in value]
     if not isinstance(value, dict):
@@ -180,7 +198,7 @@ def redact_secret_text(text: str, fragments: Iterable[str]) -> str:
     for fragment in fragments:
         if fragment:
             text = text.replace(fragment, REDACTED_CREDENTIAL)
-    return text
+    return scrub_desktop_link_tokens(text)
 
 
 def redact_secret_bytes(content: bytes, fragments: Iterable[str]) -> bytes:
@@ -196,7 +214,7 @@ def redact_secret_bytes(content: bytes, fragments: Iterable[str]) -> bytes:
     for fragment in fragments:
         if fragment:
             content = content.replace(fragment.encode("utf-8"), REDACTED_CREDENTIAL.encode("utf-8"))
-    return content
+    return _DESKTOP_LINK_TOKEN_BYTES_RE.sub(REDACTED_CREDENTIAL.encode("utf-8"), content)
 
 
 def redact_secret_value(value: Any, fragments: Iterable[str]) -> Any:

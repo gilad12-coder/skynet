@@ -215,7 +215,9 @@ def test_interview_returns_turn(monkeypatch) -> None:
     """The interview route forwards the transcript and returns the turn."""
     seen: dict = {}
 
-    def fake_turn(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    def fake_turn(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded arguments and return a canned turn."""
         seen.update(
             {
@@ -282,7 +284,9 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
     """The SSE interview route hands the chosen model to the engine."""
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update(
             {
@@ -311,7 +315,9 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     """Echoed turns with extra (even null) bookkeeping fields still validate."""
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded turns and finish immediately."""
         seen["turns"] = turns
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -347,7 +353,9 @@ def test_interview_stream_auto_runs_interview_default(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "interview_model_id", lambda: "openrouter/anthropic/claude-sonnet-5")
     seen: dict = {}
 
-    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
+    async def fake_stream(
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None, model_config=None
+    ):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update({"model": model})
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}

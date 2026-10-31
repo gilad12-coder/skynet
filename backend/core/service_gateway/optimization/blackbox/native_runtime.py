@@ -21,6 +21,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from .... import run_log
+from ....billing.host_agent import HOST_AGENT_TOKEN_KEY
 from ....billing.model_gateway import raise_gateway_stop
 from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
@@ -1032,6 +1033,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         ),
         GatewayConfig(url=options.gateway.url, api_key=harness_bridge.KEY_TOKEN),
         protected=options.budget_route is not None,
+        host_cli=proposer.host_cli,
+        host_agent_token=(options.budget_route or {}).get(HOST_AGENT_TOKEN_KEY),
     )
     input_price, output_price = model_token_costs(options.model)
     # Runs carry no wall-clock cap of their own: the budget and evaluation

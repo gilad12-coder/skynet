@@ -315,7 +315,7 @@ def test_run_contract_is_one_contract_for_every_artifact() -> None:
 
 def test_a_seed_without_the_authoring_context_fails(monkeypatch) -> None:
     """There is no Signature seed: a first draft needs the unified context or a workflow."""
-    monkeypatch.setattr(code_module, "_build_agent_lm", lambda *_a: object())
+    monkeypatch.setattr(code_module, "_build_agent_lm", lambda *_a, **_k: object())
     monkeypatch.setattr(code_module, "served_model_from", lambda _lm: "test-model")
 
     async def collect() -> list[dict]:

@@ -215,6 +215,26 @@ def parse_opencode_output(stdout: str) -> tuple[str | None, Usage]:
     return text, usage
 
 
+def parse_host_agent_output(stdout: str) -> tuple[str | None, Usage]:
+    """Read the summary line the host-agent shim prints after a host CLI turn.
+
+    Args:
+        stdout: Captured shim output.
+
+    Returns:
+        The CLI's final text (``None`` when absent) and its reported usage.
+    """
+    text: str | None = None
+    usage: Usage = {}
+    for event in _json_lines(stdout):
+        if event.get("type") != "host_agent.result":
+            continue
+        text = str(event.get("text") or "").strip() or None
+        used = event.get("usage") or {}
+        usage = _add_usage(usage, _usage(used.get("input_tokens"), used.get("output_tokens")))
+    return text, usage
+
+
 # Codex items that are the agent acting rather than talking or thinking; each
 # is announced on ``item.started`` and settled on ``item.completed``.
 _CODEX_TOOL_ITEMS = frozenset({"command_execution", "file_change", "mcp_tool_call", "web_search"})
@@ -253,6 +273,7 @@ PARSERS = {
     "pi": parse_pi_output,
     "codex": parse_codex_output,
     "opencode": parse_opencode_output,
+    "host_agent": parse_host_agent_output,
 }
 
 
