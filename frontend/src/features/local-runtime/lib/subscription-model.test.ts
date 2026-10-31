@@ -747,6 +747,10 @@ test("with the agent engine load failed, the request sends what the empty menu's
   // A Local pick still runs on its CLI.
   const local = "subscription/claude/anthropic/claude-opus-4.1";
   assert.equal(await resolveLocalAgentModel(local, "claude", deps()), local);
+  // So does a pick for another CLI than the role's pin or the default one.
+  const codex = "subscription/codex/openai/gpt-5";
+  assert.equal(await resolveLocalAgentModel(codex, null, deps()), codex);
+  assert.equal(await resolveLocalAgentModel(codex, "claude", deps()), codex);
   // A loaded engine with nothing chosen keeps the default CLI.
   assert.match(
     (await resolveLocalAgentModel(null, null, localDeps({ engine: null }))) ?? "",

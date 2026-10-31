@@ -357,9 +357,10 @@ function resolveOpenRouterEngineModel(
  * CLI's first model. With no CLI model the menu is empty: the chip names a
  * saved OpenRouter pick, which is sent unchanged, or shows the default label
  * with no pick, and nothing is sent. The menu is also empty while the engine
- * load failed (`engineLoaded` false), so the same rule applies, except that a
- * role pinned to a CLI with no pick still runs on that CLI: the backend would
- * fill no pick from its own engine and drop the pin.
+ * load failed (`engineLoaded` false), so the same rule applies: a Local pick
+ * resolves on its own CLI, which the chip names. A role pinned to a CLI with
+ * no pick still runs on that CLI: the backend would fill no pick from its own
+ * engine and drop the pin.
  */
 export async function resolveLocalAgentModel(
   model: string | null,
@@ -380,7 +381,8 @@ export async function resolveLocalAgentModel(
   if (model === RETIRED_AUTO_MODEL) model = null;
   if (deps.engineLoaded === false) {
     if (model ? isOpenRouterModelId(model) : !cli) return model;
-    return resolveAgentModel(model, cli, deps.loadStatus, deps.peekStatus);
+    const pickCli = parseSubscriptionModelId(model)?.cli ?? cli;
+    return resolveAgentModel(model, pickCli, deps.loadStatus, deps.peekStatus);
   }
   let engine = deps.engine ?? null;
   if (engine === OPENROUTER_ENGINE) {
