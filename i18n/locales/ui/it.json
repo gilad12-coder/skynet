@@ -4306,6 +4306,7 @@
   "subscription.state.failed": "Impossibile controllare le CLI su questo computer",
   "subscription.state.loading": "Controllo delle CLI su questo computer…",
   "host_agent.cli.label": "Esegui il proponente sulla mia CLI",
+  "host_agent.cli.default": "Motore dell'agente (predefinito)",
   "host_agent.cli.off": "Disattivato (proponente isolato)",
   "host_agent.permission.label": "Accesso del proponente",
   "host_agent.permission.workspace_only": "Solo area di lavoro",

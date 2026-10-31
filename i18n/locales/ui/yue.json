@@ -4306,6 +4306,7 @@
   "subscription.state.failed": "檢查唔到呢部電腦上嘅 CLI",
   "subscription.state.loading": "檢查緊呢部電腦上嘅 CLI…",
   "host_agent.cli.label": "喺我嘅 CLI 上運行提議器",
+  "host_agent.cli.default": "代理引擎（預設）",
   "host_agent.cli.off": "停用（沙盒提議器）",
   "host_agent.permission.label": "提議器權限",
   "host_agent.permission.workspace_only": "只限工作區",

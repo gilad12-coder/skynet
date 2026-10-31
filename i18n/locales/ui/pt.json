@@ -4306,6 +4306,7 @@
   "subscription.state.failed": "Não foi possível verificar as CLI neste computador",
   "subscription.state.loading": "A verificar as CLI neste computador…",
   "host_agent.cli.label": "Executar o proponente na minha CLI",
+  "host_agent.cli.default": "Motor do agente (padrão)",
   "host_agent.cli.off": "Desligado (proponente isolado)",
   "host_agent.permission.label": "Acesso do proponente",
   "host_agent.permission.workspace_only": "Apenas área de trabalho",

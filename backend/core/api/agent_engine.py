@@ -4,12 +4,13 @@ Hosted mode always runs on OpenRouter, so it never reads the stored setting.
 Local mode runs agent turns on the engine the user chose: a subscription CLI,
 or OpenRouter with the user's verified key. With no choice, it runs them on the
 first CLI that is ready on this machine, else on the user's verified OpenRouter
-key. A CLI engine never falls back to OpenRouter.
+key. A CLI engine never falls back to OpenRouter. In local mode an
+optimization proposer with no CLI pick follows the same engine CLI.
 """
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ from ..billing.byok_vault import ProviderKeyVault
 from ..config import settings
 from ..local.cli_catalog import CLI_MODELS, CliProvider, parse_subscription_model_id
 from ..local.cli_probe import CliStatus, probe_clis
+from ..models.blackbox import BLACKBOX_HARNESS_CUSTOM
 from ..storage.models import AgentEnginePreferenceModel
 from .model_catalog import is_removed_model
 from .model_router import _RETIRED_AUTO_ID
@@ -132,3 +134,25 @@ def engine_agent_model(job_store: object | None, username: str, model: str | Non
         return model
     cli: CliProvider = engine
     return f"subscription/{cli}/{next(iter(CLI_MODELS[cli]))}"
+
+
+def fill_proposer_host_cli(job_store: object | None, username: str, payload: Any) -> None:
+    """Run a local proposer with no CLI pick on the caller's engine CLI.
+
+    Args:
+        job_store: Job store whose ORM engine holds the setting, or ``None``.
+        username: The caller.
+        payload: A black-box (``proposer``) or unified (``optimizer.proposer``)
+            request, mutated in place.
+    """
+    if not settings.local_mode:
+        return
+    proposer = getattr(payload, "proposer", None) or getattr(getattr(payload, "optimizer", None), "proposer", None)
+    # An explicit pick wins, including an explicit null for the sandbox
+    # proposer. A custom harness is the user's own command, which a host CLI
+    # would replace.
+    if proposer is None or "host_cli" in proposer.model_fields_set or proposer.harness == BLACKBOX_HARNESS_CUSTOM:
+        return
+    engine = effective_agent_engine(job_store, username)
+    if engine is not None and engine != OPENROUTER_ENGINE:
+        proposer.host_cli = engine

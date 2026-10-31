@@ -4306,6 +4306,7 @@
   "subscription.state.failed": "このコンピューターの CLI を確認できませんでした",
   "subscription.state.loading": "このコンピューターの CLI を確認しています…",
   "host_agent.cli.label": "提案エージェントを自分の CLI で実行",
+  "host_agent.cli.default": "エージェントエンジン（既定）",
   "host_agent.cli.off": "オフ（サンドボックスの提案エージェント）",
   "host_agent.permission.label": "提案エージェントのアクセス権",
   "host_agent.permission.workspace_only": "ワークスペースのみ",

@@ -4309,6 +4309,7 @@
   "subscription.state.failed": "לא הצלחנו לבדוק את כלי ה-CLI במחשב הזה",
   "subscription.state.loading": "בודקים את כלי ה-CLI במחשב הזה…",
   "host_agent.cli.label": "הרצת המציע ב-CLI שלי",
+  "host_agent.cli.default": "מנוע הסוכן (ברירת מחדל)",
   "host_agent.cli.off": "כבוי (מציע בסביבה מבודדת)",
   "host_agent.permission.label": "הרשאות המציע",
   "host_agent.permission.workspace_only": "סביבת העבודה בלבד",
