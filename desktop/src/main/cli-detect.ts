@@ -128,7 +128,8 @@ function pyTruthy(value: unknown): boolean {
 
 /**
  * Tell whether a codex `auth.json` is a ChatGPT subscription login, by the
- * backend's rule (`codex_subscription_login` in `core/local/cli_probe.py`):
+ * backend's rule (`codex_subscription_login` in `core/local/cli_probe.py`,
+ * from SKY-114):
  * an explicit `auth_mode` wins; without one, a non-empty `OPENAI_API_KEY`
  * means an API-key login, else ChatGPT. Only `chatgpt` with a non-empty
  * `tokens.access_token` counts.
@@ -154,7 +155,8 @@ export function readCodexLoginFile(env: Record<string, string>): unknown {
 }
 
 /**
- * Login checks with the same rules as the backend's `core/local/cli_probe.py`.
+ * Login checks with the same rules as the backend's `core/local/cli_probe.py`
+ * once SKY-114 lands; until then these checks are stricter than the backend.
  * The backend stays the authority. For codex both read `codex login status`
  * and `auth.json`, so a login kept only in the macOS Keychain
  * (`cli_auth_credentials_store = keyring` or `auto`) counts as signed out in

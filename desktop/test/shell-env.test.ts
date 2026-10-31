@@ -181,7 +181,7 @@ describe("buildChildEnv", () => {
   });
 
   it("drops an inherited PORT, and the API env pins PORT to the API port", () => {
-    // The backend reads PORT before API_PORT, so a stray PORT would move the API.
+    // The backend reads API_PORT first, but PORT is pinned too, so a stray PORT never moves the API.
     expect(buildChildEnv({ PORT: "3000", HOME: "/Users/x" })).toEqual({ HOME: "/Users/x" });
     expect(buildChildEnv({ PORT: "3000" }, { API_PORT: "48100", PORT: "48100" }).PORT).toBe("48100");
     const index = fs.readFileSync(path.join(__dirname, "..", "src", "main", "index.ts"), "utf8");

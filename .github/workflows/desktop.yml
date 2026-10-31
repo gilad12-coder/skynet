@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build:
     name: desktop · test + ad-hoc mac build
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +73,7 @@ jobs:
     name: desktop · publish release
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     permissions:
       contents: write

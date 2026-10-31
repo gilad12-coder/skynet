@@ -187,8 +187,9 @@ async function startStack(base: OnboardingState, loginPath: string): Promise<voi
     APP_LOCAL_MODE: "1",
     API_HOST: "127.0.0.1",
     API_PORT: String(ports.api),
-    // The backend reads PORT before API_PORT. buildChildEnv already drops an
-    // inherited PORT; this pins it to the chosen port anyway.
+    // The backend reads API_PORT first and falls back to PORT. buildChildEnv
+    // drops an inherited PORT, and this pins it to the same port, so the two
+    // never disagree.
     PORT: String(ports.api),
     WORKER_ENABLED: "true",
     REMOTE_DB_URL: databaseUrl(secrets.pgPassword, ports.postgres),
