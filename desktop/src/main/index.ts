@@ -366,7 +366,7 @@ async function openApp(): Promise<void> {
   if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
   setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
   useAppSize();
-  await win?.loadURL(frontendUrl);
+  await loadAppUrl(frontendUrl);
 }
 
 /**
@@ -493,8 +493,22 @@ function guardNavigation(event: Electron.Event, url: string): void {
   const appUrl = frontendUrl === null ? null : appWindowUrl(url, frontendUrl);
   if (appUrl === url) return;
   event.preventDefault();
-  if (appUrl !== null) void win?.loadURL(appUrl);
-  else if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  if (appUrl !== null) {
+    loadAppUrl(appUrl).catch((err) => log(`app page load failed: ${err instanceof Error ? err.message : String(err)}`));
+  } else if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+}
+
+/**
+ * Load a page in the app window. guardNavigation can stop a redirect of this
+ * load and start its own; Electron then rejects this load with ERR_ABORTED,
+ * which is not a failure.
+ */
+async function loadAppUrl(url: string): Promise<void> {
+  try {
+    await win?.loadURL(url);
+  } catch (err) {
+    if ((err as { code?: string }).code !== "ERR_ABORTED") throw err;
+  }
 }
 
 function createWindow(): void {
@@ -520,7 +534,10 @@ function createWindow(): void {
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", guardNavigation);
-  win.webContents.on("will-redirect", guardNavigation);
+  // Frames (for example the sandboxed iframe of model-written HTML) keep their own redirects.
+  win.webContents.on("will-redirect", (event) => {
+    if (event.isMainFrame) guardNavigation(event, event.url);
+  });
   win.on("closed", () => {
     win = null;
   });
