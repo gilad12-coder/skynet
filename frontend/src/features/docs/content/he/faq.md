@@ -8,9 +8,9 @@ Skynet היא פלטפורמה שמבצעת אופטימיזציה לפרומפ�
 
 ### מה Skynet יכול לשפר?
 
-Skynet הוא Optimize Anything. הוא מבצע אופטימיזציה לפרומפטים, לקוד, לטקסט ולתוכניות DSPy במוצר אחד. סוג התוצר הסופי קובע אילו מנועים יכולים לעבוד עליו:
+Skynet הוא Optimize Anything. הוא מבצע אופטימיזציה לפרומפטים, לקוד, לטקסט ולתוכניות DSPy במוצר אחד. סוג התוצר קובע אילו מנועים יכולים לעבוד עליו:
 
-- תוצרים סופיים מסוג פרומפט, קוד וטקסט משתמשים במנועים המובנים: GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve.
+- תוצרים מסוג פרומפט, קוד וטקסט משתמשים במנועים המובנים: GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve.
 - תוכניות DSPy משתמשות באופטימייזרים של DSPy: DSPy GEPA,‏ DSPy MIPROv2 ו-DSPy BootstrapFewShot.
 
 **Auto** משלב את המנועים שמתאימים למשימה שלך. ראה/ראי [איך האופטימיזציה עובדת](/docs/concepts/optimization) ו[מנועים](/docs/concepts/engines).
