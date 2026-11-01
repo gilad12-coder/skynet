@@ -7,6 +7,10 @@ test("slugify keeps Hebrew letters and drops punctuation", () => {
   assert.equal(slugify("כלים והרשאות"), "כלים-והרשאות");
 });
 
+test("slugify keeps combining marks, so Devanagari words stay whole", () => {
+  assert.equal(slugify("कनेक्शन स्वीकृत करें"), "कनेक्शन-स्वीकृत-करें");
+});
+
 test("extractHeadings skips fenced code and gives repeated headings unique ids", () => {
   const md = "## Setup\n\n```bash\n## not a heading\n```\n\n### `run_id`\n\n## Setup\n";
   assert.deepEqual(extractHeadings(md), [

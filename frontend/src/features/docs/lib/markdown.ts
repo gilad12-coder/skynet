@@ -34,13 +34,13 @@ export function stripInline(text: string): string {
 }
 
 /**
- * A URL fragment for a heading. Keeps letters and digits in any script, so
- * Hebrew headings get readable ids.
+ * A URL fragment for a heading. Keeps letters, combining marks and digits in
+ * any script, so Hebrew and Devanagari headings get readable ids.
  */
 export function slugify(text: string): string {
   return stripInline(text)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
 }
 

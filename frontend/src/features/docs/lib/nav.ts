@@ -354,7 +354,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "وسم البيانات بأداة الوسم",
-      "الوسم اليدوي وCo-pilot وAutopilot، وجولات المراجعة، والتصدير.",
+      "الوسم اليدوي والطيّار المساعد والطيّار الآلي، وجولات المراجعة، والتصدير.",
     ],
     "guides/mac-app": [
       "تطبيق Mac",
@@ -421,7 +421,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Daten mit dem Tagger labeln",
-      "Manuelles Labeln, Co-pilot und Autopilot, Prüfrunden und Export.",
+      "Manuelles Labeln, Co-Pilot und Autopilot, Prüfrunden und Export.",
     ],
     "guides/mac-app": [
       "Mac-App",
@@ -497,7 +497,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Etiquetar datos con el etiquetador",
-      "Etiquetado manual, Co-pilot y Autopilot, rondas de revisión y exportación.",
+      "Etiquetado manual, Copiloto y Piloto automático, rondas de revisión y exportación.",
     ],
     "guides/mac-app": [
       "App para Mac",
@@ -567,7 +567,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "برچسب‌گذاری داده با ابزار برچسب‌گذاری",
-      "برچسب‌گذاری دستی، Co-pilot و Autopilot، دورهای بازبینی و خروجی گرفتن.",
+      "برچسب‌گذاری دستی، همیار و خلبان خودکار، دورهای بازبینی و خروجی گرفتن.",
     ],
     "guides/mac-app": [
       "برنامهٔ Mac",
@@ -640,7 +640,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Annoter des données avec l'outil d'annotation",
-      "Annotation manuelle, Co-pilot et Autopilot, cycles de relecture et export.",
+      "Annotation manuelle, Copilote et Pilote automatique, cycles de relecture et export.",
     ],
     "guides/mac-app": [
       "App Mac",
@@ -710,7 +710,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "टैगर से डेटा लेबल करें",
-      "मैन्युअल, Co-pilot और Autopilot लेबलिंग, समीक्षा राउंड, और एक्सपोर्ट।",
+      "मैन्युअल, को-पायलट और ऑटोपायलट लेबलिंग, समीक्षा राउंड, और एक्सपोर्ट।",
     ],
     "guides/mac-app": ["Mac ऐप", "अपने कोडिंग एजेंट और Docker के साथ अपने Mac पर Skynet चलाएँ।"],
     "guides/agent-panel": [
@@ -777,7 +777,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Etichettare i dati con il tagger",
-      "Etichettatura manuale, Co-pilot e Autopilot, cicli di revisione ed esportazione.",
+      "Etichettatura manuale, Co-pilota e Pilota automatico, cicli di revisione ed esportazione.",
     ],
     "guides/mac-app": [
       "App per Mac",
@@ -804,7 +804,7 @@ const PAGE_TEXT: Record<
     quickstart: ["クイックスタート", "約 10 分で最初の最適化の実行を開始します。"],
     "concepts/optimization": [
       "最適化の仕組み",
-      "実行とスコアの契約、アーティファクトの種類、種類ごとのエンジン。",
+      "実行とスコアのコントラクト、アーティファクトの種類、種類ごとのエンジン。",
     ],
     "concepts/engines": [
       "エンジン",
@@ -826,7 +826,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/submit": [
       "ウィザードで実行を開始する",
-      "タスクから契約チェックまで、送信ウィザードの各ステップ。",
+      "タスクからコントラクトチェックまで、送信ウィザードの各ステップ。",
     ],
     "guides/results": [
       "結果を読む",
@@ -835,7 +835,7 @@ const PAGE_TEXT: Record<
     "guides/sharing": ["共有と公開", "実行の公開範囲、共有リンク、ロール、探索ギャラリー。"],
     "guides/tagger": [
       "タガーでデータにラベルを付ける",
-      "手動、Co-pilot、Autopilot によるラベル付け、レビューラウンド、エクスポート。",
+      "手動、コパイロット、オートパイロットによるラベル付け、レビューラウンド、エクスポート。",
     ],
     "guides/mac-app": [
       "Mac アプリ",
@@ -884,7 +884,7 @@ const PAGE_TEXT: Record<
     "guides/sharing": ["공유 및 게시", "실행 공개 범위, 공유 링크, 역할, 탐색 갤러리."],
     "guides/tagger": [
       "태거로 데이터 라벨링",
-      "수동, Co-pilot, Autopilot 라벨링, 검토 라운드, 내보내기.",
+      "수동, 코파일럿, 오토파일럿 라벨링, 검토 라운드, 내보내기.",
     ],
     "guides/mac-app": ["Mac 앱", "내 코딩 에이전트와 Docker로 Mac에서 Skynet을 실행합니다."],
     "guides/agent-panel": [
@@ -919,7 +919,7 @@ const PAGE_TEXT: Record<
       "Como o Skynet lê seus casos e os divide em treino, validação e teste.",
     ],
     "concepts/scorers": [
-      "Métricas e pontuadores",
+      "Métricas e avaliadores",
       'Escreva a função de pontuação que diz ao motor o que significa "melhor".',
     ],
     "concepts/runs": [
@@ -948,7 +948,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Rotular dados com o rotulador",
-      "Rotulagem manual, Co-pilot e Autopilot, rodadas de revisão e exportação.",
+      "Rotulagem manual, Co-piloto e Piloto automático, rodadas de revisão e exportação.",
     ],
     "guides/mac-app": [
       "App para Mac",
@@ -1018,7 +1018,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Разметка данных в разметчике",
-      "Ручная разметка, Co-pilot и Autopilot, раунды проверки и экспорт.",
+      "Ручная разметка, «Второй пилот» и «Автопилот», раунды проверки и экспорт.",
     ],
     "guides/mac-app": [
       "Приложение для Mac",
@@ -1091,7 +1091,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Etiketleyiciyle veri etiketleme",
-      "Manuel, Co-pilot ve Autopilot etiketleme, inceleme turları ve dışa aktarma.",
+      "Manuel, Yardımcı pilot ve Otomatik pilot etiketleme, inceleme turları ve dışa aktarma.",
     ],
     "guides/mac-app": [
       "Mac uygulaması",
@@ -1161,7 +1161,7 @@ const PAGE_TEXT: Record<
     ],
     "guides/tagger": [
       "Розмітка даних у розмітнику",
-      "Ручна розмітка, Co-pilot і Autopilot, раунди перевірки та експорт.",
+      "Ручна розмітка, «Другий пілот» і «Автопілот», раунди перевірки та експорт.",
     ],
     "guides/mac-app": [
       "Застосунок для Mac",
@@ -1191,7 +1191,7 @@ const PAGE_TEXT: Record<
     quickstart: ["快速入門", "大約十分鐘開始你第一次最佳化運行。"],
     "concepts/optimization": [
       "最佳化點樣運作",
-      "運行同評分嘅合約、產物類型，同埋每種類型用嘅引擎。",
+      "運行同評分嘅合約、成品類型，同埋每種類型用嘅引擎。",
     ],
     "concepts/engines": [
       "引擎",
@@ -1241,7 +1241,7 @@ const PAGE_TEXT: Record<
     "guides/sharing": ["分享与发布", "运行可见性、分享链接、角色，以及探索画廊。"],
     "guides/tagger": [
       "使用标注工具标注数据",
-      "手动、Co-pilot 和 Autopilot 标注、审核轮次，以及导出。",
+      "手动、副驾和自动驾驶标注、审核轮次，以及导出。",
     ],
     "guides/mac-app": ["Mac 应用", "在你的 Mac 上使用你自己的编程智能体和 Docker 运行 Skynet。"],
     "guides/agent-panel": ["智能体面板", "让助手设置、启动和解释运行，并控制它可以做什么。"],

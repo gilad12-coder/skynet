@@ -58,7 +58,7 @@ test("the combined Markdown states the last-checked date", () => {
 
 test("a locale with no client translation falls back to English", () => {
   const client = MCP_CLIENTS[0]!;
-  assert.equal(mcpText(client.name, "ja"), client.name.en);
-  assert.equal(mcpClientMarkdown(client, "ja"), mcpClientMarkdown(client, "en"));
-  assert.equal(mcpClientsMarkdown("zh-Hans"), mcpClientsMarkdown("en"));
+  assert.equal(mcpText(client.name, "nl"), client.name.en);
+  assert.equal(mcpClientMarkdown(client, "nl"), mcpClientMarkdown(client, "en"));
+  assert.equal(mcpClientsMarkdown("nl"), mcpClientsMarkdown("en"));
 });
