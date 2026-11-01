@@ -21,3 +21,17 @@ test("llms.txt names the MCP server together with the not-live note", () => {
   const route = readFileSync(new URL("../../../app/llms.txt/route.ts", import.meta.url), "utf8");
   assert.match(route, /\$\{MCP_SERVER_URL\}\. \$\{MCP_NOT_LIVE_NOTE\}/);
 });
+
+test("every docs page that sends readers to the MCP page says it is not live yet", () => {
+  const root = new URL("../content/", import.meta.url);
+  const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".md"));
+  const mcpLink = /\]\(\/docs(?:\/he)?\/mcp(?:[)#])/;
+  for (const file of files) {
+    const source = readFileSync(new URL(file, root), "utf8");
+    // The index pages list every page in a plain table. Those rows only map
+    // a goal to a page, so they need no note.
+    const isIndex = /(^|\/)index\.md$/.test(file);
+    const prose = source.split("\n").filter((line) => mcpLink.test(line) && !(isIndex && line.startsWith("|")));
+    if (prose.length > 0) assert.match(source, /#861/, `${file} links to the MCP page without the not-live note`);
+  }
+});

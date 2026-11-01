@@ -44,7 +44,7 @@ After you click **Allow**, the browser returns to the agent. The agent can now c
 | `start_run` | Starts a run with a spending limit. | Write |
 | `get_run` | Returns the status, the spending and, when the run ends, the result. | Read |
 | `list_runs` | Lists your runs, newest first. Can filter by status. | Read |
-| `stop_run` | Stops a run. A second call does nothing. | Write |
+| `stop_run` | Stops a run. A second call returns an error that says the run already ended. | Write |
 
 Read access uses the `runs:read` scope. Write access uses the `runs:write` scope.
 

@@ -114,7 +114,7 @@ Agent chats on Skynet credits use your balance. If your balance is empty, the pa
 
 ## Other ways to use an agent
 
-You can also connect your own AI client to Skynet through the MCP server. See [MCP](/docs/mcp). For scripts, use the [API](/docs/api).
+You can also connect your own AI client to Skynet through the MCP server. See [MCP](/docs/mcp). The MCP server is not live yet. It goes live after pull request #861 merges and deploys. For scripts, use the [API](/docs/api).
 
 ## Next steps
 

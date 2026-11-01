@@ -1,7 +1,7 @@
 The Skynet HTTP API lets scripts and tools do what the web app does: start runs, watch them, and read the results. This page shows how to sign requests, where the full reference is, and one complete example.
 
 > [!TIP]
-> Do you use an AI agent such as Claude Code, Codex or Cursor? Connect it through [MCP](/docs/mcp) instead. The agent then starts and watches runs for you, with a spending limit for each run.
+> Do you use an AI agent such as Claude Code, Codex or Cursor? Connect it through [MCP](/docs/mcp) instead. The agent then starts and watches runs for you, with a spending limit for each run. The MCP server is not live yet. It goes live after pull request #861 merges and deploys.
 
 ## Base URL
 
