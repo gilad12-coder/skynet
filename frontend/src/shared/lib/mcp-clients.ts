@@ -13,6 +13,12 @@
 /** The public MCP endpoint. Clients save this URL, so it must never change. */
 export const MCP_SERVER_URL = "https://mcp.skynetml.com/mcp";
 
+/**
+ * Said next to MCP_SERVER_URL until the server ships. Remove it, and the
+ * notes in the docs pages, after pull request #861 merges and deploys.
+ */
+export const MCP_NOT_LIVE_NOTE = "The MCP server is not live yet. It goes live after pull request #861 merges and deploys.";
+
 /** The day someone last checked every client below against its own docs. */
 export const MCP_CLIENTS_LAST_CHECKED = "2026-11-01";
 

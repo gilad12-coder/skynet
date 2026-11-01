@@ -64,6 +64,9 @@ Skynet משתמש ביתרה בתשלום מראש. השימוש במודלים 
 
 כן. ל-Skynet יש שרת MCP בכתובת `https://mcp.skynetml.com/mcp`. מתחברים עם OAuth. לשרת יש את הכלים האלה: `check_run`, `start_run`, `get_run`, `list_runs` ו-`stop_run`. ראה/ראי [MCP](/docs/mcp).
 
+> [!WARNING]
+> שרת ה-MCP עדיין לא פעיל. הוא יהיה פעיל אחרי ששינוי השרת (pull request ‏#861) ימוזג ויפורס. עד אז, החיבור נכשל.
+
 ### יש API?
 
 כן. צור/צרי טוקן API בהגדרות, ואז שלח/י אותו בצורה `Authorization: Bearer <token>`. לכל משתמש יש טוקן תקף אחד בכל פעם. ראה/ראי [API](/docs/api).

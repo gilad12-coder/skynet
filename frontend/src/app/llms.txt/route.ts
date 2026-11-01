@@ -1,7 +1,7 @@
 /** /llms.txt: a short map of the docs for language models (https://llmstxt.org). */
 
 import { DOCS_PAGES, DOCS_SECTIONS, docsMarkdownHref } from "@/features/docs";
-import { MCP_SERVER_URL } from "@/shared/lib/mcp-clients";
+import { MCP_NOT_LIVE_NOTE, MCP_SERVER_URL } from "@/shared/lib/mcp-clients";
 import { getSiteUrl } from "@/shared/lib/site-config";
 
 export async function GET() {
@@ -17,7 +17,7 @@ export async function GET() {
     "",
     "> Skynet optimizes prompts, programs, agents and other artifacts against your own data and scorer. Skynet is Optimize Anything: one product for prompts, code, text and DSPy programs, with native engines and DSPy optimizers.",
     "",
-    `Every page below is Markdown. The full docs are in one file at ${site}/llms-full.txt. The hosted MCP server is at ${MCP_SERVER_URL}. Hebrew pages are under ${site}/docs/he.`,
+    `Every page below is Markdown. The full docs are in one file at ${site}/llms-full.txt. The hosted MCP server is at ${MCP_SERVER_URL}. ${MCP_NOT_LIVE_NOTE} Hebrew pages are under ${site}/docs/he.`,
     "",
     ...sections.flatMap((s) => [s, ""]),
   ].join("\n");

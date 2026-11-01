@@ -89,6 +89,7 @@ import { ComposerModelMenu } from "@/shared/ui/agent";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { ModelConfigModal, useRecentModelConfigs } from "@/features/submit";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { useLocale } from "@/shared/providers";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { LEGAL_CONFIG } from "@/features/legal";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
@@ -1108,6 +1109,7 @@ function AboutTab() {
 
 function ApiTab() {
   const { data: session } = useSession();
+  const { locale } = useLocale();
   const hasAuth = !!session?.backendAccessToken;
   const [info, setInfo] = React.useState<ApiTokenInfo | null>(null);
   const [loaded, setLoaded] = React.useState(false);
@@ -1293,7 +1295,7 @@ function ApiTab() {
           autoTooltip={false}
           aria-label={msg("settings.api.guide_action")}
         >
-          <a href="/docs/api" target="_blank" rel="noopener noreferrer">
+          <a href={locale === "he" ? "/docs/he/api" : "/docs/api"} target="_blank" rel="noopener noreferrer">
             <ArrowSquareOut className="size-3.5" />
           </a>
         </Button>
