@@ -23,6 +23,7 @@ import contextlib
 import hashlib
 import ipaddress
 import json
+import re
 import secrets
 import socket
 import threading
@@ -61,6 +62,9 @@ MAX_REDIRECT_URIS = 10
 MAX_URI_LENGTH = 512
 MAX_CLIENT_NAME_LENGTH = 128
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+_NETLOC = re.compile(rf"(?P<host>\[[0-9A-Fa-f:]+\]|{_LABEL}(?:\.{_LABEL})*)(?::(?P<port>[1-9][0-9]{{0,4}}))?")
+_DOTTED_QUAD_PART = re.compile(r"0|[1-9][0-9]{0,2}")
 
 _CIMD_MAX_BYTES = 16 * 1024
 _CIMD_TIMEOUT_SECONDS = 5.0
@@ -176,12 +180,47 @@ def _is_loopback(host: str | None) -> bool:
     return (host or "").lower() in _LOOPBACK_HOSTS
 
 
+def _host_is_strict(uri: str) -> bool:
+    """Return whether ``uri`` has a host that Python and browsers read the same way.
+
+    Browsers parse URLs by the WHATWG rules. They read a backslash as a slash,
+    decode ``%2e`` in a host, drop tab and newline characters, and read
+    ``0x7f.1`` or ``2130706433`` as an IPv4 address. Python's ``urlsplit``
+    does none of this, so the consent page could name a host the browser does
+    not open. Only a plain host passes: LDH labels, a dotted-quad IPv4
+    address or a bracketed IPv6 literal, then an optional port.
+
+    Args:
+        uri: A redirect URI or a client ID URL.
+
+    Returns:
+        Whether the host and port are in the strict form.
+    """
+    if any(char == "\\" or ord(char) <= 0x20 or ord(char) == 0x7F for char in uri):
+        return False
+    match = _NETLOC.fullmatch(urlsplit(uri).netloc)
+    if match is None or (match["port"] is not None and int(match["port"]) > 65535):
+        return False
+    host = match["host"]
+    if host.startswith("["):
+        try:
+            ipaddress.IPv6Address(host[1:-1])
+        except ValueError:
+            return False
+        return True
+    labels = host.split(".")
+    last = labels[-1]
+    if last.isdigit() or last[:2].lower() == "0x":
+        return len(labels) == 4 and all(_DOTTED_QUAD_PART.fullmatch(label) and int(label) <= 255 for label in labels)
+    return last[0].isalpha()
+
+
 def redirect_uri_is_valid(uri: str) -> bool:
     """Accept an ``https`` redirect, or an ``http`` loopback one (RFC 8252).
 
-    The host must be ASCII. A Unicode host must arrive as punycode, so the
-    consent page shows the same host the browser opens: Python and browsers
-    map some Unicode letters to different domains.
+    The host must be in the strict form of :func:`_host_is_strict`. A Unicode
+    host must arrive as punycode, so the consent page shows the same host the
+    browser opens.
 
     Args:
         uri: Redirect URI a client registers or sends.
@@ -196,7 +235,7 @@ def redirect_uri_is_valid(uri: str) -> bool:
         parts.port  # noqa: B018 - raises ValueError for a bad port.
     except ValueError:
         return False
-    if parts.fragment or parts.username or parts.password or not parts.hostname or not parts.netloc.isascii():
+    if parts.fragment or not _host_is_strict(uri):
         return False
     if parts.scheme == "https":
         return True
@@ -394,21 +433,15 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
         return None
     if (
         parts.scheme != "https"
-        or not parts.hostname
-        or not parts.netloc.isascii()
-        or parts.username
-        or parts.password
+        or not _host_is_strict(url)
         or parts.fragment
         or parts.path in ("", "/")
         or len(url) > MAX_URI_LENGTH
     ):
         return None
     try:
-        # httpx refuses some ASCII hosts that DNS accepts, like an empty or a
-        # 64-letter label. Refuse them here, before the fetch fails.
-        host = httpx.URL(url).raw_host.decode("ascii")
-        addresses = _resolve_host(host, port)
-    except (httpx.InvalidURL, OSError, ValueError):
+        addresses = _resolve_host(parts.hostname, port)
+    except (OSError, ValueError):
         return None
     if not addresses or not all(_is_public(address) for address in addresses):
         return None

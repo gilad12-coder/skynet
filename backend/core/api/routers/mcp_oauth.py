@@ -15,6 +15,7 @@ is not trusted before the user sees consent (RFC 9700 section 4.11.2).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import secrets
@@ -143,10 +144,11 @@ def _with_query(uri: str, params: dict[str, str | None]) -> str:
 
 
 def _display_host(url: str) -> str:
-    """Return the host and port of ``url``.
+    """Return the host and port of ``url`` as the browser shows them.
 
-    Validation accepts only ASCII hosts, so the text is the host the browser
-    opens.
+    Validation accepts only strict hosts, so this is the host the browser
+    opens. Like a browser, it lowercases the host, writes an IPv6 address in
+    its short form and leaves out the scheme's default port.
 
     Args:
         url: A validated client ID or redirect URI.
@@ -154,7 +156,13 @@ def _display_host(url: str) -> str:
     Returns:
         The ``host[:port]`` text to show.
     """
-    return urlsplit(url).netloc
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{ipaddress.IPv6Address(host).compressed}]"
+    if parts.port is None or parts.port == {"https": 443, "http": 80}.get(parts.scheme):
+        return host
+    return f"{host}:{parts.port}"
 
 
 def _require_session(request: Request) -> None:

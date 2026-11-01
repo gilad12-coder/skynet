@@ -49,6 +49,27 @@ ISSUER = "https://mcp.example.test"
 APP_URL = "https://app.example.test"
 REDIRECT = "https://claude.ai/api/mcp/auth_callback"
 CIMD_URL = "https://client.example.test/oauth/client.json"
+# Netlocs that Python's urlsplit and a WHATWG browser read as different hosts.
+SPOOFED_NETLOCS = [
+    "\u03f2\u03bf\u03c3\u03bc\u03bf\u03c2.gr",
+    "\uff45xample.com",
+    "cl\u0430ude.ai:8443",
+    "\u2603.example",
+    "attacker.example\\.claude.ai",
+    "claude.ai%2eattacker.example",
+    "%D1%81ompany.com",
+    "@attacker.example",
+    ":@attacker.example",
+    "0x7f.1",
+    "0177.0.0.1",
+    "2130706433",
+    "claude.ai:0443",
+    "claude.ai.",
+    "cla\tude.ai",
+    "claude.ai\n",
+    "a..example",
+    "claude.ai:65536",
+]
 USER = "alice@example.test"
 
 
@@ -339,9 +360,7 @@ def test_authorize_refuses_an_unregistered_redirect(harness: Any) -> None:
         ["https://user:pw@ok.example.test/cb"],
         [],
         ["javascript:alert(1)"],
-        ["https://\u03f2\u03bf\u03c3\u03bc\u03bf\u03c2.gr/cb"],
-        ["https://\uff45xample.com/cb"],
-        ["https://cl\u0430ude.ai:8443/cb"],
+        *[[f"https://{netloc}/cb"] for netloc in SPOOFED_NETLOCS],
     ],
 )
 def test_dcr_refuses_bad_redirects(harness: Any, uris: list[str]) -> None:
@@ -350,6 +369,25 @@ def test_dcr_refuses_bad_redirects(harness: Any, uris: list[str]) -> None:
     resp = client.post("/oauth/register", json={"redirect_uris": uris})
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_redirect_uri"
+
+
+@pytest.mark.parametrize(
+    ("uri", "shown"),
+    [
+        ("https://claude.ai/cb", "claude.ai"),
+        ("http://127.0.0.1:33418/cb", "127.0.0.1:33418"),
+        ("http://[::1]:8080/cb", "[::1]:8080"),
+        ("http://localhost:1234/cb", "localhost:1234"),
+        ("https://Claude.AI:443/cb", "claude.ai"),
+        ("https://xn--clude-5ve.ai:8443/cb", "xn--clude-5ve.ai:8443"),
+    ],
+)
+def test_dcr_accepts_plain_hosts_and_shows_them_like_a_browser(harness: Any, uri: str, shown: str) -> None:
+    """Register a plain redirect and show its host as WHATWG ``URL.host`` gives it."""
+    client, _store = harness
+    resp = client.post("/oauth/register", json={"redirect_uris": [uri]})
+    assert resp.status_code == 201, resp.text
+    assert mcp_oauth_router._display_host(uri) == shown
 
 
 def test_dcr_refuses_confidential_clients(harness: Any) -> None:
@@ -787,13 +825,11 @@ def test_cimd_refuses_bad_idna_hosts(harness: Any, client_id: str) -> None:
     assert resp.json()["code"] == "mcp.invalid_client"
 
 
-@pytest.mark.parametrize(
-    "host", ["\u03f2\u03bf\u03c3\u03bc\u03bf\u03c2.gr", "\uff45xample.com", "cl\u0430ude.ai", "\u2603.example"]
-)
-def test_cimd_refuses_a_unicode_host(harness: Any, monkeypatch: pytest.MonkeyPatch, host: str) -> None:
-    """Answer invalid_client for a Unicode client ID host, without a fetch."""
+@pytest.mark.parametrize("netloc", SPOOFED_NETLOCS)
+def test_cimd_refuses_a_spoofed_host(harness: Any, monkeypatch: pytest.MonkeyPatch, netloc: str) -> None:
+    """Answer invalid_client for a client ID host that a browser reads differently, without a fetch."""
     client, _store = harness
-    client_id = f"https://{host}/client.json"
+    client_id = f"https://{netloc}/client.json"
     transport = _cimd_transport(_cimd_document(client_id=client_id))
     _use_cimd(monkeypatch, transport)
     monkeypatch.setattr(mcp_oauth, "_resolve_host", lambda host, port: ["93.184.216.34"])
