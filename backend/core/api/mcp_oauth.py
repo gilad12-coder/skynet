@@ -179,6 +179,10 @@ def _is_loopback(host: str | None) -> bool:
 def redirect_uri_is_valid(uri: str) -> bool:
     """Accept an ``https`` redirect, or an ``http`` loopback one (RFC 8252).
 
+    The host must be ASCII. A Unicode host must arrive as punycode, so the
+    consent page shows the same host the browser opens: Python and browsers
+    map some Unicode letters to different domains.
+
     Args:
         uri: Redirect URI a client registers or sends.
 
@@ -192,7 +196,7 @@ def redirect_uri_is_valid(uri: str) -> bool:
         parts.port  # noqa: B018 - raises ValueError for a bad port.
     except ValueError:
         return False
-    if parts.fragment or parts.username or parts.password or not parts.hostname:
+    if parts.fragment or parts.username or parts.password or not parts.hostname or not parts.netloc.isascii():
         return False
     if parts.scheme == "https":
         return True
@@ -391,6 +395,7 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
     if (
         parts.scheme != "https"
         or not parts.hostname
+        or not parts.netloc.isascii()
         or parts.username
         or parts.password
         or parts.fragment
@@ -399,8 +404,8 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
     ):
         return None
     try:
-        # Check the ASCII host httpx connects to: getaddrinfo encodes a Unicode
-        # host by IDNA 2003, which maps "\u00df" to "ss" and names another domain.
+        # httpx refuses some ASCII hosts that DNS accepts, like an empty or a
+        # 64-letter label. Refuse them here, before the fetch fails.
         host = httpx.URL(url).raw_host.decode("ascii")
         addresses = _resolve_host(host, port)
     except (httpx.InvalidURL, OSError, ValueError):

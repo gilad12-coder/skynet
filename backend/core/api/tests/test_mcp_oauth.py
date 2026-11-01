@@ -339,6 +339,9 @@ def test_authorize_refuses_an_unregistered_redirect(harness: Any) -> None:
         ["https://user:pw@ok.example.test/cb"],
         [],
         ["javascript:alert(1)"],
+        ["https://\u03f2\u03bf\u03c3\u03bc\u03bf\u03c2.gr/cb"],
+        ["https://\uff45xample.com/cb"],
+        ["https://cl\u0430ude.ai:8443/cb"],
     ],
 )
 def test_dcr_refuses_bad_redirects(harness: Any, uris: list[str]) -> None:
@@ -505,39 +508,6 @@ def test_describe_shows_the_client_and_redirect_host(harness: Any) -> None:
         "/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": REDIRECT, "scope": "runs:read"}
     ).json()
     assert body == {"client_name": "Claude", "client_host": None, "redirect_host": "claude.ai", "scopes": ["runs:read"]}
-
-
-def test_describe_shows_a_unicode_redirect_host_as_punycode(harness: Any) -> None:
-    """Show the ASCII host the browser goes to, so a look-alike letter cannot pass as claude.ai."""
-    client, _store = harness
-    redirect = "https://cl\u0430ude.ai:8443/cb"
-    client_id = _register(client, [redirect])
-    body = client.post(
-        "/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": redirect, "scope": "runs:read"}
-    ).json()
-    assert body["redirect_host"] == "xn--clude-5ve.ai:8443"
-
-
-def test_describe_shows_the_host_by_browser_rules(harness: Any) -> None:
-    """Keep "\u00df" as its own letter, as browsers do, so the page cannot name glassdoor.de."""
-    client, _store = harness
-    redirect = "https://gla\u00dfdoor.de/cb"
-    client_id = _register(client, [redirect])
-    body = client.post(
-        "/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": redirect, "scope": "runs:read"}
-    ).json()
-    assert body["redirect_host"] == "xn--gladoor-2va.de"
-
-
-def test_describe_shows_a_fullwidth_host_as_the_browser_opens_it(harness: Any) -> None:
-    """Map a fullwidth letter like browsers, so the page names the domain the browser opens."""
-    client, _store = harness
-    redirect = "https://\uff45xample.com/cb"
-    client_id = _register(client, [redirect])
-    body = client.post(
-        "/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": redirect, "scope": "runs:read"}
-    ).json()
-    assert body["redirect_host"] == "example.com"
 
 
 def test_refresh_rotates_and_reuse_revokes(harness: Any) -> None:
@@ -817,28 +787,20 @@ def test_cimd_refuses_bad_idna_hosts(harness: Any, client_id: str) -> None:
     assert resp.json()["code"] == "mcp.invalid_client"
 
 
-def test_cimd_refuses_hosts_that_only_idna_2003_accepts(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Answer invalid_client when DNS resolves a host that httpx refuses as a URL."""
+@pytest.mark.parametrize(
+    "host", ["\u03f2\u03bf\u03c3\u03bc\u03bf\u03c2.gr", "\uff45xample.com", "cl\u0430ude.ai", "\u2603.example"]
+)
+def test_cimd_refuses_a_unicode_host(harness: Any, monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    """Answer invalid_client for a Unicode client ID host, without a fetch."""
     client, _store = harness
-    client_id = "https://\u2603.example/client.json"
+    client_id = f"https://{host}/client.json"
     transport = _cimd_transport(_cimd_document(client_id=client_id))
     _use_cimd(monkeypatch, transport)
+    monkeypatch.setattr(mcp_oauth, "_resolve_host", lambda host, port: ["93.184.216.34"])
     resp = client.post("/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": REDIRECT, "scope": ""})
     assert resp.status_code == 400
     assert resp.json()["code"] == "mcp.invalid_client"
     assert transport.calls == []  # type: ignore[attr-defined]
-
-
-def test_cimd_checks_the_host_that_httpx_connects_to(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resolve the UTS 46 host, not the IDNA 2003 one that maps "\u00df" to "ss"."""
-    client, _store = harness
-    client_id = "https://gla\u00dfdoor.example/client.json"
-    transport = _cimd_transport(_cimd_document(client_id=client_id))
-    _use_cimd(monkeypatch, transport)
-    resolved: list[str] = []
-    monkeypatch.setattr(mcp_oauth, "_resolve_host", lambda host, port: resolved.append(host) or ["93.184.216.34"])
-    client.post("/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": REDIRECT, "scope": ""})
-    assert resolved == ["xn--gladoor-2va.example"]
 
 
 def test_cimd_fetch_refuses_a_private_peer(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:

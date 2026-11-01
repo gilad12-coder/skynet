@@ -18,13 +18,11 @@ from __future__ import annotations
 import json
 import re
 import secrets
-import unicodedata
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urlsplit
 
-import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -145,13 +143,10 @@ def _with_query(uri: str, params: dict[str, str | None]) -> str:
 
 
 def _display_host(url: str) -> str:
-    """Return the host and port of ``url`` in the ASCII form the browser connects to.
+    """Return the host and port of ``url``.
 
-    A Unicode host shows as punycode, so a look-alike letter cannot pass as a
-    well-known domain on the consent page. Browsers apply UTS 46: NFKC maps
-    a fullwidth "ｅ" to "e", and non-transitional rules keep "ß". NFKC first
-    and then httpx's IDNA 2008 encoding give the same host. Python's IDNA
-    2003 codec maps "ß" to "ss" and would name a different domain.
+    Validation accepts only ASCII hosts, so the text is the host the browser
+    opens.
 
     Args:
         url: A validated client ID or redirect URI.
@@ -159,17 +154,7 @@ def _display_host(url: str) -> str:
     Returns:
         The ``host[:port]`` text to show.
     """
-    netloc = urlsplit(url).netloc
-    if netloc.isascii():
-        return netloc
-    host, sep, port = netloc.rpartition(":")
-    if not sep or not port.isdigit():
-        host, sep, port = netloc, "", ""
-    try:
-        host = httpx.URL(f"https://{unicodedata.normalize('NFKC', host)}/").raw_host.decode("ascii")
-    except httpx.InvalidURL:
-        host = host.encode("ascii", "backslashreplace").decode("ascii")
-    return host + sep + port
+    return urlsplit(url).netloc
 
 
 def _require_session(request: Request) -> None:
