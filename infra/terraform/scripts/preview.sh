@@ -424,9 +424,11 @@ deploy() {
   frontend_img="$(ecr_uri frontend):$tag"
   app_env="skynet-pr-$pr"
 
-  backend_env="$(jq -cn --arg e "$app_env" --arg sha "$sha" --arg app "https://$app" '{
+  # The remote MCP server (SKY-229) of a preview lives under its API host,
+  # because the *.<domain> wildcard certificate has no mcp-pr-<n> host.
+  backend_env="$(jq -cn --arg e "$app_env" --arg sha "$sha" --arg app "https://$app" --arg mcp "https://$api/remote-mcp" '{
     APP_ENVIRONMENT: $e, APP_GIT_SHA: $sha, SENTRY_ENVIRONMENT: $e, ALERT_ENVIRONMENT: $e,
-    ALLOWED_ORIGINS: $app, APP_PUBLIC_URL: $app, FRONTEND_URL: $app,
+    ALLOWED_ORIGINS: $app, APP_PUBLIC_URL: $app, FRONTEND_URL: $app, MCP_RESOURCE_URL: $mcp,
     DB_POOL_SIZE: "3", DB_POOL_MAX_OVERFLOW: "2"}')"
   # Google and GitHub know only staging's callback URL; staging forwards it here.
   frontend_env="$(jq -cn --arg e "$app_env" --arg sha "$sha" --arg app "https://$app" --arg api "https://$api" \

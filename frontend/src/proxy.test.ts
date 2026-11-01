@@ -56,3 +56,22 @@ test("the proxy runs on every route except build output", () => {
   }
   assert.ok(!matcher.test("/_next/static/chunks/main.js"));
 });
+
+// The docs are public: readers, crawlers and language models read them signed-out.
+test("the public docs and llms.txt skip the login gate", () => {
+  const matcher = new RegExp(`^${AUTH_GATED_PATTERN}$`);
+  for (const route of [
+    "/docs",
+    "/docs/quickstart",
+    "/docs/he/concepts/runs",
+    "/docs.md",
+    "/docs/mcp.md",
+    "/docs-md/mcp",
+    "/docs-search",
+    "/llms.txt",
+    "/llms-full.txt",
+  ]) {
+    assert.ok(!matcher.test(route), route);
+  }
+  assert.ok(matcher.test("/llms.json"), "only the two llms text files are public");
+});

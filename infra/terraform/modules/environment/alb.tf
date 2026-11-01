@@ -220,7 +220,7 @@ resource "aws_lb_listener_rule" "api" {
 
   condition {
     host_header {
-      values = [var.api_domain]
+      values = compact([var.api_domain, var.mcp_domain])
     }
   }
 }
@@ -239,4 +239,38 @@ resource "aws_lb_listener_rule" "frontend" {
       values = var.frontend_domains
     }
   }
+}
+
+# Remote MCP server host (SKY-229). The api rule above sends it to the backend,
+# which serves the MCP endpoint by host. Its own certificate keeps the main
+# certificate unchanged. First apply: target aws_acm_certificate.mcp, create
+# the records of acm_validation_records, then apply the rest.
+locals {
+  mcp_on_preview_wildcard = local.preview_enabled && can(regex("^[^.]+\\.${replace(var.preview_domain, ".", "\\.")}$", var.mcp_domain))
+  mcp_certificate_enabled = var.mcp_domain != "" && !local.mcp_on_preview_wildcard
+}
+
+resource "aws_acm_certificate" "mcp" {
+  count = local.mcp_certificate_enabled ? 1 : 0
+
+  domain_name       = var.mcp_domain
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_acm_certificate_validation" "mcp" {
+  count = local.mcp_certificate_enabled && var.enable_https ? 1 : 0
+
+  certificate_arn         = aws_acm_certificate.mcp[0].arn
+  validation_record_fqdns = [for o in aws_acm_certificate.mcp[0].domain_validation_options : o.resource_record_name]
+}
+
+resource "aws_lb_listener_certificate" "mcp" {
+  count = local.mcp_certificate_enabled && var.enable_https ? 1 : 0
+
+  listener_arn    = aws_lb_listener.https[0].arn
+  certificate_arn = aws_acm_certificate_validation.mcp[0].certificate_arn
 }

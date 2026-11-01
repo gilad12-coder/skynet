@@ -78,6 +78,17 @@ variable "api_domain" {
   type        = string
 }
 
+variable "mcp_domain" {
+  description = <<-EOT
+    Host name of the hosted remote MCP server (SKY-229). The backend serves it
+    at https://<mcp_domain>/mcp. A host directly under var.preview_domain uses
+    the preview wildcard certificate; any other host gets its own certificate.
+    Empty: no remote MCP server.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "preview_domain" {
   description = <<-EOT
     Parent domain of the PR preview hosts (pr-<n>.<domain> and

@@ -450,6 +450,7 @@
     "budget.pending": "Il consumo è ancora in fase di addebito. Attendi che il lavoro in corso termini prima di continuare.",
     "budget.conflict": "Questo budget è cambiato in un’altra scheda. Aggiorna il saldo prima di modificarlo.",
     "budget.not_found": "Questo budget non è disponibile per il tuo account. Crea un nuovo budget di configurazione.",
-    "budget.invalid": "Inserisci un limite di spesa che copra gli importi già spesi o riservati."
+    "budget.invalid": "Inserisci un limite di spesa che copra gli importi già spesi o riservati.",
+    "budget.below_minimum": "Il limite di spesa è inferiore al minimo richiesto da questa esecuzione. Inserisci un limite più alto."
   }
 }

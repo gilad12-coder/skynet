@@ -89,6 +89,8 @@ import { ComposerModelMenu } from "@/shared/ui/agent";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { ModelConfigModal, useRecentModelConfigs } from "@/features/submit";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { useLocale } from "@/shared/providers";
+import { docsPathForLocale } from "@/shared/lib/locale";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { LEGAL_CONFIG } from "@/features/legal";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
@@ -1108,6 +1110,7 @@ function AboutTab() {
 
 function ApiTab() {
   const { data: session } = useSession();
+  const { locale } = useLocale();
   const hasAuth = !!session?.backendAccessToken;
   const [info, setInfo] = React.useState<ApiTokenInfo | null>(null);
   const [loaded, setLoaded] = React.useState(false);
@@ -1275,6 +1278,25 @@ function ApiTab() {
           aria-label={msg("settings.api.docs_action")}
         >
           <a href={docsUrl} target="_blank" rel="noopener noreferrer">
+            <ArrowSquareOut className="size-3.5" />
+          </a>
+        </Button>
+      </SettingsRow>
+
+      <SettingsRow
+        icon={BookOpen}
+        label={msg("settings.api.guide_label")}
+        description={msg("settings.api.guide_description")}
+      >
+        <Button
+          variant="outline"
+          size="icon-sm"
+          asChild
+          className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+          autoTooltip={false}
+          aria-label={msg("settings.api.guide_action")}
+        >
+          <a href={docsPathForLocale(locale, "api")} target="_blank" rel="noopener noreferrer">
             <ArrowSquareOut className="size-3.5" />
           </a>
         </Button>

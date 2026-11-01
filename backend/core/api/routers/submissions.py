@@ -113,7 +113,7 @@ from ..agent_engine import fill_proposer_host_cli
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_billing import enforce_local_mode_sources, normalize_model_token_sources
-from ..preflight_execution import WizardPreflightRequest, run_preflight
+from ..preflight_execution import BALANCE_FIELD, BUDGET_CHECK_KEY, WizardPreflightRequest, run_preflight
 from ..rate_limit import enforce_submission_rate
 from ..submission_idempotency import resolve_submission_replay_keys
 from ._helpers import (
@@ -343,6 +343,13 @@ def _ensure_api_budget(
         # Only an attempt that still holds the claim reads as incomplete:
         # a same-key retry reached a check another request is running.
         raise SubmissionInProgressError()
+    if checked.status == "failed" and any(
+        check.key == BUDGET_CHECK_KEY and check.status == "failed" and check.field != BALANCE_FIELD
+        for check in checked.checks
+    ):
+        # The limit, not the account balance, stopped the check, so name the
+        # limit rather than the optimizer or the columns.
+        raise DomainError("budget.below_minimum", status=409)
     if checked.status != "succeeded":
         raise DomainError(
             "budget.pending" if checked.status == "pending" else "submission.validation_failed", status=409
