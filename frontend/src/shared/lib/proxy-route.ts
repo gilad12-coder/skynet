@@ -40,7 +40,10 @@ export function isRefusedLocalHost(
 // logged-out visitors, so
 // guarding them would bounce the POSTs to /login and the flow would never
 // complete. Terms and Privacy are public legal disclosures and must remain
-// readable before someone creates an account. ``optimizations`` is excluded
+// readable before someone creates an account. ``docs`` (the public docs, their
+// ``.md`` twins, ``docs-md`` and ``docs-search``) and ``llms.txt`` /
+// ``llms-full.txt`` are public so readers, crawlers and language models can
+// read them signed-out. ``optimizations`` is excluded
 // because a public (Explore-corpus) run must be openable signed-out — the
 // detail gate probes the anonymous public composite itself and bounces to
 // /login only when the run turns out not to be public. ``api/version`` is
@@ -51,7 +54,7 @@ export function isRefusedLocalHost(
 // service worker) is fetched by the browser itself on registration and
 // update checks, and a /login redirect would fail its registration.
 export const AUTH_GATED_PATTERN =
-  "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|fonts/|brand/|licenses/|THIRD_PARTY_NOTICES\\.txt|favicon\\.png|favicon-dark\\.png|apple-icon\\.png|notification-icon\\.png|sw\\.js|robots\\.txt|sitemap\\.xml).*)";
+  "/((?!login|terms|privacy|docs|llms(?:-full)?\\.txt|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|fonts/|brand/|licenses/|THIRD_PARTY_NOTICES\\.txt|favicon\\.png|favicon-dark\\.png|apple-icon\\.png|notification-icon\\.png|sw\\.js|robots\\.txt|sitemap\\.xml).*)";
 const authGated = new RegExp(`^${AUTH_GATED_PATTERN}$`);
 
 /**

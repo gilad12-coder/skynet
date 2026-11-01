@@ -167,9 +167,11 @@ _SCALAR_PUBLIC_PATHS = frozenset(
         # Discover valid optimizers, modules, and models for a submission
         "/registry",
         "/models",
+        "/optimizers",
+        "/blackbox/engines",
         # Submit work
-        "/run",
-        "/grid-search",
+        "/optimize",
+        "/blackbox/run",
         # Browse + read results
         "/optimizations",
         "/optimizations/{optimization_id}",
@@ -504,8 +506,13 @@ html[data-app-sidebar="hidden"] .app-sidebar-header {
 """
 
 _OPENAPI_TAGS = [
-    {"name": "Optimizations", "description": "Submit, list, inspect, and manage DSPy optimization jobs."},
-    {"name": "Inference", "description": "Run inference against an optimized program."},
+    {
+        "name": "Optimizations",
+        "description": (
+            "Submit, list, inspect, and manage optimization runs for prompts, code, text, DSPy programs, and repositories."
+        ),
+    },
+    {"name": "Inference", "description": "Run the optimized artifact of a finished run."},
     {"name": "Analytics", "description": "Aggregate stats across jobs, optimizers, and models."},
     {"name": "Models", "description": "Model catalog and provider discovery."},
     {"name": "Registry", "description": "Optimizers and modules you can reference by name in a submission."},
@@ -910,14 +917,12 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         description=(
-            f"Backend API for **{APP_NAME}** — a platform for submitting, "
-            "comparing, and serving optimized language-model "
-            "programs. Submit optimization runs or grid searches, stream "
-            "live progress and metrics, inspect per-example baselines vs. "
-            "optimized predictions, and run inference against the final "
-            "compiled program. All traffic stays on your local network; "
-            "this interactive reference is served directly from the "
-            "running backend and works fully offline."
+            f"HTTP API for **{APP_NAME}**. Submit optimization runs for "
+            "prompts, code, text, DSPy programs, and repositories, poll "
+            "their status, read the results, and run the optimized "
+            "artifact. Send an API token "
+            "from Settings > API as a Bearer token. Guides: "
+            "https://skynetml.com/docs/api"
         ),
     )
 

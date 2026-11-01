@@ -114,6 +114,10 @@ export default defineConfig([
       "src/shared/lib/generated/**",
       "src/shared/constants/job-status.ts",
       "src/features/auth/login-samples.ts",
+      // Public docs pick their language from the URL, not the app locale.
+      "src/features/docs/lib/chrome.ts",
+      "src/features/docs/lib/nav.ts",
+      "src/shared/lib/mcp-clients.ts",
     ],
     rules: {
       "no-restricted-syntax": [
