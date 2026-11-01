@@ -248,6 +248,9 @@ export const WALLET_CHANGED_EVENT = "wallet-changed";
 export function announceWalletChange(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
 }
+/** Browser event fired when the Mac app links or unlinks its hosted account, so the balance re-reads. */
+export const HOSTED_LINK_CHANGED_EVENT = "hosted-link-changed";
+
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
@@ -1113,7 +1116,16 @@ export function getLocalHostedLinkStatus() {
 
 /** Read the linked hosted account's name and email. Calls hosted through the local API. */
 export function getLocalHostedWhoami() {
-  return request<{ email?: string | null; name?: string | null }>("/local/hosted-link/whoami");
+  return request<{ email?: string | null; name?: string | null; image?: string | null }>(
+    "/local/hosted-link/whoami",
+  );
+}
+
+/** Read the linked hosted account's balance. Calls hosted through the local API. */
+export function getLocalHostedBalance() {
+  return request<{ available_cents: number; currency: string; low_balance: boolean }>(
+    "/local/hosted-link/balance",
+  );
 }
 
 /** Unlink the Mac app from its hosted account. Local runs and settings stay. */

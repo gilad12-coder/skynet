@@ -38,6 +38,7 @@ from ...billing.service import (
 )
 from ...brand import APP_NAME
 from ...config import settings
+from ...local import hosted_link
 from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -513,6 +514,41 @@ class SaveProviderKeyRequest(BaseModel):
     )
 
 
+def _mac_agent_wallet(engine: Any, username: str) -> dict[str, Any]:
+    """Return the Mac agent's wallet: the linked hosted balance, never the local credit.
+
+    Args:
+        engine: Local database that holds the hosted link.
+        username: The signed-in local user.
+
+    Returns:
+        ``{"linked": true, "hosted_balance_cents", "low_balance"}`` when hosted
+        answers. With no link (or a revoked one), or when hosted does not
+        answer, a ``message`` and no amount.
+    """
+    not_linked = {
+        "linked": False,
+        "message": f"No {APP_NAME} account is linked to this Mac; sign in to see the balance.",
+    }
+    if hosted_link.link_status(engine, username) is None:
+        return not_linked
+    try:
+        result = hosted_link.hosted_get(engine, username, "/desktop/v1/balance")
+    except DomainError as exc:
+        if exc.status_code in (401, 409):
+            return not_linked
+        return {
+            "linked": True,
+            "balance_available": False,
+            "message": f"{APP_NAME} did not answer, so the balance is unavailable right now.",
+        }
+    return {
+        "linked": True,
+        "hosted_balance_cents": int(result.get("available_cents") or 0),
+        "low_balance": bool(result.get("low_balance")),
+    }
+
+
 def create_billing_router(*, job_store) -> APIRouter:
     """Build the prepaid-balance billing router.
 
@@ -526,13 +562,17 @@ def create_billing_router(*, job_store) -> APIRouter:
     router = APIRouter()
     service = StripeBillingService(engine=job_store.engine)
     vault = ProviderKeyVault(engine=job_store.engine)
+    # The Mac app's wallet holds the local run credit, which the wizard's budget
+    # check needs but which is not money. Its agent reads the linked hosted
+    # balance from /billing/wallet/agent instead.
+    local = settings.local_mode
 
     @router.get(
         "/billing/wallet",
         response_model=WalletResponse,
-        operation_id="get_wallet_for_agent",
+        operation_id="get_local_wallet" if local else "get_wallet_for_agent",
         summary="Return the caller's wallet",
-        tags=["agent"],
+        tags=[] if local else ["agent"],
     )
     def get_wallet(user: AuthenticatedUserDep) -> WalletResponse:
         """Return the caller's purchased balance, free grant, and recent ledger.
@@ -569,6 +609,25 @@ def create_billing_router(*, job_store) -> APIRouter:
                 available=snapshot.plan.available,
             ),
         )
+
+    if local:
+
+        @router.get(
+            "/billing/wallet/agent",
+            operation_id="get_wallet_for_agent",
+            summary="Return the balance of the linked Skynet account",
+            tags=["agent"],
+        )
+        def get_mac_agent_wallet(user: AuthenticatedUserDep) -> dict[str, Any]:
+            """Return the linked hosted balance, or a sign-in note with no amount.
+
+            Args:
+                user: The signed-in local user.
+
+            Returns:
+                See :func:`_mac_agent_wallet`.
+            """
+            return _mac_agent_wallet(job_store.engine, user.username)
 
     @router.get(
         "/billing/usage",

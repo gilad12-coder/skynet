@@ -15,7 +15,6 @@ import {
 import { signOut, useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
-import { startLocalHostedLink } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
@@ -31,9 +30,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/
 import { useSettingsModal } from "@/features/settings";
 import {
   type LinkedAccount,
+  startHostedSignIn,
   unlinkHostedAccount,
   useLinkedAccount,
 } from "@/shared/hooks/use-linked-account";
+
+export { startHostedSignIn };
 
 /**
  * The Mac app's identity labels. An unknown link (`undefined`: loading, or the
@@ -52,18 +54,6 @@ export function localIdentity(account: LinkedAccount | undefined): {
   const detail =
     account.email && account.email !== name ? account.email : msg("local_identity.linked");
   return { name, detail };
-}
-
-/** Start the hosted sign-in and open its consent page in the browser. */
-export function startHostedSignIn(
-  start: () => Promise<{ authorize_url: string }> = startLocalHostedLink,
-  // The Mac app opens new windows in the default browser.
-  open: (url: string) => void = (url) => window.open(url, "_blank", "noopener"),
-  fail: () => void = () => toast.error(msg("local_identity.sign_in_failed")),
-): Promise<void> {
-  return start()
-    .then(({ authorize_url }) => open(authorize_url))
-    .catch(fail);
 }
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */
@@ -157,7 +147,7 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
-  // Read the link again on each open and after an unlink: the sign-in finishes in the browser.
+  // Read the link again on each open: the sign-in finishes in the browser.
   const [reads, setReads] = React.useState(0);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
@@ -177,6 +167,8 @@ export function AccountMenu({
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
   const deviceAvatar = local && !linked;
+  // The local session user has no provider picture; the linked account has one.
+  const image = local ? (linked?.image ?? null) : session.user.image;
 
   const close = () => setOpen(false);
 
@@ -188,7 +180,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
+      <Avatar image={image} label={name} size={28} device={deviceAvatar} />
     </button>
   ) : (
     <button
@@ -196,7 +188,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
+      <Avatar image={image} label={name} size={28} device={deviceAvatar} />
       {/* Physical edge from the UI dir, not logical `text-start`: the name keeps
           dir="auto" so it shapes and truncates by its own script, which would make
           `start` resolve to the name's direction and split it from the email line
@@ -249,7 +241,7 @@ export function AccountMenu({
             target here would just duplicate the Settings row. Surfaces the email,
             the way ChatGPT's account menu does. */}
         <div className="flex items-center gap-2.5 px-3 py-2">
-          <Avatar image={session.user.image} label={name} size={32} device={deviceAvatar} />
+          <Avatar image={image} label={name} size={32} device={deviceAvatar} />
           {/* Physical edge from the UI dir — see the trigger above for why `text-start`
               can't be used while the name carries dir="auto". */}
           <span className={cn("flex min-w-0 flex-1 flex-col", isRtl ? "text-right" : "text-left")}>
@@ -327,9 +319,9 @@ export function AccountMenu({
                   void signOut({ callbackUrl: "/login" });
                   return;
                 }
-                unlinkHostedAccount()
-                  .then(() => setReads((n) => n + 1))
-                  .catch(() => toast.error(msg("local_identity.sign_out_failed")));
+                unlinkHostedAccount().catch(() =>
+                  toast.error(msg("local_identity.sign_out_failed")),
+                );
               }}
               className={COMPACT_POPOVER_ITEM_CLASS}
             >
