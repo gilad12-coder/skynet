@@ -204,10 +204,12 @@ def _host_is_strict(uri: str) -> bool:
     host = match["host"]
     if host.startswith("["):
         try:
-            ipaddress.IPv6Address(host[1:-1])
+            address = ipaddress.IPv6Address(host[1:-1])
         except ValueError:
             return False
-        return True
+        # Python 3.12 writes an IPv4-mapped address in dotted form, but the
+        # browser shows it in hex, so the consent page would differ.
+        return address.ipv4_mapped is None
     labels = host.split(".")
     last = labels[-1]
     if last.isdigit() or last[:2].lower() == "0x":
@@ -235,7 +237,7 @@ def redirect_uri_is_valid(uri: str) -> bool:
         parts.port  # noqa: B018 - raises ValueError for a bad port.
     except ValueError:
         return False
-    if parts.fragment or not _host_is_strict(uri):
+    if "#" in uri or not _host_is_strict(uri):
         return False
     if parts.scheme == "https":
         return True
@@ -434,7 +436,7 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
     if (
         parts.scheme != "https"
         or not _host_is_strict(url)
-        or parts.fragment
+        or "#" in url
         or parts.path in ("", "/")
         or len(url) > MAX_URI_LENGTH
     ):

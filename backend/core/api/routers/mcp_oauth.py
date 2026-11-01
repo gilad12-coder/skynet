@@ -140,6 +140,8 @@ def _with_query(uri: str, params: dict[str, str | None]) -> str:
         The URI with the parameters appended.
     """
     query = urlencode({key: value for key, value in params.items() if value is not None})
+    if uri.endswith("?"):
+        return f"{uri}{query}"
     return f"{uri}{'&' if urlsplit(uri).query else '?'}{query}"
 
 

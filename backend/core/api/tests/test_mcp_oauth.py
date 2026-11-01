@@ -69,6 +69,8 @@ SPOOFED_NETLOCS = [
     "claude.ai\n",
     "a..example",
     "claude.ai:65536",
+    "[::ffff:102:304]",
+    "[::ffff:0:0]:8443",
 ]
 USER = "alice@example.test"
 
@@ -357,6 +359,7 @@ def test_authorize_refuses_an_unregistered_redirect(harness: Any) -> None:
     [
         ["http://evil.example.test/cb"],
         ["https://ok.example.test/cb#frag"],
+        ["https://ok.example.test/cb#"],
         ["https://user:pw@ok.example.test/cb"],
         [],
         ["javascript:alert(1)"],
@@ -388,6 +391,15 @@ def test_dcr_accepts_plain_hosts_and_shows_them_like_a_browser(harness: Any, uri
     resp = client.post("/oauth/register", json={"redirect_uris": [uri]})
     assert resp.status_code == 201, resp.text
     assert mcp_oauth_router._display_host(uri) == shown
+
+
+def test_with_query_adds_no_second_question_mark() -> None:
+    """Append the code to a redirect that ends with "?", without "??"."""
+    assert mcp_oauth_router._with_query("https://a.example/cb?", {"code": "c"}) == "https://a.example/cb?code=c"
+    assert mcp_oauth_router._with_query("https://a.example/cb?x=1", {"code": "c"}) == "https://a.example/cb?x=1&code=c"
+    assert mcp_oauth_router._with_query("https://a.example/cb", {"code": "c", "state": None}) == (
+        "https://a.example/cb?code=c"
+    )
 
 
 def test_dcr_refuses_confidential_clients(harness: Any) -> None:
