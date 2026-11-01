@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "호스팅 모델 사용(잔액에서 결제)",
   "desktop_link.scope.connectors": "연결된 데이터 소스 사용",
   "desktop_link.scope.web": "{term.appName} 웹 검색 및 브라우징 사용",
-  "desktop_link.password_note": "이 Mac은 비밀번호를 받지 않습니다.",
   "desktop_link.approve": "이 Mac 연결",
   "desktop_link.cancel": "취소",
   "desktop_link.returning": "Mac 앱으로 돌아가는 중…",

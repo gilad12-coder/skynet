@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { ApiError, authorizeDesktopLink, setApiAuthToken } from "@/shared/lib/api";
 import { msg, type MessageKey } from "@/shared/lib/messages";
 import { AppMark } from "@/shared/ui/app-mark";
-import { Check, CircleNotch, Desktop, Lock, UserCircle } from "@/shared/ui/icons";
+import { Check, CircleNotch, Desktop, UserCircle } from "@/shared/ui/icons";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -128,10 +128,6 @@ export function DesktopLinkConsent({ query }: { query: string }) {
             </li>
           ))}
         </ul>
-        <p className="flex items-start gap-2 pt-1 text-xs text-muted-foreground">
-          <Lock className="mt-px size-3.5 shrink-0" aria-hidden />
-          <span>{msg("desktop_link.password_note")}</span>
-        </p>
       </section>
 
       {error && <InlineErrorRow message={errorText(error)} />}

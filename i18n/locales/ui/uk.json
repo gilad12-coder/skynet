@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "Використовувати розміщені моделі з оплатою з вашого балансу",
   "desktop_link.scope.connectors": "Використовувати ваші підключені джерела даних",
   "desktop_link.scope.web": "Шукати й переглядати вебсторінки через {term.appName}",
-  "desktop_link.password_note": "Цей Mac ніколи не отримує ваш пароль.",
   "desktop_link.approve": "Пов’язати цей Mac",
   "desktop_link.cancel": "Скасувати",
   "desktop_link.returning": "Повертаємося до застосунку для Mac…",

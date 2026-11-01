@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "使用托管模型，费用从你的余额中支付",
   "desktop_link.scope.connectors": "使用你已连接的数据源",
   "desktop_link.scope.web": "通过 {term.appName} 搜索和浏览网页",
-  "desktop_link.password_note": "此 Mac 永远不会获得你的密码。",
   "desktop_link.approve": "关联此 Mac",
   "desktop_link.cancel": "取消",
   "desktop_link.returning": "正在返回 Mac 应用…",

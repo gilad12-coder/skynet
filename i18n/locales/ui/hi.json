@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "होस्ट किए गए मॉडल इस्तेमाल कर सकता है, जिनका भुगतान आपके बैलेंस से होगा",
   "desktop_link.scope.connectors": "आपके कनेक्ट किए गए डेटा स्रोत इस्तेमाल कर सकता है",
   "desktop_link.scope.web": "{term.appName} के ज़रिए वेब पर खोज और ब्राउज़ कर सकता है",
-  "desktop_link.password_note": "यह Mac आपका पासवर्ड कभी नहीं पाता।",
   "desktop_link.approve": "इस Mac को लिंक करें",
   "desktop_link.cancel": "रद्द करें",
   "desktop_link.returning": "Mac ऐप पर लौट रहे हैं…",

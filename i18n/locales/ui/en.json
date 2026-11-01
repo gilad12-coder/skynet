@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "Use hosted models, paid from your balance",
   "desktop_link.scope.connectors": "Use your connected data sources",
   "desktop_link.scope.web": "Search and browse the web through {term.appName}",
-  "desktop_link.password_note": "This Mac never gets your password.",
   "desktop_link.approve": "Link this Mac",
   "desktop_link.cancel": "Cancel",
   "desktop_link.returning": "Returning to the Mac app…",

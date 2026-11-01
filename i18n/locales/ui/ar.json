@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "استخدام النماذج المستضافة، مدفوعة من رصيدك",
   "desktop_link.scope.connectors": "استخدام مصادر البيانات المتصلة بك",
   "desktop_link.scope.web": "البحث في الويب وتصفحه عبر {term.appName}",
-  "desktop_link.password_note": "لا يحصل جهاز Mac هذا على كلمة مرورك أبدًا.",
   "desktop_link.approve": "اربط جهاز Mac هذا",
   "desktop_link.cancel": "إلغاء",
   "desktop_link.returning": "جارٍ العودة إلى تطبيق Mac…",

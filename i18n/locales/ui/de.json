@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "Gehostete Modelle nutzen, bezahlt aus deinem Guthaben",
   "desktop_link.scope.connectors": "Deine verbundenen Datenquellen nutzen",
   "desktop_link.scope.web": "Über {term.appName} im Web suchen und surfen",
-  "desktop_link.password_note": "Dieser Mac erhält nie dein Passwort.",
   "desktop_link.approve": "Diesen Mac verknüpfen",
   "desktop_link.cancel": "Abbrechen",
   "desktop_link.returning": "Zurück zur Mac-App …",

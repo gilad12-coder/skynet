@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "להשתמש במודלים המתארחים, בתשלום מהיתרה שלכם",
   "desktop_link.scope.connectors": "להשתמש במקורות הנתונים המחוברים שלכם",
   "desktop_link.scope.web": "לחפש ולגלוש באינטרנט דרך {term.appName}",
-  "desktop_link.password_note": "ה-Mac הזה אף פעם לא מקבל את הסיסמה שלכם.",
   "desktop_link.approve": "קישור ה-Mac הזה",
   "desktop_link.cancel": "ביטול",
   "desktop_link.returning": "חוזרים לאפליקציית ה-Mac…",

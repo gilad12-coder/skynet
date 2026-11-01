@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "用託管模型，費用由你嘅餘額支付",
   "desktop_link.scope.connectors": "用你已連接嘅數據來源",
   "desktop_link.scope.web": "經 {term.appName} 搜尋同瀏覽網頁",
-  "desktop_link.password_note": "呢部 Mac 永遠唔會攞到你嘅密碼。",
   "desktop_link.approve": "連結呢部 Mac",
   "desktop_link.cancel": "取消",
   "desktop_link.returning": "返緊去 Mac app…",

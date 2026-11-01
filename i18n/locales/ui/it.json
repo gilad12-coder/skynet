@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "Usare i modelli ospitati, pagati dal tuo saldo",
   "desktop_link.scope.connectors": "Usare le tue origini dati collegate",
   "desktop_link.scope.web": "Cercare e navigare sul web tramite {term.appName}",
-  "desktop_link.password_note": "Questo Mac non riceve mai la tua password.",
   "desktop_link.approve": "Collega questo Mac",
   "desktop_link.cancel": "Annulla",
   "desktop_link.returning": "Ritorno all’app Mac…",

@@ -4354,7 +4354,6 @@
   "desktop_link.scope.models": "از مدل‌های میزبانی‌شده استفاده کند، با پرداخت از موجودی شما",
   "desktop_link.scope.connectors": "از منابع داده متصل شما استفاده کند",
   "desktop_link.scope.web": "از طریق {term.appName} در وب جستجو و مرور کند",
-  "desktop_link.password_note": "این Mac هرگز رمز عبور شما را دریافت نمی‌کند.",
   "desktop_link.approve": "پیوند این Mac",
   "desktop_link.cancel": "لغو",
   "desktop_link.returning": "در حال بازگشت به برنامه Mac…",
