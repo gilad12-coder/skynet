@@ -29,6 +29,7 @@ from ..api.errors import DomainError
 from ..config import settings
 from ..connectors.vault import ConnectorVault, ConnectorView, vault_cipher
 from ..storage.models import UserConnectorModel
+from . import hosted_dns
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ _TIMEOUT = httpx.Timeout(15.0)
 # needs a TCP connect (5 s), a TLS handshake (httpcore applies the connect
 # timeout again, 5 s) and a write (5 s), so it reaches hosted at most 27 s after
 # the first send, plus network transit. The resend's read time does not count.
+# hosted_dns caches its DNS decision, so the resend spends no time on DNS.
 _REFRESH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _RESEND_TIMEOUT = httpx.Timeout(5.0)
 REFRESH_RESEND_DEADLINE = 12.0
@@ -73,7 +75,8 @@ _REFRESH_CODES = frozenset({"desktop.token_expired", "auth.invalid_token"})
 _STATE_PURPOSE = "hosted_link"
 _STATE_FIELDS = ("v", "n", "r", "u")
 
-# Tests swap in an ``httpx.MockTransport`` of the hosted routes.
+# Tests swap in an ``httpx.MockTransport`` of the hosted routes; otherwise each
+# client gets its own fallback transport, because closing a client closes it.
 _TRANSPORT: httpx.BaseTransport | None = None
 _REFRESH_LOCK = threading.Lock()
 _USED_STATES: dict[str, float] = {}
@@ -100,7 +103,11 @@ def _client(timeout: httpx.Timeout = _TIMEOUT) -> httpx.Client:
     """
     if not settings.hosted_api_url:
         raise DomainError("hosted_link.not_configured", status=503)
-    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=_TRANSPORT)
+    return httpx.Client(
+        base_url=settings.hosted_api_url,
+        timeout=timeout,
+        transport=_TRANSPORT or hosted_dns.FallbackDnsTransport(),
+    )
 
 
 def callback_uri() -> str:
