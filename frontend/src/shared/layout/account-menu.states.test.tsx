@@ -76,11 +76,12 @@ void describe("AccountMenu link states in local mode", () => {
     delete process.env.APP_LOCAL_MODE;
   });
 
-  void it("shows the linked account's name and email, with sign out of sync", () => {
+  void it("shows the linked account's name and email, with one log out", () => {
     const html = render(ada);
     assert.match(html, /Ada/);
     assert.match(html, /ada@example\.com/);
-    assert.match(html, /Sign out of sync/);
+    assert.equal(html.match(/Log out/g)?.length, 1);
+    assert.doesNotMatch(html, /Sign out of sync/);
     assert.doesNotMatch(html, /Sign in to sync|Not signed in|skynet\.local/);
   });
 
@@ -102,13 +103,13 @@ void describe("AccountMenu link states in local mode", () => {
     assert.match(html, /Local mode/);
     assert.match(html, /Not signed in/);
     assert.match(html, /Sign in to sync/);
-    assert.doesNotMatch(html, /Sign out of sync|skynet\.local/);
+    assert.doesNotMatch(html, /Log out|skynet\.local/);
   });
 
   void it("shows a neutral local mode while the link is unknown", () => {
     const html = render(undefined);
     assert.match(html, /Local mode/);
-    assert.doesNotMatch(html, /Not signed in|Sign in to sync|Sign out of sync|skynet\.local/);
+    assert.doesNotMatch(html, /Not signed in|Sign in to sync|Log out|skynet\.local/);
   });
 });
 
@@ -158,5 +159,39 @@ void describe("AccountMenu sign in to sync", () => {
     await clickSignIn(400);
     assert.equal(requests.length, 1);
     assert.deepEqual(opened, []);
+  });
+});
+
+void describe("AccountMenu log out in local mode", () => {
+  const realFetch = globalThis.fetch;
+  let requests: string[] = [];
+
+  beforeEach(() => {
+    process.env.APP_LOCAL_MODE = "1";
+    requests = [];
+  });
+  afterEach(() => {
+    delete process.env.APP_LOCAL_MODE;
+    delete (globalThis as { window?: unknown }).window;
+    globalThis.fetch = realFetch;
+  });
+
+  void it("unlinks the hosted account and keeps the local session", async () => {
+    render(ada);
+    const item = menuItem("Log out");
+    (globalThis as { window?: unknown }).window = {
+      __APP_ENV__: { apiUrl: "http://api.test", appVersion: "0", localMode: true },
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+      return new Response(JSON.stringify({ hosted_revoked: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    item.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(requests, ["POST http://api.test/local/hosted-link/unlink"]);
   });
 });

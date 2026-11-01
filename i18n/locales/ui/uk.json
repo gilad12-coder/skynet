@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "Увійти для синхронізації",
   "local_identity.sign_in_failed": "Не вдалося почати вхід. Спробуйте ще раз.",
   "local_identity.linked_offline": "Пов’язано (офлайн)",
-  "local_identity.sign_out": "Вийти із синхронізації",
   "local_identity.sign_out_failed": "Не вдалося вийти із синхронізації. Спробуйте ще раз."
 }

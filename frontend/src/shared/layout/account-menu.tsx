@@ -280,25 +280,6 @@ export function AccountMenu({
           </button>
         )}
 
-        {local && linked && (
-          <button
-            type="button"
-            onClick={() => {
-              close();
-              unlinkHostedAccount()
-                .then(() => setReads((n) => n + 1))
-                .catch(() => toast.error(msg("local_identity.sign_out_failed")));
-            }}
-            className={COMPACT_POPOVER_ITEM_CLASS}
-          >
-            <SignOut
-              className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
-              aria-hidden="true"
-            />
-            {msg("local_identity.sign_out")}
-          </button>
-        )}
-
         <button
           type="button"
           onClick={() => {
@@ -332,28 +313,40 @@ export function AccountMenu({
           {msg("legal.source_link")}
         </a>
 
-        <div role="separator" className="my-1 h-px bg-border/60" />
+        {/* The Mac app's local session is never ended: its data stays on the Mac.
+            Log out there unlinks the hosted account, so it shows only when linked. */}
+        {(!local || linked) && (
+          <>
+            <div role="separator" className="my-1 h-px bg-border/60" />
 
-        <button
-          type="button"
-          onClick={() => {
-            close();
-            void signOut({ callbackUrl: "/login" });
-          }}
-          className={COMPACT_POPOVER_ITEM_CLASS}
-        >
-          {/* Point the arrow "outward" toward the sidebar's edge so it reads as
-              leaving: the rail sits on the left in LTR (arrow ←, flipped from the
-              icon's default) and on the right in RTL (arrow →, the default). Derive
-              the flip from `isRtl` rather than the `rtl:` Tailwind variant — this
-              menu is a portaled popover where the variant doesn't fire reliably, and
-              the rest of the file drives direction the same way. */}
-          <SignOut
-            className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
-            aria-hidden="true"
-          />
-          {msg("app.shell.logout")}
-        </button>
+            <button
+              type="button"
+              onClick={() => {
+                close();
+                if (!local) {
+                  void signOut({ callbackUrl: "/login" });
+                  return;
+                }
+                unlinkHostedAccount()
+                  .then(() => setReads((n) => n + 1))
+                  .catch(() => toast.error(msg("local_identity.sign_out_failed")));
+              }}
+              className={COMPACT_POPOVER_ITEM_CLASS}
+            >
+              {/* Point the arrow "outward" toward the sidebar's edge so it reads as
+                  leaving: the rail sits on the left in LTR (arrow ←, flipped from the
+                  icon's default) and on the right in RTL (arrow →, the default). Derive
+                  the flip from `isRtl` rather than the `rtl:` Tailwind variant — this
+                  menu is a portaled popover where the variant doesn't fire reliably, and
+                  the rest of the file drives direction the same way. */}
+              <SignOut
+                className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
+                aria-hidden="true"
+              />
+              {msg("app.shell.logout")}
+            </button>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );

@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "Entre para sincronizar",
   "local_identity.sign_in_failed": "Não foi possível iniciar o login. Tente de novo.",
   "local_identity.linked_offline": "Vinculado (offline)",
-  "local_identity.sign_out": "Sair da sincronização",
   "local_identity.sign_out_failed": "Não foi possível sair da sincronização. Tente novamente."
 }

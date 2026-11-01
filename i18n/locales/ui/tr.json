@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "Eşitlemek için giriş yapın",
   "local_identity.sign_in_failed": "Giriş başlatılamadı. Tekrar deneyin.",
   "local_identity.linked_offline": "Bağlı (çevrimdışı)",
-  "local_identity.sign_out": "Eşitlemeden çıkış yap",
   "local_identity.sign_out_failed": "Eşitlemeden çıkış yapılamadı. Tekrar deneyin."
 }

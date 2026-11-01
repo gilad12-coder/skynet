@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "ورود برای همگام‌سازی",
   "local_identity.sign_in_failed": "ورود شروع نشد. دوباره امتحان کنید.",
   "local_identity.linked_offline": "پیوندشده (آفلاین)",
-  "local_identity.sign_out": "خروج از همگام‌سازی",
   "local_identity.sign_out_failed": "خروج از همگام‌سازی ممکن نشد. دوباره تلاش کنید."
 }

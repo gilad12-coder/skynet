@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "התחברות לסנכרון",
   "local_identity.sign_in_failed": "לא הצלחנו להתחיל את ההתחברות. נסו שוב.",
   "local_identity.linked_offline": "מקושר (לא מקוון)",
-  "local_identity.sign_out": "התנתקות מסנכרון",
-  "local_identity.sign_out_failed": "לא הצלחנו להתנתק מהסנכרון. נסו שוב."
+  "local_identity.sign_out_failed": "לא הצלחנו להתנתק. נסו שוב."
 }

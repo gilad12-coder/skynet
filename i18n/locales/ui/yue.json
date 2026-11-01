@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "登入嚟同步",
   "local_identity.sign_in_failed": "開始唔到登入。請再試。",
   "local_identity.linked_offline": "已連結(離線)",
-  "local_identity.sign_out": "登出同步",
   "local_identity.sign_out_failed": "登出同步失敗,請再試一次。"
 }

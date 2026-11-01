@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "Zum Synchronisieren anmelden",
   "local_identity.sign_in_failed": "Die Anmeldung konnte nicht starten. Versuche es erneut.",
   "local_identity.linked_offline": "Verknüpft (offline)",
-  "local_identity.sign_out": "Von der Synchronisierung abmelden",
   "local_identity.sign_out_failed": "Abmelden von der Synchronisierung fehlgeschlagen. Versuche es erneut."
 }

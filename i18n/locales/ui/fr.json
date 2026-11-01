@@ -4370,6 +4370,5 @@
   "local_identity.sign_in": "Se connecter pour synchroniser",
   "local_identity.sign_in_failed": "Impossible de lancer la connexion. Réessayez.",
   "local_identity.linked_offline": "Associé (hors ligne)",
-  "local_identity.sign_out": "Se déconnecter de la synchronisation",
   "local_identity.sign_out_failed": "Impossible de se déconnecter de la synchronisation. Réessayez."
 }
