@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
-import { APP_SCHEME, appUrlFromArgv, parseLinkCallback } from "./app-url";
+import { APP_SCHEME, appUrlFromArgv, appWindowUrl, parseLinkCallback } from "./app-url";
 import { HostedLinkClient } from "./hosted-link";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
@@ -485,19 +485,16 @@ async function stopStack(): Promise<void> {
 
 function isAllowedUrl(target: string): boolean {
   if (target.startsWith("file://")) return true;
-  if (frontendUrl === null) return false;
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    return false;
-  }
-  // Next.js builds callbackUrl with "localhost" even though the server binds 127.0.0.1.
-  return (
-    url.protocol === "http:" &&
-    (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
-    url.port === new URL(frontendUrl).port
-  );
+  return frontendUrl !== null && appWindowUrl(target, frontendUrl) !== null;
+}
+
+function guardNavigation(event: Electron.Event, url: string): void {
+  if (url.startsWith("file://")) return;
+  const appUrl = frontendUrl === null ? null : appWindowUrl(url, frontendUrl);
+  if (appUrl === url) return;
+  event.preventDefault();
+  if (appUrl !== null) void win?.loadURL(appUrl);
+  else if (/^https?:\/\//.test(url)) void shell.openExternal(url);
 }
 
 function createWindow(): void {
@@ -522,11 +519,8 @@ function createWindow(): void {
     if (/^https?:\/\//.test(url) && !isAllowedUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isAllowedUrl(url)) return;
-    event.preventDefault();
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-  });
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
   win.on("closed", () => {
     win = null;
   });

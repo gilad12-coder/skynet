@@ -35,3 +35,25 @@ export function parseLinkCallback(raw: string): LinkCallback | null {
 export function appUrlFromArgv(argv: readonly string[]): string | null {
   return argv.find((arg) => arg.startsWith(`${APP_SCHEME}://`)) ?? null;
 }
+
+/**
+ * The URL to load in the app window for a navigation to `target`, or null when
+ * `target` is not the local web app. NextAuth builds its redirects with
+ * "localhost" (sign-out lands on http://localhost:<port>/login), but the local
+ * API allows only the 127.0.0.1 origin, so a page left on localhost cannot
+ * reach it. This keeps every page on the app's own origin.
+ */
+export function appWindowUrl(target: string, frontendUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return null;
+  }
+  const app = new URL(frontendUrl);
+  if (url.protocol !== "http:" || url.port !== app.port) return null;
+  if (url.hostname === app.hostname) return target;
+  if (url.hostname !== "localhost") return null;
+  url.hostname = app.hostname;
+  return url.toString();
+}
