@@ -1,8 +1,5 @@
 # AGENTS.md — Skynet working rules
 
-> Full-stack optimization platform for prompts, programs, agents, workflows,
-> datasets, and other user-supplied artifacts.
-
 Every coding agent (Devin, Claude Code, Codex and others) reads this file
 first. The rules in this file always apply. Situational rules are in skills
 and reference files. Read the matching one when the task needs it:
