@@ -14,6 +14,11 @@ is deleted. PRs from forks or Dependabot, and PRs whose files cannot change
 the running app (docs, `droid-wiki/`, `tools/reel-skynet/`, tests), get no
 preview; add the label `preview` to ask for one.
 
+The remote MCP server of a preview is at
+`https://api-pr-<n>.staging.skynetml.com/remote-mcp`. Staging uses
+`https://mcp.staging.skynetml.com/mcp` and production
+`https://mcp.skynetml.com/mcp`.
+
 ## Keep them able to run an optimization
 
 The merger has to sign up and finish a real run in each `*-pr-<n>`

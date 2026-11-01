@@ -13,7 +13,7 @@ const enCatalog = JSON.parse(
 ) as Record<string, string>;
 
 // Routes a signed-in user never navigates to by name.
-const NOT_SEARCHABLE = new Set(["/login", "/desktop/link"]);
+const NOT_SEARCHABLE = new Set(["/login", "/desktop/link", "/mcp/authorize"]);
 
 function staticRoutes(dir: string, segments: string[] = []): string[] {
   const routes: string[] = [];
@@ -39,7 +39,11 @@ test("every static route is registered for search", () => {
 
 test("every registry message key exists in the English catalog", () => {
   for (const page of APP_PAGES) {
-    const keys = [page.keywordsKey, page.descriptionKey, "key" in page.label ? page.label.key : undefined];
+    const keys = [
+      page.keywordsKey,
+      page.descriptionKey,
+      "key" in page.label ? page.label.key : undefined,
+    ];
     for (const key of keys) {
       if (key) assert.ok(enCatalog[key], `${page.id}: missing message key ${key}`);
     }
