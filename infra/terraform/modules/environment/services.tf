@@ -98,6 +98,8 @@ locals {
       WEBAUTHN_ORIGINS    = join(",", local.site_origins)
       # Jobs run in the dedicated worker service.
       WORKER_ENABLED = "false"
+      # Resource URL of the remote MCP server (SKY-229); empty turns it off.
+      MCP_RESOURCE_URL = var.mcp_domain == "" ? "" : "https://${var.mcp_domain}/mcp"
     })
     worker = merge(local.app_common_env, {
       APP_SERVICE_NAME = "worker"

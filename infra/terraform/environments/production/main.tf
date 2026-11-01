@@ -17,6 +17,7 @@ module "env" {
 
   frontend_domains = ["skynetml.com", "www.skynetml.com"]
   api_domain       = "api.skynetml.com"
+  mcp_domain       = "mcp.skynetml.com"
   enable_https     = var.enable_https
 
   db_instance_class        = var.db_instance_class

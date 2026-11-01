@@ -69,6 +69,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "budget.conflict": "This budget changed in another tab. Refresh its balance before updating it.",
     "budget.insufficient": "The available budget or account balance cannot cover the next operation.",
     "budget.invalid": "Enter a spending limit that covers usage already spent or reserved.",
+    "budget.below_minimum": "The spending limit is below the minimum this run needs. Enter a higher limit.",
     "budget.not_found": "This budget is unavailable for your account. Start a new setup budget.",
     "budget.pending": "Usage is still being settled. Wait for work in progress to finish before continuing.",
     "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",

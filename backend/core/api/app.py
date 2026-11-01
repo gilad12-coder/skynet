@@ -91,6 +91,7 @@ from .observability import (
     start_stale_conversation_sweeper,
 )
 from .rate_limit import build_login_throttle
+from .remote_mcp import mount_remote_mcp
 from .routers.account_data import create_account_data_router
 from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
@@ -119,6 +120,7 @@ from .routers.generalist_agent import create_generalist_agent_router
 from .routers.local_hosted_link import create_local_hosted_link_router
 from .routers.local_notifications import create_local_notifications_router
 from .routers.local_runtime import create_local_runtime_router
+from .routers.mcp_oauth import create_mcp_oauth_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
@@ -165,9 +167,11 @@ _SCALAR_PUBLIC_PATHS = frozenset(
         # Discover valid optimizers, modules, and models for a submission
         "/registry",
         "/models",
+        "/optimizers",
+        "/blackbox/engines",
         # Submit work
-        "/run",
-        "/grid-search",
+        "/optimize",
+        "/blackbox/run",
         # Browse + read results
         "/optimizations",
         "/optimizations/{optimization_id}",
@@ -502,8 +506,13 @@ html[data-app-sidebar="hidden"] .app-sidebar-header {
 """
 
 _OPENAPI_TAGS = [
-    {"name": "Optimizations", "description": "Submit, list, inspect, and manage DSPy optimization jobs."},
-    {"name": "Inference", "description": "Run inference against an optimized program."},
+    {
+        "name": "Optimizations",
+        "description": (
+            "Submit, list, inspect, and manage optimization runs for prompts, code, text, DSPy programs, and repositories."
+        ),
+    },
+    {"name": "Inference", "description": "Run the optimized artifact of a finished run."},
     {"name": "Analytics", "description": "Aggregate stats across jobs, optimizers, and models."},
     {"name": "Models", "description": "Model catalog and provider discovery."},
     {"name": "Registry", "description": "Optimizers and modules you can reference by name in a submission."},
@@ -908,14 +917,12 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         description=(
-            f"Backend API for **{APP_NAME}** — a platform for submitting, "
-            "comparing, and serving optimized language-model "
-            "programs. Submit optimization runs or grid searches, stream "
-            "live progress and metrics, inspect per-example baselines vs. "
-            "optimized predictions, and run inference against the final "
-            "compiled program. All traffic stays on your local network; "
-            "this interactive reference is served directly from the "
-            "running backend and works fully offline."
+            f"HTTP API for **{APP_NAME}**. Submit optimization runs for "
+            "prompts, code, text, DSPy programs, and repositories, poll "
+            "their status, read the results, and run the optimized "
+            "artifact. Send an API token "
+            "from Settings > API as a Bearer token. Guides: "
+            "https://skynetml.com/docs/api"
         ),
     )
 
@@ -1339,6 +1346,7 @@ def create_app(
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_desktop_link_router(job_store=job_store), tags=["Desktop link"])
+    app.include_router(create_mcp_oauth_router(job_store=job_store), tags=["MCP connection"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_runtimes_router(), tags=["Wizard"])
@@ -1406,5 +1414,6 @@ def create_app(
         mount_mcp_on_app(app)
     except ImportError as exc:
         logger.warning("FastMCP not available, skipping /mcp mount: %s", exc)
+    mount_remote_mcp(app, service=service, job_store=job_store, get_worker=lambda: worker)
 
     return app

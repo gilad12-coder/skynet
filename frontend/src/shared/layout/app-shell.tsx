@@ -96,6 +96,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // The public docs ship their own header, page list and search, and set their
+  // own lang and dir from the URL (/docs or /docs/he), not the UI locale.
+  // The docs frame has its own <main>, so this wrapper is a plain div.
+  if (pathname === "/docs" || pathname.startsWith("/docs/")) {
+    return <div className="min-h-dvh">{children}</div>;
+  }
+
   // Phones get the view-first shell (bottom tabs, no sidebar); see mobile-shell.tsx.
   if (isPhone) return <MobileShell>{children}</MobileShell>;
 
