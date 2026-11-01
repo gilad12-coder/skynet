@@ -1,4 +1,4 @@
-The metric tells Skynet how good an output is. It is a Python function in `metric.py`. Every optimizer, on both paths, calls the same function. This page gives the contract, the return value, and examples.
+The metric tells Skynet how good an output is. It is a Python function in `metric.py`. Every engine calls the same function. This page gives the contract, the return value, and examples.
 
 ## The contract
 
@@ -16,7 +16,7 @@ def score(input, output, expected=None):
 
 If your function takes only two arguments, Skynet calls `score(input, output)`.
 
-On the DSPy path, Skynet adapts the DSPy metric call to this same function. You write one metric for both paths. Read [DSPy and Optimize Anything](/docs/concepts/paths).
+For a DSPy program, Skynet adapts the DSPy metric call to this same function. You write one metric for every artifact kind. Read [How optimization works](/docs/concepts/optimization).
 
 ## The return value
 
@@ -49,7 +49,7 @@ GEPA, DSPy GEPA and Auto read the feedback text to write the next version. Say w
 | "Bad format." | "The output is not valid JSON. It has a trailing comma after the last field." |
 
 > [!NOTE]
-> The optimizer never sees your metric source. On the DSPy path, the reflection model sees only the feedback text. Your expected values stay with the metric.
+> The optimizer never sees your metric source. With a DSPy optimizer, the reflection model sees only the feedback text. Your expected values stay with the metric.
 
 ## Examples
 

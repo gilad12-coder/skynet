@@ -53,12 +53,12 @@ export const DOCS_PAGES: DocsPage[] = [
     updated: UPDATED,
   },
   {
-    slug: "concepts/paths",
+    slug: "concepts/optimization",
     section: "concepts",
-    title: { en: "DSPy and Optimize Anything", he: "DSPy ו-Optimize Anything" },
+    title: { en: "How optimization works", he: "איך האופטימיזציה עובדת" },
     description: {
-      en: "The two optimization paths, the run and score contract, and when to use each path.",
-      he: "שני מסלולי האופטימיזציה, חוזה הריצה והציון, ומתי להשתמש בכל מסלול.",
+      en: "The run and score contract, the artifact kinds, and the engines for each kind.",
+      he: "חוזה הריצה והציון, סוגי הארטיפקטים, והמנועים לכל סוג.",
     },
     updated: UPDATED,
   },
@@ -257,6 +257,15 @@ export function resolveDocsPath(segments: readonly string[]): { locale: DocsLoca
 export function docsHref(slug: string, locale: DocsLocale): string {
   const base = locale === "he" ? "/docs/he" : "/docs";
   return slug ? `${base}/${slug}` : base;
+}
+
+/**
+ * Point the docs links in a page body at the page's locale. The Hebrew pages
+ * link to `/docs/...` like the English ones, so readers stay in their language.
+ */
+export function localizeDocsLinks(markdown: string, locale: DocsLocale): string {
+  if (locale === "en") return markdown;
+  return markdown.replace(/\]\(\/docs(?=[/)#])(?!\/he(?=[/)#]))/g, "](/docs/he");
 }
 
 /** The site-relative URL of a page's Markdown twin. */

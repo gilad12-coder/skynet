@@ -1,4 +1,4 @@
-Skynet has two optimization paths: **DSPy** and **Optimize Anything**. Both paths use the same run contract and the same metric contract. The difference is what the optimizer can change and how it changes it.
+Skynet is Optimize Anything: one product that improves any artifact against your data and your metric. Every run uses the same run contract and the same metric contract. The artifact kind decides which engines can work on it.
 
 ## The shared contract
 
@@ -30,24 +30,39 @@ The `skynet` helper module gives `llm`, `Image` and `log`. A call to `llm` from 
 
 Read [Metrics and scorers](/docs/concepts/scorers) for the full metric contract.
 
-## Artifact types and paths
+## Artifact kinds and engines
 
-| Artifact type | Path | Optimizers |
-| --- | --- | --- |
-| DSPy program | DSPy | Auto, DSPy GEPA, DSPy MIPROv2, DSPy BootstrapFewShot |
-| Prompt | Optimize Anything | Auto, GEPA, Best-of-N, AutoResearch, Meta-Harness, AutoSaddler, ShinkaEvolve |
-| Code | Optimize Anything | Same as Prompt |
-| Text | Optimize Anything | Same as Prompt |
+| Artifact kind | Engines |
+| --- | --- |
+| Prompt | Auto, GEPA, Best-of-N, AutoResearch, Meta-Harness, AutoSaddler, ShinkaEvolve |
+| Code | Same as Prompt |
+| Text | Same as Prompt |
+| DSPy program | Auto, DSPy GEPA, DSPy MIPROv2, DSPy BootstrapFewShot |
+
+The engines come in two families:
+
+- The **native engines** treat the artifact as a black box. They work on Prompt, Code and Text artifacts.
+- The **DSPy optimizers** work inside a DSPy program. They work only on DSPy program artifacts.
 
 DSPy MIPROv2 and DSPy BootstrapFewShot need pairs (cases with expected outputs). With a single input, a DSPy program can use only Auto and DSPy GEPA.
 
-## The DSPy path
+## Prompt, Code and Text artifacts
 
-Use the DSPy path when your artifact is a DSPy program.
+The native engines treat the artifact as a black box. An engine proposes a new version, runs `run(artifact, input)` on the cases, and reads the score and feedback.
 
-Your `run.py` builds a `dspy.Module` at module level and calls it inside `run`. If the file has more than one module, name the one to optimize `program`.
+The six native engines use different search methods:
 
-What happens in a DSPy run:
+- **GEPA** evolves versions by reflection and keeps a Pareto front.
+- **Best-of-N** asks the reflection model for independent proposals and keeps the best one.
+- **AutoResearch**, **Meta-Harness**, **AutoSaddler** and **ShinkaEvolve** use a coding agent to propose versions.
+
+Read [Engines](/docs/concepts/engines) for each engine and its settings.
+
+## DSPy program artifacts
+
+A DSPy program is one artifact kind. Your `run.py` builds a `dspy.Module` at module level and calls it inside `run`. If the file has more than one module, name the one to optimize `program`.
+
+What happens when a DSPy optimizer runs:
 
 1. Skynet finds your module and wraps your `run` function around it. Every case goes through your own `run`.
 2. The DSPy optimizer compiles the program on the train cases.
@@ -67,36 +82,24 @@ DSPy BootstrapFewShot does not use a reflection model.
 > [!TIP]
 > The DSPy reflection model sees only the feedback text that your metric returns. It never sees the metric source.
 
-## The Optimize Anything path
-
-Use Optimize Anything for prompts, code and any other text. The optimizer treats the artifact as a black box. It proposes a new version, runs `run(artifact, input)` on the cases, and reads the score and feedback.
-
-The six engines use different search methods:
-
-- **GEPA** evolves versions by reflection and keeps a Pareto front.
-- **Best-of-N** asks the reflection model for independent proposals and keeps the best one.
-- **AutoResearch**, **Meta-Harness**, **AutoSaddler** and **ShinkaEvolve** use a coding agent to propose versions.
-
-Read [Engines](/docs/concepts/engines) for each engine and its settings.
-
 ## Auto
 
 **Auto** is the default choice in the wizard.
 
+- On a Prompt, Code or Text artifact, Auto explores with five native engines, then continues with GEPA from the best version.
 - On a DSPy program, Auto runs DSPy GEPA.
-- On a Prompt, Code or Text artifact, Auto runs the black-box Auto strategy. It explores with five engines, then continues with GEPA from the best version.
 
 Both forms of Auto read the feedback text from your metric.
 
-## When to use each path
+## Which engine to pick
 
 | Your situation | Use |
 | --- | --- |
-| You have a DSPy program | DSPy path. Start with Auto. |
-| You want few-shot demos picked from your data | DSPy path with DSPy BootstrapFewShot or DSPy MIPROv2 |
-| You have a prompt that a model runs | Optimize Anything. Start with Auto. |
-| You have code to make faster, cheaper or more correct | Optimize Anything with a Code artifact |
-| You have a document or a configuration | Optimize Anything with a Text artifact |
+| You have a prompt that a model runs | A Prompt artifact. Start with Auto. |
+| You have code to make faster, cheaper or more correct | A Code artifact. Start with Auto. |
+| You have a document or a configuration | A Text artifact. Start with Auto. |
+| You have a DSPy program | A DSPy program artifact. Start with Auto. |
+| You want few-shot demos picked from your data | A DSPy program artifact with DSPy BootstrapFewShot or DSPy MIPROv2 |
 
 > [!WARNING]
 > GEPA, DSPy GEPA and Auto learn from the feedback text. If your feedback is always the same string, these optimizers have less information to work with.

@@ -16,14 +16,14 @@ Skynet עובד עם ארבעה סוגי תוצרים:
 > [!NOTE]
 > קוד ההרצה ופונקציית המדידה רצים ב-sandbox, בתהליכים נפרדים. קוד ההרצה לא רואה את קוד המקור של פונקציית המדידה ולא את הערכים הצפויים.
 
-## שני מסלולים
+## מוצר אחד, הרבה מנועים
 
-ל-Skynet יש שני מסלולי אופטימיזציה:
+Skynet הוא Optimize Anything. סוג התוצר קובע אילו מנועים יכולים לעבוד עליו:
 
-- **DSPy** משפר תוכנית DSPy בעזרת האופטימייזרים של DSPy: DSPy GEPA,‏ DSPy MIPROv2 ו-DSPy BootstrapFewShot.
-- **Optimize Anything** מתייחס לתוצר כקופסה שחורה. הוא משתמש במנועים GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve.
+- תוצרים מסוג פרומפט, קוד וטקסט משתמשים במנועים המובנים: GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve.
+- תוצרים מסוג תוכנית DSPy משתמשים באופטימייזרים של DSPy: DSPy GEPA,‏ DSPy MIPROv2 ו-DSPy BootstrapFewShot.
 
-**Auto** בוחר בשבילך. בתוכנית DSPy,‏ Auto משתמש ב-DSPy GEPA. בסוגי תוצרים אחרים, Auto משלב חמישה מנועי קופסה שחורה. קרא/י את [DSPy ו-Optimize Anything](/docs/concepts/paths) ואת [מנועים](/docs/concepts/engines).
+**Auto** בוחר בשבילך. בתוכנית DSPy,‏ Auto משתמש ב-DSPy GEPA. בסוגי תוצרים אחרים, Auto משלב חמישה מנועים מובנים. קרא/י את [איך האופטימיזציה עובדת](/docs/concepts/optimization) ואת [מנועים](/docs/concepts/engines).
 
 ## איך ריצה עובדת
 
@@ -40,7 +40,7 @@ Skynet בוחר גרסאות לפי מקרי האימות. הוא מדווח ע�
 | אם ברצונך | קרא/י |
 | --- | --- |
 | להפעיל את הריצה הראשונה | [התחלה מהירה](/docs/quickstart) |
-| לבחור מסלול | [DSPy ו-Optimize Anything](/docs/concepts/paths) |
+| להבין איך האופטימיזציה עובדת | [איך האופטימיזציה עובדת](/docs/concepts/optimization) |
 | לבחור מנוע | [מנועים](/docs/concepts/engines) |
 | להכין את הנתונים | [דאטאסטים וחלוקה](/docs/concepts/datasets) |
 | לכתוב פונקציית מדידה | [פונקציות מדידה ופונקציות ציון](/docs/concepts/scorers) |

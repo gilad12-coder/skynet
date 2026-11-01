@@ -2,9 +2,9 @@ Skynet improves an artifact that you already have. You give it a starting versio
 
 ## What Skynet optimizes
 
-Skynet works on four kinds of artifact:
+Skynet works on four artifact kinds:
 
-| Artifact type | What changes |
+| Artifact kind | What changes |
 | --- | --- |
 | Prompt | The prompt text |
 | Code | The source code |
@@ -16,14 +16,14 @@ Every run uses the same contract. Your run code defines `run(artifact, input)`. 
 > [!NOTE]
 > Your run code and your metric run in a sandbox, in separate processes. The run code cannot see the metric source or the expected values.
 
-## Two paths
+## One product, many engines
 
-Skynet has two optimization paths:
+Skynet is Optimize Anything. The artifact kind decides which engines can work on it:
 
-- **DSPy** optimizes a DSPy program with the DSPy optimizers: DSPy GEPA, DSPy MIPROv2 and DSPy BootstrapFewShot.
-- **Optimize Anything** treats the artifact as a black box. It uses the engines GEPA, Best-of-N, Meta-Harness, AutoResearch, AutoSaddler and ShinkaEvolve.
+- Prompt, Code and Text artifacts use the native engines: GEPA, Best-of-N, Meta-Harness, AutoResearch, AutoSaddler and ShinkaEvolve.
+- DSPy program artifacts use the DSPy optimizers: DSPy GEPA, DSPy MIPROv2 and DSPy BootstrapFewShot.
 
-**Auto** picks for you. On a DSPy program, Auto uses DSPy GEPA. On other artifact types, Auto combines five black-box engines. Read [DSPy and Optimize Anything](/docs/concepts/paths) and [Engines](/docs/concepts/engines).
+**Auto** picks for you. On a DSPy program, Auto uses DSPy GEPA. On other artifact kinds, Auto combines five native engines. Read [How optimization works](/docs/concepts/optimization) and [Engines](/docs/concepts/engines).
 
 ## How a run works
 
@@ -40,7 +40,7 @@ Skynet selects versions on the validation cases. It reports the final score on t
 | If you want to | Read |
 | --- | --- |
 | Start your first run | [Quickstart](/docs/quickstart) |
-| Choose a path | [DSPy and Optimize Anything](/docs/concepts/paths) |
+| Understand how optimization works | [How optimization works](/docs/concepts/optimization) |
 | Choose an engine | [Engines](/docs/concepts/engines) |
 | Prepare your data | [Datasets and splits](/docs/concepts/datasets) |
 | Write a metric | [Metrics and scorers](/docs/concepts/scorers) |

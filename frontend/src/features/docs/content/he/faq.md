@@ -6,14 +6,14 @@
 
 Skynet היא פלטפורמה שמבצעת אופטימיזציה לפרומפטים, תוכניות, סוכנים ותהליכי עבודה מול הנתונים ופונקציית המדידה (Metric) שלך. מעלים דאטאסט, מתארים את המשימה ומתחילים ריצה. הריצה מנסה גרסאות חדשות ונותנת להן ציון על נתונים שהוחזקו בצד. כדי להתחיל, קרא/י את [התחלה מהירה](/docs/quickstart).
 
-### אילו נתיבי אופטימיזציה יש ב-Skynet?
+### מה Skynet יכול לשפר?
 
-ל-Skynet יש שני נתיבים:
+Skynet הוא Optimize Anything. הוא מבצע אופטימיזציה לפרומפטים, לקוד, לטקסט ולתוכניות DSPy במוצר אחד. סוג התוצר קובע אילו מנועים יכולים לעבוד עליו:
 
-- **DSPy** מבצע אופטימיזציה לתוכנית מובנית ולפרומפטים שלה.
-- **Optimize Anything** מתייחס לתוצר שלך כקופסה שחורה ומבצע לו אופטימיזציה מול פונקציית ציון.
+- תוצרים מסוג פרומפט, קוד וטקסט משתמשים במנועים המובנים: GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve.
+- תוכניות DSPy משתמשות באופטימייזרים של DSPy: DSPy GEPA,‏ DSPy MIPROv2 ו-DSPy BootstrapFewShot.
 
-המנועים של Optimize Anything הם GEPA,‏ Best-of-N,‏ Meta-Harness,‏ AutoResearch,‏ AutoSaddler ו-ShinkaEvolve. **Auto** משלב את המנועים שמתאימים למשימה שלך. ראה/ראי [נתיבים](/docs/concepts/paths) ו[מנועים](/docs/concepts/engines).
+**Auto** משלב את המנועים שמתאימים למשימה שלך. ראה/ראי [איך האופטימיזציה עובדת](/docs/concepts/optimization) ו[מנועים](/docs/concepts/engines).
 
 ### באילו שפות הממשק תומך?
 

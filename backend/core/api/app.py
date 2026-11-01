@@ -506,7 +506,9 @@ html[data-app-sidebar="hidden"] .app-sidebar-header {
 _OPENAPI_TAGS = [
     {
         "name": "Optimizations",
-        "description": "Submit, list, inspect, and manage optimization runs for prompts, code, and repositories.",
+        "description": (
+            "Submit, list, inspect, and manage optimization runs for prompts, code, text, DSPy programs, and repositories."
+        ),
     },
     {"name": "Inference", "description": "Run the optimized artifact of a finished run."},
     {"name": "Analytics", "description": "Aggregate stats across jobs, optimizers, and models."},
@@ -914,8 +916,9 @@ def create_app(
         redoc_url=None,
         description=(
             f"HTTP API for **{APP_NAME}**. Submit optimization runs for "
-            "prompts, code, and repositories, poll their status, read the "
-            "results, and run the optimized artifact. Send an API token "
+            "prompts, code, text, DSPy programs, and repositories, poll "
+            "their status, read the results, and run the optimized "
+            "artifact. Send an API token "
             "from Settings > API as a Bearer token. Guides: "
             "https://skynetml.com/docs/api"
         ),

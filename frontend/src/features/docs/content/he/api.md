@@ -44,7 +44,7 @@ Authorization: Bearer skyd_...
 | --- | --- |
 | `GET /models` | מציג את המודלים שזמינים לך. |
 | `GET /optimizers` | מציג את האופטימייזרים שמתאימים להגדרות. |
-| `GET /blackbox/engines` | מציג את מנועי הקופסה השחורה ואם כל אחד מהם זמין. |
+| `GET /blackbox/engines` | מציג את המנועים המובנים ואם כל אחד מהם זמין. |
 | `POST /optimize` | מפעיל ריצה עבור פרומפט, קוד, טקסט או תוכנית DSPy. |
 | `POST /blackbox/run` | מפעיל ריצה על מאגר GitHub. |
 | `GET /optimizations` | מציג את הריצות שלך. |
@@ -139,6 +139,8 @@ curl https://api.skynetml.com/optimizations/$RUN_ID \
 | `failed`,‏ `cancelled`,‏ `stopped` | כן |
 
 מומלץ לבדוק כל 10 עד 30 שניות. ריצה יכולה להימשך מדקות עד שעות.
+
+[הפניית ה-API](https://api.skynetml.com/scalar) מציגה כל שדה בתגובת הריצה.
 
 ## שימוש בתוצאה
 

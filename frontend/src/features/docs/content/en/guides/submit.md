@@ -64,7 +64,7 @@ At the Standard level, this step has one screen. It shows the optimizer, the bud
 
 ### Optimizer
 
-The wizard lists only the optimizers that fit your task and inputs. **Auto** is selected for you. Select another optimizer if you want to. Read [Engines](/docs/concepts/engines) and [DSPy and Optimize Anything](/docs/concepts/paths).
+The wizard lists only the optimizers that fit your task and inputs. **Auto** is selected for you. Select another optimizer if you want to. Read [Engines](/docs/concepts/engines) and [How optimization works](/docs/concepts/optimization).
 
 ### Models
 

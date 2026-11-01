@@ -97,5 +97,5 @@ Open the run from your optimizations list to watch it. Read [Results](/docs/guid
 ## Next steps
 
 - Write a better metric: [Metrics and scorers](/docs/concepts/scorers).
-- Understand the two paths: [DSPy and Optimize Anything](/docs/concepts/paths).
+- Learn which engines fit your artifact: [How optimization works](/docs/concepts/optimization).
 - Learn what a run costs: [Billing](/docs/concepts/billing).

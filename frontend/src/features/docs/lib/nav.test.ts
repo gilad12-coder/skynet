@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DOCS_PAGES, DOCS_SECTIONS, docsHref, docsMarkdownHref, docsNeighbors, resolveDocsPath } from "./nav.ts";
+import { readFileSync } from "node:fs";
+import {
+  DOCS_PAGES,
+  DOCS_SECTIONS,
+  docsHref,
+  docsMarkdownHref,
+  docsNeighbors,
+  localizeDocsLinks,
+  resolveDocsPath,
+} from "./nav.ts";
 
 test("every page has a unique slug, a known section and both languages", () => {
   const slugs = DOCS_PAGES.map((p) => p.slug);
@@ -48,4 +57,26 @@ test("docsNeighbors gives no previous page for the first page", () => {
   assert.equal(docsNeighbors("").prev, null);
   assert.equal(docsNeighbors("")?.next?.slug, DOCS_PAGES[1]?.slug);
   assert.equal(docsNeighbors(DOCS_PAGES.at(-1)!.slug).next, null);
+});
+
+test("localizeDocsLinks keeps Hebrew readers on Hebrew pages", () => {
+  const md = "[a](/docs/api) [b](/docs) [c](/docs/he/faq) [d](/docs#x) [e](/docs-search) [f](https://x.dev/docs/a)";
+  assert.equal(localizeDocsLinks(md, "en"), md);
+  assert.equal(
+    localizeDocsLinks(md, "he"),
+    "[a](/docs/he/api) [b](/docs/he) [c](/docs/he/faq) [d](/docs/he#x) [e](/docs-search) [f](https://x.dev/docs/a)",
+  );
+});
+
+test("every internal docs link in the content points at a real page", () => {
+  for (const locale of ["en", "he"] as const) {
+    for (const page of DOCS_PAGES) {
+      const url = new URL(`../content/${locale}/${page.slug || "index"}.md`, import.meta.url);
+      const source = localizeDocsLinks(readFileSync(url, "utf8"), locale);
+      for (const [, href] of source.matchAll(/\]\((\/docs[^)#\s]*)/g)) {
+        const segments = href.replace(/\.md$/, "").split("/").filter(Boolean).slice(1);
+        assert.ok(resolveDocsPath(segments), `${locale}/${page.slug}: broken link ${href}`);
+      }
+    }
+  }
 });

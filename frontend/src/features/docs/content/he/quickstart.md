@@ -97,5 +97,5 @@ def score(input, output, expected=None):
 ## השלבים הבאים
 
 - כתוב/י פונקציית מדידה טובה יותר: [פונקציות מדידה ופונקציות ציון](/docs/concepts/scorers).
-- הכר/י את שני המסלולים: [DSPy ו-Optimize Anything](/docs/concepts/paths).
+- למד/י אילו מנועים מתאימים לתוצר שלך: [איך האופטימיזציה עובדת](/docs/concepts/optimization).
 - למד/י כמה עולה ריצה: [חיוב](/docs/concepts/billing).

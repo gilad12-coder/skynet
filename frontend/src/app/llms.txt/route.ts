@@ -15,7 +15,7 @@ export async function GET() {
   const body = [
     "# Skynet",
     "",
-    "> Skynet optimizes prompts, programs, agents and other artifacts against your own data and scorer. It has a DSPy path and a black-box Optimize Anything path.",
+    "> Skynet optimizes prompts, programs, agents and other artifacts against your own data and scorer. Skynet is Optimize Anything: one product for prompts, code, text and DSPy programs, with native engines and DSPy optimizers.",
     "",
     `Every page below is Markdown. The full docs are in one file at ${site}/llms-full.txt. The hosted MCP server is at ${MCP_SERVER_URL}. Hebrew pages are under ${site}/docs/he.`,
     "",

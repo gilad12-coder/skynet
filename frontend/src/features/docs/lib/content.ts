@@ -8,7 +8,7 @@
  */
 
 import { MCP_CLIENTS_BLOCK, searchText, extractHeadings } from "./markdown";
-import { DOCS_PAGES, docsHref, type DocsLocale, type DocsPage } from "./nav";
+import { DOCS_PAGES, docsHref, localizeDocsLinks, type DocsLocale, type DocsPage } from "./nav";
 import { mcpClientsMarkdown } from "@/shared/lib/mcp-clients";
 import { getSiteUrl } from "@/shared/lib/site-config";
 
@@ -28,7 +28,7 @@ export function docsSource(page: DocsPage, locale: DocsLocale): string {
   const name = page.slug || "index";
   const source = SOURCES[`../content/${locale}/${name}.md`] ?? SOURCES[`../content/en/${name}.md`];
   if (source === undefined) throw new Error(`Missing docs source: ${name}.md`);
-  return source;
+  return localizeDocsLinks(source, locale);
 }
 
 /** Replace the MCP clients placeholder with the generated client sections. */

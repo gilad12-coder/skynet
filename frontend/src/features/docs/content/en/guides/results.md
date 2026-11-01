@@ -8,14 +8,14 @@ The run page shows only the tabs that apply to the run. Some tabs depend on the 
 | --- | --- | --- |
 | **Overview** | Always | Progress, scores and the score history |
 | **Usage** | A successful run with a program that Skynet can serve | A form to run the optimized program, and integration code |
-| **Artifact** | An Optimize Anything run with a result | The versions of your artifact, with the best version |
-| **Data** | A finished DSPy run | The data split into train, validation and test sets, and the test set evaluation |
+| **Artifact** | A Prompt, Code or Text run with a result | The versions of your artifact, with the best version |
+| **Data** | A finished DSPy program run | The data split into train, validation and test sets, and the test set evaluation |
 | **Code** | When the run has code to show | The run code and the metric |
-| **Reward** | An Optimize Anything run whose metric declares reward parts | The reward parts and their weights |
+| **Reward** | A Prompt, Code or Text run whose metric declares reward parts | The reward parts and their weights |
 | **Artifact** | A run with an optimized prompt or files | The optimized output and **Export results** |
 | **Logs** | Most runs | The run log |
 | **Usage and cost** | When you are signed in | What the run spent |
-| **Scheduled run** | A successful Optimize Anything run | A schedule to run the optimization again |
+| **Scheduled run** | A successful Prompt, Code or Text run | A schedule to run the optimization again |
 | **Config** | Always | The run configuration |
 
 > [!NOTE]
@@ -33,9 +33,9 @@ The **Overview** tab shows:
 
 While the run is active, the overview also shows **Elapsed**, **Remaining** and **Rate**.
 
-For an Optimize Anything run, the overview also shows **Named scores** when your metric reports named scores.
+For a Prompt, Code or Text run, the overview also shows **Named scores** when your metric reports named scores.
 
-For a DSPy run, the **Data** tab has a **Test set evaluation**. It shows the baseline and optimized score for each test case.
+For a DSPy program run, the **Data** tab has a **Test set evaluation**. It shows the baseline and optimized score for each test case.
 
 ### When the best version is the starting version
 
@@ -45,7 +45,7 @@ If the run stopped at its budget, the run page tells you which version Skynet sa
 
 ## Export the best version
 
-### Optimize Anything runs
+### Prompt, Code and Text runs
 
 The **Artifact** tab lists the **Versions** of your artifact. For each version you can:
 
@@ -55,7 +55,7 @@ The **Artifact** tab lists the **Versions** of your artifact. For each version y
 
 You can compare a version with another version. The tab also shows the **Scorer feedback** for a version.
 
-### DSPy runs
+### DSPy program runs
 
 The **Artifact** tab has an **Export results** panel. Open the **Download** menu. It shows the formats that the run has:
 

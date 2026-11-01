@@ -1,21 +1,21 @@
-An engine is the search method that proposes new versions of your artifact. Skynet has six black-box engines for the Optimize Anything path, three DSPy optimizers for the DSPy path, and **Auto**. This page says what each one does, when to pick it, and which settings it has.
+An engine is the search method that proposes new versions of your artifact. Skynet has six native engines for Prompt, Code and Text artifacts, three DSPy optimizers for DSPy programs, and **Auto**. This page says what each one does, when to pick it, and which settings it has.
 
-Read [DSPy and Optimize Anything](/docs/concepts/paths) first if you do not know which path your artifact uses.
+Read [How optimization works](/docs/concepts/optimization) first if you do not know which engines fit your artifact.
 
 ## Quick comparison
 
-| Engine | Path | Coding agent settings | Max iterations setting |
+| Engine | Artifact kinds | Coding agent settings | Max iterations setting |
 | --- | --- | --- | --- |
-| Auto | Both | Yes, on Optimize Anything | No |
-| GEPA | Optimize Anything | No | No |
-| Best-of-N | Optimize Anything | No | No |
-| AutoResearch | Optimize Anything | Yes | No |
-| Meta-Harness | Optimize Anything | Yes | Yes |
-| AutoSaddler | Optimize Anything | Yes | Yes |
-| ShinkaEvolve | Optimize Anything | No. It has its own editor setting. | Yes |
-| DSPy GEPA | DSPy | No | No |
-| DSPy MIPROv2 | DSPy | No | No |
-| DSPy BootstrapFewShot | DSPy | No | No |
+| Auto | All | Yes, on Prompt, Code and Text | No |
+| GEPA | Prompt, Code, Text | No | No |
+| Best-of-N | Prompt, Code, Text | No | No |
+| AutoResearch | Prompt, Code, Text | Yes | No |
+| Meta-Harness | Prompt, Code, Text | Yes | Yes |
+| AutoSaddler | Prompt, Code, Text | Yes | Yes |
+| ShinkaEvolve | Prompt, Code, Text | No. It has its own editor setting. | Yes |
+| DSPy GEPA | DSPy program | No | No |
+| DSPy MIPROv2 | DSPy program | No | No |
+| DSPy BootstrapFewShot | DSPy program | No | No |
 
 The wizard marks GEPA, DSPy GEPA and Auto as optimizers that use the feedback text from your metric.
 
@@ -29,7 +29,7 @@ Auto is the default. What it runs depends on the artifact type:
 Auto does not use Best-of-N.
 
 > [!WARNING]
-> Black-box Auto needs at least 6 scorer runs: 5 exploration lanes and one continuation. All five engines must be available. If one is not available, select a single engine.
+> On a Prompt, Code or Text artifact, Auto needs at least 6 scorer runs: 5 exploration lanes and one continuation. All five engines must be available. If one is not available, select a single engine.
 
 **Pick it when** you do not know which engine fits. This is the best place to start.
 
@@ -118,7 +118,7 @@ When Auto runs ShinkaEvolve, the wizard shows these settings as "ShinkaEvolve se
 
 ## Related pages
 
-- [DSPy and Optimize Anything](/docs/concepts/paths)
+- [How optimization works](/docs/concepts/optimization)
 - [Metrics and scorers](/docs/concepts/scorers)
 - [Runs](/docs/concepts/runs)
 - [Billing](/docs/concepts/billing)

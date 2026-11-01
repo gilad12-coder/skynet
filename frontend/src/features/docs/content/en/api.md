@@ -44,7 +44,7 @@ The reference reads the OpenAPI document at `https://api.skynetml.com/openapi.pu
 | --- | --- |
 | `GET /models` | Lists the models you can use. |
 | `GET /optimizers` | Lists the optimizers that fit a setup. |
-| `GET /blackbox/engines` | Lists the black-box engines and if each one is available. |
+| `GET /blackbox/engines` | Lists the native engines and if each one is available. |
 | `POST /optimize` | Starts a run for a prompt, code, text or DSPy program. |
 | `POST /blackbox/run` | Starts a run on a GitHub repository. |
 | `GET /optimizations` | Lists your runs. |
@@ -139,6 +139,8 @@ The `status` field is one of:
 | `failed`, `cancelled`, `stopped` | Yes |
 
 Poll every 10 to 30 seconds. A run can take from minutes to hours.
+
+The [API reference](https://api.skynetml.com/scalar) lists every field of the run response.
 
 ## Use the result
 
