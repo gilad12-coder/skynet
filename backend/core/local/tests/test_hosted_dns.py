@@ -7,7 +7,8 @@ import time
 import httpx
 import pytest
 
-from .. import hosted_dns
+from ...config import settings
+from .. import hosted_dns, hosted_link
 
 URL = "https://api-staging.skynetml.com/desktop/link/token"
 
@@ -184,3 +185,25 @@ def test_doh_lookup_without_a_record_raises(monkeypatch):
     )
     with pytest.raises(LookupError):
         hosted_dns.doh_lookup("missing.example.com")
+
+
+@pytest.mark.parametrize(
+    ("proxies", "wrapped"),
+    [({}, True), ({"https": "http://proxy.example:3128"}, False), ({"all": "http://proxy.example:3128"}, False)],
+)
+def test_hosted_client_keeps_httpx_proxy_lookup(monkeypatch, proxies, wrapped):
+    """The hosted client uses the fallback only when no proxy applies."""
+    monkeypatch.setattr(hosted_dns, "getproxies", lambda: proxies)
+    monkeypatch.setattr(settings, "hosted_api_url", "https://api-staging.skynetml.com")
+    monkeypatch.setattr(hosted_link, "_TRANSPORT", None)
+    with hosted_link._client() as client:
+        assert isinstance(client._transport, hosted_dns.FallbackDnsTransport) is wrapped
+
+
+def test_proxied_client_sends_through_the_proxy(monkeypatch):
+    """With HTTPS_PROXY set, the hosted client mounts httpx's proxy transport."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setattr(settings, "hosted_api_url", "https://api-staging.skynetml.com")
+    monkeypatch.setattr(hosted_link, "_TRANSPORT", None)
+    with hosted_link._client() as client:
+        assert any(pattern.scheme == "https" for pattern in client._mounts)

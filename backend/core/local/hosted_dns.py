@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from urllib.request import getproxies
 
 import httpx
 
@@ -84,6 +85,16 @@ def doh_lookup(host: str) -> tuple[str, float]:
         if answer.get("type") == _A_RECORD:
             return answer["data"], float(answer.get("TTL", 0))
     raise LookupError(f"no A record for {host}")
+
+
+def proxy_configured() -> bool:
+    """Return whether an HTTPS proxy applies, from the environment or macOS settings.
+
+    httpx reads the same source only when a client gets no explicit transport,
+    and a proxy resolves the host name itself, so callers skip this transport then.
+    """
+    proxies = getproxies()
+    return bool(proxies.get("https") or proxies.get("all"))
 
 
 def _is_literal(host: str) -> bool:
