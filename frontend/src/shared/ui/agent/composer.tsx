@@ -14,7 +14,7 @@ import { cn } from "@/shared/lib/utils";
 import { MarkdownPreviewField } from "@/shared/ui/markdown-preview-field";
 
 import { autoResizeTextarea } from "./auto-resize";
-import { MAX_ATTACHMENT_MB, readAttachments } from "./file-attachments";
+import { MAX_ATTACHMENT_MB, readAttachments, splitClaimed } from "./file-attachments";
 import { PastedTextCard } from "./pasted-text-card";
 import {
   attachedFile,
@@ -53,10 +53,13 @@ interface ComposerProps {
   /** Checks a message before it is steered or queued; false keeps it in the
    *  draft. A queued message is sent later, when its rejection would lose it. */
   acceptsMidTurn?: (text: string) => boolean;
-  /** Claims a picked or pasted file before the composer reads it as text;
-   *  return true when handled (the generalist sends datasets to its
-   *  column-mapping card this way). */
-  onAttachFile?: (file: File) => boolean;
+  /** Whether the host handles a picked or pasted file itself instead of the
+   *  composer reading it as text (the generalist sends datasets to its
+   *  column-mapping card this way). The host takes only the first such file;
+   *  the composer skips the others with a message. */
+  claimsFile?: (file: File) => boolean;
+  /** Receives the one file `claimsFile` claimed. */
+  onAttachFile?: (file: File) => void;
 }
 
 /**
@@ -85,6 +88,7 @@ export function Composer({
   className,
   midTurn,
   acceptsMidTurn,
+  claimsFile,
   onAttachFile,
 }: ComposerProps) {
   const inline = layout === "inline";
@@ -129,7 +133,14 @@ export function Composer({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [attaching, setAttaching] = React.useState(0);
   const attachFiles = async (picked: File[]) => {
-    const files = onAttachFile ? picked.filter((file) => !onAttachFile(file)) : picked;
+    const {
+      claimed,
+      extra,
+      rest: files,
+    } = claimsFile ? splitClaimed(picked, claimsFile) : { claimed: null, extra: [], rest: picked };
+    if (claimed) onAttachFile?.(claimed);
+    for (const file of extra)
+      toast.error(msg("agent.composer.attach_one_dataset", { name: file.name }));
     if (!files.length) return;
     setAttaching((n) => n + 1);
     try {

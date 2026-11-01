@@ -14,8 +14,13 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 
 from ...config import settings
-from ...service_gateway.agents.attachments import MAX_ATTACHMENT_BYTES, extract_attachment_text
+from ...service_gateway.agents.attachments import (
+    MAX_ATTACHMENT_BYTES,
+    AttachmentReadersBusyError,
+    read_attachment,
+)
 from ..auth import AuthenticatedUser, get_authenticated_user
+from ..errors import DomainError
 from ..rate_limit import RateLimiter, shared_redis_client
 
 
@@ -33,7 +38,7 @@ def create_agent_attachments_router() -> APIRouter:
     """
     router = APIRouter()
 
-    # A sync handler, so FastAPI runs the CPU-bound parsing in its thread pool.
+    # A sync handler, so FastAPI waits for the parsing child process in its thread pool.
     @router.post(
         "/agent/attachments/extract",
         response_model=AttachmentTextResponse,
@@ -54,7 +59,8 @@ def create_agent_attachments_router() -> APIRouter:
             The extracted text, or a short note when the file cannot be read.
 
         Raises:
-            DomainError: 429 when the caller is over the hourly attachment cap.
+            DomainError: 429 when the caller is over the hourly attachment cap,
+                or when this API process already reads its maximum number of files.
         """
         RateLimiter(shared_redis_client()).enforce(
             f"attachments:{user.username}",
@@ -63,7 +69,10 @@ def create_agent_attachments_router() -> APIRouter:
         )
         data = file.file.read(MAX_ATTACHMENT_BYTES + 1)
         size = file.size if file.size is not None else len(data)
-        text = extract_attachment_text(file.filename or "file", file.content_type or "", data, size)
+        try:
+            text = read_attachment(file.filename or "file", file.content_type or "", data, size)
+        except AttachmentReadersBusyError:
+            raise DomainError("rate_limit.exceeded", status=429, params={"retry_after": 5}) from None
         return AttachmentTextResponse(text=text)
 
     return router

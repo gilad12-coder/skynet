@@ -1521,6 +1521,7 @@
   "agent.kickoff.oversized_repo": "{name} est un dépôt volumineux, je n'ai donc pas pu le parcourir. Que voulez-vous faire ?",
   "agent.composer.attach": "Joindre un fichier",
   "agent.composer.attach_failed": "Impossible de joindre {name}.",
+  "agent.composer.attach_one_dataset": "{name} n’a pas été joint : joignez un seul jeu de données à la fois.",
   "agent.composer.attach_too_large": "{name} dépasse {max_mb} Mo.",
   "agent.composer.mic_unavailable": "Microphone indisponible",
   "agent.composer.record": "Dicter",

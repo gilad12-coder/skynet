@@ -923,13 +923,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             openRouterEngine={localMenu.openRouterEngine}
           />
         }
+        // Dataset files keep their column-mapping card; any other file is
+        // read as text by the composer.
+        claimsFile={isDatasetFile}
         onAttachFile={(file) => {
-          // Dataset files keep their column-mapping card; any other file is
-          // read as text by the composer.
-          if (!isDatasetFile(file)) return false;
           setAttachFile(file);
           setAttachOpen(true);
-          return true;
         }}
         leadingControls={
           <>

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
+import time
 import zipfile
 import zlib
 
@@ -55,28 +57,33 @@ def _zip(members: dict[str, str]) -> bytes:
     return buffer.getvalue()
 
 
-def _pdf(text: str, compress: bool = False) -> bytes:
-    """Build a one-page PDF whose text layer holds ``text``.
+def _pdf(text: str, compress: bool = False, pages: int = 1, stream: bytes | None = None) -> bytes:
+    """Build a PDF whose pages all share one content stream.
 
     Args:
-        text: ASCII text without parentheses or backslashes.
+        text: ASCII text without parentheses or backslashes, shown on every page.
         compress: Whether to Flate-compress the content stream.
+        pages: The page count.
+        stream: Raw content-stream operations to use instead of ``text``.
 
     Returns:
         The PDF bytes, with a correct cross-reference table.
     """
-    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    if stream is None:
+        stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
     flate = b""
     if compress:
         stream, flate = zlib.compress(stream), b" /Filter /FlateDecode"
+    kids = " ".join(f"{5 + n} 0 R" for n in range(pages)).encode()
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d%s >>\nstream\n" % (len(stream), flate) + stream + b"\nendstream",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>" % (kids, pages),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
+        b"<< /Length %d%s >>\nstream\n" % (len(stream), flate) + stream + b"\nendstream",
+    ] + [
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 3 0 R >> >> >>"
+    ] * pages
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -360,7 +367,7 @@ def test_pptx_stops_opening_slides_past_the_character_cap(monkeypatch: pytest.Mo
 
 def test_pdf_reads_at_most_the_page_cap() -> None:
     """A PDF with more pages than the cap stops at the cap and says so."""
-    text = extract_attachment_text("long.pdf", "application/pdf", _blank_pdf(attachments._MAX_PDF_PAGES + 5))
+    text = extract_attachment_text("long.pdf", "application/pdf", _pdf("p", pages=attachments._MAX_PDF_PAGES + 5))
     assert f"Page {attachments._MAX_PDF_PAGES}\n" in text
     assert f"Page {attachments._MAX_PDF_PAGES + 1}\n" not in text
     assert text.endswith(
@@ -371,10 +378,32 @@ def test_pdf_reads_at_most_the_page_cap() -> None:
 def test_parsing_stops_when_the_time_budget_runs_out(monkeypatch: pytest.MonkeyPatch) -> None:
     """Past the time budget, extraction stops and notes the cut."""
     monkeypatch.setattr(attachments, "_MAX_PARSE_SECONDS", 0.0)
-    text = extract_attachment_text("slow.pdf", "application/pdf", _blank_pdf(3))
+    text = extract_attachment_text("slow.pdf", "application/pdf", _pdf("a", pages=3))
     assert text.startswith("Page 1")
     assert "Page 2" not in text
     assert text.endswith("[Truncated: slow.pdf took too long to read, so only its first part is shown.]")
+
+
+def test_pdf_without_a_text_layer_reads_as_empty() -> None:
+    """Blank pages give no ``Page N`` headings, so a PDF with no text gets the no-text note."""
+    data = _blank_pdf(2)
+    size = attachments._human_size(len(data))
+    text = extract_attachment_text("scan.pdf", "application/pdf", data)
+    assert text == f"[Attached file scan.pdf (application/pdf, {size}). It contains no readable text.]"
+
+
+def test_pdf_blank_pages_are_skipped_between_text_pages() -> None:
+    """Only pages with text get a heading, under their real page number."""
+    writer = PdfWriter()
+    for data in (_pdf("first"), None, _pdf("third")):
+        if data is None:
+            writer.add_blank_page(612, 792)
+        else:
+            writer.append(io.BytesIO(data))
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    text = extract_attachment_text("mixed.pdf", "application/pdf", buffer.getvalue())
+    assert text == "Page 1\nfirst\n\nPage 3\nthird"
 
 
 def test_xls_sheets_are_extracted() -> None:
@@ -498,6 +527,47 @@ def test_route_enforces_the_hourly_attachment_cap(monkeypatch: pytest.MonkeyPatc
         for _ in range(3)
     ]
     assert statuses == [200, 200, 429]
+
+
+def _slow_pdf() -> bytes:
+    """Build a small PDF whose pages share one dense drawing stream that takes seconds per page.
+
+    Returns:
+        The PDF bytes (about 20 KB, inflating to just under the stream cap).
+    """
+    return _pdf("", compress=True, pages=20, stream=b"1 0 0 1 0 0 cm\n" * (7_900_000 // 15))
+
+
+def test_documents_are_parsed_in_a_child_process() -> None:
+    """A document read through the child process gives the same text as in-process parsing."""
+    data = _pdf("Child read")
+    assert attachments.read_attachment("child.pdf", "application/pdf", data) == "Page 1\nChild read"
+
+
+def test_a_slow_parser_step_is_killed_at_the_hard_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One slow pypdf page cannot hold the request past the hard limit; the agent gets a time-limit note."""
+    monkeypatch.setattr(attachments, "_MAX_CHILD_SECONDS", 1.0)
+    data = _slow_pdf()
+    started = time.monotonic()
+    text = attachments.read_attachment("slow.pdf", "application/pdf", data)
+    assert time.monotonic() - started < 4.0
+    assert text.endswith("It took longer than 1 seconds to read, so it was not read.]")
+
+
+def test_reads_past_the_slot_limit_are_refused(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    """With every child slot in use, a document upload gets 429; a text file needs no slot."""
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(attachments, "_READ_SLOTS", slots)
+    with pytest.raises(attachments.AttachmentReadersBusyError):
+        attachments.read_attachment("a.pdf", "application/pdf", _pdf("a"))
+    resp = client.post("/agent/attachments/extract", files={"file": ("a.pdf", _pdf("a"), "application/pdf")})
+    assert resp.status_code == 429
+    resp = client.post("/agent/attachments/extract", files={"file": ("a.txt", b"a", "text/plain")})
+    assert resp.status_code == 200
+    slots.release()
+    resp = client.post("/agent/attachments/extract", files={"file": ("a.pdf", _pdf("a"), "application/pdf")})
+    assert resp.json() == {"text": "Page 1\na"}
 
 
 def test_route_requires_sign_in() -> None:

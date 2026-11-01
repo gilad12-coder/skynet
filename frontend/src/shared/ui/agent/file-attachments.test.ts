@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MAX_ATTACHMENT_MB, readAttachments } from "./file-attachments.ts";
+import { MAX_ATTACHMENT_MB, readAttachments, splitClaimed } from "./file-attachments.ts";
 
 test("any file type is sent for reading, in the order picked", async () => {
   const files = [
@@ -40,4 +40,34 @@ test("oversized files are skipped and failed reads are reported", async () => {
   assert.deepEqual(result.tooLarge, ["huge.bin"]);
   assert.deepEqual(result.failed, ["bad.docx"]);
   assert.deepEqual(result.attached, [{ name: "ok.txt", text: "ok" }]);
+});
+
+test("files are read one at a time", async () => {
+  let running = 0;
+  let peak = 0;
+  await readAttachments(
+    [new File(["a"], "a.pdf"), new File(["b"], "b.pdf"), new File(["c"], "c.pdf")],
+    async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return "ok";
+    },
+  );
+  assert.equal(peak, 1);
+});
+
+test("the host claims only the first file it takes; the others are skipped", () => {
+  const isCsv = (file: File) => file.name.endsWith(".csv");
+  const [a, notes, b] = [
+    new File(["a"], "a.csv"),
+    new File(["n"], "notes.pdf"),
+    new File(["b"], "b.csv"),
+  ];
+  const result = splitClaimed([a, notes, b], isCsv);
+  assert.equal(result.claimed, a);
+  assert.deepEqual(result.extra, [b]);
+  assert.deepEqual(result.rest, [notes]);
+  assert.deepEqual(splitClaimed([notes], isCsv), { claimed: null, extra: [], rest: [notes] });
 });

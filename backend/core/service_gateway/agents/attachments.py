@@ -7,17 +7,25 @@ short note with the file's name, type and size. Parsing never raises: a file
 that cannot be read turns into the same note.
 
 Each parser yields its text piece by piece, so reading stops at the character
-cap or the time budget instead of parsing a hostile file in full.
+cap or the time budget instead of parsing a hostile file in full. One parser
+step can still be slow or large, so :func:`read_attachment` runs the parsers in
+a child process with a hard time limit, a memory cap and a slot limit. The
+child runs this file as a script, so it imports only the parsing libraries.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import re
+import resource
+import subprocess
+import sys
+import threading
 import time
 import zipfile
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, closing
+from contextlib import AbstractContextManager, closing, suppress
 from pathlib import PurePosixPath
 from typing import IO
 from xml.etree import ElementTree as ET
@@ -54,8 +62,17 @@ _MAX_PDF_PAGES = 500
 # pypdf inflates a whole content stream and parses it into operations before
 # it extracts text, so one small compressed stream can take hundreds of MB.
 _MAX_PDF_STREAM_BYTES = 8 * 1024 * 1024
-# Parsing runs on the request thread; a file that is slow to parse stops here.
+# The child stops reading at this soft budget and keeps the text read so far.
 _MAX_PARSE_SECONDS = 10.0
+# The soft budget is checked only between pieces, and one pypdf page can take
+# seconds, so the parent kills the child at this hard limit.
+_MAX_CHILD_SECONDS = _MAX_PARSE_SECONDS + 5.0
+# Linux enforces this address-space cap in the child; macOS ignores RLIMIT_AS.
+_MAX_CHILD_MEMORY_BYTES = 1024 * 1024 * 1024
+# Each child can use a CPU and up to the memory cap, so one API process runs
+# only this many at once and refuses the rest.
+MAX_PARALLEL_READS = 4
+_READ_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_READS)
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
@@ -64,6 +81,10 @@ _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
+
+
+class AttachmentReadersBusyError(Exception):
+    """Raised when every child-process slot of this API process is in use."""
 
 
 class _PartTooLargeError(Exception):
@@ -573,21 +594,28 @@ def _pdf_text(data: bytes) -> Iterator[str]:
 
     Yields:
         Each page's text under a ``Page N`` heading, for at most
-        ``_MAX_PDF_PAGES`` pages, then a note when pages were left out.
+        ``_MAX_PDF_PAGES`` pages, then a note when pages were left out. A
+        page with no text gives only an empty piece, so a PDF without a text
+        layer reads as empty.
     """
     with _pdf_limits():
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
             reader.decrypt("")
         count = len(reader.pages)
+    read_any = False
     for number in range(1, min(count, _MAX_PDF_PAGES) + 1):
         with _pdf_limits():
             try:
                 text = (reader.pages[number - 1].extract_text() or "").strip()
             except LimitReachedError:
                 text = "[This page is too large to read.]"
-        yield f"Page {number}\n{text}" if number == 1 else f"\n\nPage {number}\n{text}"
-    if count > _MAX_PDF_PAGES:
+        if not text:
+            yield ""
+            continue
+        yield f"\n\nPage {number}\n{text}" if read_any else f"Page {number}\n{text}"
+        read_any = True
+    if count > _MAX_PDF_PAGES and read_any:
         yield f"\n\n[Truncated: read the first {_MAX_PDF_PAGES} of {count} pages.]"
 
 
@@ -680,3 +708,64 @@ def extract_attachment_text(name: str, content_type: str, data: bytes, size: int
             f"[Truncated: showing the first {MAX_ATTACHMENT_CHARS:,} of {len(text):,} characters of {name}.]"
         )
     return text
+
+
+def read_attachment(name: str, content_type: str, data: bytes, size: int | None = None) -> str:
+    """Return :func:`extract_attachment_text`'s result, parsing documents in a bounded child process.
+
+    Text-like files, images, unknown binaries and oversized files need no
+    parser, so they are handled in this process.
+
+    Args:
+        name: The file name; its suffix picks the parser.
+        content_type: The MIME type the browser reported (may be empty).
+        data: The file bytes (at most ``MAX_ATTACHMENT_BYTES`` are parsed).
+        size: The full file size when ``data`` is a capped prefix; defaults
+            to ``len(data)``.
+
+    Returns:
+        The file's text, or a short note when it cannot be read in time.
+
+    Raises:
+        AttachmentReadersBusyError: When ``MAX_PARALLEL_READS`` children
+            already run in this process.
+    """
+    size = len(data) if size is None else size
+    if size > MAX_ATTACHMENT_BYTES or PurePosixPath(name.lower()).suffix not in _EXTRACTORS:
+        return extract_attachment_text(name, content_type, data, size)
+    if not _READ_SLOTS.acquire(blocking=False):
+        raise AttachmentReadersBusyError
+    # The header is JSON on one line, so a name with newlines or NULs cannot break the framing.
+    header = json.dumps([name, content_type, size]).encode() + b"\n"
+    try:
+        # -I keeps this directory, PYTHONPATH and user site-packages off the child's import path.
+        result = subprocess.run(
+            [sys.executable, "-I", __file__],
+            input=header + data,
+            capture_output=True,
+            timeout=_MAX_CHILD_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        limit = f"{_MAX_CHILD_SECONDS:g}"
+        return _note(name, content_type, size, f"It took longer than {limit} seconds to read, so it was not read.")
+    finally:
+        _READ_SLOTS.release()
+    if result.returncode != 0:
+        return _note(name, content_type, size, "Its contents could not be read.")
+    return result.stdout.decode("utf-8")
+
+
+def _child_main() -> None:
+    """Read one framed attachment from stdin and write its text to stdout."""
+    # macOS refuses an RLIMIT_AS below its current mapping; the hard time limit still applies there.
+    with suppress(ValueError, OSError):
+        resource.setrlimit(resource.RLIMIT_AS, (_MAX_CHILD_MEMORY_BYTES, _MAX_CHILD_MEMORY_BYTES))
+    stdin = sys.stdin.buffer
+    name, content_type, size = json.loads(stdin.readline())
+    text = extract_attachment_text(name, content_type, stdin.read(), size)
+    sys.stdout.buffer.write(text.encode("utf-8", "replace"))
+
+
+if __name__ == "__main__":
+    _child_main()

@@ -16,26 +16,45 @@ export interface ReadAttachments {
   tooLarge: string[];
 }
 
-/** Read each file's text for the agent, keeping the order they were picked in. */
+export interface ClaimedFiles {
+  claimed: File | null;
+  extra: File[];
+  rest: File[];
+}
+
+/** Split picked files: the host takes the first file it claims, the other
+ *  files it would claim are skipped, and the rest are read as text. */
+export function splitClaimed(
+  files: readonly File[],
+  claims: (file: File) => boolean,
+): ClaimedFiles {
+  const result: ClaimedFiles = { claimed: null, extra: [], rest: [] };
+  for (const file of files) {
+    if (!claims(file)) result.rest.push(file);
+    else if (result.claimed) result.extra.push(file);
+    else result.claimed = file;
+  }
+  return result;
+}
+
+/** Read each file's text for the agent, keeping the order they were picked in.
+ *  Files are read one at a time: the backend reads only a few documents at
+ *  once and refuses the rest. */
 export async function readAttachments(
   files: readonly File[],
   extract: (file: File) => Promise<string>,
 ): Promise<ReadAttachments> {
   const result: ReadAttachments = { attached: [], failed: [], tooLarge: [] };
-  const read = await Promise.all(
-    files.map(async (file) => {
-      if (file.size > MAX_ATTACHMENT_BYTES) return { file, status: "tooLarge" as const };
-      try {
-        return { file, status: "ok" as const, text: await extract(file) };
-      } catch {
-        return { file, status: "failed" as const };
-      }
-    }),
-  );
-  for (const entry of read) {
-    if (entry.status === "ok") result.attached.push({ name: entry.file.name, text: entry.text });
-    else if (entry.status === "tooLarge") result.tooLarge.push(entry.file.name);
-    else result.failed.push(entry.file.name);
+  for (const file of files) {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      result.tooLarge.push(file.name);
+      continue;
+    }
+    try {
+      result.attached.push({ name: file.name, text: await extract(file) });
+    } catch {
+      result.failed.push(file.name);
+    }
   }
   return result;
 }
