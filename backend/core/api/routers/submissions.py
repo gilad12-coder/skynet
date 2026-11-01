@@ -347,8 +347,8 @@ def _ensure_api_budget(
         check.key == BUDGET_CHECK_KEY and check.status == "failed" and check.field != BALANCE_FIELD
         for check in checked.checks
     ):
-        # The limit, not the account balance, stopped the check: the request
-        # itself is valid, so do not blame the optimizer or the columns.
+        # The limit, not the account balance, stopped the check, so name the
+        # limit rather than the optimizer or the columns.
         raise DomainError("budget.below_minimum", status=409)
     if checked.status != "succeeded":
         raise DomainError(

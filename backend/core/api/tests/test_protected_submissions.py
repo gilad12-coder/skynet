@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -904,3 +905,16 @@ def test_unusable_model_credentials_fail_the_check_instead_of_leaving_it_running
     assert status == "failed"
     assert any("saved provider connection" in (check.get("message") or "") for check in body["checks"]), body
     assert harness.calls == []
+
+
+def test_guest_funds_refusal_keeps_the_account_funds_type() -> None:
+    """Report the balance, not the limit, when the guest relays a funds refusal as a budget stop."""
+    events = preflight_execution._Events()
+    events.put({"type": "error", "error_type": "BudgetInsufficientError", "error": "budget_insufficient"})
+    refusal = AccountFundsError("The balance cannot fund this call.")
+    gateway = SimpleNamespace(budget_refusal=refusal)
+
+    with pytest.raises(AccountFundsError) as raised:
+        events.evidence(gateway)
+
+    assert raised.value is refusal
