@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "Працював {duration}",
   "shared.agent.working_for": "Працює вже {duration}",
   "shared.agent.pasted_text": "Вставлений текст",
-  "shared.agent.pasted_text_lines": "Рядків: {n}",
   "shared.agent.pasted_text_remove": "Видалити вставлений текст",
   "shared.agent.pasted_text_restore": "Показати в текстовому полі",
   "shared.agent.pasted_text_open": "Відкрити вставлений текст",

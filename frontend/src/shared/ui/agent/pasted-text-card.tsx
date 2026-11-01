@@ -39,7 +39,7 @@ export function PastedTextCard({
 }: PastedTextCardProps) {
   const [open, setOpen] = React.useState(false);
   const title = name ?? msg("shared.agent.pasted_text");
-  const lines = msg("shared.agent.pasted_text_lines", { n: countLines(text) });
+  const lines = msg("shared.code_editor.lines_count", { count: countLines(text) });
 
   return (
     <>

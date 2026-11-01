@@ -4176,7 +4176,6 @@
   "shared.agent.worked_for": "עבודה: {duration}",
   "shared.agent.working_for": "עובד: {duration}",
   "shared.agent.pasted_text": "טקסט מודבק",
-  "shared.agent.pasted_text_lines": "{n} שורות",
   "shared.agent.pasted_text_remove": "הסר טקסט מודבק",
   "shared.agent.pasted_text_restore": "הצג בשדה הטקסט",
   "shared.agent.pasted_text_open": "פתח טקסט מודבק",

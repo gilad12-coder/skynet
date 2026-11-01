@@ -175,7 +175,6 @@
   "shared.agent.worked_for": "Trabalhou por {duration}",
   "shared.agent.working_for": "Trabalhando há {duration}",
   "shared.agent.pasted_text": "Texto colado",
-  "shared.agent.pasted_text_lines": "{n} linhas",
   "shared.agent.pasted_text_remove": "Remover texto colado",
   "shared.agent.pasted_text_restore": "Mostrar no campo de texto",
   "shared.agent.pasted_text_open": "Abrir texto colado",

@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "{duration} çalıştı",
   "shared.agent.working_for": "{duration} süredir çalışıyor",
   "shared.agent.pasted_text": "Yapıştırılan metin",
-  "shared.agent.pasted_text_lines": "{n} satır",
   "shared.agent.pasted_text_remove": "Yapıştırılan metni kaldır",
   "shared.agent.pasted_text_restore": "Metin alanında göster",
   "shared.agent.pasted_text_open": "Yapıştırılan metni aç",

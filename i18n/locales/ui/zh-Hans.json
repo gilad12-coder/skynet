@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "已工作 {duration}",
   "shared.agent.working_for": "正在工作，已 {duration}",
   "shared.agent.pasted_text": "粘贴的文本",
-  "shared.agent.pasted_text_lines": "{n} 行",
   "shared.agent.pasted_text_remove": "移除粘贴的文本",
   "shared.agent.pasted_text_restore": "在文本框中显示",
   "shared.agent.pasted_text_open": "打开粘贴的文本",
