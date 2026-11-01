@@ -980,7 +980,7 @@ def create_app(
         base = get_scalar_api_reference(
             openapi_url="/openapi.public.json",
             title=f"{app.title} API",
-            scalar_favicon_url="/scalar-static/favicon.svg",
+            scalar_favicon_url="/scalar-static/favicon.png",
             scalar_js_url="/scalar-static/standalone.js",
             agent=AgentScalarConfig(disabled=True),
             telemetry=False,
