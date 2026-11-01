@@ -38,8 +38,11 @@ the signed-in account.
 
 ## Stop a run
 
-`stop_run` cannot be undone. The run gets the status `cancelled` and does
-not continue.
+`stop_run` works only on `pending`, `validating` or `running` runs. For a
+`paused` run, send the user to the run page to resume or cancel it.
+
+For those three statuses, `stop_run` cannot be undone. The run gets the
+status `cancelled` and does not continue.
 
 1. Find the run and show its name, status and spend.
 2. Ask the user to confirm that run. If more than one run matches, ask

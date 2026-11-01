@@ -114,8 +114,8 @@ Source: <https://claude.com/docs/plugins/submit> and
   personal data, other services, retention and users under 18.
 - Compliance: a contact email, and four acknowledgements.
 - Repository limits: under 50 MiB as an archive, fewer than 10,000 files
-  and folders. Measured on 2026-11-01: 15.7 MB compressed archive, 2,207
-  files and 237 folders. A subfolder plugin can be held if its files reach
+  and folders. Measured on 2026-11-01: 17.4 MB compressed archive, 2,218
+  files and 245 folders. A subfolder plugin can be held if its files reach
   outside the folder. This plugin does not.
 - Local check: `claude plugin validate plugins/skynet --strict` and
   `claude plugin validate . --strict` from the repository root.

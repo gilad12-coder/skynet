@@ -66,7 +66,9 @@ The tools:
    `start_run` with a new `idempotency_key`. A reused key keeps the first
    limit. Keep the `optimization_id`.
 7. **Follow the run** with `get_run`. Poll about once a minute. Stop when
-   `terminal` is true. Tell the user the status and the spend from
+   `terminal` is true, or when `run.status` is `paused`. A paused run waits
+   for the user to resume it on the run page. Tell the user and stop
+   polling. Tell the user the status and the spend from
    `execution_budget`. The run page is
    `https://skynetml.com/optimizations/<optimization_id>`.
 8. **Present the result.** From `result`, show:
