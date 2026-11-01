@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "سجّل الدخول للمزامنة",
   "local_identity.sign_in_failed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى.",
   "local_identity.linked_offline": "مرتبط (غير متصل)",
-  "local_identity.sign_out_failed": "تعذّر تسجيل الخروج من المزامنة. حاول مرة أخرى."
+  "local_identity.sign_out_failed": "تعذّر تسجيل الخروج من المزامنة. حاول مرة أخرى.",
+  "account.linked_fallback_name": "حساب {term.appName}"
 }

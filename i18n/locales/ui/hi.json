@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "सिंक करने के लिए साइन इन करें",
   "local_identity.sign_in_failed": "साइन इन शुरू नहीं हो पाया। दोबारा कोशिश करें।",
   "local_identity.linked_offline": "लिंक है (ऑफ़लाइन)",
-  "local_identity.sign_out_failed": "सिंक से साइन आउट नहीं हो सका। फिर से कोशिश करें।"
+  "local_identity.sign_out_failed": "सिंक से साइन आउट नहीं हो सका। फिर से कोशिश करें।",
+  "account.linked_fallback_name": "{term.appName} खाता"
 }

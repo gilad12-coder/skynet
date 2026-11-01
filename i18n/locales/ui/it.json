@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "Accedi per sincronizzare",
   "local_identity.sign_in_failed": "Impossibile avviare l’accesso. Riprova.",
   "local_identity.linked_offline": "Collegato (offline)",
-  "local_identity.sign_out_failed": "Impossibile uscire dalla sincronizzazione. Riprova."
+  "local_identity.sign_out_failed": "Impossibile uscire dalla sincronizzazione. Riprova.",
+  "account.linked_fallback_name": "Account {term.appName}"
 }

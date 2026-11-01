@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "로그인하여 동기화",
   "local_identity.sign_in_failed": "로그인을 시작하지 못했습니다. 다시 시도하세요.",
   "local_identity.linked_offline": "연결됨(오프라인)",
-  "local_identity.sign_out_failed": "동기화에서 로그아웃하지 못했습니다. 다시 시도하세요."
+  "local_identity.sign_out_failed": "동기화에서 로그아웃하지 못했습니다. 다시 시도하세요.",
+  "account.linked_fallback_name": "{term.appName} 계정"
 }
