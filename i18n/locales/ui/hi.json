@@ -4374,6 +4374,7 @@
   "mcp_consent.title": "{client} को अपने {term.appName} खाते से कनेक्ट करें",
   "mcp_consent.client_label": "AI एजेंट",
   "mcp_consent.redirect_host": "{host} पर वापस जाता है",
+  "mcp_consent.client_host": "{host} द्वारा प्रकाशित",
   "mcp_consent.account_label": "{term.appName} खाता",
   "mcp_consent.allows_heading": "कनेक्ट होने के बाद, यह एजेंट:",
   "mcp_consent.scope.runs_read": "आपके ऑप्टिमाइज़ेशन रन और उनके परिणाम देख सकता है",

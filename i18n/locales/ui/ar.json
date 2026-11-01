@@ -4374,6 +4374,7 @@
   "mcp_consent.title": "اربط {client} بحساب {term.appName} الخاص بك",
   "mcp_consent.client_label": "وكيل ذكاء اصطناعي",
   "mcp_consent.redirect_host": "يعود إلى {host}",
+  "mcp_consent.client_host": "منشور بواسطة {host}",
   "mcp_consent.account_label": "حساب {term.appName}",
   "mcp_consent.allows_heading": "بعد الربط، يمكن لهذا الوكيل:",
   "mcp_consent.scope.runs_read": "رؤية عمليات التحسين ونتائجها",

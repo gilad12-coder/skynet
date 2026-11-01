@@ -80,6 +80,14 @@ export function safeRedirect(uri: string): string | null {
   return isHttpUrl(uri) ? uri : null;
 }
 
+/**
+ * Host the browser returns to after approval. It is the security signal, so
+ * it always comes from the real redirect URI, never from the client ID host.
+ */
+export function returnHost(client: { client_host: string | null; redirect_host: string }): string {
+  return client.redirect_host;
+}
+
 /** Message key for one scope line on the consent card. */
 export function scopeMessageKey(scope: McpScope): string {
   return `mcp_consent.scope.${scope.replace(":", "_")}`;

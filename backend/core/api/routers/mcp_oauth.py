@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urlsplit
 
+import idna
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -140,6 +141,33 @@ def _with_query(uri: str, params: dict[str, str | None]) -> str:
     """
     query = urlencode({key: value for key, value in params.items() if value is not None})
     return f"{uri}{'&' if urlsplit(uri).query else '?'}{query}"
+
+
+def _display_host(url: str) -> str:
+    """Return the host and port of ``url`` in the ASCII form the browser connects to.
+
+    A Unicode host shows as punycode, so a look-alike letter cannot pass as a
+    well-known domain on the consent page. It uses UTS 46 non-transitional
+    rules like browsers: Python's IDNA 2003 codec maps "ß" to "ss" and would
+    name a different domain than the one the browser opens.
+
+    Args:
+        url: A validated client ID or redirect URI.
+
+    Returns:
+        The ``host[:port]`` text to show.
+    """
+    netloc = urlsplit(url).netloc
+    if netloc.isascii():
+        return netloc
+    host, sep, port = netloc.rpartition(":")
+    if not sep or not port.isdigit():
+        host, sep, port = netloc, "", ""
+    try:
+        host = idna.encode(host, uts46=True, transitional=False).decode("ascii")
+    except UnicodeError:
+        host = host.encode("ascii", "backslashreplace").decode("ascii")
+    return host + sep + port
 
 
 def _require_session(request: Request) -> None:
@@ -380,10 +408,11 @@ def create_mcp_oauth_router(*, job_store) -> APIRouter:
         Raises:
             DomainError: 403 ``mcp.session_required``, 404 ``mcp.not_configured``,
                 400 ``mcp.invalid_client``, ``mcp.invalid_redirect`` or
-                ``mcp.invalid_scope``.
+                ``mcp.invalid_scope``, or 429.
         """
         _require_session(request)
         require_resource_url()
+        _limit(f"mcp-consent-describe:{user.username}", limit=60, window_seconds=3600)
         with Session(job_store.engine) as session:
             client = _client_and_redirect(session, body.client_id, body.redirect_uri)
         scopes = canonical_scopes(body.scope)
@@ -391,8 +420,8 @@ def create_mcp_oauth_router(*, job_store) -> APIRouter:
             raise DomainError("mcp.invalid_scope", status=400)
         return McpConsentDescription(
             client_name=client.client_name,
-            client_host=urlsplit(client.client_id).hostname if client.is_metadata_document else None,
-            redirect_host=urlsplit(body.redirect_uri).netloc,
+            client_host=_display_host(client.client_id) if client.is_metadata_document else None,
+            redirect_host=_display_host(body.redirect_uri),
             scopes=scopes.split(),
         )
 

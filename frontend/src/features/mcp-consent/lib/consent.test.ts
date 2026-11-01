@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorMessageKey, parseMcpRequest, safeRedirect, scopeMessageKey } from "./consent.ts";
+import {
+  errorMessageKey,
+  parseMcpRequest,
+  returnHost,
+  safeRedirect,
+  scopeMessageKey,
+} from "./consent.ts";
 
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
@@ -68,4 +74,12 @@ test("maps scopes and errors to message keys", () => {
   assert.equal(errorMessageKey("mcp.invalid_redirect"), "mcp_consent.error.invalid_request");
   assert.equal(errorMessageKey(undefined, 429), "mcp_consent.error.rate_limit");
   assert.equal(errorMessageKey("boom"), "mcp_consent.error.generic");
+});
+
+test("the return host is the real redirect host, also for a metadata-document client", () => {
+  assert.equal(
+    returnHost({ client_host: "claude.ai", redirect_host: "localhost:56369" }),
+    "localhost:56369",
+  );
+  assert.equal(returnHost({ client_host: null, redirect_host: "claude.ai" }), "claude.ai");
 });

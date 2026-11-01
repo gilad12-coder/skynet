@@ -23,13 +23,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from ... import i18n
+from ...billing.budgets import BudgetService
 from ...config import settings
 from ...models.optimizations import JobCancelResponse
-from ...storage.models import Base, McpGrantModel, McpTokenModel, UserModel
+from ...models.unified import UnifiedRunRequest
+from ...storage.models import Base, BillingCustomerModel, McpGrantModel, McpTokenModel, UserModel
 from .. import remote_mcp
 from ..auth import hash_api_token
 from ..errors import DomainError
 from ..remote_mcp import mount_remote_mcp
+from ..routers import _helpers as routers_helpers
+from ..sharing_access import ShareRole
 from .test_submissions_router import unified_payload
 
 RESOURCE = "https://mcp.example.test/mcp"
@@ -133,7 +138,13 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> Any:
         yield client, store, calls
 
 
-def _rpc(client: TestClient, method: str, params: dict[str, Any], token: str | None = WRITE_TOKEN) -> Any:
+def _rpc(
+    client: TestClient,
+    method: str,
+    params: dict[str, Any],
+    token: str | None = WRITE_TOKEN,
+    extra_headers: dict[str, str] | None = None,
+) -> Any:
     """Send one JSON-RPC request to the MCP endpoint.
 
     Args:
@@ -141,17 +152,25 @@ def _rpc(client: TestClient, method: str, params: dict[str, Any], token: str | N
         method: JSON-RPC method.
         params: JSON-RPC params.
         token: Bearer token, or ``None`` for no header.
+        extra_headers: More request headers, if any.
 
     Returns:
         The HTTP response.
     """
     headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    headers.update(extra_headers or {})
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
     return client.post(MCP_URL, headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
 
 
-def _call(client: TestClient, tool: str, arguments: dict[str, Any], token: str = WRITE_TOKEN) -> dict[str, Any]:
+def _call(
+    client: TestClient,
+    tool: str,
+    arguments: dict[str, Any],
+    token: str = WRITE_TOKEN,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Call a tool and return its JSON-RPC result.
 
     Args:
@@ -159,11 +178,12 @@ def _call(client: TestClient, tool: str, arguments: dict[str, Any], token: str =
         tool: Tool name.
         arguments: Tool arguments.
         token: Bearer token.
+        extra_headers: More request headers, if any.
 
     Returns:
         The ``result`` member.
     """
-    resp = _rpc(client, "tools/call", {"name": tool, "arguments": arguments}, token)
+    resp = _rpc(client, "tools/call", {"name": tool, "arguments": arguments}, token, extra_headers)
     assert resp.status_code == 200, resp.text
     return resp.json()["result"]
 
@@ -287,6 +307,68 @@ def test_start_run_creates_a_budget_with_the_agent_limit(harness: Any, monkeypat
     assert calls["timeout"][0] == USER
 
 
+def test_start_run_refuses_a_reused_key_with_a_lower_limit(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a retry that lowers max_cost_cents; replay one that keeps or raises it."""
+    client, store, _calls = harness
+    spec = unified_payload()
+    budget_key = remote_mcp.resolve_submission_replay_keys(
+        UnifiedRunRequest.model_validate(spec), username=USER, workflow=remote_mcp.UNIFIED_WORKFLOW, supplied_key="k-1"
+    ).budget
+    with Session(store.engine) as session:
+        session.add(BillingCustomerModel(username=USER, stripe_customer_id="cus_local", balance_cents=5_000))
+        session.commit()
+    # 700 stands for a first request of 900 that the balance cap lowered.
+    BudgetService(engine=store.engine).create(USER, 700, idempotency_key=budget_key)
+    submitted: list[int] = []
+    monkeypatch.setattr(
+        remote_mcp,
+        "submit_unified_payload",
+        lambda spec, **kwargs: submitted.append(spec.max_cost_cents) or SimpleNamespace(model_dump=lambda mode: {}),
+    )
+
+    error = _error_text(_call(client, "start_run", {"spec": spec, "max_cost_cents": 500, "idempotency_key": "k-1"}))
+    assert json.loads(error)["code"] == "budget.conflict"
+    assert "700 cents" in json.loads(error)["detail"]
+    assert submitted == []
+    for limit in (700, 900):
+        _payload(_call(client, "start_run", {"spec": spec, "max_cost_cents": limit, "idempotency_key": "k-1"}))
+    assert submitted == [700, 900]
+
+
+def test_start_run_replays_a_first_limit_after_the_user_raised_it(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay a same-limit retry after an edit in the app; name the run on a lower one."""
+    client, store, _calls = harness
+    spec = unified_payload()
+    budget_key = remote_mcp.resolve_submission_replay_keys(
+        UnifiedRunRequest.model_validate(spec), username=USER, workflow=remote_mcp.UNIFIED_WORKFLOW, supplied_key="k-2"
+    ).budget
+    with Session(store.engine) as session:
+        session.add(BillingCustomerModel(username=USER, stripe_customer_id="cus_local", balance_cents=5_000))
+        session.commit()
+    service = BudgetService(engine=store.engine)
+    first = service.create(USER, 700, idempotency_key=budget_key, uncapped=settings.local_mode)
+    first = service.attach_to_job(first.id, USER, "run-k2", expected_revision=first.revision)
+    service.update_total(first.id, USER, 1_500, expected_revision=first.revision, uncapped=settings.local_mode)
+    submitted: list[int] = []
+    monkeypatch.setattr(
+        remote_mcp,
+        "submit_unified_payload",
+        lambda spec, **kwargs: submitted.append(spec.max_cost_cents) or SimpleNamespace(model_dump=lambda mode: {}),
+    )
+
+    _payload(_call(client, "start_run", {"spec": spec, "max_cost_cents": 700, "idempotency_key": "k-2"}))
+    assert submitted == [700]
+    error = json.loads(
+        _error_text(_call(client, "start_run", {"spec": spec, "max_cost_cents": 600, "idempotency_key": "k-2"}))
+    )
+    assert error["code"] == "budget.conflict"
+    assert "1500 cents" in error["detail"]
+    assert error["optimization_id"] == "run-k2"
+    assert submitted == [700]
+
+
 def test_start_run_reports_a_slow_setup_check(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tell the agent to retry while the setup check still runs."""
     client, _store, _calls = harness
@@ -353,7 +435,7 @@ def test_get_run_is_owner_scoped(harness: Any, monkeypatch: pytest.MonkeyPatch) 
     def load(job_store: Any, optimization_id: str, user: Any) -> dict[str, Any]:
         """Record the owner check."""
         calls["load"] = (optimization_id, user.username)
-        return {"optimization_id": optimization_id, "result": {"best": 1}}
+        return {"optimization_id": optimization_id, "payload": {"username": USER}, "result": {"best": 1}}
 
     monkeypatch.setattr(remote_mcp, "load_job_for_user", load)
     monkeypatch.setattr(
@@ -384,6 +466,31 @@ def test_list_runs_lists_only_the_callers_runs(harness: Any, monkeypatch: pytest
     assert "Unknown status" in _error_text(_call(client, "list_runs", {"status": "bogus"}, token=READ_TOKEN))
 
 
+def test_stored_stop_reason_is_english_unless_accept_language_asks(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Render the Hebrew-base cancel reason in English, or in the asked locale."""
+    client, store, _calls = harness
+    hebrew = i18n.term("cancellationReason")
+    job = {"optimization_id": "opt-1", "payload": {"username": USER}}
+    monkeypatch.setattr(remote_mcp, "load_job_for_user", lambda store, oid, user: job)
+    monkeypatch.setattr(remote_mcp, "execution_budget_view", lambda store, job: None)
+    monkeypatch.setattr(
+        remote_mcp,
+        "build_summary",
+        lambda job: SimpleNamespace(model_dump=lambda mode: {"status": "cancelled", "message": hebrew}),
+    )
+    store.count_jobs = lambda **kwargs: 1
+    store.list_jobs = lambda **kwargs: [job]
+
+    run = _payload(_call(client, "get_run", {"optimization_id": "opt-1"}, token=READ_TOKEN))["run"]
+    assert run["message"] == "Cancelled by the user"
+    listed = _payload(_call(client, "list_runs", {}, token=READ_TOKEN))["runs"][0]
+    assert listed["message"] == "Cancelled by the user"
+    asked = _call(client, "get_run", {"optimization_id": "opt-1"}, READ_TOKEN, {"Accept-Language": "he"})
+    assert _payload(asked)["run"]["message"] == hebrew
+
+
 def test_stop_run_cancels_through_the_service_layer(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancel like the Stop button, with the background worker."""
     client, _store, calls = harness
@@ -394,6 +501,58 @@ def test_stop_run_cancels_through_the_service_layer(harness: Any, monkeypatch: p
         return JobCancelResponse(optimization_id=optimization_id, status="cancelled")
 
     monkeypatch.setattr(remote_mcp, "cancel_optimization", cancel)
+    monkeypatch.setattr(remote_mcp, "load_job_for_user", lambda store, oid, user: {"payload": {"username": USER}})
     body = _payload(_call(client, "stop_run", {"optimization_id": "opt-1"}))
     assert body == {"optimization_id": "opt-1", "status": "cancelled"}
     assert calls["cancel"] == ("opt-1", USER, calls["worker"])
+
+
+def _other_users_run(store: Any, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any]) -> None:
+    """Serve one run owned by another account and record any cancellation.
+
+    Args:
+        store: Harness store; gets a ``get_job`` that serves the run.
+        monkeypatch: Pytest monkeypatch fixture.
+        calls: Harness call log.
+    """
+    job = {"optimization_id": "opt-bob", "payload": {"username": "bob@example.test"}, "status": "running"}
+
+    def get_job(optimization_id: str) -> dict[str, Any]:
+        """Return the run, or raise for an unknown ID."""
+        if optimization_id != "opt-bob":
+            raise KeyError(optimization_id)
+        return dict(job)
+
+    store.get_job = get_job
+    monkeypatch.setattr(remote_mcp, "cancel_optimization", lambda *args: calls.setdefault("cancel", args))
+
+
+def test_admin_allowlist_gives_no_access_to_other_runs(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse another account's run even when the token's account is on the admin allowlist."""
+    client, store, calls = harness
+    _other_users_run(store, monkeypatch, calls)
+    monkeypatch.setattr(settings, "admin_usernames", USER)
+    for tool in ("get_run", "stop_run"):
+        error = json.loads(_error_text(_call(client, tool, {"optimization_id": "opt-bob"})))
+        assert error["code"] == "optimization.not_found"
+        assert error["status"] == 404
+    assert "cancel" not in calls
+
+
+def test_viewer_grant_can_read_but_not_stop(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let a viewer grant read a shared run, and refuse it the Stop action."""
+    client, store, calls = harness
+    _other_users_run(store, monkeypatch, calls)
+    for module in (remote_mcp, routers_helpers):
+        monkeypatch.setattr(module, "_grant_role", lambda job_store, optimization_id, username: ShareRole.viewer)
+    monkeypatch.setattr(
+        remote_mcp,
+        "build_summary",
+        lambda job: SimpleNamespace(status="running", model_dump=lambda mode: {"status": "running"}),
+    )
+    monkeypatch.setattr(remote_mcp, "execution_budget_view", lambda store, job: {})
+    body = _payload(_call(client, "get_run", {"optimization_id": "opt-bob"}))
+    assert body["run"] == {"status": "running"}
+    error = json.loads(_error_text(_call(client, "stop_run", {"optimization_id": "opt-bob"})))
+    assert error["code"] == "optimization.insufficient_role"
+    assert "cancel" not in calls

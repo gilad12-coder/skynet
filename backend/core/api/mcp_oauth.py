@@ -68,8 +68,10 @@ _CIMD_DEADLINE_SECONDS = 5.0
 _CIMD_CACHE_TTL_SECONDS = 300.0
 _CIMD_FAILURE_TTL_SECONDS = 60.0
 _CIMD_CACHE_MAX = 256
+_CIMD_MAX_CONCURRENT_FETCHES = 8
 _cimd_cache: dict[str, tuple[float, McpClient | None]] = {}
 _cimd_lock = threading.Lock()
+_cimd_fetch_slots = threading.BoundedSemaphore(_CIMD_MAX_CONCURRENT_FETCHES)
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,33 @@ def _resolve_host(host: str, port: int) -> list[str]:
     return [info[4][0] for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
 
 
+def _is_public(address: str) -> bool:
+    """Tell whether ``address`` is a public IP address.
+
+    Args:
+        address: IP address text; an IPv6 zone suffix is ignored.
+
+    Returns:
+        ``True`` when the address is globally routable.
+    """
+    return ipaddress.ip_address(address.split("%")[0]).is_global
+
+
+def _peer_is_public(sock: socket.socket) -> bool:
+    """Tell whether ``sock`` is connected to a public IP address.
+
+    Args:
+        sock: A connected socket.
+
+    Returns:
+        ``True`` when the peer address is globally routable.
+    """
+    try:
+        return _is_public(sock.getpeername()[0])
+    except (OSError, ValueError):
+        return False
+
+
 def _http_client() -> httpx.Client:
     """Return the HTTP client for metadata document fetches; tests replace it."""
     return httpx.Client(timeout=_CIMD_TIMEOUT_SECONDS, follow_redirects=False)
@@ -322,6 +351,10 @@ class _FetchDeadline:
         if event not in ("connection.connect_tcp.complete", "connection.start_tls.complete"):
             return
         sock = info["return_value"].get_extra_info("socket")
+        if event == "connection.connect_tcp.complete" and not _peer_is_public(sock):
+            # httpx resolves the host again, so a DNS answer that changed after the check is refused here.
+            _shut_down(sock)
+            return
         with self._lock:
             self._sockets.append(sock)
             expired = self._expired
@@ -366,10 +399,13 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
     ):
         return None
     try:
-        addresses = _resolve_host(parts.hostname, port)
-    except OSError:
+        # Check the ASCII host httpx connects to: getaddrinfo encodes a Unicode
+        # host by IDNA 2003, which maps "\u00df" to "ss" and names another domain.
+        host = httpx.URL(url).raw_host.decode("ascii")
+        addresses = _resolve_host(host, port)
+    except (httpx.InvalidURL, OSError, ValueError):
         return None
-    if not addresses or any(not ipaddress.ip_address(address.split("%")[0]).is_global for address in addresses):
+    if not addresses or not all(_is_public(address) for address in addresses):
         return None
     body = bytearray()
     try:
@@ -386,7 +422,7 @@ def _fetch_metadata_document(url: str) -> dict[str, Any] | None:
                 body.extend(chunk)
                 if len(body) > _CIMD_MAX_BYTES:
                     return None
-    except httpx.HTTPError:
+    except (httpx.HTTPError, httpx.InvalidURL):
         return None
     try:
         document = json.loads(bytes(body))
@@ -435,14 +471,23 @@ def _metadata_document_client(url: str) -> McpClient | None:
         url: The ``client_id`` URL.
 
     Returns:
-        The client, or ``None`` when the document cannot be used.
+        The client, or ``None`` when the document cannot be used or too many
+        fetches are running.
     """
     now = time.monotonic()
     with _cimd_lock:
         cached = _cimd_cache.get(url)
         if cached is not None and cached[0] > now:
             return cached[1]
-    document = _fetch_metadata_document(url)
+    # Each fetch can hold a threadpool thread for its DNS lookup and the
+    # whole deadline. The cap keeps fetches from filling the shared pool. A
+    # refusal when the cap is full is not cached, so a retry can succeed.
+    if not _cimd_fetch_slots.acquire(blocking=False):
+        return None
+    try:
+        document = _fetch_metadata_document(url)
+    finally:
+        _cimd_fetch_slots.release()
     client = _client_from_document(url, document) if document is not None else None
     ttl = _CIMD_CACHE_TTL_SECONDS if client is not None else _CIMD_FAILURE_TTL_SECONDS
     with _cimd_lock:

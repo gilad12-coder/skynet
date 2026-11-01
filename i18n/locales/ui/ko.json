@@ -4374,6 +4374,7 @@
   "mcp_consent.title": "{client}을(를) {term.appName} 계정에 연결",
   "mcp_consent.client_label": "AI 에이전트",
   "mcp_consent.redirect_host": "{host}(으)로 돌아갑니다",
+  "mcp_consent.client_host": "{host}에서 게시",
   "mcp_consent.account_label": "{term.appName} 계정",
   "mcp_consent.allows_heading": "연결하면 이 에이전트는 다음을 할 수 있습니다:",
   "mcp_consent.scope.runs_read": "최적화 실행과 그 결과 보기",

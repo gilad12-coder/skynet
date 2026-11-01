@@ -18,6 +18,7 @@ import { Button } from "@/shared/ui/primitives/button";
 import {
   errorMessageKey,
   parseMcpRequest,
+  returnHost,
   safeRedirect,
   scopeMessageKey,
   type McpScope,
@@ -140,11 +141,14 @@ export function McpConsent({ query }: { query: string }) {
             <dd className="truncate font-medium text-foreground" dir="auto">
               {client.client_name}
             </dd>
-            <dd className="truncate text-xs text-muted-foreground" dir="ltr">
-              {msg("mcp_consent.redirect_host", {
-                host: client.client_host ?? client.redirect_host,
-              })}
+            <dd className="text-xs break-all text-muted-foreground" dir="ltr">
+              {msg("mcp_consent.redirect_host", { host: returnHost(client) })}
             </dd>
+            {client.client_host && (
+              <dd className="text-xs break-all text-muted-foreground" dir="ltr">
+                {msg("mcp_consent.client_host", { host: client.client_host })}
+              </dd>
+            )}
           </div>
         </div>
         {session?.user?.email && (

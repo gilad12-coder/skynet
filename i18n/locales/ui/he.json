@@ -4374,6 +4374,7 @@
   "mcp_consent.title": "חיבור {client} לחשבון {term.appName} שלכם",
   "mcp_consent.client_label": "סוכן AI",
   "mcp_consent.redirect_host": "חוזר אל {host}",
+  "mcp_consent.client_host": "פורסם על ידי {host}",
   "mcp_consent.account_label": "חשבון {term.appName}",
   "mcp_consent.allows_heading": "אחרי החיבור, הסוכן יוכל:",
   "mcp_consent.scope.runs_read": "לראות את הרצות האופטימיזציה שלכם ואת התוצאות שלהן",

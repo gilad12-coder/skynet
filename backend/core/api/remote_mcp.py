@@ -37,10 +37,14 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService
 from ..billing.service import StripeBillingService
+from ..config import settings
+from ..i18n import DEFAULT_LOCALE, request_locale, t_locale, term
 from ..models.unified import UnifiedRunRequest
 from ..service_gateway.optimization.unified.contract import in_locale, static_contract_check
 from .auth import AuthenticatedUser
+from .converters import job_owner
 from .errors import DomainError
 from .mcp_mount import _chained_lifespan
 from .mcp_oauth import (
@@ -54,7 +58,7 @@ from .mcp_oauth import (
 )
 from .rate_limit import enforce_submission_rate
 from .response_limits import AGENT_DEFAULT_LIST, AGENT_MAX_LIST, clamp_limit
-from .routers._helpers import build_summary, load_job_for_user
+from .routers._helpers import _grant_role, build_summary, load_job_for_user
 from .routers.constants import VALID_STATUSES
 from .routers.models import box_hold_cents, call_hold_cents
 from .routers.optimizations._local import execution_budget_view
@@ -65,6 +69,7 @@ from .routers.submissions import (
     resolve_submission_replay_keys,
     submit_unified_payload,
 )
+from .sharing_access import ShareRole, role_rank
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,7 @@ _PRINCIPAL_STATE_KEY = "mcp_principal"
 _MIN_CALL_HOLD_CENTS = 100
 _MIN_SUGGESTED_LIMIT_CENTS = 500
 _TERMINAL_STATUSES = frozenset({"success", "failed", "cancelled", "stopped"})
+_STORED_REASON_TERMS = ("cancellationReason", "pauseReason")
 
 _INSTRUCTIONS = (
     "Skynet optimizes prompts, programs and agents against a metric. "
@@ -111,6 +117,32 @@ def _user(scope: str) -> AuthenticatedUser:
     return AuthenticatedUser(username=principal.username, role="user", groups=())
 
 
+def _request_locale() -> str:
+    """Return the locale to answer this request in: its Accept-Language, else English."""
+    return request_locale(None, get_http_request().headers.get("accept-language"))
+
+
+def _run_summary(job_data: dict[str, Any], locale: str) -> dict[str, Any]:
+    """Return a run summary whose stored stop reason reads in ``locale``.
+
+    The service stores a cancel or pause reason as the Hebrew base term. The
+    web UI maps it back the same way (``localizeStoredReason``). Other
+    messages pass through unchanged.
+
+    Args:
+        job_data: The run row.
+        locale: Locale tag of the caller.
+
+    Returns:
+        The summary as JSON data.
+    """
+    summary = build_summary(job_data).model_dump(mode="json")
+    for key in _STORED_REASON_TERMS:
+        if summary.get("message") == term(key):
+            summary["message"] = t_locale(locale, f"{{term.{key}}}")
+    return summary
+
+
 def _domain_tool_error(error: DomainError) -> ToolError:
     """Turn a service-layer error into a tool error the agent can read.
 
@@ -143,6 +175,7 @@ def check_run(
     *,
     job_store: Any,
     http_client: Callable[[], httpx.Client],
+    locale: str = DEFAULT_LOCALE,
 ) -> dict[str, Any]:
     """Check a run spec without running it, and estimate its spending floor.
 
@@ -154,12 +187,13 @@ def check_run(
         user: Account that will run it.
         job_store: Store whose engine backs the balance read.
         http_client: Factory for the model catalog client.
+        locale: Locale tag for the check messages.
 
     Returns:
         The static checks, the floor, a suggested limit and the balance.
     """
     enforce_submission_rate(user.username)
-    checks = in_locale(static_contract_check(spec), "en")
+    checks = in_locale(static_contract_check(spec), locale)
     sources = _effective_sources(spec)
     boxes = math.ceil(box_hold_cents())
     unpriced: list[str] = []
@@ -183,6 +217,52 @@ def check_run(
         "spendable_cents": StripeBillingService(engine=job_store.engine).spendable_cents(user.username),
         "note": "A run stops when it reaches max_cost_cents. Unused budget is released when the run ends.",
     }
+
+
+def _refuse_lower_limit(job_store: Any, username: str, budget_key: str, max_cost_cents: int) -> None:
+    """Refuse a retry that asks for less than the budget its key already made.
+
+    The submission reuses the budget a known key made, so the run would keep
+    the higher limit without a word. A retry that asks for more is allowed:
+    the submission lowers a first limit to what the balance can back. A retry
+    with the first limit is allowed too, also after the user raised the
+    total in the app: ``BudgetService.create`` returns the existing budget
+    unchanged when ``max_cost_cents`` equals its creation total. Known limit:
+    the budget stores only a hash of the creation total. If the balance cap
+    lowered the first limit and the user then raised the total, the original
+    request gets this refusal, which names the run.
+
+    Args:
+        job_store: Store whose engine holds the budgets.
+        username: Account that asks.
+        budget_key: Budget creation key of the agent's idempotency key.
+        max_cost_cents: Spending limit of this call.
+
+    Raises:
+        ToolError: When the key's budget total is above ``max_cost_cents``.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None:
+        return
+    service = BudgetService(engine=engine)
+    try:
+        existing = service.find_by_creation_key(username, budget_key)
+        if existing is None or max_cost_cents >= existing.total_cents:
+            return
+        service.create(username, max_cost_cents, idempotency_key=budget_key, uncapped=settings.local_mode)
+    except BudgetConflictError as error:
+        detail = f"This idempotency_key already has a limit of {existing.total_cents} cents. "
+        payload: dict[str, Any] = {"code": "budget.conflict", "status": 409}
+        if existing.job_id:
+            payload["optimization_id"] = existing.job_id
+            detail += "Use get_run or stop_run on optimization_id, or a new key for a run with a lower limit."
+        else:
+            detail += "Use a new key for a run with a lower limit."
+        payload["detail"] = detail
+        raise ToolError(json.dumps(payload)) from error
+    except BudgetError:
+        # The submission reads the same wallet next and reports this with its own code.
+        return
 
 
 def start_run(
@@ -209,6 +289,9 @@ def start_run(
 
     Returns:
         The submission, or ``status: in_progress`` while its setup check runs.
+
+    Raises:
+        ToolError: When ``idempotency_key`` first ran with a higher limit.
     """
     spec.max_cost_cents = max_cost_cents
     spec.execution_budget_id = None
@@ -216,9 +299,12 @@ def start_run(
     spec.execution_budget_generation = None
     spec.preflight_id = None
     spec.preflight_fingerprint = None
-    replay_key = resolve_submission_replay_keys(
+    replay_keys = resolve_submission_replay_keys(
         spec, username=user.username, workflow=UNIFIED_WORKFLOW, supplied_key=idempotency_key
-    ).job
+    )
+    if idempotency_key and replay_keys.budget is not None:
+        _refuse_lower_limit(job_store, user.username, replay_keys.budget, max_cost_cents)
+    replay_key = replay_keys.job
     result = _submit_within_proxy_timeout(
         user.username,
         replay_key,
@@ -235,23 +321,62 @@ def start_run(
     return result.model_dump(mode="json")
 
 
-def get_run(optimization_id: str, user: AuthenticatedUser, *, job_store: Any) -> dict[str, Any]:
+def _run_access(job_store: Any, optimization_id: str, user: AuthenticatedUser, minimum: ShareRole) -> dict[str, Any]:
+    """Load a run the account owns or was granted, at ``minimum`` role or above.
+
+    ``load_job_with_role`` gives every admin-allowlisted username owner access
+    to all runs. An MCP token never carries admin rights, so this check asks
+    for ownership or a share grant again, without the admin path.
+
+    Args:
+        job_store: Store that holds the run.
+        optimization_id: The run.
+        user: Account that asks.
+        minimum: Lowest role that may use the tool.
+
+    Returns:
+        The run row.
+
+    Raises:
+        DomainError: 404 when the account does not own the run and has no
+            grant on it; 403 when its grant is below ``minimum``.
+    """
+    job_data = load_job_for_user(job_store, optimization_id, user)
+    username = user.username.strip().lower()
+    role = ShareRole.owner if job_owner(job_data) == username else _grant_role(job_store, optimization_id, username)
+    if role is None:
+        raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id)
+    if role_rank(role) < role_rank(minimum):
+        raise DomainError(
+            "optimization.insufficient_role",
+            status=403,
+            optimization_id=optimization_id,
+            required=str(minimum),
+            role=str(role),
+        )
+    return job_data
+
+
+def get_run(
+    optimization_id: str, user: AuthenticatedUser, *, job_store: Any, locale: str = DEFAULT_LOCALE
+) -> dict[str, Any]:
     """Return a run's status, budget, and its result when it is terminal.
 
     Args:
         optimization_id: The run.
         user: Account that asks; must have access to the run.
         job_store: Store that holds the run.
+        locale: Locale tag for the run's stored stop reason.
 
     Returns:
         The run summary, its execution budget and its result.
     """
-    job_data = load_job_for_user(job_store, optimization_id, user)
-    summary = build_summary(job_data)
-    status = str(summary.status.value if hasattr(summary.status, "value") else summary.status)
+    job_data = _run_access(job_store, optimization_id, user, ShareRole.viewer)
+    summary = _run_summary(job_data, locale)
+    status = str(summary.get("status"))
     result = job_data.get("result") if status in _TERMINAL_STATUSES else None
     return {
-        "run": summary.model_dump(mode="json"),
+        "run": summary,
         "execution_budget": execution_budget_view(job_store, job_data),
         "result": result if isinstance(result, dict) else None,
         "terminal": status in _TERMINAL_STATUSES,
@@ -259,7 +384,13 @@ def get_run(optimization_id: str, user: AuthenticatedUser, *, job_store: Any) ->
 
 
 def list_runs(
-    limit: int, offset: int, status: str | None, user: AuthenticatedUser, *, job_store: Any
+    limit: int,
+    offset: int,
+    status: str | None,
+    user: AuthenticatedUser,
+    *,
+    job_store: Any,
+    locale: str = DEFAULT_LOCALE,
 ) -> dict[str, Any]:
     """Return a page of the account's own runs, newest first.
 
@@ -269,6 +400,7 @@ def list_runs(
         status: Optional exact status filter.
         user: Account whose runs are listed.
         job_store: Store that holds the runs.
+        locale: Locale tag for the runs' stored stop reasons.
 
     Returns:
         The total, the page and its runs.
@@ -285,7 +417,7 @@ def list_runs(
         "total": total,
         "limit": resolved,
         "offset": offset,
-        "runs": [build_summary(row).model_dump(mode="json") for row in rows],
+        "runs": [_run_summary(row, locale) for row in rows],
     }
 
 
@@ -301,6 +433,7 @@ def stop_run(optimization_id: str, user: AuthenticatedUser, *, job_store: Any, w
     Returns:
         The cancellation response.
     """
+    _run_access(job_store, optimization_id, user, ShareRole.editor)
     return cancel_optimization(job_store, optimization_id, user, worker).model_dump(mode="json")
 
 
@@ -352,7 +485,8 @@ def build_remote_mcp(
         account's spendable balance in cents.
         """
         user = _user(SCOPE_READ)
-        return guarded(lambda: check_run(spec, user, job_store=job_store, http_client=make_client))
+        locale = _request_locale()
+        return guarded(lambda: check_run(spec, user, job_store=job_store, http_client=make_client, locale=locale))
 
     @mcp.tool(
         name="start_run",
@@ -379,7 +513,8 @@ def build_remote_mcp(
     def get_run_tool(optimization_id: Annotated[str, Field(max_length=64)]) -> dict[str, Any]:
         """Get a run's status, spend and, when it is finished, its result."""
         user = _user(SCOPE_READ)
-        return guarded(lambda: get_run(optimization_id, user, job_store=job_store))
+        locale = _request_locale()
+        return guarded(lambda: get_run(optimization_id, user, job_store=job_store, locale=locale))
 
     @mcp.tool(name="list_runs", annotations=read_only)
     def list_runs_tool(
@@ -391,7 +526,8 @@ def build_remote_mcp(
     ) -> dict[str, Any]:
         """List the account's runs, newest first."""
         user = _user(SCOPE_READ)
-        return guarded(lambda: list_runs(limit, offset, status, user, job_store=job_store))
+        locale = _request_locale()
+        return guarded(lambda: list_runs(limit, offset, status, user, job_store=job_store, locale=locale))
 
     @mcp.tool(
         name="stop_run",
