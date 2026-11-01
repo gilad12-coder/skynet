@@ -16,6 +16,7 @@ The tools:
 | `check_run` | Checks a run spec without running it. Returns the static checks, the smallest and the suggested `max_cost_cents`, models without a price, and the spendable balance. | Free |
 | `start_run` | Starts a run under a new budget of `max_cost_cents`. | Spends up to `max_cost_cents` from the user's balance |
 | `get_run` | Returns the status, the budget and, for a finished run, the result. | Free |
+| `list_runs` | Lists the user's runs, newest first. Use it to find a run after an unclear `start_run` result. | Free |
 
 ## Workflow
 
@@ -56,9 +57,14 @@ The tools:
 6. **Call `start_run`** with the same spec, the agreed `max_cost_cents` and
    a new `idempotency_key` (for example a UUID). If the result has
    `status: in_progress`, wait `retry_after_seconds`, then call `start_run`
-   again with the same arguments and the same key. On any error, retry
-   with the same `idempotency_key`, or check `list_runs` first. Keep the
-   `optimization_id`.
+   again with the same arguments and the same key. If a call times out or
+   the result is unclear, call `list_runs` first. If no run exists, call
+   `start_run` again with the same arguments and the same
+   `idempotency_key`. If Skynet returns an error with a `code`, do not
+   retry unchanged. Show the `code` and `detail`, fix the spec, call
+   `check_run` again, get the user's agreement to a limit again, and call
+   `start_run` with a new `idempotency_key`. A reused key keeps the first
+   limit. Keep the `optimization_id`.
 7. **Follow the run** with `get_run`. Poll about once a minute. Stop when
    `terminal` is true. Tell the user the status and the spend from
    `execution_budget`. The run page is
