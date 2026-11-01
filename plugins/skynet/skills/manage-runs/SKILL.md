@@ -5,8 +5,9 @@ description: List, inspect and stop Skynet optimization runs. Use when the user 
 
 # Manage Skynet runs
 
-Use the Skynet MCP server of this plugin. The tools only see the runs of
-the signed-in account.
+Use the Skynet MCP server of this plugin. The tools see the runs of the
+signed-in account and runs shared with it. `list_runs` shows only the
+account's own runs.
 
 | Tool | What it does |
 | --- | --- |

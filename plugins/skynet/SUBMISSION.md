@@ -90,9 +90,9 @@ Example prompts:
 | --- | --- | --- | --- | --- | --- | --- |
 | `check_run` | Check run spec | true | false | false | `runs:read` | Validates a spec and reads the balance. Changes nothing. |
 | `start_run` | Start optimization run | false | see blocker 2 | false | `runs:write` | Starts a job that spends at most the limit the user approves. Idempotent with the same key. |
-| `get_run` | Get run | true | false | false | `runs:read` | Reads one run of the user's own account. |
+| `get_run` | Get run | true | false | false | `runs:read` | Reads one run of the user's account, or a run shared with the user. |
 | `list_runs` | List runs | true | false | false | `runs:read` | Reads the user's own runs. |
-| `stop_run` | Stop run | false | true | false | `runs:write` | Cancels a run. The MCP tools cannot resume a stopped run. Some GEPA runs show Resume on the run page. |
+| `stop_run` | Stop run | false | true | false | `runs:write` | Cancels a run of the user's account, or a run shared with edit rights. The MCP tools cannot resume a stopped run. Some GEPA runs show Resume on the run page. |
 
 `openWorldHint` is false for all tools, because they act only inside the
 user's Skynet account.
@@ -211,6 +211,8 @@ stop Skynet optimization runs, with a spending limit the user approves."
   cases, workspace code, model choices) and run ids.
 - Data the tools return: check results, the suggested limit, the spendable
   balance in cents, run status, spend, results and the best version.
+- Shared runs: the assistant can receive data from runs that other users
+  share with the signed-in user.
 - Storage: Skynet stores runs and results in the user's account, the same
   as runs from the web app. Deletion follows the privacy policy.
 - No payment data passes through the tools. The tools cannot add funds or
