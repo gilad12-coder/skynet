@@ -61,6 +61,7 @@ class I18nKey(StrEnum):
     BLACKBOX_HOST_AGENT_FAILED = 'blackbox.host_agent_failed'
     BLACKBOX_HOST_AGENT_RATE_LIMITED = 'blackbox.host_agent_rate_limited'
     BLACKBOX_REPO_TARGET_UNAVAILABLE = 'blackbox.repo_target_unavailable'
+    BUDGET_BELOW_MINIMUM = 'budget.below_minimum'
     BUDGET_CONFLICT = 'budget.conflict'
     BUDGET_IDEMPOTENCY_REQUIRED = 'budget.idempotency_required'
     BUDGET_INSUFFICIENT = 'budget.insufficient'

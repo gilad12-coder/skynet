@@ -171,6 +171,35 @@ def _effective_sources(spec: UnifiedRunRequest) -> list[tuple[str, str]]:
     return [(model.name, model.token_source or spec.token_source) for model in roles if model is not None]
 
 
+def _floor_cents(spec: UnifiedRunRequest, http_client: Callable[[], httpx.Client]) -> tuple[int, list[str]]:
+    """Estimate the smallest spending limit a run spec can start with.
+
+    The floor is what the wizard requires: the boxes' hold plus one call of
+    the dearest model.
+
+    Args:
+        spec: The run spec.
+        http_client: Factory for the model catalog client.
+
+    Returns:
+        The floor in cents, and the models the catalog has no price for.
+    """
+    sources = _effective_sources(spec)
+    boxes = math.ceil(box_hold_cents())
+    unpriced: list[str] = []
+    if all(source == "subscription" for _, source in sources):
+        return boxes, unpriced
+    holds: list[Decimal] = []
+    with http_client() as client:
+        for name, source in sources:
+            hold = call_hold_cents(name, source, client=client)
+            if hold is None:
+                unpriced.append(name)
+            else:
+                holds.append(hold)
+    return boxes + max(_MIN_CALL_HOLD_CENTS, math.ceil(max(holds, default=Decimal(0)))), unpriced
+
+
 def check_run(
     spec: UnifiedRunRequest,
     user: AuthenticatedUser,
@@ -196,21 +225,7 @@ def check_run(
     """
     enforce_submission_rate(user.username)
     checks = in_locale(static_contract_check(spec), locale)
-    sources = _effective_sources(spec)
-    boxes = math.ceil(box_hold_cents())
-    unpriced: list[str] = []
-    if all(source == "subscription" for _, source in sources):
-        floor = boxes
-    else:
-        holds: list[Decimal] = []
-        with http_client() as client:
-            for name, source in sources:
-                hold = call_hold_cents(name, source, client=client)
-                if hold is None:
-                    unpriced.append(name)
-                else:
-                    holds.append(hold)
-        floor = boxes + max(_MIN_CALL_HOLD_CENTS, math.ceil(max(holds, default=Decimal(0))))
+    floor, unpriced = _floor_cents(spec, http_client)
     return {
         "checks": checks.model_dump(mode="json"),
         "min_max_cost_cents": floor,
@@ -267,6 +282,30 @@ def _refuse_lower_limit(job_store: Any, username: str, budget_key: str, max_cost
         return
 
 
+def _below_minimum_error(
+    error: DomainError, spec: UnifiedRunRequest, max_cost_cents: int, http_client: Callable[[], httpx.Client]
+) -> ToolError:
+    """Name the smallest limit the run can start with in a too-low-limit refusal.
+
+    Args:
+        error: The submission's ``budget.below_minimum`` refusal.
+        spec: The run spec.
+        max_cost_cents: Spending limit the agent asked for.
+        http_client: Factory for the model catalog client.
+
+    Returns:
+        A tool error with ``min_max_cost_cents``, the floor ``check_run`` reports.
+    """
+    floor, _unpriced = _floor_cents(spec, http_client)
+    detail = error.detail
+    # The floor is an estimate; when the setup check needed more, do not name
+    # a minimum the agent already met.
+    if floor > max_cost_cents:
+        detail = f"max_cost_cents {max_cost_cents} is below this run's minimum of {floor} cents. Use at least {floor}."
+    payload = {"code": error.code, "status": error.status_code, "detail": detail, "min_max_cost_cents": floor}
+    return ToolError(json.dumps(payload))
+
+
 def start_run(
     spec: UnifiedRunRequest,
     max_cost_cents: int,
@@ -275,6 +314,7 @@ def start_run(
     *,
     service: Any,
     job_store: Any,
+    http_client: Callable[[], httpx.Client],
 ) -> dict[str, Any]:
     """Start a run under a new execution budget of ``max_cost_cents``.
 
@@ -288,13 +328,15 @@ def start_run(
         user: Account that runs it.
         service: Optimization service handed to the worker.
         job_store: Store that persists the run.
+        http_client: Factory for the model catalog client that prices the run's floor.
 
     Returns:
         The submission, or ``status: in_progress`` while its setup check runs or
         other usage on the account settles.
 
     Raises:
-        ToolError: When ``idempotency_key`` first ran with a higher limit.
+        ToolError: When ``idempotency_key`` first ran with a higher limit, or
+            when the limit is below the run's minimum.
     """
     spec.max_cost_cents = max_cost_cents
     spec.execution_budget_id = None
@@ -317,6 +359,8 @@ def start_run(
             ),
         )
     except DomainError as error:
+        if error.code == "budget.below_minimum":
+            raise _below_minimum_error(error, spec, max_cost_cents, http_client) from error
         # budget.pending means earlier usage awaits confirmation or another run
         # holds the wallet funds. Either can clear later, and the same call
         # then goes through, so report it like a running setup check.
@@ -521,7 +565,15 @@ def build_remote_mcp(
         """
         user = _user(SCOPE_WRITE)
         return guarded(
-            lambda: start_run(spec, max_cost_cents, idempotency_key, user, service=service, job_store=job_store)
+            lambda: start_run(
+                spec,
+                max_cost_cents,
+                idempotency_key,
+                user,
+                service=service,
+                job_store=job_store,
+                http_client=make_client,
+            )
         )
 
     @mcp.tool(name="get_run", annotations=read_only)

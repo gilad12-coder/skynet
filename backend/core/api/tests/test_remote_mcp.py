@@ -419,6 +419,27 @@ def test_start_run_reports_service_errors(harness: Any, monkeypatch: pytest.Monk
     assert json.loads(text)["code"] == "billing.insufficient_balance"
 
 
+@pytest.mark.parametrize(("limit", "named"), [(1, True), (500, False)])
+def test_start_run_names_the_minimum_of_a_too_low_limit(
+    harness: Any, monkeypatch: pytest.MonkeyPatch, limit: int, named: bool
+) -> None:
+    """Give the agent the floor check_run reports when the limit is too low."""
+    client, _store, _calls = harness
+    monkeypatch.setattr(remote_mcp, "box_hold_cents", lambda: Decimal("18.2"))
+    monkeypatch.setattr(remote_mcp, "call_hold_cents", lambda name, source, *, client: Decimal("100.5"))
+
+    def refuse(username: str, key: str, work: Any) -> Any:
+        """Refuse like a setup check the limit stopped."""
+        raise DomainError("budget.below_minimum", status=409)
+
+    monkeypatch.setattr(remote_mcp, "_submit_within_proxy_timeout", refuse)
+    error = json.loads(_error_text(_call(client, "start_run", {"spec": unified_payload(), "max_cost_cents": limit})))
+    assert error["code"] == "budget.below_minimum"
+    assert error["min_max_cost_cents"] == 19 + 101
+    assert ("minimum of 120 cents" in error["detail"]) is named
+    assert error["detail"].startswith("max_cost_cents" if named else "The spending limit is below")
+
+
 def test_check_run_estimates_the_floor(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Return the checks, the wizard's floor, a suggested limit and the balance."""
     client, _store, calls = harness

@@ -21,6 +21,7 @@ import {
   returnHost,
   safeRedirect,
   scopeMessageKey,
+  showsBudgetNote,
   type McpScope,
 } from "../lib/consent";
 
@@ -174,7 +175,9 @@ export function McpConsent({ query }: { query: string }) {
             </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">{msg("mcp_consent.budget_note")}</p>
+        {showsBudgetNote(request.scopes) && (
+          <p className="text-xs text-muted-foreground">{msg("mcp_consent.budget_note")}</p>
+        )}
       </section>
 
       {error && <InlineErrorRow message={msg(error as MessageKey)} />}

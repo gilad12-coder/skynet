@@ -450,6 +450,7 @@
     "budget.pending": "Die Nutzung wird noch abgerechnet. Warte, bis laufende Vorgänge abgeschlossen sind, bevor du fortfährst.",
     "budget.conflict": "Dieses Budget wurde in einem anderen Tab geändert. Lade den Kontostand neu, bevor du es aktualisierst.",
     "budget.not_found": "Dieses Budget ist für dein Konto nicht verfügbar. Erstelle ein neues Einrichtungsbudget.",
-    "budget.invalid": "Gib ein Ausgabenlimit ein, das bereits verbrauchte oder reservierte Beträge abdeckt."
+    "budget.invalid": "Gib ein Ausgabenlimit ein, das bereits verbrauchte oder reservierte Beträge abdeckt.",
+    "budget.below_minimum": "Das Ausgabenlimit liegt unter dem Minimum, das dieser Lauf benötigt. Geben Sie ein höheres Limit ein."
   }
 }
