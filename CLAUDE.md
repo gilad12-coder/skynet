@@ -6,5 +6,9 @@ its table names when the task needs it.
 
 @AGENTS.md
 
+`.claude/skills/` holds one symlink for each repo skill in `.agents/skills/`,
+so Claude Code lists them. Add a link when you add a skill.
+
 Put personal, machine-specific rules (paths, port overrides, sibling
-checkouts) in `CLAUDE.local.md`. It is gitignored; never commit it.
+checkouts) in `CLAUDE.local.md`. Devin reads `AGENTS.local.md` for the same
+purpose. Both are gitignored; never commit them.

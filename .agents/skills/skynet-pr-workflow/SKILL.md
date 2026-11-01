@@ -1,20 +1,18 @@
 ---
 name: skynet-pr-workflow
-description: Use this skill whenever you create, update, describe, review, verify, record videos for, or merge a Skynet pull request, or move its Linear issue. It holds the PR description structure and test table, the Opus 5.5 RevEngine review gate, the staging and preview acceptance rules, the costly-workflow rule, the UI before-and-after video specs, the backend-only merge scope, the Linear approval flow and the daily merge window.
+description: Use this skill whenever you create, update, describe, review, verify, record videos for, or merge a Skynet pull request, or move its Linear issue. It holds the fix-locally-then-push-once order, the merge gates and proof card, the PR description structure and test table, the Opus 5.5 RevEngine review gate, the staging and preview acceptance rules, the costly-workflow rule, the UI before-and-after video specs, the backend-only merge scope, the Linear approval flow and the daily merge window.
 ---
 
 # Skynet PR workflow
 
 These rules apply to every PR in `gilad12-coder/skynet`, also for work that
-starts outside the dispatcher. `AGENTS.md` holds the always-on rules (merge
-gates, fix locally and push once, git and authorship). This skill adds the
-full PR and review policy.
+starts outside the dispatcher. `AGENTS.md` holds the always-on rules (git and
+authorship, branch and draft PR, merge policy summary). This skill holds the
+full PR, review and merge procedure.
 
 ## 1. Branch, worktree and parallel work
 
-- Create one feature branch and one worktree per issue from current
-  `origin/staging`. Open a **draft** PR against `staging`. Never push to
-  `staging` or `main` directly.
+- Branch, worktree and draft PR rules: `AGENTS.md`.
 - Run independent issues in parallel, each in its own worktree and branch.
   Check memory, CPU and active work before you add an agent. Do not start
   duplicate workers. The ceilings are six implementation worktrees and
@@ -27,6 +25,23 @@ full PR and review policy.
 - Each agent runs at most one headless browser at a time and closes it when
   done. Prefer the cloud preview (AWS). Start a local dev server only when
   there is no other way.
+
+### 1a. Fix bugs locally, deploy once (MANDATORY)
+
+Each push rebuilds the PR preview (the sandbox image too) and starts a new
+automated review. A bug found after the push costs a full rebuild. Find the
+bugs before you push. Follow this order for every PR:
+
+1. Build the change. Run the tests, lint and typecheck locally.
+2. Review the full diff locally. Use two reviewers with fresh context (for
+   example, two subagents). Verify each finding with a failing test, then
+   fix it. Repeat until a review finds nothing new.
+3. Push once. Let CI, the preview build and the automated review gate run.
+4. Run the acceptance checks on the PR preview.
+5. Record the After video last, on the final commit.
+
+If the review gate or the acceptance checks find a bug, fix all findings
+locally, check them again, and then push them together in one push.
 
 ## 2. Required for every PR
 
@@ -41,7 +56,6 @@ full PR and review policy.
   **Result** and **Evidence**.
 - Keep passed, failed, skipped and not run apart. Give counts when the runner
   reports them. Link the CI run or saved output.
-- Do not call lint, type checks or a build behavior tests.
 - State material coverage gaps and the reason for any skipped required check.
   Never invent a result or evidence.
 - Run checks that fit the change and the repository's required checks. Avoid
@@ -186,7 +200,7 @@ for review until the evidence is there.
   side-by-side image.
 - Check that both uploaded videos play and show the expected behavior. State
   that check in the Linear comment and in the PR body.
-- Record the After video last, on the final commit.
+- Record the After video last, on the final commit (section 1a, step 5).
 
 ## 6. Defect repairs and conflicts (standing rule, 2026-10-20)
 
@@ -207,6 +221,36 @@ for review until the evidence is there.
   needs a separate authorized session.
 
 ## 7. Merging (orchestrator only)
+
+### Merge gates (MANDATORY)
+
+**Backend PRs** (only files under `backend/`, at least one, plus optional
+Markdown under `docs/`) merge into `staging` only when **all** of these
+gates pass:
+
+1. Agent code review is clean.
+2. Tests and the Linear issue's acceptance checks pass in the PR environment.
+3. The diff touches only the files in the issue's `## Files` list.
+4. Up to date: the branch includes the latest `staging` (one merge commit from
+   `staging`, never a force-push), then tests pass again.
+5. After the merge, the staging smoke test passes. If it fails, revert that
+   PR's merge right away and reopen its issue with the failure.
+
+**UI PRs** (anything touching `frontend/`, including mixed PRs) wait for the
+user. Attach a proof card: one line naming the decision and the Linear issue,
+the Before and After videos of the acceptance criteria in the PR environment
+(on the Linear issue; section 5), the review verdict, and the diff size.
+Merge only after the user approves that specific PR in chat or on GitHub (or
+with `Approved for merge` on the Linear issue), and then only in the daily
+window. A frontend PR with no meaningful visible change can use the backend
+path (the 2026-10-22 exception below).
+
+Any other PR (files outside `backend/` and `docs/**/*.md`, or no backend
+file) also waits for the user's approval.
+
+**`staging` → `main`** needs the user's approval every time. Each morning,
+send one card: the backend changes that landed, staging smoke status, and a
+60s video tour of the core flow on staging. Promote only on "promote".
 
 ### Backend-only merges (2026-10-19)
 

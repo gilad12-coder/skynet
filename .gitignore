@@ -30,8 +30,10 @@ htmlcov/
 .claude/*
 !.claude/settings.json
 !.claude/commands/
+!.claude/skills/
 CLAUDE.md
 !/CLAUDE.md
+!/frontend/CLAUDE.md
 
 # Jupyter
 .ipynb_checkpoints/
@@ -89,8 +91,9 @@ logs/
 /migration.sql
 /deploy/helm/skynet/values-airgap.generated.yaml
 
-# Machine-local AI-assistant rules
+# Machine-local AI-assistant rules (Claude Code, Devin)
 CLAUDE.local.md
+AGENTS.local.md
 
 # Generated at frontend build time by scripts/generate-third-party-licenses.mjs
 frontend/public/THIRD_PARTY_LICENSES.txt
