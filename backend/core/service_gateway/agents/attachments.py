@@ -742,7 +742,9 @@ def read_attachment(name: str, content_type: str, data: bytes, size: int | None 
         result = subprocess.run(
             [sys.executable, "-I", __file__],
             input=header + data,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            # pypdf logs a warning per bad xref entry; nothing reads them, so they never reach this process.
+            stderr=subprocess.DEVNULL,
             timeout=_MAX_CHILD_SECONDS,
             check=False,
         )

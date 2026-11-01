@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import io
+import subprocess
 import threading
 import time
 import zipfile
@@ -542,6 +543,22 @@ def test_documents_are_parsed_in_a_child_process() -> None:
     """A document read through the child process gives the same text as in-process parsing."""
     data = _pdf("Child read")
     assert attachments.read_attachment("child.pdf", "application/pdf", data) == "Page 1\nChild read"
+
+
+def test_child_stderr_is_discarded_not_held_in_the_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The child's warnings go to the null device, so a noisy PDF cannot fill the API process's memory."""
+    calls: list[dict[str, object]] = []
+    real_run = subprocess.run
+
+    def recording_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        """Record the keyword arguments, then run the child."""
+        calls.append(kwargs)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(attachments.subprocess, "run", recording_run)
+    assert attachments.read_attachment("a.pdf", "application/pdf", _pdf("quiet")) == "Page 1\nquiet"
+    assert calls[0]["stderr"] is subprocess.DEVNULL
+    assert "capture_output" not in calls[0]
 
 
 def test_a_slow_parser_step_is_killed_at_the_hard_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
