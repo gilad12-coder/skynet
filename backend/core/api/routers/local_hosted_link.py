@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import platform
+import subprocess
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -36,6 +37,24 @@ class HostedLinkStartRequest(BaseModel):
 class HostedLinkFinishRequest(BaseModel):
     code: str = Field(min_length=1, max_length=256)
     state: str = Field(min_length=1, max_length=4096)
+
+
+def _mac_name() -> str:
+    """Return the name of this Mac that people know from System Settings.
+
+    ``platform.node()`` is the network host name (``Gilads-MacBook-Pro.local``),
+    so it is only the fallback when the Computer Name cannot be read.
+
+    Returns:
+        The Computer Name, else the host name without ``.local``, else ``"Mac"``.
+    """
+    try:
+        name = subprocess.run(
+            ["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=2, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    return (name or platform.node().removesuffix(".local") or "Mac")[:100]
 
 
 def _page(message: str, *, status: int) -> HTMLResponse:
@@ -83,7 +102,7 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
         Returns:
             ``{"authorize_url": ...}``.
         """
-        device_name = (body.device_name if body else None) or platform.node() or "Mac"
+        device_name = (body.device_name if body else None) or _mac_name()
         app_callback = body.app_callback if body else False
         return {
             "authorize_url": hosted_link.start_link(user.username, device_name=device_name, app_callback=app_callback)
