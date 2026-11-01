@@ -57,14 +57,12 @@ The tools:
 6. **Call `start_run`** with the same spec, the agreed `max_cost_cents` and
    a new `idempotency_key` (for example a UUID). If the result has
    `status: in_progress`, wait `retry_after_seconds`, then call `start_run`
-   again with the same arguments and the same key. If a call times out or
-   the result is unclear, call `list_runs` first. If no run exists, call
-   `start_run` again with the same arguments and the same
-   `idempotency_key`. If the error code is `budget.pending`, wait 30 to
-   60 seconds, then call `start_run` again with the same arguments and the
-   same `idempotency_key`. Do not ask the user to agree again. Retry at
-   most 3 times, then show the `code` and `detail` to the user and stop.
-   If Skynet
+   again with the same arguments and the same key. Do not ask the user to
+   agree again. After 10 `in_progress` results in a row, stop, show the
+   `detail` to the user, and tell them to try again in a few minutes. If a
+   call times out or the result is unclear, call `list_runs` first. If no
+   run exists, call `start_run` again with the same arguments and the same
+   `idempotency_key`. If Skynet
    returns a spec or limit error with a `code`, do not retry unchanged.
    Show the `code` and `detail`, fix the spec, call `check_run` again, get
    the user's agreement to a limit again, and call `start_run` with a new
@@ -139,7 +137,6 @@ Notes on the spec:
 - A tool error with a `code` and `detail` comes from Skynet. Show the
   detail to the user. Do not retry a refused run with a higher limit
   without the user's agreement.
-- `budget.pending` is a short wait, not a refusal. Wait 30 to 60 seconds,
-  then call `start_run` again with the same arguments and the same
-  `idempotency_key`. Do not ask the user to agree again. Retry at most 3
-  times, then show the `code` and `detail` to the user and stop.
+- `status: in_progress` from `start_run` is a short wait, not a refusal or
+  an error. Follow step 6 of "Workflow": retry with the same key,
+  at most 10 times in a row.
