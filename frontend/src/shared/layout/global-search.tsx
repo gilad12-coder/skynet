@@ -14,6 +14,7 @@ import { APP_PAGE_ICONS, appPageDescription, appPageKeywords, appPageLabel } fro
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
 import {
   Dialog,
@@ -76,14 +77,19 @@ export function GlobalSearch() {
             },
           ]
         : []),
-      {
-        id: "action-sign-out",
-        group: "actions",
-        label: msg("app.shell.logout"),
-        keywords: splitKeywords(msg("app.shell.search.kw.sign_out")),
-        icon: SignOut,
-        run: () => void signOut({ callbackUrl: "/login" }),
-      },
+      // The Mac app logs out from the account menu, which unlinks the hosted account.
+      ...(isLocalMode()
+        ? []
+        : [
+            {
+              id: "action-sign-out",
+              group: "actions" as const,
+              label: msg("app.shell.logout"),
+              keywords: splitKeywords(msg("app.shell.search.kw.sign_out")),
+              icon: SignOut,
+              run: () => void signOut({ callbackUrl: "/login" }),
+            },
+          ]),
     ];
     const settings: SearchItem[] = visibleSettingsTabs(isAdmin).map((tab) => ({
       id: `settings-${tab}`,

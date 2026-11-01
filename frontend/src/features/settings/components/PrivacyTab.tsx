@@ -60,6 +60,7 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { SETUP_SETTING_EVENT, type SetupSettingDetail } from "@/features/experience";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 
 /** Localize a data-action failure: semantic backend codes when present. */
 function describeError(err: unknown, fallback: string): string {
@@ -331,19 +332,24 @@ export function PrivacyTab() {
           </Button>
         </SettingsRow>
 
-        <CopyValueRow
-          icon={User}
-          label={msg("settings.privacy.copy_username.label")}
-          value={session?.user?.name ?? ""}
-          signedOut={signedOut}
-        />
+        {/* The Mac app's local user has a placeholder name and email; there is nothing real to copy. */}
+        {!isLocalMode() && (
+          <>
+            <CopyValueRow
+              icon={User}
+              label={msg("settings.privacy.copy_username.label")}
+              value={session?.user?.name ?? ""}
+              signedOut={signedOut}
+            />
 
-        <CopyValueRow
-          icon={At}
-          label={msg("settings.privacy.copy_email.label")}
-          value={email}
-          signedOut={signedOut}
-        />
+            <CopyValueRow
+              icon={At}
+              label={msg("settings.privacy.copy_email.label")}
+              value={email}
+              signedOut={signedOut}
+            />
+          </>
+        )}
       </div>
 
       <Separator />

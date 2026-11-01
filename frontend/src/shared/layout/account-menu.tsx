@@ -2,10 +2,22 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Code, DotsThree, FileText, Gear, ShieldCheck, SignOut } from "@/shared/ui/icons";
+import {
+  Code,
+  Desktop,
+  DotsThree,
+  FileText,
+  Gear,
+  ShieldCheck,
+  SignIn,
+  SignOut,
+} from "@/shared/ui/icons";
 import { signOut, useSession } from "next-auth/react";
+import { toast } from "react-toastify";
 import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
+import { startLocalHostedLink } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
 import {
   COMPACT_POPOVER_ICON_CLASS,
@@ -17,6 +29,42 @@ import { dirForLocale } from "@/shared/lib/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { useSettingsModal } from "@/features/settings";
+import {
+  type LinkedAccount,
+  unlinkHostedAccount,
+  useLinkedAccount,
+} from "@/shared/hooks/use-linked-account";
+
+/**
+ * The Mac app's identity labels. An unknown link (`undefined`: loading, or the
+ * status call failed) shows only the title, so a linked Mac never reads "Not
+ * signed in" by mistake.
+ */
+export function localIdentity(account: LinkedAccount | undefined): {
+  name: string;
+  detail: string | null;
+} {
+  if (!account) return { name: msg("local_identity.title"), detail: null };
+  if (!account.linked)
+    return { name: msg("local_identity.title"), detail: msg("settings.account.signed_out") };
+  const name = account.name ?? account.email ?? msg("account.linked_fallback_name");
+  if (account.offline) return { name, detail: msg("local_identity.linked_offline") };
+  const detail =
+    account.email && account.email !== name ? account.email : msg("local_identity.linked");
+  return { name, detail };
+}
+
+/** Start the hosted sign-in and open its consent page in the browser. */
+export function startHostedSignIn(
+  start: () => Promise<{ authorize_url: string }> = startLocalHostedLink,
+  // The Mac app opens new windows in the default browser.
+  open: (url: string) => void = (url) => window.open(url, "_blank", "noopener"),
+  fail: () => void = () => toast.error(msg("local_identity.sign_in_failed")),
+): Promise<void> {
+  return start()
+    .then(({ authorize_url }) => open(authorize_url))
+    .catch(fail);
+}
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */
 function initials(name: string): string {
@@ -29,7 +77,28 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function Avatar({ image, label, size }: { image?: string | null; label: string; size: number }) {
+function Avatar({
+  image,
+  label,
+  size,
+  device = false,
+}: {
+  image?: string | null;
+  label: string;
+  size: number;
+  device?: boolean;
+}) {
+  if (device) {
+    return (
+      <span
+        aria-hidden="true"
+        className="grid shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+        style={{ width: size, height: size }}
+      >
+        <Desktop style={{ width: size * 0.55, height: size * 0.55 }} />
+      </span>
+    );
+  }
   if (image) {
     return (
       // Avatars come from arbitrary OAuth providers (Google, GitHub, Auth0); a
@@ -88,13 +157,26 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
+  // Read the link again on each open and after an unlink: the sign-in finishes in the browser.
+  const [reads, setReads] = React.useState(0);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) setReads((n) => n + 1);
+  };
+  const local = isLocalMode();
+  const account = useLinkedAccount(reads);
+  const linked = account?.linked ? account : null;
 
   if (!session?.user) return null;
 
-  const name = session.user.name ?? session.user.email ?? "";
-  const email = session.user.email ?? "";
+  // The Mac app's session user is an internal placeholder, never a real
+  // account, so local mode shows the linked hosted account or "Local mode".
+  const identity = local ? localIdentity(account) : null;
+  const name = identity ? identity.name : (session.user.name ?? session.user.email ?? "");
+  const email = identity ? (identity.detail ?? "") : (session.user.email ?? "");
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
+  const deviceAvatar = local && !linked;
 
   const close = () => setOpen(false);
 
@@ -106,7 +188,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} />
+      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
     </button>
   ) : (
     <button
@@ -114,7 +196,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} />
+      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
       {/* Physical edge from the UI dir, not logical `text-start`: the name keeps
           dir="auto" so it shapes and truncates by its own script, which would make
           `start` resolve to the name's direction and split it from the email line
@@ -127,7 +209,10 @@ export function AccountMenu({
           {name}
         </span>
         {showEmail && (
-          <span dir="ltr" className="truncate text-xs leading-tight text-muted-foreground">
+          <span
+            dir={local ? "auto" : "ltr"}
+            className="truncate text-xs leading-tight text-muted-foreground"
+          >
             {email}
           </span>
         )}
@@ -140,7 +225,7 @@ export function AccountMenu({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {collapsed && !customTrigger ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -164,7 +249,7 @@ export function AccountMenu({
             target here would just duplicate the Settings row. Surfaces the email,
             the way ChatGPT's account menu does. */}
         <div className="flex items-center gap-2.5 px-3 py-2">
-          <Avatar image={session.user.image} label={name} size={32} />
+          <Avatar image={session.user.image} label={name} size={32} device={deviceAvatar} />
           {/* Physical edge from the UI dir — see the trigger above for why `text-start`
               can't be used while the name carries dir="auto". */}
           <span className={cn("flex min-w-0 flex-1 flex-col", isRtl ? "text-right" : "text-left")}>
@@ -172,7 +257,7 @@ export function AccountMenu({
               {name}
             </span>
             {showEmail && (
-              <span dir="ltr" className="truncate text-xs text-muted-foreground">
+              <span dir={local ? "auto" : "ltr"} className="truncate text-xs text-muted-foreground">
                 {email}
               </span>
             )}
@@ -180,6 +265,20 @@ export function AccountMenu({
         </div>
 
         <div role="separator" className="my-1 h-px bg-border/60" />
+
+        {local && account?.linked === false && (
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              void startHostedSignIn();
+            }}
+            className={COMPACT_POPOVER_ITEM_CLASS}
+          >
+            <SignIn className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+            {msg("local_identity.sign_in")}
+          </button>
+        )}
 
         <button
           type="button"
@@ -214,28 +313,40 @@ export function AccountMenu({
           {msg("legal.source_link")}
         </a>
 
-        <div role="separator" className="my-1 h-px bg-border/60" />
+        {/* The Mac app's local session is never ended: its data stays on the Mac.
+            Log out there unlinks the hosted account, so it shows only when linked. */}
+        {(!local || linked) && (
+          <>
+            <div role="separator" className="my-1 h-px bg-border/60" />
 
-        <button
-          type="button"
-          onClick={() => {
-            close();
-            void signOut({ callbackUrl: "/login" });
-          }}
-          className={COMPACT_POPOVER_ITEM_CLASS}
-        >
-          {/* Point the arrow "outward" toward the sidebar's edge so it reads as
-              leaving: the rail sits on the left in LTR (arrow ←, flipped from the
-              icon's default) and on the right in RTL (arrow →, the default). Derive
-              the flip from `isRtl` rather than the `rtl:` Tailwind variant — this
-              menu is a portaled popover where the variant doesn't fire reliably, and
-              the rest of the file drives direction the same way. */}
-          <SignOut
-            className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
-            aria-hidden="true"
-          />
-          {msg("app.shell.logout")}
-        </button>
+            <button
+              type="button"
+              onClick={() => {
+                close();
+                if (!local) {
+                  void signOut({ callbackUrl: "/login" });
+                  return;
+                }
+                unlinkHostedAccount()
+                  .then(() => setReads((n) => n + 1))
+                  .catch(() => toast.error(msg("local_identity.sign_out_failed")));
+              }}
+              className={COMPACT_POPOVER_ITEM_CLASS}
+            >
+              {/* Point the arrow "outward" toward the sidebar's edge so it reads as
+                  leaving: the rail sits on the left in LTR (arrow ←, flipped from the
+                  icon's default) and on the right in RTL (arrow →, the default). Derive
+                  the flip from `isRtl` rather than the `rtl:` Tailwind variant — this
+                  menu is a portaled popover where the variant doesn't fire reliably, and
+                  the rest of the file drives direction the same way. */}
+              <SignOut
+                className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
+                aria-hidden="true"
+              />
+              {msg("app.shell.logout")}
+            </button>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );
