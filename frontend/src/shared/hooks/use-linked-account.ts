@@ -141,18 +141,33 @@ export function startHostedSignIn(
     .catch(fail);
 }
 
+/** Call `listener` on each link change; returns the unsubscribe. */
+export function onLinkChange(listener: () => void): () => void {
+  window.addEventListener(HOSTED_LINK_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(HOSTED_LINK_CHANGED_EVENT, listener);
+}
+
 /**
  * The hosted account of the Mac app: `undefined` while unknown or outside
  * local mode.
  *
  * The Mac app signs in one internal local user that owns all local data. Its
  * email is a placeholder, so the UI shows this account (or "Local mode")
- * instead. A new `refreshKey` reads the link again, for example each time a
- * menu opens after a browser sign-in.
+ * instead. A link change (for example a log out from the command menu) or a
+ * new `refreshKey` reads the link again, for example each time a menu opens
+ * after a browser sign-in.
  */
 export function useLinkedAccount(refreshKey: unknown = 0): LinkedAccount | undefined {
   const local = isLocalMode();
   const [account, setAccount] = React.useState<LinkedAccount | undefined>(undefined);
+  const [changes, setChanges] = React.useState(0);
+
+  // A reload cannot loop: writeCache announces only when the cached identity
+  // appears or goes away, so a second read of the same state is silent.
+  React.useEffect(() => {
+    if (!local) return;
+    return onLinkChange(() => setChanges((n) => n + 1));
+  }, [local]);
 
   React.useEffect(() => {
     if (!local) return;
@@ -165,7 +180,7 @@ export function useLinkedAccount(refreshKey: unknown = 0): LinkedAccount | undef
     return () => {
       cancelled = true;
     };
-  }, [local, refreshKey]);
+  }, [local, refreshKey, changes]);
 
   return local ? account : undefined;
 }

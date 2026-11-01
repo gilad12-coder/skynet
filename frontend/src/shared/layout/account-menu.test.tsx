@@ -18,7 +18,7 @@ import { setServerMessages } from "@/shared/lib/runtime-messages";
 const { SettingsModalProvider } = await import("@/features/settings");
 const { LocaleProvider } = await import("@/shared/providers/locale-provider");
 const { AccountMenu, localIdentity, startHostedSignIn } = await import("./account-menu");
-const { linkedUsername, loadLinkedAccount, unlinkHostedAccount } = await import(
+const { linkedUsername, loadLinkedAccount, onLinkChange, unlinkHostedAccount } = await import(
   "@/shared/hooks/use-linked-account"
 );
 const { TooltipProvider } = await import("@/shared/ui/primitives/tooltip");
@@ -163,10 +163,16 @@ void describe("settings in local mode", () => {
 void describe("loadLinkedAccount", () => {
   const store = new Map<string, string>();
   const events: string[] = [];
+  const target = new EventTarget();
   // The menu tests above need `window` unset: runtime-env reads the server env then.
   before(() => {
     (globalThis as { window?: unknown }).window = {
-      dispatchEvent: (e: Event) => events.push(e.type),
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      dispatchEvent: (e: Event) => {
+        events.push(e.type);
+        return target.dispatchEvent(e);
+      },
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
         setItem: (k: string, v: string) => store.set(k, v),
@@ -290,6 +296,32 @@ void describe("loadLinkedAccount", () => {
     await unlinkHostedAccount(async () => ({ hosted_revoked: true }));
     assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
     assert.equal(store.size, 0);
+  });
+
+  void it("reloads a listener on a log out without a reload loop", async () => {
+    store.clear();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    events.length = 0;
+    const reloads: Array<Promise<unknown>> = [];
+    // The hook reloads on each event; an unlinked reload must not announce again.
+    const stop = onLinkChange(() => {
+      reloads.push(
+        loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable }),
+      );
+    });
+    await unlinkHostedAccount(async () => ({ hosted_revoked: true }));
+    await Promise.all(reloads);
+    assert.equal(reloads.length, 1);
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    stop();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    assert.equal(reloads.length, 1);
   });
 
   void it("reports not linked without asking hosted", async () => {

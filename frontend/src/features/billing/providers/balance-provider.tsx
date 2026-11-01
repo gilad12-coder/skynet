@@ -154,11 +154,11 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
 
   // A sign-in finishes in the browser, so the app reads the link again when
   // its window comes back into focus. A log out or a new link reads at once.
+  // The first read comes from refresh() once the session signs in.
   React.useEffect(() => {
     if (!local) return;
     const onFocus = () => void readHosted(false);
     const onLinkChange = () => void readHosted(true);
-    void readHosted(true);
     window.addEventListener("focus", onFocus);
     window.addEventListener(HOSTED_LINK_CHANGED_EVENT, onLinkChange);
     return () => {

@@ -147,7 +147,7 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
-  // Read the link again on each open and after an unlink: the sign-in finishes in the browser.
+  // Read the link again on each open: the sign-in finishes in the browser.
   const [reads, setReads] = React.useState(0);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
@@ -319,9 +319,9 @@ export function AccountMenu({
                   void signOut({ callbackUrl: "/login" });
                   return;
                 }
-                unlinkHostedAccount()
-                  .then(() => setReads((n) => n + 1))
-                  .catch(() => toast.error(msg("local_identity.sign_out_failed")));
+                unlinkHostedAccount().catch(() =>
+                  toast.error(msg("local_identity.sign_out_failed")),
+                );
               }}
               className={COMPACT_POPOVER_ITEM_CLASS}
             >
