@@ -60,11 +60,14 @@ The tools:
    again with the same arguments and the same key. If a call times out or
    the result is unclear, call `list_runs` first. If no run exists, call
    `start_run` again with the same arguments and the same
-   `idempotency_key`. If Skynet returns an error with a `code`, do not
-   retry unchanged. Show the `code` and `detail`, fix the spec, call
-   `check_run` again, get the user's agreement to a limit again, and call
-   `start_run` with a new `idempotency_key`. A reused key keeps the first
-   limit. Keep the `optimization_id`.
+   `idempotency_key`. If the error code is `budget.pending`, wait 30 to
+   60 seconds, then call `start_run` again with the same arguments and the
+   same `idempotency_key`. Do not ask the user to agree again. If Skynet
+   returns a spec or limit error with a `code`, do not retry unchanged.
+   Show the `code` and `detail`, fix the spec, call `check_run` again, get
+   the user's agreement to a limit again, and call `start_run` with a new
+   `idempotency_key`. A reused key keeps the first limit. Keep the
+   `optimization_id`.
 7. **Follow the run** with `get_run`. Poll about once a minute. Stop when
    `terminal` is true, or when `run.status` is `paused`. A paused run waits
    for the user to resume it on the run page. Tell the user and stop
@@ -134,3 +137,6 @@ Notes on the spec:
 - A tool error with a `code` and `detail` comes from Skynet. Show the
   detail to the user. Do not retry a refused run with a higher limit
   without the user's agreement.
+- `budget.pending` is a short wait, not a refusal. Wait 30 to 60 seconds,
+  then call `start_run` again with the same arguments and the same
+  `idempotency_key`. Do not ask the user to agree again.

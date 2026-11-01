@@ -39,7 +39,7 @@ the signed-in account.
 ## Stop a run
 
 `stop_run` works only on `pending`, `validating` or `running` runs. For a
-`paused` run, send the user to the run page to resume or cancel it.
+`paused` run, send the user to the run page to resume or delete it.
 
 For those three statuses, `stop_run` cannot be undone. The run gets the
 status `cancelled` and does not continue.
