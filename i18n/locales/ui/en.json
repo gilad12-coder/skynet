@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "Sign in to sync",
   "local_identity.sign_in_failed": "Could not start the sign-in. Try again.",
   "local_identity.linked_offline": "Linked (offline)",
-  "local_identity.sign_out_failed": "Could not log out. Try again."
+  "local_identity.sign_out_failed": "Could not log out. Try again.",
+  "account.linked_fallback_name": "{term.appName} account"
 }

@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "Войти для синхронизации",
   "local_identity.sign_in_failed": "Не удалось начать вход. Повторите попытку.",
   "local_identity.linked_offline": "Связано (офлайн)",
-  "local_identity.sign_out_failed": "Не удалось выйти из синхронизации. Попробуйте ещё раз."
+  "local_identity.sign_out_failed": "Не удалось выйти из синхронизации. Попробуйте ещё раз.",
+  "account.linked_fallback_name": "Аккаунт {term.appName}"
 }

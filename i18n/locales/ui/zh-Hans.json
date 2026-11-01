@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "登录以同步",
   "local_identity.sign_in_failed": "无法开始登录。请重试。",
   "local_identity.linked_offline": "已关联(离线)",
-  "local_identity.sign_out_failed": "无法退出同步,请重试。"
+  "local_identity.sign_out_failed": "无法退出同步,请重试。",
+  "account.linked_fallback_name": "{term.appName} 帐户"
 }

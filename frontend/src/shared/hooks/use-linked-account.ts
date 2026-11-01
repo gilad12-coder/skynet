@@ -90,7 +90,7 @@ export async function loadLinkedAccount(
 export function linkedUsername(account: LinkedAccount | undefined): string {
   if (!account) return msg("local_identity.title");
   if (!account.linked) return "";
-  return account.email ?? account.name ?? msg("desktop_link.account_label");
+  return account.email ?? account.name ?? msg("account.linked_fallback_name");
 }
 
 /** Unlink the Mac app from hosted and forget the cached identity. */

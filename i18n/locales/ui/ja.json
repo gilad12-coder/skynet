@@ -4370,5 +4370,6 @@
   "local_identity.sign_in": "サインインして同期",
   "local_identity.sign_in_failed": "サインインを開始できませんでした。もう一度お試しください。",
   "local_identity.linked_offline": "リンク済み(オフライン)",
-  "local_identity.sign_out_failed": "同期からサインアウトできませんでした。もう一度お試しください。"
+  "local_identity.sign_out_failed": "同期からサインアウトできませんでした。もう一度お試しください。",
+  "account.linked_fallback_name": "{term.appName} アカウント"
 }
