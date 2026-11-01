@@ -58,8 +58,10 @@ The tools:
    a new `idempotency_key` (for example a UUID). If the result has
    `status: in_progress`, wait `retry_after_seconds`, then call `start_run`
    again with the same arguments and the same key. Do not ask the user to
-   agree again. After 10 `in_progress` results in a row, stop, show the
-   `detail` to the user, and tell them to try again in a few minutes. If a
+   agree again. The setup check can take several minutes. If the result
+   is still `in_progress` 15 minutes after the first call, stop and show
+   the `detail` to the user. Keep the key. Before any later `start_run`
+   for this spec, call `list_runs` and use the run if it exists. If a
    call times out or the result is unclear, call `list_runs` first. If no
    run exists, call `start_run` again with the same arguments and the same
    `idempotency_key`. If Skynet
@@ -139,4 +141,4 @@ Notes on the spec:
   without the user's agreement.
 - `status: in_progress` from `start_run` is a short wait, not a refusal or
   an error. Follow step 6 of "Workflow": retry with the same key,
-  at most 10 times in a row.
+  for at most 15 minutes.
