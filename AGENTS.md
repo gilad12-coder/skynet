@@ -228,12 +228,16 @@ or `just backend`), frontend `:3000` (`cd frontend && npm run dev` or
 
 ## Product and runtime model
 
-- **DSPy** is the structured program/prompt optimization path.
-- **Optimize Anything** is the black-box path. Its native engines come from the
-  pinned upstream GEPA implementation and include GEPA, Best-of-N and
-  Meta-Harness, plus Skynet's own AutoResearch and the pinned AutoSaddler and
-  ShinkaEvolve packages. `Auto` composes eligible engines without
-  redefining their algorithms.
+- **Skynet is Optimize Anything.** It is one product that optimizes any
+  user-supplied artifact: prompts, programs, agents, workflows, datasets and
+  more. Do not describe DSPy and Optimize Anything as two separate paths or
+  products, in code comments, docs, UI copy or marketing text.
+- **DSPy programs** are one artifact type inside Optimize Anything. Skynet
+  optimizes them with the DSPy optimizers.
+- **Engines.** The native engines come from the pinned upstream GEPA
+  implementation and include GEPA, Best-of-N and Meta-Harness, plus Skynet's
+  own AutoResearch and the pinned AutoSaddler and ShinkaEvolve packages.
+  `Auto` composes eligible engines without redefining their algorithms.
 - **Vercel Sandbox** is the production execution boundary for user workloads,
   including optimization setup, runs, recovery, and completed-run
   interactions. Workers are the control plane: they orchestrate jobs, reserve
