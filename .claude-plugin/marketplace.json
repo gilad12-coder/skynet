@@ -1,0 +1,16 @@
+{
+  "name": "skynet",
+  "owner": {
+    "name": "Skynet",
+    "url": "https://skynetml.com"
+  },
+  "description": "Skynet plugins: optimize prompts, programs and agents from your coding agent.",
+  "plugins": [
+    {
+      "name": "skynet",
+      "source": "./plugins/skynet",
+      "description": "Optimize prompts, programs and agents against your own metric with Skynet, and manage the runs.",
+      "category": "development"
+    }
+  ]
+}

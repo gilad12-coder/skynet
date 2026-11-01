@@ -1,0 +1,19 @@
+{
+  "name": "skynet",
+  "displayName": "Skynet",
+  "version": "0.1.0",
+  "description": "Optimize prompts, programs and agents against your own metric with Skynet, and manage the runs.",
+  "author": {
+    "name": "Skynet",
+    "url": "https://skynetml.com"
+  },
+  "homepage": "https://skynetml.com",
+  "repository": "https://github.com/Skynet-ml/skynet",
+  "license": "AGPL-3.0-only",
+  "keywords": ["optimization", "prompts", "dspy", "gepa", "evaluation", "agents"],
+  "icon": "./assets/logo.png",
+  "documentationUrl": "https://github.com/Skynet-ml/skynet/tree/main/plugins/skynet",
+  "supportUrl": "https://github.com/Skynet-ml/skynet/issues",
+  "privacyPolicyUrl": "https://skynetml.com/privacy",
+  "termsOfServiceUrl": "https://skynetml.com/terms"
+}

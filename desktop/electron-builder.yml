@@ -44,6 +44,6 @@ dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
 publish:
   provider: github
-  owner: gilad12-coder
+  owner: Skynet-ml
   repo: skynet
   releaseType: draft
