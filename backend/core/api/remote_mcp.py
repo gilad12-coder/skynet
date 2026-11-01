@@ -291,7 +291,7 @@ def start_run(
 
     Returns:
         The submission, or ``status: in_progress`` while its setup check runs or
-        earlier usage settles.
+        other usage on the account settles.
 
     Raises:
         ToolError: When ``idempotency_key`` first ran with a higher limit.
@@ -317,14 +317,15 @@ def start_run(
             ),
         )
     except DomainError as error:
-        # budget.pending is transient: earlier usage settles in seconds, and the
-        # same call then goes through. Report it like a running setup check.
+        # budget.pending means earlier usage awaits confirmation or another run
+        # holds the wallet funds. Either can clear later, and the same call
+        # then goes through, so report it like a running setup check.
         if error.code != "budget.pending":
             raise
         return {
             "status": "in_progress",
             "retry_after_seconds": _PENDING_RETRY_SECONDS,
-            "detail": "Earlier usage is still being settled. Call start_run again with the same arguments.",
+            "detail": "Other usage on this account must settle first. Call start_run again with the same arguments.",
         }
     if isinstance(result, JSONResponse):
         return {

@@ -529,6 +529,17 @@ def test_describe_shows_the_host_by_browser_rules(harness: Any) -> None:
     assert body["redirect_host"] == "xn--gladoor-2va.de"
 
 
+def test_describe_shows_a_fullwidth_host_as_the_browser_opens_it(harness: Any) -> None:
+    """Map a fullwidth letter like browsers, so the page names the domain the browser opens."""
+    client, _store = harness
+    redirect = "https://\uff45xample.com/cb"
+    client_id = _register(client, [redirect])
+    body = client.post(
+        "/oauth/consent/describe", json={"client_id": client_id, "redirect_uri": redirect, "scope": "runs:read"}
+    ).json()
+    assert body["redirect_host"] == "example.com"
+
+
 def test_refresh_rotates_and_reuse_revokes(harness: Any) -> None:
     """Rotate refresh tokens, and end the grant when an old one comes back."""
     client, store = harness

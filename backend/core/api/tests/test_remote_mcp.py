@@ -396,6 +396,7 @@ def test_start_run_reports_unsettled_usage_as_in_progress(harness: Any, monkeypa
     body = _payload(result)
     assert body["status"] == "in_progress"
     assert body["retry_after_seconds"] == 5
+    assert body["detail"].startswith("Other usage on this account must settle first.")
 
 
 def test_start_run_refuses_a_zero_budget(harness: Any) -> None:
