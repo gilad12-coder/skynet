@@ -9,7 +9,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionProvider } from "next-auth/react";
 
-import { ApiError } from "@/shared/lib/api";
+import { ApiError, HOSTED_LINK_CHANGED_EVENT } from "@/shared/lib/api";
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { setServerMessages } from "@/shared/lib/runtime-messages";
 
@@ -18,7 +18,9 @@ import { setServerMessages } from "@/shared/lib/runtime-messages";
 const { SettingsModalProvider } = await import("@/features/settings");
 const { LocaleProvider } = await import("@/shared/providers/locale-provider");
 const { AccountMenu, localIdentity, startHostedSignIn } = await import("./account-menu");
-const { linkedUsername, loadLinkedAccount } = await import("@/shared/hooks/use-linked-account");
+const { linkedUsername, loadLinkedAccount, unlinkHostedAccount } = await import(
+  "@/shared/hooks/use-linked-account"
+);
 const { TooltipProvider } = await import("@/shared/ui/primitives/tooltip");
 const { PrivacyTab } = await import("@/features/settings/components/PrivacyTab");
 
@@ -160,9 +162,11 @@ void describe("settings in local mode", () => {
 
 void describe("loadLinkedAccount", () => {
   const store = new Map<string, string>();
+  const events: string[] = [];
   // The menu tests above need `window` unset: runtime-env reads the server env then.
   before(() => {
     (globalThis as { window?: unknown }).window = {
+      dispatchEvent: (e: Event) => events.push(e.type),
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
         setItem: (k: string, v: string) => store.set(k, v),
@@ -262,6 +266,29 @@ void describe("loadLinkedAccount", () => {
       },
     });
     assert.deepEqual(account, { linked: false });
+    assert.equal(store.size, 0);
+  });
+
+  void it("announces a new link once, and a revoked link", async () => {
+    store.clear();
+    events.length = 0;
+    const whoami = async () => ({ name: "Ada", email: "ada@example.com" });
+    await loadLinkedAccount({ status: linked, whoami });
+    await loadLinkedAccount({ status: linked, whoami });
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    await loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable });
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT, HOSTED_LINK_CHANGED_EVENT]);
+  });
+
+  void it("announces a log out and forgets the identity", async () => {
+    store.clear();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    events.length = 0;
+    await unlinkHostedAccount(async () => ({ hosted_revoked: true }));
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
     assert.equal(store.size, 0);
   });
 

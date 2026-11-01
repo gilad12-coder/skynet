@@ -431,6 +431,9 @@ def test_oauth_provision_keeps_only_an_https_picture(accounts_client: TestClient
     assert picture() == "https://lh3.googleusercontent.com/a/pia"
     sign_in("https://avatars.githubusercontent.com/u/1")
     assert picture() == "https://avatars.githubusercontent.com/u/1"
+    # A picture URL longer than the column must not fail the sign-in.
+    sign_in("https://lh3.googleusercontent.com/a/" + "x" * 2100)
+    assert picture() == "https://avatars.githubusercontent.com/u/1"
 
 
 def test_oauth_provision_reuses_local_account(accounts_client: TestClient) -> None:

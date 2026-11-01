@@ -6,6 +6,7 @@ export {
   type LinkedAccount,
   linkedUsername,
   loadLinkedAccount,
+  startHostedSignIn,
   unlinkHostedAccount,
 } from "../../hooks/use-linked-account";
 

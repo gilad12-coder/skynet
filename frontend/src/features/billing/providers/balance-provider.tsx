@@ -8,11 +8,13 @@ import {
   getLocalHostedBalance,
   getLocalHostedLinkStatus,
   getWallet,
+  HOSTED_LINK_CHANGED_EVENT,
   WALLET_CHANGED_EVENT,
   type BillingWalletResponse,
 } from "@/shared/lib/api";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import {
+  hostedBalanceReader,
   loadHostedBalance,
   shownBalance,
   type HostedBalance,
@@ -139,24 +141,34 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   const local = isLocalMode();
   const [hosted, setHosted] = React.useState<HostedBalance>({ kind: "loading" });
 
-  const readHosted = React.useCallback(() => {
-    void loadHostedBalance({
-      linked: () => getLocalHostedLinkStatus().then((s) => s.linked),
-      balance: getLocalHostedBalance,
-    }).then(setHosted);
-  }, []);
+  const [readHosted] = React.useState(() =>
+    hostedBalanceReader(
+      () =>
+        loadHostedBalance({
+          linked: () => getLocalHostedLinkStatus().then((s) => s.linked),
+          balance: getLocalHostedBalance,
+        }),
+      setHosted,
+    ),
+  );
 
   // A sign-in finishes in the browser, so the app reads the link again when
-  // its window comes back into focus.
+  // its window comes back into focus. A log out or a new link reads at once.
   React.useEffect(() => {
     if (!local) return;
-    readHosted();
-    window.addEventListener("focus", readHosted);
-    return () => window.removeEventListener("focus", readHosted);
+    const onFocus = () => void readHosted(false);
+    const onLinkChange = () => void readHosted(true);
+    void readHosted(true);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener(HOSTED_LINK_CHANGED_EVENT, onLinkChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(HOSTED_LINK_CHANGED_EVENT, onLinkChange);
+    };
   }, [local, readHosted]);
 
   const refresh = React.useCallback(() => {
-    if (local) readHosted();
+    if (local) void readHosted(true);
     setLoading(true);
     setLoadError(false);
     getWallet()

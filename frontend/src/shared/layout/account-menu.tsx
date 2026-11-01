@@ -15,7 +15,6 @@ import {
 import { signOut, useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
-import { startLocalHostedLink } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
@@ -31,9 +30,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/
 import { useSettingsModal } from "@/features/settings";
 import {
   type LinkedAccount,
+  startHostedSignIn,
   unlinkHostedAccount,
   useLinkedAccount,
 } from "@/shared/hooks/use-linked-account";
+
+export { startHostedSignIn };
 
 /**
  * The Mac app's identity labels. An unknown link (`undefined`: loading, or the
@@ -52,18 +54,6 @@ export function localIdentity(account: LinkedAccount | undefined): {
   const detail =
     account.email && account.email !== name ? account.email : msg("local_identity.linked");
   return { name, detail };
-}
-
-/** Start the hosted sign-in and open its consent page in the browser. */
-export function startHostedSignIn(
-  start: () => Promise<{ authorize_url: string }> = startLocalHostedLink,
-  // The Mac app opens new windows in the default browser.
-  open: (url: string) => void = (url) => window.open(url, "_blank", "noopener"),
-  fail: () => void = () => toast.error(msg("local_identity.sign_in_failed")),
-): Promise<void> {
-  return start()
-    .then(({ authorize_url }) => open(authorize_url))
-    .catch(fail);
 }
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */

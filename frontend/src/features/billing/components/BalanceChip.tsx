@@ -129,6 +129,11 @@ export function BalanceChip({ className }: { className?: string }) {
               <p className="pt-1 text-xs text-muted-foreground">
                 {msg("billing.local.hosted_note")}
               </p>
+              {status === "low" && (
+                <p className="pt-1 text-xs text-muted-foreground/80">
+                  {msg("billing.chip.low_note")}
+                </p>
+              )}
             </div>
           ) : (
             <>

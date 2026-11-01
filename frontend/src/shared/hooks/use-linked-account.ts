@@ -1,10 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "react-toastify";
 import {
   ApiError,
   getLocalHostedLinkStatus,
   getLocalHostedWhoami,
+  HOSTED_LINK_CHANGED_EVENT,
+  startLocalHostedLink,
   unlinkLocalHostedLink,
 } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
@@ -49,7 +52,14 @@ function readCache(): Identity | null {
   }
 }
 
+function announceLinkChange(): void {
+  window.dispatchEvent(new Event(HOSTED_LINK_CHANGED_EVENT));
+}
+
+// The cache holds an identity exactly while the Mac is known to be linked, so a
+// change in its presence is a link that finished or ended.
 function writeCache(identity: Identity | null): void {
+  const wasLinked = readCache() !== null;
   try {
     if (identity) window.localStorage.setItem(CACHE_KEY, JSON.stringify(identity));
     else window.localStorage.removeItem(CACHE_KEY);
@@ -57,6 +67,7 @@ function writeCache(identity: Identity | null): void {
     // Storage can be off; the identity is then read from hosted each time.
   }
   whoamiAt = identity ? Date.now() : 0;
+  if (wasLinked !== (identity !== null)) announceLinkChange();
 }
 
 /**
@@ -110,9 +121,24 @@ export function linkedUsername(account: LinkedAccount | undefined): string {
 }
 
 /** Unlink the Mac app from hosted and forget the cached identity. */
-export async function unlinkHostedAccount(): Promise<void> {
-  await unlinkLocalHostedLink();
+export async function unlinkHostedAccount(unlink = unlinkLocalHostedLink): Promise<void> {
+  await unlink();
+  const hadIdentity = readCache() !== null;
   writeCache(null);
+  // An offline link may have no cached identity, so announce the log out anyway.
+  if (!hadIdentity) announceLinkChange();
+}
+
+/** Start the hosted sign-in and open its consent page in the browser. */
+export function startHostedSignIn(
+  start: () => Promise<{ authorize_url: string }> = startLocalHostedLink,
+  // The Mac app opens new windows in the default browser.
+  open: (url: string) => void = (url) => window.open(url, "_blank", "noopener"),
+  fail: () => void = () => toast.error(msg("local_identity.sign_in_failed")),
+): Promise<void> {
+  return start()
+    .then(({ authorize_url }) => open(authorize_url))
+    .catch(fail);
 }
 
 /**

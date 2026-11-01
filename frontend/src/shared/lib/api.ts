@@ -248,6 +248,9 @@ export const WALLET_CHANGED_EVENT = "wallet-changed";
 export function announceWalletChange(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
 }
+/** Browser event fired when the Mac app links or unlinks its hosted account, so the balance re-reads. */
+export const HOSTED_LINK_CHANGED_EVENT = "hosted-link-changed";
+
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadHostedBalance, shownBalance } from "./hosted-balance.ts";
+import {
+  hostedBalanceReader,
+  loadHostedBalance,
+  shownBalance,
+  type HostedBalance,
+} from "./hosted-balance.ts";
 
 const failWith = (status: number) => () =>
   Promise.reject(Object.assign(new Error("x"), { status }));
@@ -94,4 +99,65 @@ test("the Mac app never shows the local credit", () => {
     assert.equal(shown.loading, kind === "loading", kind);
     assert.equal(shown.linkNeeded, kind === "link", kind);
   }
+});
+
+function deferred() {
+  let resolve!: (b: HostedBalance) => void;
+  const promise = new Promise<HostedBalance>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+test("only the newest read sets the balance", async () => {
+  const seen: HostedBalance[] = [];
+  const slow = deferred();
+  const fast = deferred();
+  const loads = [slow.promise, fast.promise];
+  const read = hostedBalanceReader(
+    () => loads.shift()!,
+    (b) => seen.push(b),
+  );
+  const first = read(true);
+  const second = read(true);
+  fast.resolve({ kind: "link" });
+  await second;
+  slow.resolve({ kind: "hosted", cents: 5, status: "healthy" });
+  await first;
+  assert.deepEqual(seen, [{ kind: "link" }]);
+});
+
+test("a focus read waits 30 s after a linked balance; a forced read does not", async () => {
+  let now = 0;
+  let calls = 0;
+  const read = hostedBalanceReader(
+    async () => {
+      calls += 1;
+      return { kind: "hosted", cents: 5, status: "healthy" };
+    },
+    () => {},
+    () => now,
+  );
+  await read(false);
+  now = 29_000;
+  await read(false);
+  assert.equal(calls, 1);
+  await read(true);
+  assert.equal(calls, 2);
+  now = 60_000;
+  await read(false);
+  assert.equal(calls, 3);
+});
+
+test("a focus read never waits while the Mac is unlinked", async () => {
+  let calls = 0;
+  const read = hostedBalanceReader(
+    async () => {
+      calls += 1;
+      return { kind: "link" };
+    },
+    () => {},
+    () => 0,
+  );
+  await read(false);
+  await read(false);
+  assert.equal(calls, 2);
 });

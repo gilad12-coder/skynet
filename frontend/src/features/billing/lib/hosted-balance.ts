@@ -80,3 +80,32 @@ export function shownBalance(
     hosted: true,
   };
 }
+
+// Each read of a linked balance calls hosted; window focus would repeat it often.
+const FOCUS_TTL_MS = 30_000;
+
+/**
+ * Build the read the Mac app runs on mount, focus, refresh and link changes.
+ *
+ * Only the newest read sets the balance, so a slow read that started before an
+ * unlink cannot put the old balance back. A focus read (`force` false) skips a
+ * read within 30 s of a linked balance; an unlinked Mac reads only the local
+ * link status, so it always reads.
+ */
+export function hostedBalanceReader(
+  load: () => Promise<HostedBalance>,
+  set: (balance: HostedBalance) => void,
+  now: () => number = Date.now,
+): (force: boolean) => Promise<void> {
+  let latest = 0;
+  let linkedAt: number | null = null;
+  return (force) => {
+    if (!force && linkedAt !== null && now() - linkedAt < FOCUS_TTL_MS) return Promise.resolve();
+    const id = ++latest;
+    return load().then((balance) => {
+      if (id !== latest) return;
+      linkedAt = balance.kind === "hosted" ? now() : null;
+      set(balance);
+    });
+  };
+}
