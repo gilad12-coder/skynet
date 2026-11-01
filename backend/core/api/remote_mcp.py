@@ -283,7 +283,11 @@ def _refuse_lower_limit(job_store: Any, username: str, budget_key: str, max_cost
 
 
 def _below_minimum_error(
-    error: DomainError, spec: UnifiedRunRequest, max_cost_cents: int, http_client: Callable[[], httpx.Client]
+    error: DomainError,
+    spec: UnifiedRunRequest,
+    max_cost_cents: int,
+    idempotency_key: str | None,
+    http_client: Callable[[], httpx.Client],
 ) -> ToolError:
     """Name the smallest limit the run can start with in a too-low-limit refusal.
 
@@ -291,6 +295,7 @@ def _below_minimum_error(
         error: The submission's ``budget.below_minimum`` refusal.
         spec: The run spec.
         max_cost_cents: Spending limit the agent asked for.
+        idempotency_key: Key the agent sent, if any.
         http_client: Factory for the model catalog client.
 
     Returns:
@@ -302,6 +307,10 @@ def _below_minimum_error(
     # a minimum the agent already met.
     if floor > max_cost_cents:
         detail = f"max_cost_cents {max_cost_cents} is below this run's minimum of {floor} cents. Use at least {floor}."
+    if idempotency_key:
+        # A same-key retry reuses the budget this attempt created, with its
+        # low limit, so it would fail the same way every time.
+        detail += " Retry with a new idempotency_key; this key keeps its first limit."
     payload = {"code": error.code, "status": error.status_code, "detail": detail, "min_max_cost_cents": floor}
     return ToolError(json.dumps(payload))
 
@@ -360,7 +369,7 @@ def start_run(
         )
     except DomainError as error:
         if error.code == "budget.below_minimum":
-            raise _below_minimum_error(error, spec, max_cost_cents, http_client) from error
+            raise _below_minimum_error(error, spec, max_cost_cents, idempotency_key, http_client) from error
         # budget.pending means earlier usage awaits confirmation or another run
         # holds the wallet funds. Either can clear later, and the same call
         # then goes through, so report it like a running setup check.

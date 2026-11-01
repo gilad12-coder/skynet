@@ -419,11 +419,13 @@ def test_start_run_reports_service_errors(harness: Any, monkeypatch: pytest.Monk
     assert json.loads(text)["code"] == "billing.insufficient_balance"
 
 
-@pytest.mark.parametrize(("limit", "named"), [(1, True), (500, False)])
+@pytest.mark.parametrize(
+    ("limit", "named", "key"), [(1, True, None), (500, False, None), (1, True, "k1"), (500, False, "k1")]
+)
 def test_start_run_names_the_minimum_of_a_too_low_limit(
-    harness: Any, monkeypatch: pytest.MonkeyPatch, limit: int, named: bool
+    harness: Any, monkeypatch: pytest.MonkeyPatch, limit: int, named: bool, key: str | None
 ) -> None:
-    """Give the agent the floor check_run reports when the limit is too low."""
+    """Give the agent the floor check_run reports, and a new key to retry with, when the limit is too low."""
     client, _store, _calls = harness
     monkeypatch.setattr(remote_mcp, "box_hold_cents", lambda: Decimal("18.2"))
     monkeypatch.setattr(remote_mcp, "call_hold_cents", lambda name, source, *, client: Decimal("100.5"))
@@ -433,11 +435,16 @@ def test_start_run_names_the_minimum_of_a_too_low_limit(
         raise DomainError("budget.below_minimum", status=409)
 
     monkeypatch.setattr(remote_mcp, "_submit_within_proxy_timeout", refuse)
-    error = json.loads(_error_text(_call(client, "start_run", {"spec": unified_payload(), "max_cost_cents": limit})))
+    arguments: dict[str, Any] = {"spec": unified_payload(), "max_cost_cents": limit}
+    if key:
+        arguments["idempotency_key"] = key
+    error = json.loads(_error_text(_call(client, "start_run", arguments)))
     assert error["code"] == "budget.below_minimum"
     assert error["min_max_cost_cents"] == 19 + 101
     assert ("minimum of 120 cents" in error["detail"]) is named
     assert error["detail"].startswith("max_cost_cents" if named else "The spending limit is below")
+    # A same-key retry reuses the first budget and its low limit, so it can never pass.
+    assert ("new idempotency_key" in error["detail"]) is bool(key)
 
 
 def test_check_run_estimates_the_floor(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
