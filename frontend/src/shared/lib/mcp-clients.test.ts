@@ -62,3 +62,15 @@ test("a locale with no client translation falls back to English", () => {
   assert.equal(mcpClientMarkdown(client, "nl"), mcpClientMarkdown(client, "en"));
   assert.equal(mcpClientsMarkdown("nl"), mcpClientsMarkdown("en"));
 });
+
+test("the server URL in every locale ends where the link should end", () => {
+  // A GFM autolink runs on until whitespace, so text glued to the URL (Korean
+  // particles, CJK or Arabic commas) would become part of the link.
+  const locales = new Set(MCP_CLIENTS.flatMap((c) => c.steps.flatMap((s) => Object.keys(s))));
+  const glued = new RegExp(`(?<!<)${MCP_SERVER_URL.replace(/[.]/g, "\\.")}(?![\\s>\`"'.,;:)]|$)`, "u");
+  for (const locale of locales) {
+    for (const client of MCP_CLIENTS) {
+      assert.doesNotMatch(mcpClientMarkdown(client, locale), glued, `${client.id} ${locale}`);
+    }
+  }
+});

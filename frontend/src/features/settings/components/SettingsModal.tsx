@@ -90,6 +90,7 @@ import { ModelChip } from "@/shared/ui/model-chip";
 import { ModelConfigModal, useRecentModelConfigs } from "@/features/submit";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useLocale } from "@/shared/providers";
+import { docsPathForLocale } from "@/shared/lib/locale";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { LEGAL_CONFIG } from "@/features/legal";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
@@ -1295,7 +1296,7 @@ function ApiTab() {
           autoTooltip={false}
           aria-label={msg("settings.api.guide_action")}
         >
-          <a href={locale === "he" ? "/docs/he/api" : "/docs/api"} target="_blank" rel="noopener noreferrer">
+          <a href={docsPathForLocale(locale, "api")} target="_blank" rel="noopener noreferrer">
             <ArrowSquareOut className="size-3.5" />
           </a>
         </Button>

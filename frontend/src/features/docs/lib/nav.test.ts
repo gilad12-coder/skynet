@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
-import { FULL_TRANSLATION_LOCALES } from "../../../shared/lib/locale.ts";
+import { FULL_TRANSLATION_LOCALES, docsPathForLocale } from "../../../shared/lib/locale.ts";
 import { extractHeadings } from "./markdown.ts";
 import {
   DOCS_LOCALES,
@@ -178,4 +178,13 @@ test("docsMarkdownSegments splits the page path and never throws on a stray perc
   // Next decodes /docs-md/%25zz to "%zz"; a second decode throws URIError.
   assert.deepEqual(docsMarkdownSegments(["%zz"]), ["%zz"]);
   assert.equal(resolveDocsPath(docsMarkdownSegments(["%zz"])), null);
+});
+
+test("the app links each UI locale to its docs language", () => {
+  assert.equal(docsPathForLocale("en"), "/docs");
+  assert.equal(docsPathForLocale("he", "api"), "/docs/he/api");
+  assert.equal(docsPathForLocale("de"), "/docs/de");
+  assert.equal(docsPathForLocale("de-AT", "api"), "/docs/de/api");
+  assert.equal(docsPathForLocale("pt-BR"), "/docs/pt");
+  assert.equal(docsPathForLocale("en-GB"), "/docs");
 });
