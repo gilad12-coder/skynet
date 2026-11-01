@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "Trabajó durante {duration}",
   "shared.agent.working_for": "Trabajando desde hace {duration}",
   "shared.agent.pasted_text": "Texto pegado",
-  "shared.agent.pasted_text_lines": "{n} líneas",
   "shared.agent.pasted_text_remove": "Quitar texto pegado",
   "shared.agent.pasted_text_restore": "Mostrar en el campo de texto",
   "shared.agent.pasted_text_open": "Abrir texto pegado",

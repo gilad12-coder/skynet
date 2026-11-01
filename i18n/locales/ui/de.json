@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "Gearbeitet: {duration}",
   "shared.agent.working_for": "Arbeitet seit {duration}",
   "shared.agent.pasted_text": "Eingefügter Text",
-  "shared.agent.pasted_text_lines": "{n} Zeilen",
   "shared.agent.pasted_text_remove": "Eingefügten Text entfernen",
   "shared.agent.pasted_text_restore": "Im Textfeld anzeigen",
   "shared.agent.pasted_text_open": "Eingefügten Text öffnen",
