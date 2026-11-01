@@ -29,8 +29,8 @@ function errorText(error: LinkError): string {
 /**
  * Hosted consent page for the Mac account link. The route is login-gated, so
  * the user is signed in here. "Link this Mac" asks the backend for a
- * single-use code and hands it to the Mac app's loopback callback; "Cancel"
- * tells the Mac app the user declined.
+ * single-use code and hands it to the Mac app's callback (its skynet:// URL);
+ * "Cancel" tells the Mac app the user declined.
  */
 export function DesktopLinkConsent({ query }: { query: string }) {
   const { data: session } = useSession();
@@ -91,7 +91,7 @@ export function DesktopLinkConsent({ query }: { query: string }) {
 
   return (
     <ConsentFrame>
-      <h1 className="text-center text-xl font-semibold text-balance text-foreground">
+      <h1 className="text-center text-2xl font-semibold text-balance text-foreground">
         {msg("desktop_link.title")}
       </h1>
 
@@ -128,7 +128,6 @@ export function DesktopLinkConsent({ query }: { query: string }) {
             </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">{msg("desktop_link.unlink_note")}</p>
       </section>
 
       {error && <InlineErrorRow message={errorText(error)} />}
@@ -139,17 +138,17 @@ export function DesktopLinkConsent({ query }: { query: string }) {
           {msg("desktop_link.returning")}
         </p>
       ) : (
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="grid grid-cols-2 gap-3">
           <Button
             variant="outline"
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full"
             disabled={busy}
             onClick={() => leave(deniedCallbackUrl(request))}
           >
             {msg("desktop_link.cancel")}
           </Button>
           <Button
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full"
             disabled={busy}
             aria-busy={phase === "linking"}
             onClick={() => void approve()}

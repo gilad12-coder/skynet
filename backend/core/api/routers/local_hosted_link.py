@@ -29,6 +29,13 @@ _LOCAL_ONLY = [Depends(require_local_mode)]
 # Request body of POST /local/hosted-link/start.
 class HostedLinkStartRequest(BaseModel):
     device_name: str | None = Field(default=None, max_length=100)
+    app_callback: bool = False
+
+
+# Request body of POST /local/hosted-link/finish: the values the skynet:// URL carried.
+class HostedLinkFinishRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=256)
+    state: str = Field(min_length=1, max_length=4096)
 
 
 def _page(message: str, *, status: int) -> HTMLResponse:
@@ -59,7 +66,7 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
         job_store: Storage backend whose ``engine`` holds ``user_connectors``.
 
     Returns:
-        A FastAPI ``APIRouter`` with start, callback, status, whoami, balance and unlink.
+        A FastAPI ``APIRouter`` with start, finish, callback, status, whoami, balance and unlink.
     """
     router = APIRouter()
     engine = job_store.engine
@@ -70,13 +77,31 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
 
         Args:
             user: The signed-in local user.
-            body: Optional Mac name for the consent screen.
+            body: Optional Mac name for the consent screen, and whether the
+                result goes to the Mac app's ``skynet://`` URL.
 
         Returns:
             ``{"authorize_url": ...}``.
         """
         device_name = (body.device_name if body else None) or platform.node() or "Mac"
-        return {"authorize_url": hosted_link.start_link(user.username, device_name=device_name)}
+        app_callback = body.app_callback if body else False
+        return {
+            "authorize_url": hosted_link.start_link(user.username, device_name=device_name, app_callback=app_callback)
+        }
+
+    @router.post("/local/hosted-link/finish", include_in_schema=False, dependencies=_LOCAL_ONLY)
+    def finish(user: AuthenticatedUserDep, body: HostedLinkFinishRequest) -> dict[str, Any]:
+        """Finish the link from the ``skynet://`` URL the Mac app received.
+
+        Args:
+            user: The signed-in local user (the Mac app).
+            body: The code and state from the URL.
+
+        Returns:
+            ``{"linked": true, "account_email": ...}``.
+        """
+        view = hosted_link.finish_link(engine, code=body.code, state=body.state)
+        return {"linked": True, "account_email": view.account_label}
 
     @router.get("/local/hosted-link/callback", include_in_schema=False, dependencies=_LOCAL_ONLY)
     def callback(code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:

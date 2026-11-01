@@ -29,6 +29,7 @@ from ..api.errors import DomainError
 from ..config import settings
 from ..connectors.vault import ConnectorVault, ConnectorView, vault_cipher
 from ..storage.models import UserConnectorModel
+from . import hosted_dns
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,9 @@ RELAY_AUTH_METHOD = "oauth_relay"
 CLIENT_ID = "skynet-desktop"
 SCOPES = "identity balance:read sync models connectors web"
 CALLBACK_PATH = "/local/hosted-link/callback"
+# The Mac app opens the consent page in the default browser, which hands the
+# result back through this URL; the app then calls ``finish_link`` (SKY-228).
+APP_CALLBACK_URI = "skynet://link/callback"
 STATE_TTL_SECONDS = 600
 REFRESH_MARGIN = timedelta(minutes=5)
 _TIMEOUT = httpx.Timeout(15.0)
@@ -48,6 +52,8 @@ _TIMEOUT = httpx.Timeout(15.0)
 # needs a TCP connect (5 s), a TLS handshake (httpcore applies the connect
 # timeout again, 5 s) and a write (5 s), so it reaches hosted at most 27 s after
 # the first send, plus network transit. The resend's read time does not count.
+# After a system DNS failure, hosted_dns caches its answer, so the resend spends
+# no time on DNS; a working system resolver answers from the OS cache.
 _REFRESH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _RESEND_TIMEOUT = httpx.Timeout(5.0)
 REFRESH_RESEND_DEADLINE = 12.0
@@ -97,7 +103,12 @@ def _client(timeout: httpx.Timeout = _TIMEOUT) -> httpx.Client:
     """
     if not settings.hosted_api_url:
         raise DomainError("hosted_link.not_configured", status=503)
-    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=_TRANSPORT)
+    transport = _TRANSPORT
+    # An explicit transport turns off httpx's proxy lookup, so a proxied Mac keeps
+    # the default. Each client gets its own transport: closing a client closes it.
+    if transport is None and not hosted_dns.proxy_configured():
+        transport = hosted_dns.FallbackDnsTransport()
+    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=transport)
 
 
 def callback_uri() -> str:
@@ -127,12 +138,14 @@ def _challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
 
 
-def start_link(username: str, *, device_name: str) -> str:
+def start_link(username: str, *, device_name: str, app_callback: bool = False) -> str:
     """Begin a link and return the hosted consent URL to open in the browser.
 
     Args:
         username: The local user who will own the link.
         device_name: The Mac name shown on the hosted consent screen.
+        app_callback: Send the result to the Mac app's ``skynet://`` URL
+            instead of the loopback callback of this API.
 
     Returns:
         The hosted ``/desktop/link`` URL with PKCE and an encrypted state.
@@ -143,7 +156,7 @@ def start_link(username: str, *, device_name: str) -> str:
     if not settings.hosted_api_url or not settings.hosted_app_url:
         raise DomainError("hosted_link.not_configured", status=503)
     verifier = secrets.token_urlsafe(64)
-    redirect_uri = callback_uri()
+    redirect_uri = APP_CALLBACK_URI if app_callback else callback_uri()
     payload = {"t": _STATE_PURPOSE, "v": verifier, "n": secrets.token_urlsafe(16), "r": redirect_uri, "u": username}
     state = vault_cipher().encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
     query = urlencode(
