@@ -17,6 +17,8 @@ const MessageMarkdown = dynamic(() => import("./message-markdown").then((m) => m
 
 interface PastedTextCardProps {
   text: string;
+  /** An attached file's name; without one the card is a long paste. */
+  name?: string;
   /** Composer only: drop the paste from the draft. */
   onRemove?: () => void;
   /** Composer only: put the paste back into the text field as plain draft. */
@@ -28,8 +30,15 @@ interface PastedTextCardProps {
  * A long paste shown as a file card, the way ChatGPT shows one: a document
  * tile, a name and a line count. Clicking it opens the full text.
  */
-export function PastedTextCard({ text, onRemove, onRestore, className }: PastedTextCardProps) {
+export function PastedTextCard({
+  text,
+  name,
+  onRemove,
+  onRestore,
+  className,
+}: PastedTextCardProps) {
   const [open, setOpen] = React.useState(false);
+  const title = name ?? msg("shared.agent.pasted_text");
   const lines = msg("shared.agent.pasted_text_lines", { n: countLines(text) });
 
   return (
@@ -45,8 +54,8 @@ export function PastedTextCard({ text, onRemove, onRestore, className }: PastedT
             <FileText className="size-4.5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">
-              {msg("shared.agent.pasted_text")}
+            <span className="block truncate text-sm font-medium text-foreground" dir="auto">
+              {title}
             </span>
             <span className="block truncate text-xs text-muted-foreground">{lines}</span>
           </span>
@@ -65,7 +74,9 @@ export function PastedTextCard({ text, onRemove, onRestore, className }: PastedT
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-[min(48rem,92vw)]">
           <DialogTitle className="flex items-baseline gap-2">
-            {msg("shared.agent.pasted_text")}
+            <span className="min-w-0 truncate" dir="auto">
+              {title}
+            </span>
             <span className="text-xs font-normal text-muted-foreground">{lines}</span>
           </DialogTitle>
           <div className="min-h-0 flex-1 overflow-y-auto text-sm" dir="auto">

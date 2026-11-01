@@ -25,7 +25,8 @@ interface ChatTranscriptState {
 interface ChatTranscriptProps {
   messages: readonly AgentMessage[];
   streaming: boolean;
-  editAndResend: (index: number, content: string) => void;
+  /** Returns false when the edit was refused; the editor then stays open. */
+  editAndResend: (index: number, content: string) => boolean | void;
   thinking?: AgentThinking;
   renderToolCall?: (call: AgentToolCall, ctx: { isRetry: boolean }) => React.ReactNode;
   isStepCall?: (call: AgentToolCall) => boolean;
@@ -114,7 +115,7 @@ export function ChatTranscript({
     if (editingIndex === null) return;
     const trimmed = editDraft.trim();
     if (!trimmed) return;
-    editAndResend(editingIndex, trimmed);
+    if (editAndResend(editingIndex, trimmed) === false) return;
     setEditingIndex(null);
     setEditDraft("");
   }, [editingIndex, editDraft, editAndResend]);

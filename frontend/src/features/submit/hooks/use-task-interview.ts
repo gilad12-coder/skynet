@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "react-toastify";
 
 import {
   localAgentEffort,
@@ -21,6 +22,7 @@ import type {
 } from "@/shared/types/unified-run";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 
+import { fitsInterviewTurn, INTERVIEW_TURN_MAX_CHARS } from "../lib/interview-turn";
 import { taskInterviewPatch, type TaskSlice, type WizardV2Context } from "../lib/wizard-v2";
 
 /** Task fields the interview writes and the user may take over by editing. */
@@ -47,8 +49,10 @@ export interface TaskInterviewState {
   setModel: (model: string | null) => void;
   reasoningEffort: string | null;
   setReasoningEffort: (effort: string | null) => void;
-  send: (content: string) => void;
-  editAndResend: (messageIndex: number, content: string) => void;
+  /** Send a user turn; false when it is too long and was not sent. */
+  send: (content: string) => boolean;
+  /** Resend an edited user turn; false when it is too long and was not sent. */
+  editAndResend: (messageIndex: number, content: string) => boolean;
   stop: () => void;
   /** Re-run the last turn: after an error, a stop, or a reload mid-turn. */
   retry: () => void;
@@ -57,6 +61,18 @@ export interface TaskInterviewState {
   /** Write a field by hand; the interview never overwrites it afterwards. */
   editField: <K extends TaskInterviewField>(field: K, value: TaskSlice[K]) => void;
   isDirty: (field: TaskInterviewField) => boolean;
+}
+
+/** Check a user turn's size; a turn over the limit is never saved, and the user is told why. */
+export function fitsInterview(content: string): boolean {
+  if (fitsInterviewTurn(content)) return true;
+  toast.error(
+    msg("submit.code.interview.too_long", {
+      count: content.length,
+      max: INTERVIEW_TURN_MAX_CHARS,
+    }),
+  );
+  return false;
 }
 
 /**
@@ -134,66 +150,70 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
       const controller = new AbortController();
       abortRef.current = controller;
 
-      void localAgentModel(model, agentSubscriptionFor("interview")).then((sentModel) =>
-        streamTaskInterviewTurn(
-          {
-            turns: next,
-            objective: current.objective,
-            background: current.background,
-            artifact_kind: current.artifactKind,
-            starting_version: current.startingVersion,
-            locale: getActiveLocale(),
-            model: sentModel ?? undefined,
-            reasoning_effort: localAgentEffort(model, reasoningEffort, sentModel) ?? undefined,
-          },
-          {
-            onReasoning: (chunk: string) =>
-              setThinking((prev) => ({
-                reasoning: (prev?.reasoning ?? "") + chunk,
-                startedAt: prev?.startedAt ?? Date.now(),
-                endedAt: null,
-                streaming: true,
-              })),
-            onMessagePatch: (chunk: string) => {
-              setThinking((prev) =>
-                prev && prev.streaming ? { ...prev, streaming: false, endedAt: Date.now() } : prev,
-              );
-              setStreamText((text) => text + chunk);
+      void localAgentModel(model, agentSubscriptionFor("interview"))
+        .then((sentModel) =>
+          streamTaskInterviewTurn(
+            {
+              turns: next,
+              objective: current.objective,
+              background: current.background,
+              artifact_kind: current.artifactKind,
+              starting_version: current.startingVersion,
+              locale: getActiveLocale(),
+              model: sentModel ?? undefined,
+              reasoning_effort: localAgentEffort(model, reasoningEffort, sentModel) ?? undefined,
             },
-            onReset: () => {
-              setStreamText("");
-              setThinking(null);
+            {
+              onReasoning: (chunk: string) =>
+                setThinking((prev) => ({
+                  reasoning: (prev?.reasoning ?? "") + chunk,
+                  startedAt: prev?.startedAt ?? Date.now(),
+                  endedAt: null,
+                  streaming: true,
+                })),
+              onMessagePatch: (chunk: string) => {
+                setThinking((prev) =>
+                  prev && prev.streaming
+                    ? { ...prev, streaming: false, endedAt: Date.now() }
+                    : prev,
+                );
+                setStreamText((text) => text + chunk);
+              },
+              onReset: () => {
+                setStreamText("");
+                setThinking(null);
+              },
+              onDone: (result: TaskInterviewTurnResult) => {
+                const transcript: UnifiedChatTurn[] = [
+                  ...next,
+                  { role: "assistant", content: result.message },
+                ];
+                patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
+                setServed((prev) => ({
+                  ...prev,
+                  [transcript.length - 1]: {
+                    model: result.model ?? null,
+                    servedModel: result.served_model ?? null,
+                  },
+                }));
+                setOptions(result.done ? [] : result.options);
+                setDone(result.done);
+                setBusy(false);
+                setStreamText("");
+                setThinking(null);
+              },
+              onError: (_message, code) => {
+                setError(true);
+                setErrorMessage(localModelRefusalMessage(code));
+                clearStream();
+              },
             },
-            onDone: (result: TaskInterviewTurnResult) => {
-              const transcript: UnifiedChatTurn[] = [
-                ...next,
-                { role: "assistant", content: result.message },
-              ];
-              patchTask({ ...taskInterviewPatch(result, dirtyRef.current), transcript });
-              setServed((prev) => ({
-                ...prev,
-                [transcript.length - 1]: {
-                  model: result.model ?? null,
-                  servedModel: result.served_model ?? null,
-                },
-              }));
-              setOptions(result.done ? [] : result.options);
-              setDone(result.done);
-              setBusy(false);
-              setStreamText("");
-              setThinking(null);
-            },
-            onError: (_message, code) => {
-              setError(true);
-              setErrorMessage(localModelRefusalMessage(code));
-              clearStream();
-            },
-          },
-          controller.signal,
-        ),
-      ).finally(() => {
-        if (abortRef.current === controller) abortRef.current = null;
-      });
+            controller.signal,
+          ),
+        )
+        .finally(() => {
+          if (abortRef.current === controller) abortRef.current = null;
+        });
     },
     [patchTask, model, reasoningEffort, clearStream],
   );
@@ -207,13 +227,20 @@ export function useTaskInterview(ctx: WizardV2Context, enabled: boolean): TaskIn
   );
 
   const send = React.useCallback(
-    (content: string) => runTurn([...turns, { role: "user", content }]),
+    (content: string) => {
+      if (!fitsInterview(content)) return false;
+      runTurn([...turns, { role: "user", content }]);
+      return true;
+    },
     [runTurn, turns],
   );
 
   const editAndResend = React.useCallback(
-    (messageIndex: number, content: string) =>
-      runTurn([...turns.slice(0, messageIndex), { role: "user", content }]),
+    (messageIndex: number, content: string) => {
+      if (!fitsInterview(content)) return false;
+      runTurn([...turns.slice(0, messageIndex), { role: "user", content }]);
+      return true;
+    },
     [runTurn, turns],
   );
 

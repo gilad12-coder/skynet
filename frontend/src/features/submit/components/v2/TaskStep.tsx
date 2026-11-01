@@ -24,7 +24,11 @@ import { agentSubscriptionFor } from "@/features/settings";
 import { cn } from "@/shared/lib/utils";
 
 import { useWizardAutoAdvance } from "../../hooks/use-auto-advance";
-import { useTaskInterview, type TaskInterviewState } from "../../hooks/use-task-interview";
+import {
+  fitsInterview,
+  useTaskInterview,
+  type TaskInterviewState,
+} from "../../hooks/use-task-interview";
 import { useWizardV2, useWizardV2Shell } from "../../hooks/use-unified-wizard";
 import { taskAdvanceFrom } from "../../lib/auto-advance";
 import { emptyRepoDraft, taskIssue } from "../../lib/wizard-v2";
@@ -226,8 +230,8 @@ function TaskInterviewPanel({
   const submit = () => {
     const content = draft.trim();
     if (!content || interview.busy) return;
-    setDraft("");
-    interview.send(content);
+    // A turn that is too long stays in the composer, so the user can fix it.
+    if (interview.send(content)) setDraft("");
   };
 
   // Answers typed while the interviewer is replying wait for it to finish.
@@ -307,6 +311,7 @@ function TaskInterviewPanel({
         onStop={interview.stop}
         streaming={interview.busy}
         midTurn={midTurn}
+        acceptsMidTurn={fitsInterview}
         placeholder={t("submit.v2.task.chat.placeholder")}
         modelMenu={
           <ComposerModelMenu

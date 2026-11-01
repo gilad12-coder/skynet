@@ -21,7 +21,8 @@ import { joinPastes, shouldAttachPaste, splitPastes, type SplitMessage } from ".
 /** Messages sent before cards existed show a long body as a card too. */
 function splitSent(content: string): SplitMessage {
   const split = splitPastes(content);
-  if (!split.pastes.length && shouldAttachPaste(content)) return { text: "", pastes: [content] };
+  if (!split.pastes.length && !split.files.length && shouldAttachPaste(content))
+    return { text: "", pastes: [content], files: [] };
   return split;
 }
 
@@ -44,13 +45,16 @@ interface UserBubbleProps {
 }
 
 export function UserBubble({ content, onEdit, editable = true }: UserBubbleProps) {
-  const { text, pastes } = splitSent(content);
+  const { text, pastes, files } = splitSent(content);
 
   return (
     <div className="flex justify-start group/user">
       <div className="flex max-w-[80%] flex-col items-start gap-1.5">
-        {pastes.length > 0 && (
+        {pastes.length + files.length > 0 && (
           <div className="flex flex-wrap gap-2">
+            {files.map((file, i) => (
+              <PastedTextCard key={`file-${i}`} name={file.name} text={file.text} />
+            ))}
             {pastes.map((paste, i) => (
               <PastedTextCard key={i} text={paste} />
             ))}
@@ -127,8 +131,18 @@ export function UserBubbleEditor({
   return (
     <div className="flex justify-start">
       <div className="max-w-[80%] w-full space-y-2">
-        {draft.pastes.length > 0 && (
+        {draft.pastes.length + draft.files.length > 0 && (
           <div className="flex flex-wrap gap-2">
+            {draft.files.map((file, i) => (
+              <PastedTextCard
+                key={`file-${i}`}
+                name={file.name}
+                text={file.text}
+                onRemove={() =>
+                  onChange(joinPastes({ ...draft, files: draft.files.filter((_, j) => j !== i) }))
+                }
+              />
+            ))}
             {draft.pastes.map((paste, i) => (
               <PastedTextCard
                 key={i}
@@ -136,7 +150,7 @@ export function UserBubbleEditor({
                 onRemove={() =>
                   onChange(
                     joinPastes({
-                      text: draft.text,
+                      ...draft,
                       pastes: draft.pastes.filter((_, j) => j !== i),
                     }),
                   )
@@ -150,7 +164,7 @@ export function UserBubbleEditor({
             ref={textareaRef}
             value={draft.text}
             onChange={(e) => {
-              onChange(joinPastes({ text: e.target.value, pastes: draft.pastes }));
+              onChange(joinPastes({ ...draft, text: e.target.value }));
               autoResizeTextarea(e.target);
             }}
             onKeyDown={(e) => {
