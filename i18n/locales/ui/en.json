@@ -4357,7 +4357,6 @@
   "desktop_link.scope.models": "Use hosted models, paid from your balance",
   "desktop_link.scope.connectors": "Use your connected data sources",
   "desktop_link.scope.web": "Use hosted web search and browsing",
-  "desktop_link.unlink_note": "You can unlink this Mac at any time in the Mac app.",
   "desktop_link.approve": "Link this Mac",
   "desktop_link.cancel": "Cancel",
   "desktop_link.returning": "Returning to the Mac app…",

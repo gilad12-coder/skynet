@@ -5,3 +5,4 @@ stage/
 *.log
 # The root .gitignore drops build/; electron-builder reads entitlements from here.
 !build/
+dev-app/

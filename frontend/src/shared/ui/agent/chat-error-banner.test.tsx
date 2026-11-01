@@ -1,0 +1,44 @@
+/*
+ * node --test cannot load .tsx, so this runs through jiti (chat-error-banner.render.test.ts
+ * spawns it inside `npm run test:unit`). To run it by hand from frontend/:
+ * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// The classic JSX transform the test loader applies reads a global React.
+(globalThis as { React?: typeof React }).React = React;
+const { ChatErrorBanner } = await import("./chat-error-banner");
+
+const BALANCE = "Your balance is empty. Add funds to keep chatting with the agent.";
+const ADD_FUNDS = "Add funds";
+
+function messageTag(html: string): string {
+  const match = /<p [^>]*>/.exec(html);
+  assert.ok(match, html);
+  return match[0];
+}
+
+void describe("ChatErrorBanner", () => {
+  void it("keeps the message on one line and puts the action on its own row", () => {
+    const html = renderToStaticMarkup(
+      <ChatErrorBanner message={BALANCE} action={<button type="button">{ADD_FUNDS}</button>} />,
+    );
+    const p = messageTag(html);
+    assert.match(p, /\btruncate\b/);
+    assert.doesNotMatch(p, /break-words/);
+    assert.ok(p.includes(`title="${BALANCE}"`), p);
+    // The action renders after the message row closes, not beside the text.
+    assert.match(html, /<\/p><\/div><div class="mt-2 ps-10"><button/);
+  });
+
+  void it("lets an error without an action wrap", () => {
+    const html = renderToStaticMarkup(<ChatErrorBanner message="Model unavailable" />);
+    const p = messageTag(html);
+    assert.match(p, /break-words/);
+    assert.doesNotMatch(p, /\btruncate\b/);
+    assert.doesNotMatch(p, /title=/);
+  });
+});

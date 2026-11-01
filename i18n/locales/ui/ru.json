@@ -4357,7 +4357,6 @@
   "desktop_link.scope.models": "Использовать размещённые модели с оплатой с вашего баланса",
   "desktop_link.scope.connectors": "Использовать ваши подключённые источники данных",
   "desktop_link.scope.web": "Использовать размещённый веб-поиск и просмотр веб-страниц",
-  "desktop_link.unlink_note": "Связь с этим Mac можно отменить в любой момент в приложении для Mac.",
   "desktop_link.approve": "Связать этот Mac",
   "desktop_link.cancel": "Отмена",
   "desktop_link.returning": "Возвращаемся в приложение для Mac…",

@@ -4357,7 +4357,6 @@
   "desktop_link.scope.models": "ホストされたモデルを使用（残高から支払い）",
   "desktop_link.scope.connectors": "接続済みのデータソースを使用",
   "desktop_link.scope.web": "ホストされたウェブ検索とブラウジングを使用",
-  "desktop_link.unlink_note": "この Mac のリンクは Mac アプリでいつでも解除できます。",
   "desktop_link.approve": "この Mac をリンク",
   "desktop_link.cancel": "キャンセル",
   "desktop_link.returning": "Mac アプリに戻っています…",

@@ -4357,7 +4357,6 @@
   "desktop_link.scope.models": "Barındırılan modelleri kullanma (bakiyenizden ödenir)",
   "desktop_link.scope.connectors": "Bağlı veri kaynaklarınızı kullanma",
   "desktop_link.scope.web": "Barındırılan web aramasını ve gezinmeyi kullanma",
-  "desktop_link.unlink_note": "Bu Mac’in bağlantısını Mac uygulamasından istediğiniz zaman kaldırabilirsiniz.",
   "desktop_link.approve": "Bu Mac’i bağla",
   "desktop_link.cancel": "İptal",
   "desktop_link.returning": "Mac uygulamasına dönülüyor…",

@@ -4357,7 +4357,6 @@
   "desktop_link.scope.models": "Usar modelos hospedados, pagos com seu saldo",
   "desktop_link.scope.connectors": "Usar suas fontes de dados conectadas",
   "desktop_link.scope.web": "Usar pesquisa e navegação na web hospedadas",
-  "desktop_link.unlink_note": "Você pode desvincular este Mac a qualquer momento no app do Mac.",
   "desktop_link.approve": "Vincular este Mac",
   "desktop_link.cancel": "Cancelar",
   "desktop_link.returning": "Voltando ao app do Mac…",
