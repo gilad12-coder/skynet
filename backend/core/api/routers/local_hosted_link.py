@@ -48,9 +48,16 @@ def _mac_name() -> str:
     Returns:
         The Computer Name, else the host name without ``.local``, else ``"Mac"``.
     """
+    # scutil writes UTF-8, but the app passes the login shell's LANG on, and an
+    # ASCII locale would fail on the default name's curly apostrophe.
     try:
         name = subprocess.run(
-            ["/usr/sbin/scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=2, check=True
+            ["/usr/sbin/scutil", "--get", "ComputerName"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=2,
+            check=True,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         name = ""

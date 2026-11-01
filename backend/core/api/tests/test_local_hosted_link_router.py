@@ -299,6 +299,35 @@ def test_start_names_the_mac_by_its_computer_name(
     assert _consent_device_name(client) == "Gilad’s MacBook Pro"
 
 
+def test_start_reads_a_non_ascii_computer_name_under_an_ascii_locale(
+    client: TestClient, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A curly apostrophe in the name still decodes when the login shell sets an ASCII locale.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to fake ``scutil``.
+    """
+
+    def scutil(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Decode ``scutil``'s UTF-8 bytes the way ``subprocess.run`` does under ``LANG=en_US.US-ASCII``.
+
+        Args:
+            args: The command.
+            **kwargs: ``subprocess.run`` options; ``encoding`` and ``errors`` decide the decoding.
+
+        Returns:
+            The finished process with the decoded output.
+        """
+        raw = "Gilad’s MacBook Pro\n".encode()
+        stdout = raw.decode(str(kwargs.get("encoding") or "ascii"), str(kwargs.get("errors") or "strict"))
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(local_hosted_link.subprocess, "run", scutil)
+    assert _consent_device_name(client) == "Gilad’s MacBook Pro"
+
+
 def test_start_falls_back_to_the_host_name_then_mac(
     client: TestClient, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
