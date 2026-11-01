@@ -6,7 +6,7 @@
   "description": "Skynet for Mac: runs the Skynet stack locally on your own model subscriptions.",
   "license": "AGPL-3.0-only",
   "author": "Skynet maintainers",
-  "homepage": "https://github.com/gilad12-coder/skynet",
+  "homepage": "https://github.com/Skynet-ml/skynet",
   "main": "out/main/index.js",
   "engines": {
     "node": ">=22"
