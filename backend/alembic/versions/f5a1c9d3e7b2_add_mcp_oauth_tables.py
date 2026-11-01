@@ -1,7 +1,7 @@
 """add remote MCP OAuth tables
 
 Revision ID: f5a1c9d3e7b2
-Revises: c4bbf54b3990
+Revises: d8e1f2a3b4c5
 Create Date: 2026-10-31 12:00:00.000000
 
 SKY-229: OAuth 2.1 for the hosted remote MCP server. ``mcp_oauth_clients``
@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "f5a1c9d3e7b2"
-down_revision: str | None = "c4bbf54b3990"
+down_revision: str | None = "d8e1f2a3b4c5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -262,10 +262,27 @@ def test_link_flow_issues_scoped_pair_and_whoami(harness: Any) -> None:
     assert who.json() == {
         "email": "alice@example.test",
         "name": "Alice Example",
+        "image": None,
         "link_id": pair["link_id"],
         "scopes": ALL_SCOPES.split(),
         "device_name": "Alice's MacBook Pro",
     }
+
+
+def test_whoami_returns_the_profile_picture(harness: Any) -> None:
+    """Whoami returns the picture saved at the last provider sign-in."""
+    client, engine, _ = harness
+    with Session(engine) as session:
+        user = session.get(UserModel, "alice@example.test")
+        assert user is not None
+        user.image_url = "https://lh3.googleusercontent.com/a/alice"
+        session.commit()
+    response, verifier = _authorize(client)
+    pair = _exchange(client, response.json()["code"], verifier).json()
+
+    who = client.get("/desktop/v1/whoami", headers=_bearer(pair["access_token"]))
+
+    assert who.json()["image"] == "https://lh3.googleusercontent.com/a/alice"
 
 
 def test_database_holds_only_hashes(harness: Any) -> None:

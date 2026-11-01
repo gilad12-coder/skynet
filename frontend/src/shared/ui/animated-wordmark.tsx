@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APP_NAME } from "@/shared/lib/brand";
-import { HOATZIN_LOCKUP_VIEWBOX, HoatzinShapes } from "@/shared/ui/app-mark";
+import { HoatzinShapes } from "@/shared/ui/app-mark";
 
 /**
  * Animated app wordmark with morphing SVG letters, spelling the app's name.
@@ -130,8 +130,8 @@ const LETTERS: LetterDef[] = [
 const TOTAL_WIDTH = 475;
 
 // The hoatzin brand mark (shared/ui/app-mark.tsx) leads the letters, taller than them:
-// the cropped neck ends on the baseline (y=90), the eye sits on the letters' centre line
-// (y=46) and the crest rises above the cap height. It stays still while the letters morph.
+// the cropped neck ends on the baseline (y=90) and the crest rises above the cap height.
+// It stays still while the letters morph.
 const MARK_TOP = -30;
 const MARK_HEIGHT = 120;
 const MARK_WIDTH = 111;
@@ -328,11 +328,13 @@ export function AnimatedWordmark({
         style={fluid ? { width: "100%", height: "auto", color: "var(--foreground)" } : { color: "var(--foreground)" }}
       >
         {withMark && (
-          <svg y={MARK_TOP} width={MARK_WIDTH} height={MARK_HEIGHT} viewBox={HOATZIN_LOCKUP_VIEWBOX}>
-            {/* Fluid lockups fill a wide column; fixed ones are header-sized, where the
-                full line work would blur together. */}
-            <HoatzinShapes detail={fluid || svgHeight >= 64 ? "full" : "simple"} />
-          </svg>
+          // Fluid lockups fill a wide column and need the larger artwork; fixed ones are header-sized.
+          <HoatzinShapes
+            detail={fluid || svgHeight >= 64 ? "full" : "simple"}
+            y={MARK_TOP}
+            width={MARK_WIDTH}
+            height={MARK_HEIGHT}
+          />
         )}
         {LETTERS.map((letter, li) => (
           <g key={li} transform={`translate(${letter.offset + (withMark ? MARK_SHIFT : 0)}, 0)`}>

@@ -11,8 +11,8 @@ const brand = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "..", "i18n", "brand.json"), "utf8"),
 ) as { appName: string };
 
-// The service worker and the favicons are served as-is, so they hold a literal.
-const STATIC_FILES = ["public/sw.js", "public/favicon.svg", "public/favicon-dark.svg"];
+// The service worker is served as-is, so it holds a literal.
+const STATIC_FILES = ["public/sw.js"];
 
 test("the generated APP_NAME matches i18n/brand.json", () => {
   assert.equal(APP_NAME, brand.appName);

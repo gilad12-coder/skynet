@@ -49,6 +49,8 @@ logger = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USE_CASES = frozenset({"classification", "extraction", "rag_agents", "generation", "other"})
 _JOB_ROLES = frozenset({"engineer", "researcher", "pm", "other"})
+# Width of ``users.image_url``; a longer picture URL is dropped, not rejected.
+_IMAGE_URL_MAX_LENGTH = 2048
 # Accounts store no language preference and these internal routes carry no
 # request locale, so code emails keep the English they were always sent in.
 ACCOUNT_EMAIL_LOCALE = "en"
@@ -109,6 +111,8 @@ class OAuthProvisionRequest(BaseModel):
         max_length=255,
         description="The provider's stable account id; a linked one decides the account before any email does.",
     )
+    # No max_length: a picture is cosmetic, so an oversized one must not fail the sign-in.
+    image: str = Field(default="", description="Profile picture URL from the provider profile.")
 
 
 # Links a provider account to the signed-in account from Settings.
@@ -474,7 +478,8 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         loses its password, since the provider is the first proof of ownership.
 
         Args:
-            body: Provider-asserted email, display name, and other verified emails.
+            body: Provider-asserted email, display name, other verified emails
+                and profile picture URL (kept only when it is ``https``).
             x_internal_auth: Shared-secret header proving the caller is the
                 trusted frontend.
 
@@ -526,6 +531,8 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                         created_at=now,
                     )
                 )
+            if body.image.startswith("https://") and len(body.image) <= _IMAGE_URL_MAX_LENGTH:
+                row.image_url = body.image
             first_login = row.last_login_at is None
             row.last_login_at = now
             email = str(row.email)

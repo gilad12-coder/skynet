@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, shell } from "electron";
-import { APP_SCHEME, appUrlFromArgv, parseLinkCallback } from "./app-url";
+import { APP_SCHEME, appUrlFromArgv, appWindowUrl, parseLinkCallback } from "./app-url";
 import { HostedLinkClient } from "./hosted-link";
 import { childPath, probeClis, probeDocker, readCliLimits, searchDirs } from "./cli-detect";
 import { allocatePorts, type PortPlan } from "./ports";
@@ -366,7 +366,7 @@ async function openApp(): Promise<void> {
   if (quitting || !frontendUrl || (state.kind !== "starting" && state.kind !== "sign_in")) return;
   setState({ ...state, kind: "ready", url: frontendUrl, signIn: undefined });
   useAppSize();
-  await win?.loadURL(frontendUrl);
+  await loadAppUrl(frontendUrl);
 }
 
 /**
@@ -485,19 +485,30 @@ async function stopStack(): Promise<void> {
 
 function isAllowedUrl(target: string): boolean {
   if (target.startsWith("file://")) return true;
-  if (frontendUrl === null) return false;
-  let url: URL;
+  return frontendUrl !== null && appWindowUrl(target, frontendUrl) !== null;
+}
+
+function guardNavigation(event: Electron.Event, url: string): void {
+  if (url.startsWith("file://")) return;
+  const appUrl = frontendUrl === null ? null : appWindowUrl(url, frontendUrl);
+  if (appUrl === url) return;
+  event.preventDefault();
+  if (appUrl !== null) {
+    loadAppUrl(appUrl).catch((err) => log(`app page load failed: ${err instanceof Error ? err.message : String(err)}`));
+  } else if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+}
+
+/**
+ * Load a page in the app window. guardNavigation can stop a redirect of this
+ * load and start its own; Electron then rejects this load with ERR_ABORTED,
+ * which is not a failure.
+ */
+async function loadAppUrl(url: string): Promise<void> {
   try {
-    url = new URL(target);
-  } catch {
-    return false;
+    await win?.loadURL(url);
+  } catch (err) {
+    if ((err as { code?: string }).code !== "ERR_ABORTED") throw err;
   }
-  // Next.js builds callbackUrl with "localhost" even though the server binds 127.0.0.1.
-  return (
-    url.protocol === "http:" &&
-    (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
-    url.port === new URL(frontendUrl).port
-  );
 }
 
 function createWindow(): void {
@@ -522,10 +533,10 @@ function createWindow(): void {
     if (/^https?:\/\//.test(url) && !isAllowedUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isAllowedUrl(url)) return;
-    event.preventDefault();
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  win.webContents.on("will-navigate", guardNavigation);
+  // Frames (for example the sandboxed iframe of model-written HTML) keep their own redirects.
+  win.webContents.on("will-redirect", (event) => {
+    if (event.isMainFrame) guardNavigation(event, event.url);
   });
   win.on("closed", () => {
     win = null;

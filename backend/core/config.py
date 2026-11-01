@@ -1373,6 +1373,14 @@ class Settings(BaseSettings):
             "Dictation runs on the platform's transcription key and is not billed to user balances. 0 disables the cap."
         ),
     )
+    rate_limit_attachments_per_hour: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "Per-account cap on files read for agent chats per hour, enforced across replicas via Redis. "
+            "Bounds the parsing work one account can cause. 0 disables the cap."
+        ),
+    )
     transcription_monthly_budget_usd: float = Field(
         default=10.0,
         ge=0,

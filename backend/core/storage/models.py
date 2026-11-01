@@ -343,6 +343,9 @@ class UserModel(Base):
     totp_pending_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_2fa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provider profile picture, refreshed on each OAuth sign-in. The Mac app
+    # has no provider session, so desktop whoami returns this instead.
+    image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     # Our own and test accounts (synthetic ``.local`` fixtures, configured
     # admins, anything an admin flags) that every product metric excludes.
     # Defaults False so every new sign-up counts as a real user.

@@ -49,13 +49,14 @@ import {
 } from "../lib/screen-agent";
 import type { ToolEndPayload, WizardState } from "../lib/types";
 import { stageDatasetForAgent } from "@/shared/lib/api";
+import { DATASET_UPLOAD_EXTENSIONS } from "@/shared/lib/parse-dataset";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { MAX_WIDTH, MIN_WIDTH, NARROW_VIEWPORT_QUERY } from "../constants";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { ConversationDrawer } from "./ConversationDrawer";
-import { DATASET_FILE_ACCEPT, DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
+import { DatasetUploadCard, type ConfirmedDataset } from "./DatasetUploadCard";
 import { LibraryDatasetCard, type ConfirmedLibraryDataset } from "./LibraryDatasetCard";
 import { InferenceFormCard } from "./InferenceFormCard";
 import { MinimizedPill } from "./MinimizedPill";
@@ -83,6 +84,12 @@ const RICH_CARD_TOOLS = new Set<string>([
 // Submit tools whose success should mirror the manual wizard submit button:
 // play the splash banner, then route to the new optimization's details.
 const SUBMIT_TOOLS: ReadonlySet<string> = new Set(["submit_unified_run_optimize_post"]);
+
+/** Whether a file opens the dataset column-mapping card instead of being read as text. */
+function isDatasetFile(file: File): boolean {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return (DATASET_UPLOAD_EXTENSIONS as readonly string[]).includes(ext);
+}
 
 /**
  * Pull the new optimization's id out of a submit tool result. The backend's
@@ -487,9 +494,9 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
 
   const [draft, setDraft] = React.useState("");
   const [attachOpen, setAttachOpen] = React.useState(false);
-  // The + button opens the OS file picker directly; the popover only appears
-  // once a file was chosen, already parsed into the column-mapping card.
-  const attachInputRef = React.useRef<HTMLInputElement | null>(null);
+  // The composer's attach button opens the OS file picker; the popover only
+  // appears once a dataset file was chosen, already parsed into the
+  // column-mapping card.
   const [attachFile, setAttachFile] = React.useState<File | null>(null);
   const confirmedDatasetCallsRef = React.useRef<Set<string>>(new Set());
 
@@ -916,22 +923,15 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
             openRouterEngine={localMenu.openRouterEngine}
           />
         }
+        // Dataset files keep their column-mapping card; any other file is
+        // read as text by the composer.
+        claimsFile={isDatasetFile}
+        onAttachFile={(file) => {
+          setAttachFile(file);
+          setAttachOpen(true);
+        }}
         leadingControls={
           <>
-            <input
-              ref={attachInputRef}
-              type="file"
-              accept={DATASET_FILE_ACCEPT}
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (file) {
-                  setAttachFile(file);
-                  setAttachOpen(true);
-                }
-              }}
-            />
             <Popover
               open={attachOpen}
               onOpenChange={(open) => {
@@ -939,32 +939,10 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                 if (!open) setAttachFile(null);
               }}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={msg("agent.composer.attach")}
-                      onClick={(e) => {
-                        // Skip the popover toggle — go straight to the
-                        // OS file picker; the popover opens on pick.
-                        e.preventDefault();
-                        attachInputRef.current?.click();
-                      }}
-                      className={cn(
-                        "inline-flex size-9 items-center justify-center rounded-full",
-                        "text-muted-foreground transition-colors cursor-pointer",
-                        "hover:bg-accent/60 hover:text-foreground",
-                        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-                        "disabled:pointer-events-none disabled:opacity-50",
-                      )}
-                    >
-                      <Plus className="size-4" />
-                    </button>
-                  </PopoverTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="top">{msg("agent.composer.attach")}</TooltipContent>
-              </Tooltip>
+              {/* Anchors the dataset card beside the composer's attach button. */}
+              <PopoverTrigger asChild>
+                <span aria-hidden className="pointer-events-none -ms-1 block size-0" />
+              </PopoverTrigger>
               <PopoverContent
                 side="top"
                 align="start"

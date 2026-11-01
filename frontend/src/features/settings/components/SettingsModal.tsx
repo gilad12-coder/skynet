@@ -118,6 +118,7 @@ import { SecurityTab } from "./SecurityTab";
 import { SETTINGS_TABS, visibleSettingsTabs, type SettingsTab } from "../lib/tabs";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { isLocalMode } from "@/shared/lib/runtime-env";
+import { linkedUsername, useLinkedAccount } from "@/shared/hooks/use-linked-account";
 import { AgentEngineSetting } from "./AgentEngineSetting";
 import { AgentLocalRunSetting } from "./AgentLocalRunSetting";
 import { useLocalAgentMenuModels } from "@/features/local-runtime";
@@ -311,7 +312,9 @@ function AgentTab() {
 function AccountTab() {
   const { data: session } = useSession();
   const { setOpen } = useSettingsModal();
-  const username = session?.user?.name ?? "";
+  const account = useLinkedAccount();
+  // The Mac app's session user is an internal placeholder; show the linked hosted account instead.
+  const username = isLocalMode() ? linkedUsername(account) : (session?.user?.name ?? "");
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
   const isAdmin = role === "admin";
 

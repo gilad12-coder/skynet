@@ -286,6 +286,7 @@ class FakeHosted:
                 json={
                     "email": self.email,
                     "name": "Dana",
+                    "image": "https://lh3.googleusercontent.com/a/dana",
                     "link_id": "dl_00000000-0000-0000-0000-000000000001",
                     "scopes": self.scopes.split(),
                     "device_name": "Test Mac",

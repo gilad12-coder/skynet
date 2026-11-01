@@ -47,6 +47,7 @@ import {
   type BillingTransaction,
   type BillingTransactionsResponse,
 } from "@/shared/lib/api";
+import { LinkAccountPrompt } from "./LinkAccountPrompt";
 import { useBalance } from "../providers/balance-provider";
 import {
   TOP_UP_PACKS,
@@ -893,7 +894,8 @@ function BillingDetails() {
  * follow below. Balances are stored in cents and read in dollars.
  */
 export function WalletTab() {
-  const { totalCents, status, syncing, loading, available, loadError, refresh } = useBalance();
+  const { shown, syncing, loading, loadError, refresh } = useBalance();
+  const { totalCents, status, available, linkNeeded, hosted } = shown;
   const { locale } = useLocale();
 
   return (
@@ -939,6 +941,12 @@ export function WalletTab() {
                 {available ? formatCentsUsd(totalCents, locale) : "—"}
               </span>
             </div>
+            {linkNeeded && <LinkAccountPrompt />}
+            {hosted && available && (
+              <span className="text-xs text-muted-foreground">
+                {msg("billing.local.hosted_note")}
+              </span>
+            )}
             {/* Low balance stays an operational metric here too — same calm line as
                 the header chip, no red, no urgency. */}
             {available && status === "low" && (

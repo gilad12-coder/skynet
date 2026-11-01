@@ -248,6 +248,9 @@ export const WALLET_CHANGED_EVENT = "wallet-changed";
 export function announceWalletChange(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
 }
+/** Browser event fired when the Mac app links or unlinks its hosted account, so the balance re-reads. */
+export const HOSTED_LINK_CHANGED_EVENT = "hosted-link-changed";
+
 /** Browser event fired when storage usage changes, such as a delete or a full quota, so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
@@ -1135,6 +1138,46 @@ export function updateLocalMacosHeld(held: boolean) {
   return request<LocalNotificationChannels>("/local/notifications/macos", {
     method: "PATCH",
     body: JSON.stringify({ held }),
+  });
+}
+
+export interface LocalHostedLinkStatus {
+  linked: boolean;
+  account_email?: string | null;
+}
+
+/** Read whether the Mac app is linked to a hosted account. Local-only route. */
+export function getLocalHostedLinkStatus() {
+  return request<LocalHostedLinkStatus>("/local/hosted-link/status");
+}
+
+/** Read the linked hosted account's name and email. Calls hosted through the local API. */
+export function getLocalHostedWhoami() {
+  return request<{ email?: string | null; name?: string | null; image?: string | null }>(
+    "/local/hosted-link/whoami",
+  );
+}
+
+/** Read the linked hosted account's balance. Calls hosted through the local API. */
+export function getLocalHostedBalance() {
+  return request<{ available_cents: number; currency: string; low_balance: boolean }>(
+    "/local/hosted-link/balance",
+  );
+}
+
+/** Unlink the Mac app from its hosted account. Local runs and settings stay. */
+export function unlinkLocalHostedLink() {
+  return request<{ hosted_revoked: boolean }>("/local/hosted-link/unlink", { method: "POST" });
+}
+
+/**
+ * Start linking the Mac app to a hosted account. The returned consent URL
+ * redirects back to this API's loopback callback, which finishes the link.
+ */
+export function startLocalHostedLink() {
+  return request<{ authorize_url: string }>("/local/hosted-link/start", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 
@@ -3192,6 +3235,18 @@ export async function claimSharedTaggerSession(token: string) {
   );
   invalidateCache("/tagging-sessions");
   return res;
+}
+
+/** The text an agent reads for a file attached in a chat: the extracted
+ *  contents, or a short note when the file cannot be read. */
+export async function extractAttachmentText(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await request<{ text: string }>("/agent/attachments/extract", {
+    method: "POST",
+    body: form,
+  });
+  return res.text;
 }
 
 /** Transcript of one dictated clip plus which STT provider produced it. */

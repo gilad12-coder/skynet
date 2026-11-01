@@ -97,6 +97,7 @@ from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
 from .routers.admin import create_admin_router
 from .routers.admin_dashboard import create_admin_dashboard_router
+from .routers.agent_attachments import create_agent_attachments_router
 from .routers.agent_engine import create_agent_engine_router
 from .routers.agent_history import create_agent_history_router
 from .routers.analytics import create_analytics_router
@@ -982,7 +983,7 @@ def create_app(
         base = get_scalar_api_reference(
             openapi_url="/openapi.public.json",
             title=f"{app.title} API",
-            scalar_favicon_url="/scalar-static/favicon.svg",
+            scalar_favicon_url="/scalar-static/favicon.png",
             scalar_js_url="/scalar-static/standalone.js",
             agent=AgentScalarConfig(disabled=True),
             telemetry=False,
@@ -1334,6 +1335,7 @@ def create_app(
     app.include_router(create_code_validation_router(), tags=["Code Validation"])
     app.include_router(create_mcp_probe_router(), tags=["Code Validation"])
     app.include_router(create_transcription_router(job_store=job_store), tags=["Transcription"])
+    app.include_router(create_agent_attachments_router(), tags=["Optimizations"])
     app.include_router(create_code_agent_router(job_store=job_store), tags=["Code Validation"])
     app.include_router(create_generalist_agent_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
