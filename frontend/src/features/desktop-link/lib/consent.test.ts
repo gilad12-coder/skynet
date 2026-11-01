@@ -9,6 +9,7 @@ import {
   returnsToDesktopLink,
   deniedCallbackUrl,
   errorMessageKey,
+  isAppCallback,
   isLoopbackCallback,
   parseLinkRequest,
   scopeMessageKey,
@@ -59,6 +60,37 @@ test("loopback callback accepts only the Mac app's callback on 127.0.0.1 or [::1
   ]) {
     assert.equal(isLoopbackCallback(uri), false, uri);
   }
+});
+
+test("app callback accepts only the exact skynet://link/callback URL or a loopback callback", () => {
+  assert.ok(isAppCallback("skynet://link/callback"));
+  assert.ok(isAppCallback(CALLBACK));
+  for (const uri of [
+    "skynet://link/callback/",
+    "skynet://link/callback?x=1",
+    "skynet://link/other",
+    "skynet://evil/callback",
+    "skynet:link/callback",
+    "SKYNET://link/callback",
+    "skynet-evil://link/callback",
+    "https://evil.com/cb",
+    "",
+  ]) {
+    assert.equal(isAppCallback(uri), false, uri);
+  }
+});
+
+test("approve and cancel hand the result to the skynet:// URL", () => {
+  const parsed = parseLinkRequest(macQuery({ redirect_uri: "skynet://link/callback" }));
+  assert.ok(parsed.ok);
+  const approved = new URL(approvedCallbackUrl(parsed.request, "abc") ?? "");
+  assert.equal(`${approved.protocol}//${approved.host}${approved.pathname}`, "skynet://link/callback");
+  assert.equal(approved.searchParams.get("code"), "abc");
+  assert.equal(approved.searchParams.get("state"), STATE);
+  assert.equal(
+    deniedCallbackUrl(parsed.request),
+    `skynet://link/callback?error=access_denied&state=${encodeURIComponent(STATE)}`,
+  );
 });
 
 test("a valid Mac request parses, with scopes in backend order", () => {

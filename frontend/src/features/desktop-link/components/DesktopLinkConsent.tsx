@@ -29,8 +29,8 @@ function errorText(error: LinkError): string {
 /**
  * Hosted consent page for the Mac account link. The route is login-gated, so
  * the user is signed in here. "Link this Mac" asks the backend for a
- * single-use code and hands it to the Mac app's loopback callback; "Cancel"
- * tells the Mac app the user declined.
+ * single-use code and hands it to the Mac app's callback (its skynet:// URL);
+ * "Cancel" tells the Mac app the user declined.
  */
 export function DesktopLinkConsent({ query }: { query: string }) {
   const { data: session } = useSession();
@@ -41,7 +41,7 @@ export function DesktopLinkConsent({ query }: { query: string }) {
   if (!parsed.ok) {
     return (
       <ConsentFrame>
-        <h1 className="text-center text-lg font-semibold text-foreground">
+        <h1 className="text-center text-lg! leading-snug! font-semibold text-foreground">
           {msg("desktop_link.error_title")}
         </h1>
         <InlineErrorRow message={msg(errorMessageKey(parsed.problem) as MessageKey)} />
@@ -91,7 +91,7 @@ export function DesktopLinkConsent({ query }: { query: string }) {
 
   return (
     <ConsentFrame>
-      <h1 className="text-center text-xl font-semibold text-balance text-foreground">
+      <h1 className="text-center text-2xl! leading-tight! font-semibold text-balance text-foreground">
         {msg("desktop_link.title")}
       </h1>
 
@@ -119,7 +119,7 @@ export function DesktopLinkConsent({ query }: { query: string }) {
       </dl>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-foreground">{msg("desktop_link.allows_heading")}</h2>
+        <h2 className="text-sm! leading-5! font-medium text-foreground">{msg("desktop_link.allows_heading")}</h2>
         <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
           {request.scopes.map((scope) => (
             <li key={scope} className="flex items-start gap-2">
@@ -128,7 +128,6 @@ export function DesktopLinkConsent({ query }: { query: string }) {
             </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">{msg("desktop_link.unlink_note")}</p>
       </section>
 
       {error && <InlineErrorRow message={errorText(error)} />}
@@ -139,17 +138,17 @@ export function DesktopLinkConsent({ query }: { query: string }) {
           {msg("desktop_link.returning")}
         </p>
       ) : (
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="grid grid-cols-2 gap-3">
           <Button
             variant="outline"
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full"
             disabled={busy}
             onClick={() => leave(deniedCallbackUrl(request))}
           >
             {msg("desktop_link.cancel")}
           </Button>
           <Button
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full"
             disabled={busy}
             aria-busy={phase === "linking"}
             onClick={() => void approve()}
@@ -164,10 +163,13 @@ export function DesktopLinkConsent({ query }: { query: string }) {
   );
 }
 
+// The global h1/h2 sizes (globals.css) are unlayered, so the headings here
+// force theirs with "!". The card is wide enough for the English and Hebrew
+// title on one line; longer translations wrap, balanced.
 function ConsentFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <div className="flex w-full max-w-md flex-col gap-5 rounded-2xl border border-border/50 bg-card p-6 text-card-foreground shadow-sm">
+      <div className="flex w-full max-w-lg flex-col gap-5 rounded-2xl border border-border/50 bg-card p-6 text-card-foreground shadow-sm">
         <AppMark className="mx-auto size-12 text-foreground" aria-hidden />
         {children}
       </div>

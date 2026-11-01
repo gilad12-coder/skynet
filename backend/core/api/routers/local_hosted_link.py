@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import platform
+import subprocess
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -29,6 +30,38 @@ _LOCAL_ONLY = [Depends(require_local_mode)]
 # Request body of POST /local/hosted-link/start.
 class HostedLinkStartRequest(BaseModel):
     device_name: str | None = Field(default=None, max_length=100)
+    app_callback: bool = False
+
+
+# Request body of POST /local/hosted-link/finish: the values the skynet:// URL carried.
+class HostedLinkFinishRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=256)
+    state: str = Field(min_length=1, max_length=4096)
+
+
+def _mac_name() -> str:
+    """Return the name of this Mac that people know from System Settings.
+
+    ``platform.node()`` is the network host name (``Gilads-MacBook-Pro.local``),
+    so it is only the fallback when the Computer Name cannot be read.
+
+    Returns:
+        The Computer Name, else the host name without ``.local``, else ``"Mac"``.
+    """
+    # scutil writes UTF-8, but the app passes the login shell's LANG on, and an
+    # ASCII locale would fail on the default name's curly apostrophe.
+    try:
+        name = subprocess.run(
+            ["/usr/sbin/scutil", "--get", "ComputerName"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=2,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    return (name or platform.node().removesuffix(".local") or "Mac")[:100]
 
 
 def _page(message: str, *, status: int) -> HTMLResponse:
@@ -59,7 +92,7 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
         job_store: Storage backend whose ``engine`` holds ``user_connectors``.
 
     Returns:
-        A FastAPI ``APIRouter`` with start, callback, status, whoami, balance and unlink.
+        A FastAPI ``APIRouter`` with start, finish, callback, status, whoami, balance and unlink.
     """
     router = APIRouter()
     engine = job_store.engine
@@ -70,13 +103,31 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
 
         Args:
             user: The signed-in local user.
-            body: Optional Mac name for the consent screen.
+            body: Optional Mac name for the consent screen, and whether the
+                result goes to the Mac app's ``skynet://`` URL.
 
         Returns:
             ``{"authorize_url": ...}``.
         """
-        device_name = (body.device_name if body else None) or platform.node() or "Mac"
-        return {"authorize_url": hosted_link.start_link(user.username, device_name=device_name)}
+        device_name = (body.device_name if body else None) or _mac_name()
+        app_callback = body.app_callback if body else False
+        return {
+            "authorize_url": hosted_link.start_link(user.username, device_name=device_name, app_callback=app_callback)
+        }
+
+    @router.post("/local/hosted-link/finish", include_in_schema=False, dependencies=_LOCAL_ONLY)
+    def finish(user: AuthenticatedUserDep, body: HostedLinkFinishRequest) -> dict[str, Any]:
+        """Finish the link from the ``skynet://`` URL the Mac app received.
+
+        Args:
+            user: The signed-in local user (the Mac app).
+            body: The code and state from the URL.
+
+        Returns:
+            ``{"linked": true, "account_email": ...}``.
+        """
+        view = hosted_link.finish_link(engine, code=body.code, state=body.state)
+        return {"linked": True, "account_email": view.account_label}
 
     @router.get("/local/hosted-link/callback", include_in_schema=False, dependencies=_LOCAL_ONLY)
     def callback(code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:
@@ -131,10 +182,10 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
             user: The signed-in local user.
 
         Returns:
-            ``{"email", "name", "link_id", "scopes", "device_name"}``.
+            ``{"email", "name", "image", "link_id", "scopes", "device_name"}``.
         """
         who = hosted_link.hosted_get(engine, user.username, "/desktop/v1/whoami")
-        return {key: who.get(key) for key in ("email", "name", "link_id", "scopes", "device_name")}
+        return {key: who.get(key) for key in ("email", "name", "image", "link_id", "scopes", "device_name")}
 
     @router.get("/local/hosted-link/balance", include_in_schema=False, dependencies=_LOCAL_ONLY)
     def balance(user: AuthenticatedUserDep) -> dict[str, Any]:

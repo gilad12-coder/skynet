@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import subprocess
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -25,6 +26,7 @@ from ...local.tests.fake_hosted import API_ORIGIN, APP_ORIGIN, FakeHosted
 from ...storage.models import UserConnectorModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
+from ..routers import local_hosted_link
 from ..routers.local_hosted_link import create_local_hosted_link_router
 
 _USER = "local@skynet.local"
@@ -119,6 +121,7 @@ def test_routes_are_hidden_outside_local_mode(client: TestClient, monkeypatch: p
 
     assert client.post("/local/hosted-link/start", json={}).status_code == 404
     assert client.get("/local/hosted-link/callback", params={"code": "c", "state": "s"}).status_code == 404
+    assert client.post("/local/hosted-link/finish", json={"code": "c", "state": "s"}).status_code == 404
     assert client.get("/local/hosted-link/status").status_code == 404
     assert client.post("/local/hosted-link/unlink").status_code == 404
 
@@ -139,6 +142,7 @@ def test_link_status_whoami_balance_unlink(client: TestClient, hosted: FakeHoste
     assert status.json()["account_email"] == "dana@example.test"
     who = client.get("/local/hosted-link/whoami")
     assert who.json()["email"] == "dana@example.test"
+    assert who.json()["image"] == "https://lh3.googleusercontent.com/a/dana"
     balance = client.get("/local/hosted-link/balance")
     assert balance.json() == {"available_cents": 1234, "currency": "usd", "low_balance": False}
     for body in (status.text, who.text, balance.text):
@@ -222,3 +226,135 @@ def test_connector_state_gives_the_state_invalid_page(client: TestClient, hosted
     assert page.status_code == 400
     assert html.escape(t_en("hosted_link.state_invalid")) in page.text
     assert hosted.calls == []
+
+
+def test_app_callback_flow_finishes_through_the_finish_route(client: TestClient, hosted: FakeHosted) -> None:
+    """The Mac app asks for the skynet:// callback and posts the code and state it receives.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    url = client.post("/local/hosted-link/start", json={"device_name": "Test Mac", "app_callback": True}).json()[
+        "authorize_url"
+    ]
+    redirect, code, state = hosted.authorize(url)
+    assert redirect == hosted_link.APP_CALLBACK_URI == "skynet://link/callback"
+
+    response = client.post("/local/hosted-link/finish", json={"code": code, "state": state})
+
+    assert response.status_code == 200
+    assert response.json() == {"linked": True, "account_email": "dana@example.test"}
+    assert "skyl_" not in response.text
+    assert client.get("/local/hosted-link/status").json()["linked"] is True
+    replay = client.post("/local/hosted-link/finish", json={"code": code, "state": state})
+    assert replay.status_code == 400
+    assert replay.json()["code"] == "hosted_link.state_invalid"
+
+
+def test_finish_refuses_a_forged_state(client: TestClient, hosted: FakeHosted) -> None:
+    """A skynet:// URL with a state this Mac did not make never reaches hosted.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+    """
+    response = client.post("/local/hosted-link/finish", json={"code": "c", "state": "forged"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "hosted_link.state_invalid"
+    assert hosted.calls == []
+    assert client.get("/local/hosted-link/status").json() == {"linked": False}
+
+
+def _consent_device_name(client: TestClient) -> str:
+    """Start a link without a Mac name and return the name the consent URL carries.
+
+    Args:
+        client: The test client.
+
+    Returns:
+        The ``device_name`` query value.
+    """
+    url = client.post("/local/hosted-link/start", json={"app_callback": True}).json()["authorize_url"]
+    return parse_qs(urlsplit(url).query)["device_name"][0]
+
+
+def test_start_names_the_mac_by_its_computer_name(
+    client: TestClient, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The consent screen shows the Computer Name, not the network host name.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to fake ``scutil`` and the host name.
+    """
+    monkeypatch.setattr(local_hosted_link.platform, "node", lambda: "Gilads-MacBook-Pro.local")
+    monkeypatch.setattr(
+        local_hosted_link.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout="Gilad’s MacBook Pro\n"),
+    )
+
+    assert _consent_device_name(client) == "Gilad’s MacBook Pro"
+
+
+def test_start_reads_a_non_ascii_computer_name_under_an_ascii_locale(
+    client: TestClient, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A curly apostrophe in the name still decodes when the login shell sets an ASCII locale.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to fake ``scutil``.
+    """
+
+    def scutil(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Decode ``scutil``'s UTF-8 bytes the way ``subprocess.run`` does under ``LANG=en_US.US-ASCII``.
+
+        Args:
+            args: The command.
+            **kwargs: ``subprocess.run`` options; ``encoding`` and ``errors`` decide the decoding.
+
+        Returns:
+            The finished process with the decoded output.
+        """
+        raw = "Gilad’s MacBook Pro\n".encode()
+        stdout = raw.decode(str(kwargs.get("encoding") or "ascii"), str(kwargs.get("errors") or "strict"))
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(local_hosted_link.subprocess, "run", scutil)
+    assert _consent_device_name(client) == "Gilad’s MacBook Pro"
+
+
+def test_start_falls_back_to_the_host_name_then_mac(
+    client: TestClient, hosted: FakeHosted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``scutil``, the host name without ``.local`` is used, then ``Mac``.
+
+    Args:
+        client: The test client.
+        hosted: The fake hosted server.
+        monkeypatch: Pytest fixture used to fake ``scutil`` and the host name.
+    """
+
+    def missing_scutil(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Fail like a system without ``scutil``.
+
+        Args:
+            args: The command.
+            **_kwargs: Ignored ``subprocess.run`` options.
+
+        Raises:
+            FileNotFoundError: Always.
+        """
+        raise FileNotFoundError(args[0])
+
+    monkeypatch.setattr(local_hosted_link.subprocess, "run", missing_scutil)
+    monkeypatch.setattr(local_hosted_link.platform, "node", lambda: "build-host.local")
+    assert _consent_device_name(client) == "build-host"
+
+    monkeypatch.setattr(local_hosted_link.platform, "node", lambda: "")
+    assert _consent_device_name(client) == "Mac"

@@ -45,6 +45,10 @@ CLAUDE.md
 # Screenshots
 *.png
 !frontend/public/notification-icon.png
+!frontend/public/favicon.png
+!frontend/public/favicon-dark.png
+!frontend/public/apple-icon.png
+!backend/core/api/static/scalar/favicon.png
 
 # Environment variables (NEVER commit secrets)
 .env

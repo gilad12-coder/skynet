@@ -157,11 +157,18 @@ async function resolveLocalAccount(): Promise<BackendAccount | null> {
  * sign-in itself — the provider has already authenticated the user.
  */
 async function provisionBackendAccount(
-  user: { email?: string | null; name?: string | null; otherEmails?: string[] },
+  user: {
+    email?: string | null;
+    name?: string | null;
+    image?: string | null;
+    otherEmails?: string[];
+  },
   provider: string,
   providerAccountId: string,
 ): Promise<BackendAccount | null> {
   if (!backendAuthSecret || !user.email) return null;
+  // The backend keeps only an https picture that fits its 2048-character column.
+  const image = user.image?.startsWith("https://") && user.image.length <= 2048 ? user.image : "";
   try {
     const res = await fetch(`${backendBaseUrl}/auth/oauth/provision`, {
       method: "POST",
@@ -172,6 +179,7 @@ async function provisionBackendAccount(
         other_emails: user.otherEmails ?? [],
         provider,
         provider_account_id: providerAccountId,
+        image,
       }),
     });
     if (!res.ok) return null;
@@ -539,4 +547,14 @@ export const { handlers, auth } = NextAuth({
   // compares Host with AUTH_URL. Local mode refuses a foreign Host in the proxy
   // (shared/lib/proxy-route.ts), and AUTH_URL fixes the URLs Auth.js builds.
   trustHost: true,
+  // Google and GitHub accept only registered callback URLs, and every PR
+  // preview has its own host. Previews send their OAuth callback to staging
+  // (preview.sh sets AUTH_REDIRECT_PROXY_URL), and staging forwards it to the
+  // host sealed in the state. Previews copy staging's AUTH_SECRET, so staging
+  // can open that state.
+  redirectProxyUrl:
+    process.env.AUTH_REDIRECT_PROXY_URL ??
+    (process.env.APP_ENVIRONMENT === "staging" && process.env.AUTH_URL
+      ? `${process.env.AUTH_URL}/api/auth`
+      : undefined),
 });

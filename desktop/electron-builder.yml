@@ -17,6 +17,10 @@ extraResources:
   - from: stage/uv/${arch}
     to: uv
 asar: true
+# CFBundleURLTypes in Info.plist: the hosted sign-in hands the link back through skynet:// (SKY-228).
+protocols:
+  - name: Skynet
+    schemes: [skynet]
 mac:
   target:
     # x64 is built in CI but not run on Intel hardware yet.

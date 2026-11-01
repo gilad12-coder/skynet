@@ -11,6 +11,7 @@ import { useSettingsModal } from "@/features/settings";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { useBalance } from "../providers/balance-provider";
 import { formatCentsUsd } from "../lib/wallet";
+import { LinkAccountPrompt } from "./LinkAccountPrompt";
 
 /**
  * Header balance chip — the spine of the billing UI.
@@ -21,7 +22,8 @@ import { formatCentsUsd } from "../lib/wallet";
  * an alarm.
  */
 export function BalanceChip({ className }: { className?: string }) {
-  const { wallet, status, totalCents, loading, syncing, available } = useBalance();
+  const { wallet, shown, syncing } = useBalance();
+  const { status, totalCents, loading, available, linkNeeded, hosted } = shown;
   const { locale } = useLocale();
   const { openTo } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
@@ -55,7 +57,9 @@ export function BalanceChip({ className }: { className?: string }) {
         <button
           type="button"
           aria-label={formatMsg("billing.chip.aria", {
-            p1: !available ? msg("billing.chip.unavailable") : formatCentsUsd(totalCents, locale),
+            p1: !available
+              ? msg(linkNeeded ? "billing.local.link_chip" : "billing.chip.unavailable")
+              : formatCentsUsd(totalCents, locale),
           })}
           aria-busy={syncing || undefined}
           data-setup="balance"
@@ -68,7 +72,9 @@ export function BalanceChip({ className }: { className?: string }) {
           {!available ? (
             <>
               <Coins className="size-3.5 text-muted-foreground" aria-hidden="true" />
-              <span>{msg("billing.chip.unavailable")}</span>
+              <span>
+                {msg(linkNeeded ? "billing.local.link_chip" : "billing.chip.unavailable")}
+              </span>
             </>
           ) : status === "empty" ? (
             <>
@@ -105,10 +111,30 @@ export function BalanceChip({ className }: { className?: string }) {
             </span>
           </div>
 
-          {!available ? (
+          {linkNeeded ? (
+            <LinkAccountPrompt className="px-4 pb-4" />
+          ) : !available ? (
             <p className="px-4 pb-4 text-xs text-muted-foreground">
               {msg("billing.popover.unavailable")}
             </p>
+          ) : hosted ? (
+            // Hosted sends one total, so the Mac app shows no paid/grant split.
+            <div className="px-4 pb-3 text-start">
+              <span
+                dir="ltr"
+                className="inline-block text-2xl font-semibold text-foreground tabular-nums"
+              >
+                {formatCentsUsd(totalCents, locale)}
+              </span>
+              <p className="pt-1 text-xs text-muted-foreground">
+                {msg("billing.local.hosted_note")}
+              </p>
+              {status === "low" && (
+                <p className="pt-1 text-xs text-muted-foreground/80">
+                  {msg("billing.chip.low_note")}
+                </p>
+              )}
+            </div>
           ) : (
             <>
               {/* Balance sits directly under the title. An inline-block (not a

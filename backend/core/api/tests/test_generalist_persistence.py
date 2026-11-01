@@ -635,6 +635,19 @@ def test_history_for_agent_bounds_turns_text_and_tool_results() -> None:
     assert all(len(call["result"]) == agent_mod.HISTORY_TOOL_RESULT_MAX_CHARS for call in last["tools"])
 
 
+def test_title_skips_attached_file_and_pasted_text_blocks() -> None:
+    """A new conversation is titled from the typed question, not from a file's or paste's text."""
+    message = (
+        "Summarise the report\n\n"
+        '<attached_file name="report.pdf">\nPage 1\nQuarterly revenue\n</attached_file>\n\n'
+        "<pasted_text>\nlong paste\n</pasted_text>"
+    )
+    assert agent_mod._derive_title(message) == "Summarise the report"
+    only_file = '<attached_file name="report.pdf">\nPage 1\nQuarterly revenue\n</attached_file>'
+    assert agent_mod._derive_title(only_file) == "report.pdf"
+    assert agent_mod._derive_title("<pasted_text>\nlong paste\n</pasted_text>") == ""
+
+
 def test_turn_forwards_tool_trace_and_owner(
     persistence_client: tuple[TestClient, Engine],
     monkeypatch: pytest.MonkeyPatch,

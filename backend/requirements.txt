@@ -330,6 +330,8 @@ pyopenssl==26.4.0
     # via webauthn
 pyotp==2.10.0
     # via skynet
+pypdf==6.21.4
+    # via skynet
 pyperclip==1.11.0
     # via fastmcp-slim
 python-dateutil==2.9.0.post0
@@ -485,6 +487,8 @@ webauthn==2.8.0
     # via skynet
 websockets==16.0
     # via fastmcp-slim
+xlrd==2.0.2
+    # via skynet
 yarl==1.25.1
     # via aiohttp
 zipp==3.23.1
