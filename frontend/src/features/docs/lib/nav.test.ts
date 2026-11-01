@@ -6,6 +6,7 @@ import {
   DOCS_SECTIONS,
   docsHref,
   docsMarkdownHref,
+  docsMarkdownSegments,
   docsNeighbors,
   localizeDocsLinks,
   resolveDocsPath,
@@ -79,4 +80,12 @@ test("every internal docs link in the content points at a real page", () => {
       }
     }
   }
+});
+
+test("docsMarkdownSegments splits the page path and never throws on a stray percent sign", () => {
+  assert.deepEqual(docsMarkdownSegments(["he", "concepts", "runs"]), ["he", "concepts", "runs"]);
+  assert.deepEqual(docsMarkdownSegments(["concepts/runs"]), ["concepts", "runs"]);
+  // Next decodes /docs-md/%25zz to "%zz"; a second decode throws URIError.
+  assert.deepEqual(docsMarkdownSegments(["%zz"]), ["%zz"]);
+  assert.equal(resolveDocsPath(docsMarkdownSegments(["%zz"])), null);
 });

@@ -268,6 +268,11 @@ export function localizeDocsLinks(markdown: string, locale: DocsLocale): string 
   return markdown.replace(/\]\(\/docs(?=[/)#])(?!\/he(?=[/)#]))/g, "](/docs/he");
 }
 
+/** The page path segments from the Markdown twin route's catch-all param. */
+export function docsMarkdownSegments(parts: readonly string[]): string[] {
+  return parts.flatMap((part) => part.split("/")).filter(Boolean);
+}
+
 /** The site-relative URL of a page's Markdown twin. */
 export function docsMarkdownHref(slug: string, locale: DocsLocale): string {
   return `${docsHref(slug, locale)}.md`;

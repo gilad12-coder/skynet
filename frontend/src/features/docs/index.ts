@@ -10,6 +10,7 @@ export {
   DOCS_SECTIONS,
   docsHref,
   docsMarkdownHref,
+  docsMarkdownSegments,
   isDocsLocale,
   resolveDocsPath,
   type DocsLocale,

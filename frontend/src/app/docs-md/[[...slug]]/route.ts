@@ -3,11 +3,10 @@
  * /docs.md and /docs/<page>.md here.
  */
 
-import { docsMarkdownDocument, resolveDocsPath } from "@/features/docs";
+import { docsMarkdownDocument, docsMarkdownSegments, resolveDocsPath } from "@/features/docs";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug?: string[] }> }) {
-  // The rewrite can pass the page path as one encoded segment ("concepts%2Fruns").
-  const segments = ((await params).slug ?? []).flatMap((part) => decodeURIComponent(part).split("/")).filter(Boolean);
+  const segments = docsMarkdownSegments((await params).slug ?? []);
   const resolved = resolveDocsPath(segments);
   if (!resolved) return new Response("Not found\n", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   return new Response(docsMarkdownDocument(resolved.page, resolved.locale), {
