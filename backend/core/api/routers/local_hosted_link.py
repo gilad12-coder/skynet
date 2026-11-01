@@ -50,7 +50,7 @@ def _mac_name() -> str:
     """
     try:
         name = subprocess.run(
-            ["scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=2, check=True
+            ["/usr/sbin/scutil", "--get", "ComputerName"], capture_output=True, text=True, timeout=2, check=True
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         name = ""
