@@ -56,7 +56,8 @@ The tools:
 6. **Call `start_run`** with the same spec, the agreed `max_cost_cents` and
    a new `idempotency_key` (for example a UUID). If the result has
    `status: in_progress`, wait `retry_after_seconds`, then call `start_run`
-   again with the same arguments and the same key. Keep the
+   again with the same arguments and the same key. On any error, retry
+   with the same `idempotency_key`, or check `list_runs` first. Keep the
    `optimization_id`.
 7. **Follow the run** with `get_run`. Poll about once a minute. Stop when
    `terminal` is true. Tell the user the status and the spend from

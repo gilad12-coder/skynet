@@ -262,6 +262,3 @@ Negative (no tool call):
   documentation URL only after promotion.
 - `start_run` `destructiveHint` (blocker 2).
 - Which countries for the OpenAI publication?
-- `frontend/src/features/legal/legal-config.ts` still names
-  `github.com/gilad12-coder/skynet` as the source repository. The
-  repository moved to `Skynet-ml/skynet`.

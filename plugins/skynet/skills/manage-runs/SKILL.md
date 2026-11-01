@@ -32,6 +32,8 @@ the signed-in account.
   `best_score` and `best_candidate`. For a `failed`, `stopped` or
   `cancelled` run, show
   `run.message` and `run.stop_reason`.
+- `run.message` can be in Hebrew. Give it to the user in the user's
+  language.
 - The run page is `https://skynetml.com/optimizations/<optimization_id>`.
 
 ## Stop a run
