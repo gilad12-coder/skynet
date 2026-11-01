@@ -11,7 +11,7 @@ output "alb_zone_id" {
 output "acm_validation_records" {
   description = "DNS records that ACM needs before it issues the certificate. Create them by hand."
   value = {
-    for o in aws_acm_certificate.this.domain_validation_options : o.domain_name => {
+    for o in concat(tolist(aws_acm_certificate.this.domain_validation_options), flatten([for c in aws_acm_certificate.mcp : tolist(c.domain_validation_options)])) : o.domain_name => {
       name  = o.resource_record_name
       type  = o.resource_record_type
       value = o.resource_record_value

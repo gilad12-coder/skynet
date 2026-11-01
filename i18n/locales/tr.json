@@ -450,6 +450,7 @@
     "budget.pending": "Kullanım hâlâ kesinleştiriliyor. Devam etmeden önce süren işlerin bitmesini bekleyin.",
     "budget.conflict": "Bu bütçe başka bir sekmede değişti. Güncellemeden önce bakiyesini yenileyin.",
     "budget.not_found": "Bu bütçe hesabınız için kullanılamıyor. Yeni bir kurulum bütçesi oluşturun.",
-    "budget.invalid": "Önceden harcanmış veya ayrılmış kullanımı karşılayan bir harcama limiti girin."
+    "budget.invalid": "Önceden harcanmış veya ayrılmış kullanımı karşılayan bir harcama limiti girin.",
+    "budget.below_minimum": "Harcama limiti bu çalıştırmanın ihtiyaç duyduğu minimumun altında. Daha yüksek bir limit girin."
   }
 }

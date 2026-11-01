@@ -91,6 +91,7 @@ from .observability import (
     start_stale_conversation_sweeper,
 )
 from .rate_limit import build_login_throttle
+from .remote_mcp import mount_remote_mcp
 from .routers.account_data import create_account_data_router
 from .routers.account_security import create_account_security_router
 from .routers.accounts import create_accounts_router
@@ -119,6 +120,7 @@ from .routers.generalist_agent import create_generalist_agent_router
 from .routers.local_hosted_link import create_local_hosted_link_router
 from .routers.local_notifications import create_local_notifications_router
 from .routers.local_runtime import create_local_runtime_router
+from .routers.mcp_oauth import create_mcp_oauth_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
@@ -1344,6 +1346,7 @@ def create_app(
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_desktop_link_router(job_store=job_store), tags=["Desktop link"])
+    app.include_router(create_mcp_oauth_router(job_store=job_store), tags=["MCP connection"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
     app.include_router(create_execution_runtimes_router(), tags=["Wizard"])
@@ -1411,5 +1414,6 @@ def create_app(
         mount_mcp_on_app(app)
     except ImportError as exc:
         logger.warning("FastMCP not available, skipping /mcp mount: %s", exc)
+    mount_remote_mcp(app, service=service, job_store=job_store, get_worker=lambda: worker)
 
     return app

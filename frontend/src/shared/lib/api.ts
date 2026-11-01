@@ -850,6 +850,43 @@ export function authorizeDesktopLink(body: DesktopLinkAuthorizeRequest) {
   });
 }
 
+export interface McpConsentDescribeRequest {
+  client_id: string;
+  redirect_uri: string;
+  scope: string;
+}
+
+export interface McpConsentDescription {
+  client_name: string;
+  client_host: string | null;
+  redirect_host: string;
+  scopes: string[];
+}
+
+export interface McpConsentRequest extends McpConsentDescribeRequest {
+  code_challenge: string;
+  code_challenge_method: "S256";
+  state: string | null;
+  resource: string | null;
+  decision: "approve" | "deny";
+}
+
+/** Describe the agent that asks for MCP access, for the consent page. */
+export function describeMcpConsent(body: McpConsentDescribeRequest) {
+  return request<McpConsentDescription>("/oauth/consent/describe", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Approve or deny MCP access; returns the agent's redirect URL. */
+export function submitMcpConsent(body: McpConsentRequest) {
+  return request<{ redirect_url: string }>("/oauth/consent", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 /** Revoke the caller's active API token. Idempotent; the route returns 204. */
 export async function revokeApiToken(): Promise<void> {
   const res = await fetchWithAuthRetry(`${apiBase()}/settings/api-token`, { method: "DELETE" });

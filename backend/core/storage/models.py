@@ -125,6 +125,86 @@ class DesktopLinkCodeModel(Base):
     link_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
+class McpOAuthClientModel(Base):
+    """An OAuth client of the remote MCP server, from dynamic registration (SKY-229).
+
+    ``redirect_uris`` is a JSON list. Clients that use a client ID metadata
+    document (CIMD) have no row; their document is fetched on use.
+    """
+
+    __tablename__ = "mcp_oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    redirect_uris: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class McpAuthCodeModel(Base):
+    """A single-use MCP authorization code, stored as its hash (SKY-229)."""
+
+    __tablename__ = "mcp_auth_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    client_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(String(512), nullable=False)
+    code_challenge: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    grant_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class McpGrantModel(Base):
+    """One approval of an MCP client for an account (SKY-229).
+
+    A grant owns its tokens. ``resource`` is the MCP server URL the tokens are
+    bound to. Revoking sets ``revoked_at``; a grant is never reactivated.
+    """
+
+    __tablename__ = "mcp_grants"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    client_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class McpTokenModel(Base):
+    """An MCP access or refresh token, stored only as its SHA-256 hash (SKY-229).
+
+    ``used_at`` marks a refresh token as rotated; any later use of it revokes
+    the grant.
+    """
+
+    __tablename__ = "mcp_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    grant_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AgentApprovalModel(Base):
     """Cross-replica handoff for a generalist-agent tool approval decision.
 

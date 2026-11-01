@@ -432,6 +432,21 @@ DNS changes are manual and need Gilad's approval. Terraform does not touch DNS.
 5. Update the OAuth redirect URIs and the Stripe webhook endpoint only if the
    host names change. They do not change in this plan.
 
+### Remote MCP host (SKY-229)
+
+`mcp_domain` adds the remote MCP host to the API listener rule. The backend
+serves the MCP endpoint at `https://<mcp_domain>/mcp` (`MCP_RESOURCE_URL`).
+
+- staging: `mcp.staging.skynetml.com` uses the `*.staging.skynetml.com`
+  wildcard certificate and CNAME. No new DNS record is needed.
+- production: `mcp.skynetml.com` gets its own certificate. Run
+  `terraform apply -target=module.env.aws_acm_certificate.mcp` first. Create
+  its record from `acm_validation_records`, then run the full apply. Point
+  `mcp.skynetml.com` at the ALB with a CNAME.
+- PR previews: `scripts/preview.sh` sets the URL to
+  `https://api-pr-<n>.staging.skynetml.com/remote-mcp`, under the preview API
+  host. The wildcard certificate has no second preview host.
+
 ## Monthly cost estimate (us-east-2, October 2026 list prices)
 
 Prices from the AWS Price List API: Fargate ARM $0.03238 per vCPU-hour and
