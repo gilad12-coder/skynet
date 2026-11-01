@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import {
+  BookOpen,
   Code,
   Desktop,
   DotsThree,
@@ -283,6 +284,11 @@ export function AccountMenu({
           <Gear className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
           {msg("app.shell.account.settings")}
         </button>
+
+        <Link href={locale === "he" ? "/docs/he" : "/docs"} onClick={close} className={COMPACT_POPOVER_ITEM_CLASS}>
+          <BookOpen className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+          {msg("app.shell.account.docs")}
+        </Link>
 
         <div role="separator" className="my-1 h-px bg-border/60" />
 

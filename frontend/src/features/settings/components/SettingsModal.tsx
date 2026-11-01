@@ -1279,6 +1279,25 @@ function ApiTab() {
           </a>
         </Button>
       </SettingsRow>
+
+      <SettingsRow
+        icon={BookOpen}
+        label={msg("settings.api.guide_label")}
+        description={msg("settings.api.guide_description")}
+      >
+        <Button
+          variant="outline"
+          size="icon-sm"
+          asChild
+          className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+          autoTooltip={false}
+          aria-label={msg("settings.api.guide_action")}
+        >
+          <a href="/docs/api" target="_blank" rel="noopener noreferrer">
+            <ArrowSquareOut className="size-3.5" />
+          </a>
+        </Button>
+      </SettingsRow>
     </div>
   );
 }
