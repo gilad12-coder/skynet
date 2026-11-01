@@ -4364,5 +4364,11 @@
   "desktop_link.error.too_many_links": "你的帐户已关联 {limit} 台 Mac，已达上限。请取消关联一台不再使用的 Mac，然后重试。",
   "desktop_link.error.rate_limit": "关联尝试次数过多。请稍后重试。",
   "desktop_link.error.generic": "关联未成功。请重试。",
-  "desktop_link.use_without_account": "不登录直接使用"
+  "desktop_link.use_without_account": "不登录直接使用",
+  "local_identity.title": "本地模式",
+  "local_identity.linked": "已关联此 Mac",
+  "local_identity.sign_in": "登录以同步",
+  "local_identity.sign_in_failed": "无法开始登录。请重试。",
+  "local_identity.linked_offline": "已关联(离线)",
+  "local_identity.sign_out_failed": "无法退出同步,请重试。"
 }

@@ -4364,5 +4364,11 @@
   "desktop_link.error.too_many_links": "Dein Konto hat bereits {limit} verknüpfte Macs, das Maximum. Hebe die Verknüpfung eines Macs auf, den du nicht mehr nutzt, und versuche es erneut.",
   "desktop_link.error.rate_limit": "Zu viele Verknüpfungsversuche. Versuche es später erneut.",
   "desktop_link.error.generic": "Die Verknüpfung hat nicht geklappt. Versuche es erneut.",
-  "desktop_link.use_without_account": "Ohne Anmeldung verwenden"
+  "desktop_link.use_without_account": "Ohne Anmeldung verwenden",
+  "local_identity.title": "Lokaler Modus",
+  "local_identity.linked": "Mit diesem Mac verknüpft",
+  "local_identity.sign_in": "Zum Synchronisieren anmelden",
+  "local_identity.sign_in_failed": "Die Anmeldung konnte nicht starten. Versuche es erneut.",
+  "local_identity.linked_offline": "Verknüpft (offline)",
+  "local_identity.sign_out_failed": "Abmelden von der Synchronisierung fehlgeschlagen. Versuche es erneut."
 }
