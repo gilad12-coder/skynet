@@ -29,7 +29,42 @@ import { dirForLocale } from "@/shared/lib/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { useSettingsModal } from "@/features/settings";
-import { unlinkHostedAccount, useLinkedAccount } from "@/shared/hooks/use-linked-account";
+import {
+  type LinkedAccount,
+  unlinkHostedAccount,
+  useLinkedAccount,
+} from "@/shared/hooks/use-linked-account";
+
+/**
+ * The Mac app's identity labels. An unknown link (`undefined`: loading, or the
+ * status call failed) shows only the title, so a linked Mac never reads "Not
+ * signed in" by mistake.
+ */
+export function localIdentity(account: LinkedAccount | undefined): {
+  name: string;
+  detail: string | null;
+} {
+  if (!account) return { name: msg("local_identity.title"), detail: null };
+  if (!account.linked)
+    return { name: msg("local_identity.title"), detail: msg("settings.account.signed_out") };
+  const name = account.name ?? account.email ?? msg("desktop_link.account_label");
+  if (account.offline) return { name, detail: msg("local_identity.linked_offline") };
+  const detail =
+    account.email && account.email !== name ? account.email : msg("local_identity.linked");
+  return { name, detail };
+}
+
+/** Start the hosted sign-in and open its consent page in the browser. */
+export function startHostedSignIn(
+  start: () => Promise<{ authorize_url: string }> = startLocalHostedLink,
+  // The Mac app opens new windows in the default browser.
+  open: (url: string) => void = (url) => window.open(url, "_blank", "noopener"),
+  fail: () => void = () => toast.error(msg("local_identity.sign_in_failed")),
+): Promise<void> {
+  return start()
+    .then(({ authorize_url }) => open(authorize_url))
+    .catch(fail);
+}
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */
 function initials(name: string): string {
@@ -122,30 +157,23 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
-  const [unlinks, setUnlinks] = React.useState(0);
+  // Read the link again on each open and after an unlink: the sign-in finishes in the browser.
+  const [reads, setReads] = React.useState(0);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) setReads((n) => n + 1);
+  };
   const local = isLocalMode();
-  // Read the link again on each open: the sign-in finishes in the browser.
-  const account = useLinkedAccount(`${open}-${unlinks}`);
+  const account = useLinkedAccount(reads);
   const linked = account?.linked ? account : null;
 
   if (!session?.user) return null;
 
   // The Mac app's session user is an internal placeholder, never a real
   // account, so local mode shows the linked hosted account or "Local mode".
-  const name = !local
-    ? (session.user.name ?? session.user.email ?? "")
-    : linked
-      ? (linked.name ?? linked.email ?? msg("desktop_link.account_label"))
-      : msg("local_identity.title");
-  const email = !local
-    ? (session.user.email ?? "")
-    : !linked
-      ? msg("settings.account.signed_out")
-      : linked.offline
-        ? msg("local_identity.linked_offline")
-        : linked.email && linked.email !== name
-          ? linked.email
-          : msg("local_identity.linked");
+  const identity = local ? localIdentity(account) : null;
+  const name = identity ? identity.name : (session.user.name ?? session.user.email ?? "");
+  const email = identity ? (identity.detail ?? "") : (session.user.email ?? "");
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
   const deviceAvatar = local && !linked;
@@ -197,7 +225,7 @@ export function AccountMenu({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {collapsed && !customTrigger ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -243,12 +271,7 @@ export function AccountMenu({
             type="button"
             onClick={() => {
               close();
-              startLocalHostedLink()
-                .then(({ authorize_url }) => {
-                  // The Mac app opens new windows in the default browser.
-                  window.open(authorize_url, "_blank", "noopener");
-                })
-                .catch(() => toast.error(msg("local_identity.sign_in_failed")));
+              void startHostedSignIn();
             }}
             className={COMPACT_POPOVER_ITEM_CLASS}
           >
@@ -263,7 +286,7 @@ export function AccountMenu({
             onClick={() => {
               close();
               unlinkHostedAccount()
-                .then(() => setUnlinks((n) => n + 1))
+                .then(() => setReads((n) => n + 1))
                 .catch(() => toast.error(msg("local_identity.sign_out_failed")));
             }}
             className={COMPACT_POPOVER_ITEM_CLASS}

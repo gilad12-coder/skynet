@@ -1,7 +1,7 @@
 /*
  * node --test cannot load .tsx, so this runs through jiti (account-menu.render.test.ts
  * spawns it inside `npm run test:unit`). To run it by hand from frontend/:
- * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\"}" npx jiti <this file>
+ * JITI_JSX=1 JITI_ALIAS="{\"@/\":\"$PWD/src/\",\"react-loading-skeleton/dist/skeleton.css\":\"$PWD/src/features/optimizations/components/__fixtures__/style-stub.ts\"}" npx jiti <this file>
  */
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
@@ -17,22 +17,22 @@ import { setServerMessages } from "@/shared/lib/runtime-messages";
 (globalThis as { React?: typeof React }).React = React;
 const { SettingsModalProvider } = await import("@/features/settings");
 const { LocaleProvider } = await import("@/shared/providers/locale-provider");
-const { AccountMenu } = await import("./account-menu");
-const { loadLinkedAccount } = await import("@/shared/hooks/use-linked-account");
+const { AccountMenu, localIdentity, startHostedSignIn } = await import("./account-menu");
+const { linkedUsername, loadLinkedAccount } = await import("@/shared/hooks/use-linked-account");
+const { TooltipProvider } = await import("@/shared/ui/primitives/tooltip");
+const { PrivacyTab } = await import("@/features/settings/components/PrivacyTab");
 
 const session = {
   user: { name: "local@skynet.local", email: "local@skynet.local" },
   expires: "2099-01-01T00:00:00.000Z",
 };
 
-function render(): string {
+function render(node: React.ReactNode = <AccountMenu />): string {
   setServerMessages(buildActiveCatalog("en"), "en");
   return renderToStaticMarkup(
     <LocaleProvider initialLocale="en">
       <SessionProvider session={session}>
-        <SettingsModalProvider>
-          <AccountMenu />
-        </SettingsModalProvider>
+        <SettingsModalProvider>{node}</SettingsModalProvider>
       </SessionProvider>
     </LocaleProvider>,
   );
@@ -48,12 +48,113 @@ void describe("AccountMenu", () => {
     assert.match(html, /local@skynet\.local/);
   });
 
-  void it("shows local mode, not the placeholder local user, in local mode", () => {
+  void it("shows a neutral local mode while the link is unknown", () => {
     process.env.APP_LOCAL_MODE = "1";
+    // A static render never runs the effect that reads the link, so it stays unknown.
     const html = render();
     assert.doesNotMatch(html, /skynet\.local/);
     assert.match(html, /Local mode/);
-    assert.match(html, /Not signed in/);
+    assert.doesNotMatch(html, /Not signed in/);
+  });
+});
+
+void describe("localIdentity", () => {
+  void it("shows the linked account's name and email", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    assert.deepEqual(
+      localIdentity({ linked: true, name: "Ada", email: "ada@example.com", offline: false }),
+      { name: "Ada", detail: "ada@example.com" },
+    );
+  });
+
+  void it("falls back to the account label with no name or email", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    const identity = localIdentity({ linked: true, name: null, email: null, offline: false });
+    assert.equal(identity.name, "Skynet account");
+  });
+
+  void it("marks a linked account offline when hosted does not answer", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    assert.deepEqual(
+      localIdentity({ linked: true, name: "Ada", email: "ada@example.com", offline: true }),
+      { name: "Ada", detail: "Linked (offline)" },
+    );
+  });
+
+  void it("says not signed in only when the Mac is not linked", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    assert.deepEqual(localIdentity({ linked: false }), {
+      name: "Local mode",
+      detail: "Not signed in",
+    });
+    assert.deepEqual(localIdentity(undefined), { name: "Local mode", detail: null });
+  });
+});
+
+void describe("startHostedSignIn", () => {
+  void it("starts the link, then opens the consent page", async () => {
+    const calls: string[] = [];
+    await startHostedSignIn(
+      async () => {
+        calls.push("start");
+        return { authorize_url: "https://example.com/consent" };
+      },
+      (url) => calls.push(`open ${url}`),
+      () => calls.push("fail"),
+    );
+    assert.deepEqual(calls, ["start", "open https://example.com/consent"]);
+  });
+
+  void it("reports a failed start and opens nothing", async () => {
+    const calls: string[] = [];
+    await startHostedSignIn(
+      async () => {
+        throw new ApiError("down", { status: 503 });
+      },
+      (url) => calls.push(`open ${url}`),
+      () => calls.push("fail"),
+    );
+    assert.deepEqual(calls, ["fail"]);
+  });
+});
+
+void describe("settings in local mode", () => {
+  afterEach(() => {
+    delete process.env.APP_LOCAL_MODE;
+  });
+
+  void it("shows the linked account as the username", () => {
+    setServerMessages(buildActiveCatalog("en"), "en");
+    assert.equal(
+      linkedUsername({ linked: true, name: "Ada", email: "ada@example.com", offline: false }),
+      "ada@example.com",
+    );
+    assert.equal(
+      linkedUsername({ linked: true, name: null, email: null, offline: true }),
+      "Skynet account",
+    );
+    assert.equal(linkedUsername({ linked: false }), "");
+    assert.equal(linkedUsername(undefined), "Local mode");
+  });
+
+  void it("hides the placeholder username and email from the privacy tab", () => {
+    assert.match(
+      render(
+        <TooltipProvider>
+          <PrivacyTab />
+        </TooltipProvider>,
+      ),
+      /local@skynet\.local/,
+    );
+    process.env.APP_LOCAL_MODE = "1";
+    assert.doesNotMatch(
+      render(
+        <TooltipProvider>
+          <PrivacyTab />
+        </TooltipProvider>,
+      ),
+      /skynet\.local/,
+    );
   });
 });
 

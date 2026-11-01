@@ -7,6 +7,7 @@ import {
   getLocalHostedWhoami,
   unlinkLocalHostedLink,
 } from "@/shared/lib/api";
+import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
 
 /**
@@ -14,7 +15,8 @@ import { isLocalMode } from "@/shared/lib/runtime-env";
  * answer, so `name` and `email` come from the last known identity.
  */
 export type LinkedAccount =
-  { linked: false } | { linked: true; name: string | null; email: string | null; offline: boolean };
+  | { linked: false }
+  | { linked: true; name: string | null; email: string | null; offline: boolean };
 
 interface Identity {
   name: string | null;
@@ -78,6 +80,17 @@ export async function loadLinkedAccount(
     }
     return { linked: true, ...(cached ?? { name: null, email: savedEmail }), offline: true };
   }
+}
+
+/**
+ * The username line of the Mac app's settings. An unknown link shows "Local
+ * mode"; an empty string means not linked, which the caller shows as "Not
+ * signed in".
+ */
+export function linkedUsername(account: LinkedAccount | undefined): string {
+  if (!account) return msg("local_identity.title");
+  if (!account.linked) return "";
+  return account.email ?? account.name ?? msg("desktop_link.account_label");
 }
 
 /** Unlink the Mac app from hosted and forget the cached identity. */
