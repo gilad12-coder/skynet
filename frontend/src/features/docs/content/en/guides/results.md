@@ -4,19 +4,19 @@ The run page shows the progress and the results of a run. This guide explains th
 
 The run page shows only the tabs that apply to the run. Some tabs depend on the path, the status and your experience level.
 
-| Tab | When it shows | What it contains |
-| --- | --- | --- |
-| **Overview** | Always | Progress, scores and the score history |
-| **Usage** | A successful run with a program that Skynet can serve | A form to run the optimized program, and integration code |
-| **Artifact** | A Prompt, Code or Text run with a result | The versions of your artifact, with the best version |
-| **Data** | A finished DSPy program run | The data split into train, validation and test sets, and the test set evaluation |
-| **Code** | When the run has code to show | The run code and the metric |
-| **Reward** | A Prompt, Code or Text run whose metric declares reward parts | The reward parts and their weights |
-| **Artifact** | A run with an optimized prompt or files | The optimized output and **Export results** |
-| **Logs** | Most runs | The run log |
-| **Usage and cost** | When you are signed in | What the run spent |
-| **Scheduled run** | A successful Prompt, Code or Text run | A schedule to run the optimization again |
-| **Config** | Always | The run configuration |
+| Tab                | When it shows                                                 | What it contains                                                                 |
+| ------------------ | ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Overview**       | Always                                                        | Progress, scores and the score history                                           |
+| **Usage**          | A successful run with a program that Skynet can serve         | A form to run the optimized program, and integration code                        |
+| **Artifact**       | A Prompt, Code or Text run with a result                      | The versions of your artifact, with the best version                             |
+| **Data**           | A finished DSPy program run                                   | The data split into train, validation and test sets, and the test set evaluation |
+| **Code**           | When the run has code to show                                 | The run code and the metric                                                      |
+| **Reward**         | A Prompt, Code or Text run whose metric declares reward parts | The reward parts and their weights                                               |
+| **Artifact**       | A run with an optimized prompt or files                       | The optimized output and **Export results**                                      |
+| **Logs**           | Most runs                                                     | The run log                                                                      |
+| **Usage and cost** | When you are signed in                                        | What the run spent                                                               |
+| **Scheduled run**  | A successful Prompt, Code or Text run                         | A schedule to run the optimization again                                         |
+| **Config**         | Always                                                        | The run configuration                                                            |
 
 > [!NOTE]
 > At the **Guided** level, the run page hides the **Data**, **Code**, **Logs** and **Config** tabs. A direct link to one of these tabs still opens it. Change the level in **Settings → Account**.
@@ -59,13 +59,13 @@ You can compare a version with another version. The tab also shows the **Scorer 
 
 The **Artifact** tab has an **Export results** panel. Open the **Download** menu. It shows the formats that the run has:
 
-| Option | Format |
-| --- | --- |
-| DSPy program | `.zip`, a self-contained export that you can run |
-| Optimized program | `.pkl` |
-| Prompt | `.json` |
-| Optimized code | `.py` |
-| Logs | `.csv` |
+| Option            | Format                                           |
+| ----------------- | ------------------------------------------------ |
+| DSPy program      | `.zip`, a self-contained export that you can run |
+| Optimized program | `.pkl`                                           |
+| Prompt            | `.json`                                          |
+| Optimized code    | `.py`                                            |
+| Logs              | `.csv`                                           |
 
 ## Serve the best version
 

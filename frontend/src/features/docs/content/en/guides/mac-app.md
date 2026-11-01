@@ -59,14 +59,14 @@ The app does these steps in order:
 
 The app shows a list of checks: **Docker**, **Coding CLI**, **Signed in**, **Usage limit**, **Local services** and **Account**. If a check fails, the app shows a screen that tells you what to do:
 
-| Screen | What to do |
-| --- | --- |
-| **Install Docker Desktop** | Install Docker Desktop. |
-| **Start Docker** | Start Docker Desktop. |
-| **Install a coding CLI** | Install Claude Code or Codex. |
-| **Update your coding CLI** | Update the CLI to the minimum version above. |
-| **Sign in to your CLI** | Sign in to the CLI in Terminal. |
-| **Usage limit reached** | Wait for the reset time. New jobs can start again after the reset. |
+| Screen                     | What to do                                                         |
+| -------------------------- | ------------------------------------------------------------------ |
+| **Install Docker Desktop** | Install Docker Desktop.                                            |
+| **Start Docker**           | Start Docker Desktop.                                              |
+| **Install a coding CLI**   | Install Claude Code or Codex.                                      |
+| **Update your coding CLI** | Update the CLI to the minimum version above.                       |
+| **Sign in to your CLI**    | Sign in to the CLI in Terminal.                                    |
+| **Usage limit reached**    | Wait for the reset time. New jobs can start again after the reset. |
 
 Click **Check again** after you fix the problem. Click **Open logs** to see the log files. On the **Usage limit reached** screen, you can click **Open Skynet anyway**.
 
@@ -121,12 +121,12 @@ The link uses a secure sign-in flow (OAuth with PKCE). The app stores its tokens
 
 ### Link limits
 
-| Limit | Value |
-| --- | --- |
-| Linked Macs for each account | 10 |
-| Access token lifetime | 1 hour, then the app refreshes it |
-| Link idle timeout | 30 days without use |
-| Link maximum age | 365 days |
+| Limit                        | Value                             |
+| ---------------------------- | --------------------------------- |
+| Linked Macs for each account | 10                                |
+| Access token lifetime        | 1 hour, then the app refreshes it |
+| Link idle timeout            | 30 days without use               |
+| Link maximum age             | 365 days                          |
 
 After the idle timeout or the maximum age, link the Mac again.
 
@@ -138,10 +138,10 @@ The app shows one of these states: **Local mode**, **Linked to this Mac**, **Sig
 
 All local services listen on `127.0.0.1` only:
 
-| Service | Port range |
-| --- | --- |
-| API | 48100 to 48119 |
-| Web app | 48120 to 48139 |
+| Service  | Port range     |
+| -------- | -------------- |
+| API      | 48100 to 48119 |
+| Web app  | 48120 to 48139 |
 | Postgres | 48140 to 48159 |
 
 The app keeps its data in `~/Library/Application Support/Skynet`. The `logs/` folder holds `desktop.log`, `api.log`, `frontend.log`, `migrate.log` and `sandbox-build.log`.

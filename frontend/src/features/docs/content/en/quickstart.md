@@ -77,13 +77,13 @@ def score(input, output, expected=None):
 
 Then select **Check** under **Contract check**. The check runs your code and your metric in the sandbox on 3 sample cases. It checks:
 
-| Check | What fails |
-| --- | --- |
-| Run code signature | `run.py` does not define `run(artifact, input)` |
-| Metric signature | `metric.py` does not define `score(input, output, expected=None)` |
-| Metric model | The metric model is not usable |
-| Run code on samples | Your run code raises an error on a sample case |
-| Metric return value | `score` does not return a valid score and feedback |
+| Check               | What fails                                                        |
+| ------------------- | ----------------------------------------------------------------- |
+| Run code signature  | `run.py` does not define `run(artifact, input)`                   |
+| Metric signature    | `metric.py` does not define `score(input, output, expected=None)` |
+| Metric model        | The metric model is not usable                                    |
+| Run code on samples | Your run code raises an error on a sample case                    |
+| Metric return value | `score` does not return a valid score and feedback                |
 
 > [!NOTE]
 > You can start the run only after the contract check passes.

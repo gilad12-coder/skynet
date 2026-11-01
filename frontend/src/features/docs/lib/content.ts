@@ -15,7 +15,10 @@ import { getSiteUrl } from "@/shared/lib/site-config";
 // Whole modules, not `import: "default"`: with that option the production
 // build renames the text modules' default export but not the glob's lookup,
 // and every page reads undefined.
-const MODULES = import.meta.glob<{ default: string }>("../content/**/*.md", { query: "?raw", eager: true });
+const MODULES = import.meta.glob<{ default: string }>("../content/**/*.md", {
+  query: "?raw",
+  eager: true,
+});
 const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(MODULES).map(([path, module]) => [path, module.default]),
 );
@@ -33,7 +36,7 @@ export function docsSource(page: DocsPage, locale: DocsLocale): string {
 
 /** Replace the MCP clients placeholder with the generated client sections. */
 function expandBlocks(markdown: string, locale: DocsLocale): string {
-  const block = new RegExp(`\`\`\`${  MCP_CLIENTS_BLOCK  }\\n\`\`\``, "g");
+  const block = new RegExp(`\`\`\`${MCP_CLIENTS_BLOCK}\\n\`\`\``, "g");
   return markdown.replace(block, () => mcpClientsMarkdown(locale));
 }
 
@@ -56,7 +59,10 @@ export interface DocsSearchEntry {
 }
 
 /** The search index for one locale: titles, headings and plain body text. */
-export function docsSearchIndex(locale: DocsLocale, sectionTitle: (page: DocsPage) => string): DocsSearchEntry[] {
+export function docsSearchIndex(
+  locale: DocsLocale,
+  sectionTitle: (page: DocsPage) => string,
+): DocsSearchEntry[] {
   return DOCS_PAGES.map((page) => {
     const source = docsSource(page, locale);
     return {

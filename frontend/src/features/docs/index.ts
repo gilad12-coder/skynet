@@ -6,8 +6,10 @@ export { DOCS_CHROME } from "./lib/chrome";
 export { docsMarkdownDocument, docsSearchIndex, docsSource } from "./lib/content";
 export { extractHeadings } from "./lib/markdown";
 export {
+  DOCS_LOCALES,
   DOCS_PAGES,
   DOCS_SECTIONS,
+  docsDir,
   docsHref,
   docsMarkdownHref,
   docsMarkdownSegments,

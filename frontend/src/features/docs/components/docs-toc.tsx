@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/shared/lib/utils";
+import { useIndicator } from "../lib/use-indicator";
 
 interface TocHeading {
   depth: 2 | 3;
@@ -12,6 +13,7 @@ interface TocHeading {
 /** The "On this page" list. It marks the section at the top of the screen. */
 export function DocsToc({ headings, title }: { headings: TocHeading[]; title: string }) {
   const [current, setCurrent] = React.useState<string | null>(headings[0]?.id ?? null);
+  const { ref: indicatorRef, box, moved } = useIndicator<HTMLUListElement>(current);
 
   React.useEffect(() => {
     const elements = headings
@@ -36,18 +38,33 @@ export function DocsToc({ headings, title }: { headings: TocHeading[]; title: st
   return (
     <nav aria-label={title} className="text-sm">
       <p className="mb-3 font-medium text-foreground">{title}</p>
-      <ul className="space-y-2 border-s border-border">
+      <ul ref={indicatorRef} className="relative space-y-2 border-s border-border">
+        {/* One marker slides between sections, so the reader sees where they moved. */}
+        {box && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute -start-px top-0 w-0.5 rounded-full bg-primary",
+              moved && "docs-indicator",
+            )}
+            style={{
+              height: box.height,
+              transform: `translateY(${box.y}px)`,
+            }}
+          />
+        )}
         {headings.map((h) => (
           <li key={h.id}>
             <a
               href={`#${h.id}`}
               aria-current={current === h.id ? "location" : undefined}
+              data-active={current === h.id}
               className={cn(
-                "-ms-px block border-s-2 py-0.5 leading-snug transition-colors",
+                "-ms-px block border-s-2 border-transparent py-0.5 leading-snug transition-colors duration-200",
                 h.depth === 3 ? "ps-6" : "ps-3",
                 current === h.id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {h.text}

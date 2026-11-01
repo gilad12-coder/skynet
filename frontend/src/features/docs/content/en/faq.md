@@ -64,9 +64,6 @@ The [Mac app](/docs/guides/mac-app) runs Skynet on your own computer. It sends m
 
 Yes. Skynet has an MCP server at `https://mcp.skynetml.com/mcp`. You sign in with OAuth. The server has these tools: `check_run`, `start_run`, `get_run`, `list_runs` and `stop_run`. See [MCP](/docs/mcp).
 
-> [!WARNING]
-> The MCP server is not live yet. It goes live after the server change (pull request #861) merges and deploys. Until then, the connection fails.
-
 ### Is there an API?
 
 Yes. Generate an API token in Settings, then send it as `Authorization: Bearer <token>`. Each user has one valid token at a time. See [API](/docs/api).

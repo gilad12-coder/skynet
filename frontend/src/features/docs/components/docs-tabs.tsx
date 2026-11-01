@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/shared/lib/utils";
+import { useIndicator } from "../lib/use-indicator";
 
 /**
  * Tabs for docs content: code in several languages, or setup steps for
@@ -18,6 +19,8 @@ export function DocsTabs({
   ariaLabel?: string;
 }) {
   const [active, setActive] = React.useState(0);
+  const [switched, setSwitched] = React.useState(false);
+  const { ref: indicatorRef, box, moved } = useIndicator<HTMLDivElement>(active);
   const id = React.useId();
   const tabs = React.useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -32,6 +35,7 @@ export function DocsTabs({
     else if (event.key === "End") next = labels.length - 1;
     else return;
     event.preventDefault();
+    setSwitched(true);
     setActive(next);
     tabs.current[next]?.focus();
   };
@@ -39,10 +43,11 @@ export function DocsTabs({
   return (
     <div className="docs-tabs my-5">
       <div
+        ref={indicatorRef}
         role="tablist"
         aria-label={ariaLabel}
         onKeyDown={onKeyDown}
-        className="flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]"
+        className="relative flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]"
       >
         {labels.map((label, i) => (
           <button
@@ -56,17 +61,32 @@ export function DocsTabs({
             aria-selected={i === active}
             aria-controls={`${id}-panel-${i}`}
             tabIndex={i === active ? 0 : -1}
-            onClick={() => setActive(i)}
+            data-active={i === active}
+            onClick={() => {
+              setSwitched(true);
+              setActive(i);
+            }}
             className={cn(
-              "-mb-px shrink-0 cursor-pointer border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              i === active
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+              "-mb-px shrink-0 cursor-pointer border-b-2 border-transparent px-3 py-2 text-sm font-medium transition-colors duration-200",
+              i === active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             {label}
           </button>
         ))}
+        {box && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full bg-primary",
+              moved && "docs-indicator",
+            )}
+            style={{
+              width: box.width,
+              transform: `translateX(${box.x}px)`,
+            }}
+          />
+        )}
       </div>
       {panels.map((panel, i) => (
         <div
@@ -75,7 +95,8 @@ export function DocsTabs({
           id={`${id}-panel-${i}`}
           aria-labelledby={`${id}-tab-${i}`}
           hidden={i !== active}
-          className="docs-tab-panel pt-1"
+          // Fade only after a switch, so the first paint does not animate.
+          className={cn("docs-tab-panel pt-1", switched && "docs-panel-in")}
         >
           {panel}
         </div>

@@ -4,12 +4,12 @@ Skynet improves an artifact that you already have. You give it a starting versio
 
 Skynet works on four artifact kinds:
 
-| Artifact kind | What changes |
-| --- | --- |
-| Prompt | The prompt text |
-| Code | The source code |
-| DSPy program | The instructions of the predictors in a `dspy.Module` |
-| Text | Any other text, for example a document or a configuration |
+| Artifact kind | What changes                                              |
+| ------------- | --------------------------------------------------------- |
+| Prompt        | The prompt text                                           |
+| Code          | The source code                                           |
+| DSPy program  | The instructions of the predictors in a `dspy.Module`     |
+| Text          | Any other text, for example a document or a configuration |
 
 Every run uses the same contract. Your run code defines `run(artifact, input)`. Your metric defines `score(input, output, expected=None)`. The metric returns a score and written feedback. The optimizer reads the feedback to make the next version better.
 
@@ -37,19 +37,19 @@ Skynet selects versions on the validation cases. It reports the final score on t
 
 ## Where to start
 
-| If you want to | Read |
-| --- | --- |
-| Start your first run | [Quickstart](/docs/quickstart) |
+| If you want to                    | Read                                                  |
+| --------------------------------- | ----------------------------------------------------- |
+| Start your first run              | [Quickstart](/docs/quickstart)                        |
 | Understand how optimization works | [How optimization works](/docs/concepts/optimization) |
-| Choose an engine | [Engines](/docs/concepts/engines) |
-| Prepare your data | [Datasets and splits](/docs/concepts/datasets) |
-| Write a metric | [Metrics and scorers](/docs/concepts/scorers) |
-| Fill in the wizard | [Submit a run](/docs/guides/submit) |
-| Read your results | [Results](/docs/guides/results) |
-| Understand cost | [Billing](/docs/concepts/billing) |
-| Use Skynet from an agent | [MCP](/docs/mcp) |
-| Call Skynet from code | [API](/docs/api) |
-| Check the limits | [Limits](/docs/limits) |
+| Choose an engine                  | [Engines](/docs/concepts/engines)                     |
+| Prepare your data                 | [Datasets and splits](/docs/concepts/datasets)        |
+| Write a metric                    | [Metrics and scorers](/docs/concepts/scorers)         |
+| Fill in the wizard                | [Submit a run](/docs/guides/submit)                   |
+| Read your results                 | [Results](/docs/guides/results)                       |
+| Understand cost                   | [Billing](/docs/concepts/billing)                     |
+| Use Skynet from an agent          | [MCP](/docs/mcp)                                      |
+| Call Skynet from code             | [API](/docs/api)                                      |
+| Check the limits                  | [Limits](/docs/limits)                                |
 
 > [!TIP]
 > Start with a small dataset and the default settings. Make the metric feedback specific. Good feedback gives the optimizer more to work with than the score alone.

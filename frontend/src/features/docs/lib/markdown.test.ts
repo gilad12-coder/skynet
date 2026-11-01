@@ -28,7 +28,12 @@ test("tabLabel reads the tab name from a code block info string", () => {
 });
 
 test("remarkDocs groups adjacent tab code blocks once, and marks callouts and headings", () => {
-  const code = (label: string) => ({ type: "code", lang: "bash", meta: `tab="${label}"`, value: label });
+  const code = (label: string) => ({
+    type: "code",
+    lang: "bash",
+    meta: `tab="${label}"`,
+    value: label,
+  });
   const tree = {
     type: "root",
     children: [

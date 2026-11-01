@@ -8,10 +8,10 @@ def score(input, output, expected=None):
     return score_value, {"feedback": "..."}
 ```
 
-| Argument | What it holds |
-| --- | --- |
-| `input` | A dict with the input fields of the case |
-| `output` | What your `run(artifact, input)` returned for the case |
+| Argument   | What it holds                                                    |
+| ---------- | ---------------------------------------------------------------- |
+| `input`    | A dict with the input fields of the case                         |
+| `output`   | What your `run(artifact, input)` returned for the case           |
 | `expected` | The expected value of the case, or `None` when the case has none |
 
 If your function takes only two arguments, Skynet calls `score(input, output)`.
@@ -29,23 +29,23 @@ The side info can also have a `"scores"` key. It maps names to numbers, for exam
 
 If the return value has a different shape, the contract check fails at **Metric return value**.
 
-| Return value | Valid |
-| --- | --- |
-| `(0.8, {"feedback": "Close. Missing the date."})` | Yes |
-| `[1.0, {"feedback": "OK", "scores": {"format": 1.0}}]` | Yes |
-| `0.8` | No. There is no side info. |
-| `(0.8, "Close.")` | No. The side info is not a dict. |
-| `(0.8, {})` | No. There is no feedback string. |
-| `("0.8", {"feedback": "OK"})` | No. The score is a string. |
-| `(0.8, {"feedback": "OK", "scores": {"a": "high"}})` | No. A named score is not a number. |
+| Return value                                           | Valid                              |
+| ------------------------------------------------------ | ---------------------------------- |
+| `(0.8, {"feedback": "Close. Missing the date."})`      | Yes                                |
+| `[1.0, {"feedback": "OK", "scores": {"format": 1.0}}]` | Yes                                |
+| `0.8`                                                  | No. There is no side info.         |
+| `(0.8, "Close.")`                                      | No. The side info is not a dict.   |
+| `(0.8, {})`                                            | No. There is no feedback string.   |
+| `("0.8", {"feedback": "OK"})`                          | No. The score is a string.         |
+| `(0.8, {"feedback": "OK", "scores": {"a": "high"}})`   | No. A named score is not a number. |
 
 ## Write useful feedback
 
 GEPA, DSPy GEPA and Auto read the feedback text to write the next version. Say what is wrong and what a correct output looks like.
 
-| Weak feedback | Useful feedback |
-| --- | --- |
-| "Wrong." | "Expected 'billing', got 'other'. The message mentions a charge." |
+| Weak feedback | Useful feedback                                                               |
+| ------------- | ----------------------------------------------------------------------------- |
+| "Wrong."      | "Expected 'billing', got 'other'. The message mentions a charge."             |
 | "Bad format." | "The output is not valid JSON. It has a trailing comma after the last field." |
 
 > [!NOTE]
@@ -133,10 +133,10 @@ The metric can also read the measurements directly with `observation()` and `ser
 
 ## Limits
 
-| Item | Value |
-| --- | --- |
-| Metric timeout | 60 seconds by default, at most 600 |
-| Contract check samples | 3 cases |
+| Item                   | Value                              |
+| ---------------------- | ---------------------------------- |
+| Metric timeout         | 60 seconds by default, at most 600 |
+| Contract check samples | 3 cases                            |
 
 ## Related pages
 

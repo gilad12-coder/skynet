@@ -2,10 +2,19 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Dialog as DialogPrimitive } from "radix-ui";
-import { MagnifyingGlass } from "@/shared/ui/icons";
+import { ArrowUpRight, FileText, Hash, MagnifyingGlass } from "@/shared/ui/icons";
+import type { Icon } from "@/shared/ui/icons";
 import { Kbd } from "@/shared/ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { matchesQuery } from "@/shared/lib/app-pages";
 import { cn } from "@/shared/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/primitives/dialog";
 
 interface SearchEntry {
   href: string;
@@ -15,16 +24,18 @@ interface SearchEntry {
   text: string;
 }
 
-interface SearchHit {
-  key: string;
+// Same shape as the app's command palette items, so both searches behave alike.
+interface SearchItem {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  keywords: string[];
+  icon: Icon;
   href: string;
-  title: string;
-  context: string;
-  snippet: string;
-  score: number;
+  isPage: boolean;
 }
 
-const MAX_HITS = 12;
 const indexes = new Map<string, Promise<SearchEntry[]>>();
 
 /** Load a locale's search index once per page view. */
@@ -41,50 +52,33 @@ function loadIndex(locale: string): Promise<SearchEntry[]> {
   return pending;
 }
 
-/** A short piece of text around the first match. */
-function snippetAround(text: string, term: string): string {
-  const at = text.toLowerCase().indexOf(term);
-  if (at < 0) return "";
-  const start = Math.max(0, at - 50);
-  const end = Math.min(text.length, at + term.length + 90);
-  return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+/** Turn the index into palette items: one per page, one per heading. */
+function toItems(entries: SearchEntry[]): SearchItem[] {
+  return entries.flatMap((entry) => [
+    {
+      id: entry.href,
+      group: entry.section,
+      label: entry.title,
+      description: entry.section,
+      keywords: [entry.text],
+      icon: FileText,
+      href: entry.href,
+      isPage: true,
+    },
+    ...entry.headings.map((heading) => ({
+      id: `${entry.href}#${heading.id}`,
+      group: entry.section,
+      label: heading.text,
+      description: entry.title,
+      keywords: [],
+      icon: Hash,
+      href: `${entry.href}#${heading.id}`,
+      isPage: false,
+    })),
+  ]);
 }
 
-/** Rank pages and headings for a query. Every word in the query must match. */
-function search(entries: SearchEntry[], query: string): SearchHit[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return [];
-  const all = (value: string) => terms.every((t) => value.toLowerCase().includes(t));
-  const hits: SearchHit[] = [];
-  for (const entry of entries) {
-    const inTitle = all(entry.title);
-    const inBody = all(`${entry.title} ${entry.text}`);
-    if (inTitle || inBody) {
-      hits.push({
-        key: entry.href,
-        href: entry.href,
-        title: entry.title,
-        context: entry.section,
-        snippet: inTitle ? "" : snippetAround(entry.text, terms[0] ?? ""),
-        score: inTitle ? 100 : 10,
-      });
-    }
-    for (const heading of entry.headings) {
-      if (!all(heading.text)) continue;
-      hits.push({
-        key: `${entry.href}#${heading.id}`,
-        href: `${entry.href}#${heading.id}`,
-        title: heading.text,
-        context: entry.title,
-        snippet: "",
-        score: 50,
-      });
-    }
-  }
-  return hits.sort((a, b) => b.score - a.score).slice(0, MAX_HITS);
-}
-
-/** The docs search: a header button, Cmd/Ctrl+K, and a results dialog. */
+/** The docs search: the app's search trigger, Cmd/Ctrl+K, and command palette. */
 export function DocsSearch({
   locale,
   dir,
@@ -92,26 +86,42 @@ export function DocsSearch({
 }: {
   locale: string;
   dir: "ltr" | "rtl";
-  labels: { search: string; searchPlaceholder: string; searchEmpty: string; searchLoading: string; searchError: string };
+  labels: {
+    search: string;
+    searchPlaceholder: string;
+    searchEmpty: string;
+    searchLoading: string;
+    searchError: string;
+    searchOpen: string;
+  };
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [entries, setEntries] = React.useState<SearchEntry[] | null>(null);
   const [failed, setFailed] = React.useState(false);
-  const [selected, setSelected] = React.useState(0);
-  const listId = React.useId();
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setOpen((value) => !value);
+        setOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  React.useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open || entries) return;
@@ -126,98 +136,204 @@ export function DocsSearch({
     };
   }, [open, entries, locale]);
 
-  const hits = React.useMemo(() => (entries ? search(entries, query) : []), [entries, query]);
+  const items = React.useMemo(() => (entries ? toItems(entries) : []), [entries]);
 
-  const go = (hit: SearchHit | undefined) => {
-    if (!hit) return;
+  const filteredItems = React.useMemo(() => {
+    if (!query.trim()) return items.filter((item) => item.isPage);
+    return items.filter((item) =>
+      matchesQuery([item.label, item.description, ...item.keywords], query),
+    );
+  }, [items, query]);
+
+  const groups = React.useMemo(
+    () => [...new Set(filteredItems.map((item) => item.group))],
+    [filteredItems],
+  );
+
+  React.useEffect(() => {
+    setActiveIndex(0);
+  }, [filteredItems.length, query]);
+
+  const selectItem = (item: SearchItem) => {
     setOpen(false);
-    setQuery("");
-    router.push(hit.href);
+    router.push(item.href);
   };
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "ArrowDown") setSelected((i) => Math.min(i + 1, hits.length - 1));
-    else if (event.key === "ArrowUp") setSelected((i) => Math.max(i - 1, 0));
-    else if (event.key === "Enter") go(hits[selected]);
-    else return;
-    event.preventDefault();
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const count = Math.max(filteredItems.length, 1);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((index) => (index + 1) % count);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => (index - 1 + count) % count);
+    } else if (event.key === "Enter" && filteredItems[activeIndex]) {
+      event.preventDefault();
+      selectItem(filteredItems[activeIndex]);
+    }
   };
+
+  const status = failed
+    ? labels.searchError
+    : !entries
+      ? labels.searchLoading
+      : filteredItems.length === 0
+        ? labels.searchEmpty
+        : null;
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
-      <DialogPrimitive.Trigger asChild>
-        <button
-          type="button"
-          className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-2.5 text-sm text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground sm:w-56"
-        >
-          <MagnifyingGlass className="size-4 shrink-0" aria-hidden="true" />
-          <span className="flex-1 text-start">{labels.search}</span>
-          <Kbd className="hidden sm:inline-flex" dir="ltr">
-            {"⌘K"}
-          </Kbd>
-        </button>
-      </DialogPrimitive.Trigger>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <DialogPrimitive.Content
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            dir={dir}
+            className="group inline-flex size-[44px] shrink-0 items-center justify-center gap-3 rounded-xl border border-border/70 bg-background/80 px-2.5 text-muted-foreground shadow-none transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-border hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 lg:h-8 lg:w-64 lg:justify-between"
+            aria-label={labels.searchPlaceholder}
+            aria-keyshortcuts="Control+K Meta+K"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-controls="docs-search-dialog"
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <MagnifyingGlass
+                className="size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-primary"
+                aria-hidden="true"
+              />
+              <span
+                dir="auto"
+                className="hidden truncate text-start text-[0.8rem] font-normal tracking-tight text-muted-foreground lg:block"
+              >
+                {labels.search}
+              </span>
+            </span>
+            <span
+              dir="ltr"
+              className="hidden shrink-0 items-center gap-1 lg:flex"
+              aria-hidden="true"
+            >
+              <Kbd>{"⌘"}</Kbd>
+              <Kbd>{"K"}</Kbd>
+            </span>
+          </button>
+        </TooltipTrigger>
+        {/* The label shows on the button at lg+, so the tooltip is for the icon-only size. */}
+        <TooltipContent className="lg:hidden">{labels.search}</TooltipContent>
+      </Tooltip>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          id="docs-search-dialog"
+          showCloseButton={false}
           dir={dir}
-          aria-describedby={undefined}
-          className="fixed inset-x-3 top-[12vh] z-50 mx-auto max-w-xl overflow-hidden rounded-xl border border-border bg-background shadow-[var(--shadow-float)] outline-none"
+          className="max-w-[calc(100%-1.5rem)] gap-0 overflow-hidden rounded-2xl border border-border/75 bg-background p-0 shadow-[var(--shadow-float)] sm:max-w-xl"
         >
-          <DialogPrimitive.Title className="sr-only">{labels.search}</DialogPrimitive.Title>
-          <div className="flex items-center gap-2 border-b border-border px-3">
-            <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <DialogHeader className="sr-only">
+            <DialogTitle>{labels.search}</DialogTitle>
+            <DialogDescription>{labels.searchPlaceholder}</DialogDescription>
+          </DialogHeader>
+          <div className="group flex h-[58px] items-center gap-3 border-b border-border/60 px-4 focus-within:bg-white/50 dark:focus-within:bg-white/5">
+            <MagnifyingGlass
+              className="size-5 shrink-0 text-primary/60 transition-colors group-focus-within:text-primary"
+              aria-hidden="true"
+            />
             <input
-              autoFocus
+              ref={inputRef}
+              id="docs-search-input"
               value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setSelected(0);
-              }}
-              onKeyDown={onKeyDown}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleInputKeyDown}
               placeholder={labels.searchPlaceholder}
               aria-label={labels.searchPlaceholder}
+              aria-controls="docs-search-results"
+              aria-activedescendant={
+                filteredItems[activeIndex] ? `docs-search-${activeIndex}` : undefined
+              }
               role="combobox"
-              aria-expanded={hits.length > 0}
-              aria-controls={listId}
-              aria-activedescendant={hits[selected] ? `${listId}-${selected}` : undefined}
-              className="h-12 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
+              aria-expanded="true"
+              autoComplete="off"
+              spellCheck={false}
+              dir={dir}
+              className="h-full min-w-0 flex-1 bg-transparent text-start text-[0.95rem] text-foreground outline-none placeholder:text-start placeholder:text-muted-foreground/90"
             />
           </div>
-          <div className="max-h-[60vh] overflow-y-auto p-2">
-            {failed ? (
-              <p className="p-4 text-sm text-muted-foreground">{labels.searchError}</p>
-            ) : !entries && query ? (
-              <p className="p-4 text-sm text-muted-foreground">{labels.searchLoading}</p>
-            ) : query && !hits.length ? (
-              <p className="p-4 text-sm text-muted-foreground">{labels.searchEmpty}</p>
+
+          <div
+            id="docs-search-results"
+            role="listbox"
+            aria-label={labels.search}
+            className="max-h-[min(28rem,60vh)] overflow-y-auto p-2"
+          >
+            {status === null ? (
+              groups.map((group) => {
+                const groupItems = filteredItems.filter((item) => item.group === group);
+                return (
+                  <section key={group} className="pb-2 last:pb-0">
+                    <p className="px-2 pb-1.5 pt-2 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65">
+                      {group}
+                    </p>
+                    <div className="space-y-0.5">
+                      {groupItems.map((item) => {
+                        const index = filteredItems.indexOf(item);
+                        const selected = activeIndex === index;
+                        const ItemIcon = item.icon;
+                        return (
+                          <button
+                            key={item.id}
+                            id={`docs-search-${index}`}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onMouseEnter={() => setActiveIndex(index)}
+                            onClick={() => selectItem(item)}
+                            className={cn(
+                              "group/item flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start outline-none transition-[background-color,color] duration-100",
+                              selected
+                                ? "bg-primary-fill/[0.09] text-foreground"
+                                : "text-foreground/80 hover:bg-accent/55",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-100",
+                                selected
+                                  ? "bg-primary-fill/[0.12] text-primary"
+                                  : "bg-muted/70 text-muted-foreground group-hover/item:text-primary",
+                              )}
+                            >
+                              <ItemIcon className="size-[1.05rem]" aria-hidden="true" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium">
+                                {item.label}
+                              </span>
+                              <span className="mt-0.5 block truncate text-xs text-muted-foreground/75">
+                                {item.description}
+                              </span>
+                            </span>
+                            {selected && (
+                              <span className="hidden shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground sm:flex">
+                                {labels.searchOpen}
+                                <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })
             ) : (
-              <ul id={listId} role="listbox" aria-label={labels.search}>
-                {hits.map((hit, i) => (
-                  <li
-                    key={hit.key}
-                    id={`${listId}-${i}`}
-                    role="option"
-                    aria-selected={i === selected}
-                    onMouseMove={() => setSelected(i)}
-                    onClick={() => go(hit)}
-                    className={cn(
-                      "cursor-pointer rounded-lg px-3 py-2",
-                      i === selected ? "bg-muted" : undefined,
-                    )}
-                  >
-                    <div className="text-xs text-muted-foreground">{hit.context}</div>
-                    <div className="text-sm font-medium text-foreground">{hit.title}</div>
-                    {hit.snippet && (
-                      <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{hit.snippet}</div>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <div className="flex min-h-36 flex-col items-center justify-center gap-2 px-6 text-center">
+                <MagnifyingGlass className="size-5 text-primary/30" aria-hidden="true" />
+                <p className="text-sm font-medium text-foreground/75">{status}</p>
+              </div>
             )}
           </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

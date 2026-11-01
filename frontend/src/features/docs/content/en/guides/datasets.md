@@ -4,11 +4,11 @@ A dataset is a table of examples that an optimization run learns from and scores
 
 Skynet reads these file types:
 
-| Extension | How Skynet reads it |
-| --- | --- |
-| `.csv` | The first line is the header row. The file needs at least one data row. |
-| `.json` | An array of objects, or one object. The keys of the first object become the columns. |
-| `.xlsx`, `.xls` | Skynet reads only the first sheet. |
+| Extension       | How Skynet reads it                                                                  |
+| --------------- | ------------------------------------------------------------------------------------ |
+| `.csv`          | The first line is the header row. The file needs at least one data row.              |
+| `.json`         | An array of objects, or one object. The keys of the first object become the columns. |
+| `.xlsx`, `.xls` | Skynet reads only the first sheet.                                                   |
 
 Skynet rejects other extensions with the message "Unsupported file format".
 
@@ -122,9 +122,9 @@ Select a dataset and click **Share**. The **Share and privacy** dialog opens.
 
 ### Link access
 
-| Option | Who can open the dataset |
-| --- | --- |
-| **Restricted** | Only the owner and invited people. |
+| Option                   | Who can open the dataset                                      |
+| ------------------------ | ------------------------------------------------------------- |
+| **Restricted**           | Only the owner and invited people.                            |
 | **Anyone with the link** | Any signed-in person with the link, with the role you choose. |
 
 For an "Anyone with the link" dataset, choose the role that the link gives: **Viewer** or **Editor**. Click **Copy link** to copy the URL.
@@ -137,11 +137,11 @@ For an "Anyone with the link" dataset, choose the role that the link gives: **Vi
 
 The roles are:
 
-| Role | Access |
-| --- | --- |
-| Owner | Full control, including managing sharing and deletion. |
+| Role   | Access                                                    |
+| ------ | --------------------------------------------------------- |
+| Owner  | Full control, including managing sharing and deletion.    |
 | Editor | Viewer access plus running the model, chat, and renaming. |
-| Viewer | Opens the dataset. The editor is read-only. |
+| Viewer | Opens the dataset. The editor is read-only.               |
 
 ### Transfer ownership
 

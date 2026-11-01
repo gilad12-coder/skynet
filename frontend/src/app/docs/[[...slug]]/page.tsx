@@ -1,8 +1,8 @@
-/** Public documentation at /docs (English) and /docs/he (Hebrew). No sign-in. */
+/** Public documentation at /docs (English) and /docs/<locale> (every other app locale). No sign-in. */
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { DOCS_CHROME, DocsMarkdown, DocsShell, docsHref, docsMarkdownDocument, docsSource, extractHeadings, resolveDocsPath } from "@/features/docs";
+import { DOCS_CHROME, DOCS_LOCALES, DocsMarkdown, DocsShell, docsHref, docsMarkdownDocument, docsSource, extractHeadings, resolveDocsPath } from "@/features/docs";
 import { APP_NAME } from "@/shared/lib/brand";
 import { getSiteUrl } from "@/shared/lib/site-config";
 
@@ -20,8 +20,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     alternates: {
       canonical: url,
       languages: {
-        en: docsHref(page.slug, "en"),
-        he: docsHref(page.slug, "he"),
+        ...Object.fromEntries(DOCS_LOCALES.map((l) => [l, docsHref(page.slug, l)])),
         "x-default": docsHref(page.slug, "en"),
       },
       types: { "text/markdown": `${url}.md` },
@@ -32,7 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description: page.description[locale],
       url,
-      locale: locale === "he" ? "he_IL" : "en_US",
+      locale: locale === "en" ? "en_US" : locale === "he" ? "he_IL" : locale.replace("-", "_"),
       modifiedTime: page.updated,
     },
     robots: { index: true, follow: true },

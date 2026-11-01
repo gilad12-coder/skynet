@@ -1,7 +1,7 @@
 The Skynet HTTP API lets scripts and tools do what the web app does: start runs, watch them, and read the results. This page shows how to sign requests, where the full reference is, and one complete example.
 
 > [!TIP]
-> Do you use an AI agent such as Claude Code, Codex or Cursor? Connect it through [MCP](/docs/mcp) instead. The agent then starts and watches runs for you, with a spending limit for each run. The MCP server is not live yet. It goes live after pull request #861 merges and deploys.
+> Do you use an AI agent such as Claude Code, Codex or Cursor? Connect it through [MCP](/docs/mcp) instead. The agent then starts and watches runs for you, with a spending limit for each run.
 
 ## Base URL
 
@@ -40,19 +40,19 @@ The reference reads the OpenAPI document at `https://api.skynetml.com/openapi.pu
 
 ## Main endpoints
 
-| Method and path | What it does |
-| --- | --- |
-| `GET /models` | Lists the models you can use. |
-| `GET /optimizers` | Lists the optimizers that fit a setup. |
-| `GET /blackbox/engines` | Lists the native engines and if each one is available. |
-| `POST /optimize` | Starts a run for a prompt, code, text or DSPy program. |
-| `POST /blackbox/run` | Starts a run on a GitHub repository. |
-| `GET /optimizations` | Lists your runs. |
-| `GET /optimizations/{optimization_id}` | Returns one run: status, progress, logs and result. |
-| `GET /optimizations/{optimization_id}/artifact` | Returns the best version that the run found. |
-| `POST /optimizations/{optimization_id}/cancel` | Stops a run. |
-| `POST /serve/{optimization_id}` | Runs the best version on a new input. |
-| `GET /health` | Shows if the service is up. |
+| Method and path                                 | What it does                                           |
+| ----------------------------------------------- | ------------------------------------------------------ |
+| `GET /models`                                   | Lists the models you can use.                          |
+| `GET /optimizers`                               | Lists the optimizers that fit a setup.                 |
+| `GET /blackbox/engines`                         | Lists the native engines and if each one is available. |
+| `POST /optimize`                                | Starts a run for a prompt, code, text or DSPy program. |
+| `POST /blackbox/run`                            | Starts a run on a GitHub repository.                   |
+| `GET /optimizations`                            | Lists your runs.                                       |
+| `GET /optimizations/{optimization_id}`          | Returns one run: status, progress, logs and result.    |
+| `GET /optimizations/{optimization_id}/artifact` | Returns the best version that the run found.           |
+| `POST /optimizations/{optimization_id}/cancel`  | Stops a run.                                           |
+| `POST /serve/{optimization_id}`                 | Runs the best version on a new input.                  |
+| `GET /health`                                   | Shows if the service is up.                            |
 
 ## Start a run
 
@@ -81,7 +81,10 @@ curl https://api.skynetml.com/optimize \
     "cases": [
       { "input": { "message": "I was charged twice." }, "expected": { "label": "billing" } },
       { "input": { "message": "The export button does nothing." }, "expected": { "label": "bug" } },
-      { "input": { "message": "Do you have a Hebrew interface?" }, "expected": { "label": "other" } }
+      {
+        "input": { "message": "Do you have a Hebrew interface?" },
+        "expected": { "label": "other" }
+      }
     ]
   },
   "optimizer": { "choice": "auto", "budget": { "max_scorer_runs": 200 } },
@@ -109,13 +112,13 @@ Read [Metrics and scorers](/docs/concepts/scorers) for the rules of `run_code` a
 
 ### Responses
 
-| Status | Meaning |
-| --- | --- |
-| `201` | Skynet queued the run. The body has `optimization_id` and `status`. |
-| `202` | The setup check is still running. Wait for the seconds in the `Retry-After` header. Then send the same body with the same `Idempotency-Key`. |
-| `402` | Your balance is too low. |
-| `409` | You reached a quota, or the setup check is out of date. |
-| `422` | The request or the workspace code does not fit the optimizer. |
+| Status | Meaning                                                                                                                                      |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `201`  | Skynet queued the run. The body has `optimization_id` and `status`.                                                                          |
+| `202`  | The setup check is still running. Wait for the seconds in the `Retry-After` header. Then send the same body with the same `Idempotency-Key`. |
+| `402`  | Your balance is too low.                                                                                                                     |
+| `409`  | You reached a quota, or the setup check is out of date.                                                                                      |
+| `422`  | The request or the workspace code does not fit the optimizer.                                                                                |
 
 > [!NOTE]
 > Always send an `Idempotency-Key` header. If you send the same request again with the same key, Skynet returns the first run. It does not start a second run.
@@ -131,12 +134,12 @@ curl https://api.skynetml.com/optimizations/$RUN_ID \
 
 The `status` field is one of:
 
-| Status | Final |
-| --- | --- |
-| `pending`, `validating`, `running` | No |
-| `paused` | No |
-| `success` | Yes |
-| `failed`, `cancelled`, `stopped` | Yes |
+| Status                             | Final |
+| ---------------------------------- | ----- |
+| `pending`, `validating`, `running` | No    |
+| `paused`                           | No    |
+| `success`                          | Yes   |
+| `failed`, `cancelled`, `stopped`   | Yes   |
 
 Poll every 10 to 30 seconds. A run can take from minutes to hours.
 

@@ -1,7 +1,11 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, List } from "@/shared/ui/icons";
+import { ArrowLeft, ArrowRight, LinkSimple, List } from "@/shared/ui/icons";
+import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { AppMark } from "@/shared/ui/app-mark";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { APP_NAME } from "@/shared/lib/brand";
 import { cn } from "@/shared/lib/utils";
+import { DocsLanguagePicker } from "./docs-language-picker";
 import { DocsPageActions } from "./docs-page-actions";
 import { DocsSearch } from "./docs-search";
 import { DocsThemeToggle } from "./docs-theme-toggle";
@@ -11,6 +15,7 @@ import type { DocsHeading } from "../lib/markdown";
 import {
   DOCS_PAGES,
   DOCS_SECTIONS,
+  docsDir,
   docsHref,
   docsMarkdownHref,
   docsNeighbors,
@@ -54,7 +59,7 @@ function DocsNav({ locale, current }: { locale: DocsLocale; current: string }) {
 
 /** A long date in the page language, from YYYY-MM-DD. */
 function formatDate(date: string, locale: DocsLocale): string {
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "long",
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
@@ -78,8 +83,7 @@ export function DocsShell({
   children: React.ReactNode;
 }) {
   const t = DOCS_CHROME[locale];
-  const dir = locale === "he" ? "rtl" : "ltr";
-  const other: DocsLocale = locale === "he" ? "en" : "he";
+  const dir = docsDir(locale);
   const section = DOCS_SECTIONS.find((s) => s.id === page.section);
   const { prev, next } = docsNeighbors(page.slug);
   const markdownHref = docsMarkdownHref(page.slug, locale);
@@ -87,7 +91,7 @@ export function DocsShell({
   const NextIcon = dir === "rtl" ? ArrowLeft : ArrowRight;
 
   return (
-    <div lang={locale} dir={dir} className="min-h-dvh bg-background text-foreground">
+    <div lang={locale} dir={dir} className="docs-root min-h-dvh bg-background text-foreground">
       <a
         href="#docs-content"
         className="sr-only focus:not-sr-only focus:fixed focus:start-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2"
@@ -95,36 +99,56 @@ export function DocsShell({
         {t.skip}
       </a>
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[90rem] items-center gap-3 px-4 sm:px-6">
-          <Link href={docsHref("", locale)} aria-label={t.home} className="flex shrink-0 items-center gap-2">
-            <AppMark className="size-7" aria-hidden="true" />
-            <span className="font-semibold" dir="ltr">
-              {"Skynet"}
+        <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
+          <Link
+            href={docsHref("", locale)}
+            aria-label={t.home}
+            className="flex shrink-0 items-center gap-2"
+          >
+            {/* The app navbar wordmark: the morphing mark and name at sm+, the
+                static mark and plain-text name below sm. */}
+            <span dir="ltr" className="flex items-center gap-2">
+              <span className="hidden sm:block">
+                <AnimatedWordmark
+                  size={16}
+                  withMark
+                  autoMorph
+                  autoMorphDuration={10000}
+                  morphSpeed={250}
+                />
+              </span>
+              <AppMark className="sm:hidden size-5 shrink-0" aria-hidden="true" />
+              <span
+                className="sm:hidden text-sm font-bold tracking-[0.14em] uppercase text-primary"
+                style={{ fontFamily: "var(--font-ui)" }}
+              >
+                {APP_NAME}
+              </span>
             </span>
             <span className="text-muted-foreground">{t.docs}</span>
           </Link>
-          <div className="flex-1" />
-          <div className="min-w-0 flex-1 sm:flex-none">
+          <div className="flex flex-1 justify-center px-2">
             <DocsSearch locale={locale} dir={dir} labels={t} />
           </div>
-          <Link
-            href={docsHref(page.slug, other)}
-            hrefLang={other}
-            lang={other}
-            title={t.otherLanguage}
-            className="hidden shrink-0 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground sm:block"
-          >
-            {t.otherLanguageName}
-          </Link>
-          <div className="hidden md:block">
-            <DocsThemeToggle labels={t} />
+          {/* Language, theme and the app link share one bordered control, like a segmented toggle. */}
+          <div className="hidden h-8 shrink-0 items-center rounded-md border border-border p-0.5 md:flex">
+            <DocsLanguagePicker slug={page.slug} locale={locale} chrome={t} inline />
+            <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
+            <DocsThemeToggle labels={t} inline />
+            <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  href="/"
+                  aria-label={t.openApp}
+                  className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                >
+                  <LinkSimple className="size-3.5" aria-hidden="true" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent>{t.openApp}</TooltipContent>
+            </Tooltip>
           </div>
-          <Link
-            href="/"
-            className="hidden shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover md:block"
-          >
-            {t.openApp}
-          </Link>
         </div>
       </header>
 
@@ -134,19 +158,15 @@ export function DocsShell({
         </aside>
 
         <main id="docs-content" className="min-w-0 flex-1 py-8 lg:px-10">
-          <details className="mb-6 rounded-lg border border-border lg:hidden">
+          <details className="docs-details mb-6 rounded-lg border border-border lg:hidden">
             <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium">
               <List className="size-4" aria-hidden="true" />
               {t.menu}
             </summary>
             <div className="border-t border-border p-3">
               <DocsNav locale={locale} current={page.slug} />
-              <div className="mt-4 flex items-center gap-3 border-t border-border pt-4 sm:hidden">
-                <Link href={docsHref(page.slug, other)} hrefLang={other} lang={other} className="text-sm">
-                  {t.otherLanguageName}
-                </Link>
-              </div>
-              <div className="mt-4 md:hidden">
+              <div className="mt-4 flex items-center gap-3 border-t border-border pt-4 md:hidden">
+                <DocsLanguagePicker slug={page.slug} locale={locale} chrome={t} />
                 <DocsThemeToggle labels={t} />
               </div>
             </div>
@@ -154,9 +174,10 @@ export function DocsShell({
 
           <article className="mx-auto max-w-3xl">
             <p className="text-sm font-medium text-primary">{section?.title[locale]}</p>
-            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight sm:text-4xl">{page.title[locale]}</h1>
-            <p className="mt-3 text-lg text-muted-foreground">{page.description[locale]}</p>
-            <div className="mt-5">
+            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              {page.title[locale]}
+            </h1>
+            <div className="mt-3">
               <DocsPageActions
                 markdown={markdown}
                 markdownHref={markdownHref}
@@ -164,22 +185,20 @@ export function DocsShell({
                 labels={t}
               />
             </div>
+            <p className="mt-3 text-lg text-muted-foreground">{page.description[locale]}</p>
 
             <div className="docs-prose mt-8">{children}</div>
 
             <footer className="mt-12 border-t border-border pt-6">
-              <p className="text-sm text-muted-foreground">
-                {fillChrome(t.lastUpdated, { date: formatDate(page.updated, locale) })}
-              </p>
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {prev ? (
                   <Link
                     href={docsHref(prev.slug, locale)}
                     rel="prev"
-                    className="rounded-lg border border-border p-4 transition-colors hover:border-foreground/25"
+                    className="group rounded-lg border border-border p-4 transition-colors duration-200 hover:border-foreground/25"
                   >
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <PrevIcon className="size-3" aria-hidden="true" />
+                      <PrevIcon className="docs-nudge-back size-3" aria-hidden="true" />
                       {t.previous}
                     </span>
                     <span className="mt-1 block font-medium">{prev.title[locale]}</span>
@@ -191,16 +210,19 @@ export function DocsShell({
                   <Link
                     href={docsHref(next.slug, locale)}
                     rel="next"
-                    className="rounded-lg border border-border p-4 text-end transition-colors hover:border-foreground/25"
+                    className="group rounded-lg border border-border p-4 text-end transition-colors duration-200 hover:border-foreground/25"
                   >
                     <span className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
                       {t.next}
-                      <NextIcon className="size-3" aria-hidden="true" />
+                      <NextIcon className="docs-nudge-forward size-3" aria-hidden="true" />
                     </span>
                     <span className="mt-1 block font-medium">{next.title[locale]}</span>
                   </Link>
                 )}
               </div>
+              <p className="mt-6 text-sm text-muted-foreground">
+                {fillChrome(t.lastUpdated, { date: formatDate(page.updated, locale) })}
+              </p>
             </footer>
           </article>
         </main>

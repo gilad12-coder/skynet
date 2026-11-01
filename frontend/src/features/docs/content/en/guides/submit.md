@@ -18,12 +18,12 @@ You can edit both fields. The assistant does not overwrite your edits.
 
 Select the **Artifact type**:
 
-| Artifact type | What changes |
-| --- | --- |
-| Prompt | Instructions sent to a language model |
-| Code | The source of a program |
-| DSPy program | The predictor instructions of a DSPy module |
-| Text | Any other text, such as a document or a template |
+| Artifact type | What changes                                     |
+| ------------- | ------------------------------------------------ |
+| Prompt        | Instructions sent to a language model            |
+| Code          | The source of a program                          |
+| DSPy program  | The predictor instructions of a DSPy module      |
+| Text          | Any other text, such as a document or a template |
 
 Then give the **Starting version** (Guided: **Where we start from**). Paste the current version, or let the assistant write a draft.
 

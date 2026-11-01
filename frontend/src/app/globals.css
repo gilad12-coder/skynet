@@ -766,8 +766,7 @@ h3 {
 [data-settings-text-buttons] [data-slot="button"][data-accent]:not([data-size^="icon"]) {
   @apply border-transparent bg-primary-fill text-primary-foreground;
 }
-[data-settings-text-buttons]
-  [data-slot="button"][data-accent]:not([data-size^="icon"]):hover {
+[data-settings-text-buttons] [data-slot="button"][data-accent]:not([data-size^="icon"]):hover {
   @apply bg-primary-hover text-primary-foreground;
 }
 [data-settings-text-buttons]
@@ -1068,7 +1067,12 @@ code,
 /* Spotlight radial glow on hover (follows mouse) */
 /* Gradient headings */
 h1 {
-  background: linear-gradient(135deg, var(--foreground) 0%, var(--foreground) 50%, var(--text-2) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--foreground) 0%,
+    var(--foreground) 50%,
+    var(--text-2) 100%
+  );
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -1115,7 +1119,6 @@ button[data-slot="button"][data-variant="default"] {
 aside {
   backdrop-filter: blur(16px);
 }
-
 
 /* ════════════════════════════════════════════
    3D PERSPECTIVE EFFECTS
@@ -1309,8 +1312,16 @@ aside {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--border) 4%, transparent) 1px, transparent 1px);
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--border) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--border) 4%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 48px 48px;
   mask-image: linear-gradient(180deg, transparent 0%, black 10%, black 90%, transparent 100%);
   -webkit-mask-image: linear-gradient(
@@ -1794,5 +1805,83 @@ table {
   .docs-prose hr {
     margin-block: 2rem;
     border-color: var(--border);
+  }
+}
+
+/* Public docs motion: feedback and continuity only, no page-load choreography. */
+@layer components {
+  .docs-indicator {
+    transition:
+      transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+      width 260ms cubic-bezier(0.16, 1, 0.3, 1),
+      height 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .docs-panel-in {
+    animation: docs-panel-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .docs-details {
+    interpolate-size: allow-keywords;
+  }
+  .docs-details::details-content {
+    block-size: 0;
+    overflow: hidden;
+    transition:
+      block-size 280ms cubic-bezier(0.16, 1, 0.3, 1),
+      content-visibility 280ms allow-discrete;
+  }
+  .docs-details[open]::details-content {
+    block-size: auto;
+  }
+  .docs-nudge-back,
+  .docs-nudge-forward {
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .group:hover .docs-nudge-back {
+    transform: translateX(-3px);
+  }
+  .group:hover .docs-nudge-forward {
+    transform: translateX(3px);
+  }
+  [dir="rtl"] .group:hover .docs-nudge-back {
+    transform: translateX(3px);
+  }
+  [dir="rtl"] .group:hover .docs-nudge-forward {
+    transform: translateX(-3px);
+  }
+}
+
+@keyframes docs-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.docs-root) {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Reduced motion: indicators and menus jump into place, panels only fade. */
+@media (prefers-reduced-motion: reduce) {
+  .docs-indicator,
+  .docs-details::details-content,
+  .docs-nudge-back,
+  .docs-nudge-forward {
+    transition: none;
+  }
+  .group:hover .docs-nudge-back,
+  .group:hover .docs-nudge-forward {
+    transform: none;
+  }
+  .docs-panel-in {
+    animation-name: docs-fade-in;
+  }
+}
+
+@keyframes docs-fade-in {
+  from {
+    opacity: 0;
   }
 }

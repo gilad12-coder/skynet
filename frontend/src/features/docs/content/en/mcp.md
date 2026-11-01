@@ -1,8 +1,5 @@
 The Skynet MCP server lets an AI agent use Skynet for you. Claude, ChatGPT, Codex, Cursor and other MCP clients can check a run setup, start runs, watch them and stop them. You approve the connection one time in your browser. The agent sets a spending limit for each run.
 
-> [!WARNING]
-> The MCP server is not live yet. It goes live after the server change (pull request #861) merges and deploys. Until then, the connection fails.
-
 ## Server URL
 
 Every client uses the same URL:
@@ -18,6 +15,7 @@ The server uses Streamable HTTP. Sign-in uses OAuth 2.1. You do not copy a token
 Select your client. Follow its steps, then go to [Approve the connection](#approve-the-connection).
 
 ```skynet-mcp-clients
+
 ```
 
 ## Approve the connection
@@ -38,13 +36,13 @@ After you click **Allow**, the browser returns to the agent. The agent can now c
 
 ## Tools
 
-| Tool | What it does | Access |
-| --- | --- | --- |
-| `check_run` | Checks a run setup without running it or charging you. Suggests a spending limit. | Read |
-| `start_run` | Starts a run with a spending limit. | Write |
-| `get_run` | Returns the status, the spending and, when the run ends, the result. | Read |
-| `list_runs` | Lists your runs, newest first. Can filter by status. | Read |
-| `stop_run` | Stops a run. A second call returns an error that says the run already ended. | Write |
+| Tool        | What it does                                                                      | Access |
+| ----------- | --------------------------------------------------------------------------------- | ------ |
+| `check_run` | Checks a run setup without running it or charging you. Suggests a spending limit. | Read   |
+| `start_run` | Starts a run with a spending limit.                                               | Write  |
+| `get_run`   | Returns the status, the spending and, when the run ends, the result.              | Read   |
+| `list_runs` | Lists your runs, newest first. Can filter by status.                              | Read   |
+| `stop_run`  | Stops a run. A second call returns an error that says the run already ended.      | Write  |
 
 Read access uses the `runs:read` scope. Write access uses the `runs:write` scope.
 
@@ -84,13 +82,13 @@ To disconnect an agent, remove the Skynet server from the client. Most clients t
 
 ## Troubleshooting
 
-| Problem | What to do |
-| --- | --- |
-| The connection fails right away | Check the server URL. It must be exactly `https://mcp.skynetml.com/mcp`. |
-| "This agent can't connect" | Start the connection again from the client. |
-| "Too many attempts" | Wait some minutes, then try again. |
-| The client does not open a browser | Update the client. It must support remote MCP servers with OAuth. |
-| `start_run` fails with a balance error | Add funds in Skynet, or start the run with a lower spending limit. |
-| The tools stop working after some weeks | The grant expired. Remove the server and connect again. |
+| Problem                                 | What to do                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------ |
+| The connection fails right away         | Check the server URL. It must be exactly `https://mcp.skynetml.com/mcp`. |
+| "This agent can't connect"              | Start the connection again from the client.                              |
+| "Too many attempts"                     | Wait some minutes, then try again.                                       |
+| The client does not open a browser      | Update the client. It must support remote MCP servers with OAuth.        |
+| `start_run` fails with a balance error  | Add funds in Skynet, or start the run with a lower spending limit.       |
+| The tools stop working after some weeks | The grant expired. Remove the server and connect again.                  |
 
 For direct HTTP access without an agent, read [API](/docs/api).

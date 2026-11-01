@@ -1,7 +1,7 @@
 ה-HTTP API של Skynet מאפשר לסקריפטים ולכלים לעשות את מה שאפליקציית הווב עושה: להפעיל ריצות, לעקוב אחריהן ולקרוא את התוצאות. העמוד הזה מראה איך לחתום על בקשות, איפה נמצא התיעוד המלא, ודוגמה מלאה אחת.
 
 > [!TIP]
-> משתמש/ת בסוכן AI כמו Claude Code,‏ Codex או Cursor? חבר/י אותו דרך [MCP](/docs/mcp) במקום זאת. הסוכן יפעיל ויעקוב אחרי ריצות בשבילך, עם תקרת הוצאה לכל ריצה. שרת ה-MCP עדיין לא פעיל. הוא יהיה פעיל אחרי ש-pull request ‏#861 ימוזג ויפורס.
+> משתמש/ת בסוכן AI כמו Claude Code,‏ Codex או Cursor? חבר/י אותו דרך [MCP](/docs/mcp) במקום זאת. הסוכן יפעיל ויעקוב אחרי ריצות בשבילך, עם תקרת הוצאה לכל ריצה.
 
 ## כתובת הבסיס
 
@@ -40,19 +40,19 @@ Authorization: Bearer skyd_...
 
 ## endpoints עיקריים
 
-| שיטה ונתיב | מה הוא עושה |
-| --- | --- |
-| `GET /models` | מציג את המודלים שזמינים לך. |
-| `GET /optimizers` | מציג את האופטימייזרים שמתאימים להגדרות. |
-| `GET /blackbox/engines` | מציג את המנועים המובנים ואם כל אחד מהם זמין. |
-| `POST /optimize` | מפעיל ריצה עבור פרומפט, קוד, טקסט או תוכנית DSPy. |
-| `POST /blackbox/run` | מפעיל ריצה על מאגר GitHub. |
-| `GET /optimizations` | מציג את הריצות שלך. |
-| `GET /optimizations/{optimization_id}` | מחזיר ריצה אחת: סטטוס, התקדמות, לוגים ותוצאה. |
-| `GET /optimizations/{optimization_id}/artifact` | מחזיר את הגרסה הטובה ביותר שהריצה מצאה. |
-| `POST /optimizations/{optimization_id}/cancel` | עוצר ריצה. |
-| `POST /serve/{optimization_id}` | מריץ את הגרסה הטובה ביותר על קלט חדש. |
-| `GET /health` | מראה אם השירות פעיל. |
+| שיטה ונתיב                                      | מה הוא עושה                                       |
+| ----------------------------------------------- | ------------------------------------------------- |
+| `GET /models`                                   | מציג את המודלים שזמינים לך.                       |
+| `GET /optimizers`                               | מציג את האופטימייזרים שמתאימים להגדרות.           |
+| `GET /blackbox/engines`                         | מציג את המנועים המובנים ואם כל אחד מהם זמין.      |
+| `POST /optimize`                                | מפעיל ריצה עבור פרומפט, קוד, טקסט או תוכנית DSPy. |
+| `POST /blackbox/run`                            | מפעיל ריצה על מאגר GitHub.                        |
+| `GET /optimizations`                            | מציג את הריצות שלך.                               |
+| `GET /optimizations/{optimization_id}`          | מחזיר ריצה אחת: סטטוס, התקדמות, לוגים ותוצאה.     |
+| `GET /optimizations/{optimization_id}/artifact` | מחזיר את הגרסה הטובה ביותר שהריצה מצאה.           |
+| `POST /optimizations/{optimization_id}/cancel`  | עוצר ריצה.                                        |
+| `POST /serve/{optimization_id}`                 | מריץ את הגרסה הטובה ביותר על קלט חדש.             |
+| `GET /health`                                   | מראה אם השירות פעיל.                              |
 
 ## הפעלת ריצה
 
@@ -81,7 +81,10 @@ curl https://api.skynetml.com/optimize \
     "cases": [
       { "input": { "message": "I was charged twice." }, "expected": { "label": "billing" } },
       { "input": { "message": "The export button does nothing." }, "expected": { "label": "bug" } },
-      { "input": { "message": "Do you have a Hebrew interface?" }, "expected": { "label": "other" } }
+      {
+        "input": { "message": "Do you have a Hebrew interface?" },
+        "expected": { "label": "other" }
+      }
     ]
   },
   "optimizer": { "choice": "auto", "budget": { "max_scorer_runs": 200 } },
@@ -109,13 +112,13 @@ curl https://api.skynetml.com/optimize \
 
 ### תגובות
 
-| סטטוס | משמעות |
-| --- | --- |
-| `201` | ‏Skynet הכניס את הריצה לתור. הגוף מכיל `optimization_id` ו-`status`. |
+| סטטוס | משמעות                                                                                                                      |
+| ----- | --------------------------------------------------------------------------------------------------------------------------- |
+| `201` | ‏Skynet הכניס את הריצה לתור. הגוף מכיל `optimization_id` ו-`status`.                                                        |
 | `202` | בדיקת ההגדרות עדיין רצה. יש לחכות את מספר השניות שבכותרת `Retry-After`. אחר כך לשלוח את אותו גוף עם אותו `Idempotency-Key`. |
-| `402` | היתרה שלך נמוכה מדי. |
-| `409` | הגעת למכסה, או שבדיקת ההגדרות לא עדכנית. |
-| `422` | הבקשה או קוד ה-workspace לא מתאימים לאופטימייזר. |
+| `402` | היתרה שלך נמוכה מדי.                                                                                                        |
+| `409` | הגעת למכסה, או שבדיקת ההגדרות לא עדכנית.                                                                                    |
+| `422` | הבקשה או קוד ה-workspace לא מתאימים לאופטימייזר.                                                                            |
 
 > [!NOTE]
 > יש לשלוח תמיד כותרת `Idempotency-Key`. כששולחים שוב את אותה בקשה עם אותו מפתח, Skynet יחזיר את הריצה הראשונה. הוא לא יפעיל ריצה שנייה.
@@ -131,12 +134,12 @@ curl https://api.skynetml.com/optimizations/$RUN_ID \
 
 השדה `status` הוא אחד מאלה:
 
-| סטטוס | סופי |
-| --- | --- |
-| `pending`,‏ `validating`,‏ `running` | לא |
-| `paused` | לא |
-| `success` | כן |
-| `failed`,‏ `cancelled`,‏ `stopped` | כן |
+| סטטוס                                | סופי |
+| ------------------------------------ | ---- |
+| `pending`,‏ `validating`,‏ `running` | לא   |
+| `paused`                             | לא   |
+| `success`                            | כן   |
+| `failed`,‏ `cancelled`,‏ `stopped`   | כן   |
 
 מומלץ לבדוק כל 10 עד 30 שניות. ריצה יכולה להימשך מדקות עד שעות.
 

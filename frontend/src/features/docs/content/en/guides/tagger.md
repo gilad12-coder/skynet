@@ -17,21 +17,21 @@ The setup asks for the data to label:
 
 ### Choose the task type
 
-| Task type | What you give each row |
-| --- | --- |
-| **Yes / No question** | A yes or no answer. |
+| Task type                | What you give each row                                                           |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| **Yes / No question**    | A yes or no answer.                                                              |
 | **Pick from categories** | One or more categories from a list that you define. Add at least two categories. |
-| **Written answers** | A free text answer. |
+| **Written answers**      | A free text answer.                                                              |
 
 ### Choose a mode
 
 The setup asks "How do you want to tag?". There are three modes:
 
-| Mode | What happens |
-| --- | --- |
-| **Manual** | You label every row yourself. No AI is involved. |
-| **Co-pilot** | After a short interview, the AI tags a first batch. You keep or correct each label in review rounds. |
-| **Autopilot** | After a short interview, the AI tags all rows and flags the rows it is not sure about. |
+| Mode          | What happens                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| **Manual**    | You label every row yourself. No AI is involved.                                                     |
+| **Co-pilot**  | After a short interview, the AI tags a first batch. You keep or correct each label in review rounds. |
+| **Autopilot** | After a short interview, the AI tags all rows and flags the rows it is not sure about.               |
 
 The setup marks one mode as **Recommended**.
 
@@ -55,11 +55,11 @@ At the end, the AI shows **Here's the plan**. Then you start the work:
 
 In Co-pilot, the AI first tags a calibration batch. The batch size depends on the task type:
 
-| Task type | First batch |
-| --- | --- |
-| Yes / No question | 24 rows |
+| Task type            | First batch                                          |
+| -------------------- | ---------------------------------------------------- |
+| Yes / No question    | 24 rows                                              |
 | Pick from categories | 6 rows for each category, at least 30 and at most 60 |
-| Written answers | 30 rows |
+| Written answers      | 30 rows                                              |
 
 If the dataset has fewer rows, the AI tags all of them.
 
@@ -103,25 +103,25 @@ In Manual mode, you label every row yourself. The keyboard shortcuts below help 
 
 ### Keyboard shortcuts
 
-| Key | Action |
-| --- | --- |
-| Ctrl+H or Cmd+H | Show the shortcuts. |
-| Y / N | Answer yes or no on a Yes / No row. |
-| 1 to 9 | Select or clear that category on a category row. |
-| U | Go to the next untagged row. |
-| Home | Go to the first row. |
-| E | Export as CSV. |
+| Key             | Action                                           |
+| --------------- | ------------------------------------------------ |
+| Ctrl+H or Cmd+H | Show the shortcuts.                              |
+| Y / N           | Answer yes or no on a Yes / No row.              |
+| 1 to 9          | Select or clear that category on a category row. |
+| U               | Go to the next untagged row.                     |
+| Home            | Go to the first row.                             |
+| E               | Export as CSV.                                   |
 
 ## Results
 
 The results show where each label came from:
 
-| Count | Meaning |
-| --- | --- |
-| **Labeled by you** | Labels that you wrote. |
-| **AI labels you confirmed** | AI labels that you kept in review. |
-| **Labeled automatically** | AI labels with no review. |
-| **Cost** | The cost of the AI work in this session. |
+| Count                       | Meaning                                  |
+| --------------------------- | ---------------------------------------- |
+| **Labeled by you**          | Labels that you wrote.                   |
+| **AI labels you confirmed** | AI labels that you kept in review.       |
+| **Labeled automatically**   | AI labels with no review.                |
+| **Cost**                    | The cost of the AI work in this session. |
 
 The **Source** column shows the same values for each row: **You**, **AI confirmed** or **AI**.
 
@@ -145,11 +145,11 @@ If some rows have no label, Skynet asks you to confirm the export.
 
 The export adds a label column. Its name depends on the task type:
 
-| Task type | Column |
-| --- | --- |
-| Yes / No question | `binary_label` |
+| Task type            | Column                |
+| -------------------- | --------------------- |
+| Yes / No question    | `binary_label`        |
 | Pick from categories | `selected_categories` |
-| Written answers | `extracted_text` |
+| Written answers      | `extracted_text`      |
 
 A `label_source` column records where each label came from.
 

@@ -7,6 +7,7 @@ import {
   cursorInstallUrl,
   mcpClientMarkdown,
   mcpClientsMarkdown,
+  mcpText,
   vscodeInstallUrl,
 } from "./mcp-clients.ts";
 
@@ -53,4 +54,11 @@ test("the combined Markdown has one level-3 section per client", () => {
 
 test("the combined Markdown states the last-checked date", () => {
   assert.ok(mcpClientsMarkdown("en").startsWith(`_Last checked against each client's docs: ${MCP_CLIENTS_LAST_CHECKED}._`));
+});
+
+test("a locale with no client translation falls back to English", () => {
+  const client = MCP_CLIENTS[0]!;
+  assert.equal(mcpText(client.name, "ja"), client.name.en);
+  assert.equal(mcpClientMarkdown(client, "ja"), mcpClientMarkdown(client, "en"));
+  assert.equal(mcpClientsMarkdown("zh-Hans"), mcpClientsMarkdown("en"));
 });

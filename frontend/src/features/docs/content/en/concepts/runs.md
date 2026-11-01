@@ -4,16 +4,16 @@ A run is one optimization. It has a status, a spending limit and a set of saved 
 
 Every run has one of these statuses:
 
-| Status | Meaning |
-| --- | --- |
-| `pending` | The run is in the queue. |
-| `validating` | Skynet checks the setup before the optimization starts. |
-| `running` | The optimizer proposes and scores new versions. |
-| `success` | The run finished. The best version is saved. |
-| `failed` | An error stopped the run. |
-| `cancelled` | A person cancelled the run. |
-| `paused` | The run stopped at a checkpoint. You can resume it. |
-| `stopped` | The run stopped at its budget. It keeps the best version it found. |
+| Status       | Meaning                                                            |
+| ------------ | ------------------------------------------------------------------ |
+| `pending`    | The run is in the queue.                                           |
+| `validating` | Skynet checks the setup before the optimization starts.            |
+| `running`    | The optimizer proposes and scores new versions.                    |
+| `success`    | The run finished. The best version is saved.                       |
+| `failed`     | An error stopped the run.                                          |
+| `cancelled`  | A person cancelled the run.                                        |
+| `paused`     | The run stopped at a checkpoint. You can resume it.                |
+| `stopped`    | The run stopped at its budget. It keeps the best version it found. |
 
 `success`, `failed`, `cancelled`, `stopped` and `paused` are terminal states. The optimizer does not work on a run in a terminal state. `paused` is the only terminal state that exists to be resumed.
 
@@ -21,13 +21,13 @@ Every run has one of these statuses:
 
 The run page shows the actions that apply to the current status and your role. The API has the same actions.
 
-| Action | When you can use it | What it does |
-| --- | --- | --- |
-| **Pause** | The run is running and has a saved checkpoint. | Stops the run at the checkpoint. The status changes to `paused`. |
-| **Cancel** | The run is `pending`, `validating` or `running`. | Stops the run. You cannot undo a cancel. |
+| Action     | When you can use it                                                                                    | What it does                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| **Pause**  | The run is running and has a saved checkpoint.                                                         | Stops the run at the checkpoint. The status changes to `paused`.       |
+| **Cancel** | The run is `pending`, `validating` or `running`.                                                       | Stops the run. You cannot undo a cancel.                               |
 | **Resume** | The run is `failed`, `cancelled`, `paused`, or `stopped` at its budget, and it has a saved checkpoint. | Continues the same run from its last checkpoint. The run keeps its id. |
-| **Clone** | Any time you can see the run. | Opens the submit wizard with a copy of the configuration. |
-| **Delete** | The run is in a terminal state. Owner only. | Permanently deletes the run and all its data. |
+| **Clone**  | Any time you can see the run.                                                                          | Opens the submit wizard with a copy of the configuration.              |
+| **Delete** | The run is in a terminal state. Owner only.                                                            | Permanently deletes the run and all its data.                          |
 
 The API also has two more actions for a run that is `failed` or `cancelled`:
 

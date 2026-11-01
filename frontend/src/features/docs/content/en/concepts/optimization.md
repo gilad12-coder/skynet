@@ -32,12 +32,12 @@ Read [Metrics and scorers](/docs/concepts/scorers) for the full metric contract.
 
 ## Artifact kinds and engines
 
-| Artifact kind | Engines |
-| --- | --- |
-| Prompt | Auto, GEPA, Best-of-N, AutoResearch, Meta-Harness, AutoSaddler, ShinkaEvolve |
-| Code | Same as Prompt |
-| Text | Same as Prompt |
-| DSPy program | Auto, DSPy GEPA, DSPy MIPROv2, DSPy BootstrapFewShot |
+| Artifact kind | Engines                                                                      |
+| ------------- | ---------------------------------------------------------------------------- |
+| Prompt        | Auto, GEPA, Best-of-N, AutoResearch, Meta-Harness, AutoSaddler, ShinkaEvolve |
+| Code          | Same as Prompt                                                               |
+| Text          | Same as Prompt                                                               |
+| DSPy program  | Auto, DSPy GEPA, DSPy MIPROv2, DSPy BootstrapFewShot                         |
 
 The engines come in two families:
 
@@ -71,11 +71,11 @@ What happens when a DSPy optimizer runs:
 
 The final scores measure the same program that Skynet saves.
 
-| Optimizer | Reads feedback text |
-| --- | --- |
-| DSPy GEPA | Yes |
-| DSPy MIPROv2 | No, score only |
-| DSPy BootstrapFewShot | No, score only |
+| Optimizer             | Reads feedback text |
+| --------------------- | ------------------- |
+| DSPy GEPA             | Yes                 |
+| DSPy MIPROv2          | No, score only      |
+| DSPy BootstrapFewShot | No, score only      |
 
 DSPy BootstrapFewShot does not use a reflection model.
 
@@ -93,13 +93,13 @@ Both forms of Auto read the feedback text from your metric.
 
 ## Which engine to pick
 
-| Your situation | Use |
-| --- | --- |
-| You have a prompt that a model runs | A Prompt artifact. Start with Auto. |
-| You have code to make faster, cheaper or more correct | A Code artifact. Start with Auto. |
-| You have a document or a configuration | A Text artifact. Start with Auto. |
-| You have a DSPy program | A DSPy program artifact. Start with Auto. |
-| You want few-shot demos picked from your data | A DSPy program artifact with DSPy BootstrapFewShot or DSPy MIPROv2 |
+| Your situation                                        | Use                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------ |
+| You have a prompt that a model runs                   | A Prompt artifact. Start with Auto.                                |
+| You have code to make faster, cheaper or more correct | A Code artifact. Start with Auto.                                  |
+| You have a document or a configuration                | A Text artifact. Start with Auto.                                  |
+| You have a DSPy program                               | A DSPy program artifact. Start with Auto.                          |
+| You want few-shot demos picked from your data         | A DSPy program artifact with DSPy BootstrapFewShot or DSPy MIPROv2 |
 
 > [!WARNING]
 > GEPA, DSPy GEPA and Auto learn from the feedback text. If your feedback is always the same string, these optimizers have less information to work with.

@@ -15,11 +15,11 @@ Read [Datasets](/docs/guides/datasets) to manage saved datasets.
 
 Under **How to read the data**, give each column one role:
 
-| Role | What Skynet does with the column |
-| --- | --- |
-| Input | Puts the value in `input`, which your run code receives |
+| Role   | What Skynet does with the column                         |
+| ------ | -------------------------------------------------------- |
+| Input  | Puts the value in `input`, which your run code receives  |
 | Output | Puts the value in `expected`, which your metric receives |
-| Skip | Does not use the column |
+| Skip   | Does not use the column                                  |
 
 Each column also has a kind: **Text** or **Image**.
 
@@ -34,9 +34,9 @@ For each row, Skynet builds one case:
 
 For this table:
 
-| message | label | id |
-| --- | --- | --- |
-| I was charged twice | billing | 17 |
+| message             | label   | id  |
+| ------------------- | ------- | --- |
+| I was charged twice | billing | 17  |
 
 with the roles `message` = Input, `label` = Output and `id` = Skip, your code receives:
 
@@ -55,10 +55,10 @@ with the roles `message` = Input, `label` = Output and `id` = Skip, your code re
 
 The roles set the data mode of the run:
 
-| Mode | When | What happens |
-| --- | --- | --- |
-| Pairs | One column is Output | Every row is a case with an input and an expected value. You need at least 2 rows. |
-| Single | No column is Output | The run uses the Input columns of the first row only. It is one case with no expected value. |
+| Mode   | When                 | What happens                                                                                 |
+| ------ | -------------------- | -------------------------------------------------------------------------------------------- |
+| Pairs  | One column is Output | Every row is a case with an input and an expected value. You need at least 2 rows.           |
+| Single | No column is Output  | The run uses the Input columns of the first row only. It is one case with no expected value. |
 
 In single mode, Skynet uses the one case for training, selection and the report. Nothing is held out.
 
@@ -66,11 +66,11 @@ In single mode, Skynet uses the one case for training, selection and the report.
 
 In pairs mode, Skynet splits the cases into three sets:
 
-| Set | What it is for |
-| --- | --- |
-| Train | The engine proposes and tests versions on these cases. |
-| Val (validation) | Skynet selects the best version on these cases. |
-| Test | Skynet reports the final score on these cases. |
+| Set              | What it is for                                         |
+| ---------------- | ------------------------------------------------------ |
+| Train            | The engine proposes and tests versions on these cases. |
+| Val (validation) | Skynet selects the best version on these cases.        |
+| Test             | Skynet reports the final score on these cases.         |
 
 > [!NOTE]
 > The test cases never reach an engine, a proposer or the contract check. The final score is on cases that the optimizer did not see.
@@ -78,9 +78,9 @@ In pairs mode, Skynet splits the cases into three sets:
 ### The default split
 
 | Number of pairs | Train | Val | Test |
-| --- | --- | --- | --- |
-| 5 or more | 70% | 15% | 15% |
-| Fewer than 5 | 85% | 15% | 0% |
+| --------------- | ----- | --- | ---- |
+| 5 or more       | 70%   | 15% | 15%  |
+| Fewer than 5    | 85%   | 15% | 0%   |
 
 With fewer than 5 pairs, Skynet keeps no test set.
 

@@ -2,11 +2,11 @@ You can share a run with other people, and you can list it in the public Explore
 
 ## Defaults
 
-| Setting | Default for a new run |
-| --- | --- |
-| Public visibility | **Public**. The run is listed in public search. |
-| Link access | **Restricted**. Only the owner and invited people can open the run. |
-| Role for **Anyone with the link** | **Viewer** |
+| Setting                           | Default for a new run                                               |
+| --------------------------------- | ------------------------------------------------------------------- |
+| Public visibility                 | **Public**. The run is listed in public search.                     |
+| Link access                       | **Restricted**. Only the owner and invited people can open the run. |
+| Role for **Anyone with the link** | **Viewer**                                                          |
 
 The submit wizard shows the visibility of a new run on its last screen. You change it after the run starts, in the **Share and privacy** dialog.
 
@@ -21,11 +21,11 @@ On the run page, select **Share and privacy**. Only the owner of the run sees th
 
 Each person who can open a run has one of three roles:
 
-| Role | What the person can do |
-| --- | --- |
-| **Viewer** | Open the run and see its results and its owner. Clone the run. |
+| Role       | What the person can do                                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Viewer** | Open the run and see its results and its owner. Clone the run.                                                       |
 | **Editor** | Viewer access plus running the model, chat and renaming. An editor can also cancel, pause, resume and retry the run. |
-| **Owner** | Full control, including managing sharing and deletion. |
+| **Owner**  | Full control, including managing sharing and deletion.                                                               |
 
 A run has exactly one owner. All people who open a shared run must sign in. There is no anonymous access to a shared run.
 
@@ -71,9 +71,9 @@ The new owner gets full control. You become an editor and lose the owner privile
 
 Public visibility controls whether a run shows in public search in the Explore gallery. It does not change link access or invitations.
 
-| Option | Meaning |
-| --- | --- |
-| **Public** | Listed in public search. Visible to all users. |
+| Option      | Meaning                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| **Public**  | Listed in public search. Visible to all users.                     |
 | **Private** | Hidden from public search. Visible only to you and invited people. |
 
 Only the owner can change public visibility. The change takes effect immediately.
@@ -82,10 +82,10 @@ Only the owner can change public visibility. The change takes effect immediately
 
 The Explore page lets you search optimizations. It has three tabs:
 
-| Tab | What it shows |
-| --- | --- |
-| **Mine** | Your optimizations, private and public |
-| **Public** | Public optimizations from other users |
+| Tab                | What it shows                             |
+| ------------------ | ----------------------------------------- |
+| **Mine**           | Your optimizations, private and public    |
+| **Public**         | Public optimizations from other users     |
 | **Shared with me** | Optimizations other users shared with you |
 
 Use the search bar and **Filters** to find runs.

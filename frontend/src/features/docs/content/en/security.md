@@ -37,10 +37,10 @@ Skynet locks sign-in for an email address for a period after repeated failed att
 
 Turn on two-step verification for more protection. Choose one method:
 
-| Method | How it works |
-| --- | --- |
-| **Authenticator app** | Enter a 6-digit code from your authenticator app. |
-| **Email codes** | Enter a 6-digit code that Skynet sends at each sign-in. |
+| Method                | How it works                                            |
+| --------------------- | ------------------------------------------------------- |
+| **Authenticator app** | Enter a 6-digit code from your authenticator app.       |
+| **Email codes**       | Enter a 6-digit code that Skynet sends at each sign-in. |
 
 Skynet also gives you recovery codes. Keep them in a safe place. Use one if you lose access to your method.
 
@@ -95,11 +95,11 @@ To stop a token, click **Revoke token**. For the full API, read [API](/docs/api)
 
 The **Model data privacy** setting controls what model providers can do with your data. It applies to optimizations that Skynet bills to your balance.
 
-| Option | Effect |
-| --- | --- |
-| **Allow all** | Any provider, including providers that can train on or store your prompts. |
-| **No training** | Only providers that do not train on your prompts and do not keep them. This is the default. |
-| **Zero retention** | Only endpoints with a zero-data-retention agreement. Some models can be unavailable. |
+| Option             | Effect                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| **Allow all**      | Any provider, including providers that can train on or store your prompts.                  |
+| **No training**    | Only providers that do not train on your prompts and do not keep them. This is the default. |
+| **Zero retention** | Only endpoints with a zero-data-retention agreement. Some models can be unavailable.        |
 
 > [!NOTE]
 > Optimizations on your own key follow your OpenRouter account's privacy settings.

@@ -21,7 +21,10 @@ const highlighter = tagHighlighter(
  * Tokens per line for a code block, or null when no grammar matches the
  * language name. The caller then shows plain text.
  */
-export async function highlightDocsCode(language: string, code: string): Promise<CodeToken[][] | null> {
+export async function highlightDocsCode(
+  language: string,
+  code: string,
+): Promise<CodeToken[][] | null> {
   if (!language || language === "text") return null;
   const description = LanguageDescription.matchLanguageName(languages, language, true);
   if (!description) return null;

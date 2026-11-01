@@ -11,10 +11,10 @@ Skynet gives no free starting balance by default. Add funds before you start you
 
 You add funds in **Settings → Billing**. You can pick a fixed amount or enter a custom amount:
 
-| Top-up | Amount added to your balance |
-| --- | --- |
-| Fixed amounts | $5, $20 or $50 |
-| Custom | Any amount from $5 to $1,000 |
+| Top-up        | Amount added to your balance |
+| ------------- | ---------------------------- |
+| Fixed amounts | $5, $20 or $50               |
+| Custom        | Any amount from $5 to $1,000 |
 
 The amount you choose is the amount that goes into your balance. The top-up fee comes on top of it. See the fees below.
 
@@ -49,21 +49,21 @@ Before Skynet does paid work, it reserves part of the run's limit. Skynet releas
 
 When a budget already has activity, the **Spending limit** card in the wizard shows its ledger:
 
-| Label | Meaning |
-| --- | --- |
-| **Remaining in this limit** | The part of the limit that is left. |
-| **Spent so far** | The cost that settled. |
-| **Reserved** | Money held for work in progress. Skynet releases it when the work settles. |
+| Label                       | Meaning                                                                    |
+| --------------------------- | -------------------------------------------------------------------------- |
+| **Remaining in this limit** | The part of the limit that is left.                                        |
+| **Spent so far**            | The cost that settled.                                                     |
+| **Reserved**                | Money held for work in progress. Skynet releases it when the work settles. |
 
 ## Fees
 
 Skynet has three charges on top of the provider cost.
 
-| Charge | Current default | Applies to |
-| --- | --- | --- |
-| Top-up fee | 12.5% of the amount, plus $0.35 | Each top-up |
-| Usage markup | Provider cost × 1.15 (cost plus 15%) | Model calls on Skynet's keys, and sandbox compute |
-| Platform fee for your own key | 5% of the model cost | Model calls on your own provider key |
+| Charge                        | Current default                      | Applies to                                        |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------- |
+| Top-up fee                    | 12.5% of the amount, plus $0.35      | Each top-up                                       |
+| Usage markup                  | Provider cost × 1.15 (cost plus 15%) | Model calls on Skynet's keys, and sandbox compute |
+| Platform fee for your own key | 5% of the model cost                 | Model calls on your own provider key              |
 
 ### Top-up fee
 

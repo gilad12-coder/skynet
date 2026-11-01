@@ -51,11 +51,11 @@ Destructive actions include:
 
 The trust mode sets which actions need your approval. Click the trust toggle in the composer to change it. The toggle cycles through the three modes.
 
-| Mode | Description | Safe actions | Destructive actions |
-| --- | --- | --- | --- |
-| **Ask** | Asks for confirmation before every action. | Need approval | Need approval |
-| **Automatic** | Performs safe actions without confirmation. | Run at once | Need approval |
-| **Unrestricted** | Performs everything without confirmation. | Run at once | Run at once |
+| Mode             | Description                                 | Safe actions  | Destructive actions |
+| ---------------- | ------------------------------------------- | ------------- | ------------------- |
+| **Ask**          | Asks for confirmation before every action.  | Need approval | Need approval       |
+| **Automatic**    | Performs safe actions without confirmation. | Run at once   | Need approval       |
+| **Unrestricted** | Performs everything without confirmation.   | Run at once   | Run at once         |
 
 The default mode is **Ask**. Read-only tools never need approval.
 
@@ -114,7 +114,7 @@ Agent chats on Skynet credits use your balance. If your balance is empty, the pa
 
 ## Other ways to use an agent
 
-You can also connect your own AI client to Skynet through the MCP server. See [MCP](/docs/mcp). The MCP server is not live yet. It goes live after pull request #861 merges and deploys. For scripts, use the [API](/docs/api).
+You can also connect your own AI client to Skynet through the MCP server. See [MCP](/docs/mcp). For scripts, use the [API](/docs/api).
 
 ## Next steps
 

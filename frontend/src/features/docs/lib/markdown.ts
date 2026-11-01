@@ -142,7 +142,11 @@ function groupTabs(children: MdNode[]): MdNode[] {
     }
     out.push(
       label
-        ? { type: "docsTabs", data: { hName: "div", hProperties: { dataTabs: "" } }, children: [child] }
+        ? {
+            type: "docsTabs",
+            data: { hName: "div", hProperties: { dataTabs: "" } },
+            children: [child],
+          }
         : child,
     );
   }

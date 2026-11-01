@@ -4,18 +4,18 @@ Read [How optimization works](/docs/concepts/optimization) first if you do not k
 
 ## Quick comparison
 
-| Engine | Artifact kinds | Coding agent settings | Max iterations setting |
-| --- | --- | --- | --- |
-| Auto | All | Yes, on Prompt, Code and Text | No |
-| GEPA | Prompt, Code, Text | No | No |
-| Best-of-N | Prompt, Code, Text | No | No |
-| AutoResearch | Prompt, Code, Text | Yes | No |
-| Meta-Harness | Prompt, Code, Text | Yes | Yes |
-| AutoSaddler | Prompt, Code, Text | Yes | Yes |
-| ShinkaEvolve | Prompt, Code, Text | No. It has its own editor setting. | Yes |
-| DSPy GEPA | DSPy program | No | No |
-| DSPy MIPROv2 | DSPy program | No | No |
-| DSPy BootstrapFewShot | DSPy program | No | No |
+| Engine                | Artifact kinds     | Coding agent settings              | Max iterations setting |
+| --------------------- | ------------------ | ---------------------------------- | ---------------------- |
+| Auto                  | All                | Yes, on Prompt, Code and Text      | No                     |
+| GEPA                  | Prompt, Code, Text | No                                 | No                     |
+| Best-of-N             | Prompt, Code, Text | No                                 | No                     |
+| AutoResearch          | Prompt, Code, Text | Yes                                | No                     |
+| Meta-Harness          | Prompt, Code, Text | Yes                                | Yes                    |
+| AutoSaddler           | Prompt, Code, Text | Yes                                | Yes                    |
+| ShinkaEvolve          | Prompt, Code, Text | No. It has its own editor setting. | Yes                    |
+| DSPy GEPA             | DSPy program       | No                                 | No                     |
+| DSPy MIPROv2          | DSPy program       | No                                 | No                     |
+| DSPy BootstrapFewShot | DSPy program       | No                                 | No                     |
 
 The wizard marks GEPA, DSPy GEPA and Auto as optimizers that use the feedback text from your metric.
 
@@ -71,10 +71,10 @@ A coding agent reads the feedback from your metric and patches the version. Skyn
 
 ## DSPy optimizers
 
-| Optimizer | What it does |
-| --- | --- |
-| DSPy GEPA | Reads the metric feedback and evolves the instructions of each predictor. |
-| DSPy MIPROv2 | Proposes instructions and few-shot demos together, and searches their combinations with Bayesian optimization. |
+| Optimizer             | What it does                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| DSPy GEPA             | Reads the metric feedback and evolves the instructions of each predictor.                                                 |
+| DSPy MIPROv2          | Proposes instructions and few-shot demos together, and searches their combinations with Bayesian optimization.            |
 | DSPy BootstrapFewShot | Collects worked examples that the program gets right and adds them as few-shot demos. It does not use a reflection model. |
 
 DSPy MIPROv2 and DSPy BootstrapFewShot need pairs (cases with expected outputs).
@@ -83,11 +83,11 @@ DSPy MIPROv2 and DSPy BootstrapFewShot need pairs (cases with expected outputs).
 
 ### Budget
 
-| Setting | Default | Range |
-| --- | --- | --- |
-| Max scorer runs | 200 | 1 to 100000 (Auto: at least 6) |
-| Stop at score | Off | 0 or more |
-| Max iterations | Off | 1 to 1000. Only Meta-Harness, AutoSaddler and ShinkaEvolve. |
+| Setting         | Default | Range                                                       |
+| --------------- | ------- | ----------------------------------------------------------- |
+| Max scorer runs | 200     | 1 to 100000 (Auto: at least 6)                              |
+| Stop at score   | Off     | 0 or more                                                   |
+| Max iterations  | Off     | 1 to 1000. Only Meta-Harness, AutoSaddler and ShinkaEvolve. |
 
 One scorer run is one call of your metric on one case. The final re-score of the starting version and the winner does not count against **Max scorer runs**.
 
@@ -95,24 +95,24 @@ One scorer run is one call of your metric on one case. The final re-score of the
 
 These settings apply to Auto, AutoResearch, Meta-Harness and AutoSaddler.
 
-| Setting | Default | Range |
-| --- | --- | --- |
-| Coding agent | Codex | Pi, Codex, OpenCode, Prime Agent, Custom command |
-| Candidates per iteration | 3 | 1 to 8. Shown for Auto and Meta-Harness. |
-| Max tool calls per candidate | 100 | 1 to 1000 |
+| Setting                      | Default | Range                                            |
+| ---------------------------- | ------- | ------------------------------------------------ |
+| Coding agent                 | Codex   | Pi, Codex, OpenCode, Prime Agent, Custom command |
+| Candidates per iteration     | 3       | 1 to 8. Shown for Auto and Meta-Harness.         |
+| Max tool calls per candidate | 100     | 1 to 1000                                        |
 
 ### ShinkaEvolve settings
 
-| Setting | Default |
-| --- | --- |
-| How new versions are written | Single model call. The other option is "Coding agent (Pi)". |
-| Islands | 2 (1 to 8) |
-| Migration interval | 10 |
-| Parent selection | Weighted. Other options: Power law, Beam search. |
-| Diff edits / Full rewrites / Crossovers | 60% / 30% / 10%. They must add up to 100%. |
-| Archive size | 40 |
-| Parallel evaluations | 2 |
-| Parallel proposals | 2 |
+| Setting                                 | Default                                                     |
+| --------------------------------------- | ----------------------------------------------------------- |
+| How new versions are written            | Single model call. The other option is "Coding agent (Pi)". |
+| Islands                                 | 2 (1 to 8)                                                  |
+| Migration interval                      | 10                                                          |
+| Parent selection                        | Weighted. Other options: Power law, Beam search.            |
+| Diff edits / Full rewrites / Crossovers | 60% / 30% / 10%. They must add up to 100%.                  |
+| Archive size                            | 40                                                          |
+| Parallel evaluations                    | 2                                                           |
+| Parallel proposals                      | 2                                                           |
 
 When Auto runs ShinkaEvolve, the wizard shows these settings as "ShinkaEvolve settings (when Auto runs it)".
 

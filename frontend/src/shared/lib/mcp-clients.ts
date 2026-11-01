@@ -13,20 +13,21 @@
 /** The public MCP endpoint. Clients save this URL, so it must never change. */
 export const MCP_SERVER_URL = "https://mcp.skynetml.com/mcp";
 
-/**
- * Said next to MCP_SERVER_URL until the server ships. Remove it, and the
- * notes in the docs pages, after pull request #861 merges and deploys.
- */
-export const MCP_NOT_LIVE_NOTE = "The MCP server is not live yet. It goes live after pull request #861 merges and deploys.";
-
 /** The day someone last checked every client below against its own docs. */
 export const MCP_CLIENTS_LAST_CHECKED = "2026-11-01";
 
 /** The server name that the commands and config files register. */
 export const MCP_SERVER_NAME = "skynet";
 
-export type McpLocale = "en" | "he";
-type Text = Record<McpLocale, string>;
+/** A docs locale code. Text without a translation for it falls back to English. */
+export type McpLocale = string;
+type Localized<T> = { en: T; he: T } & Partial<Record<McpLocale, T>>;
+type Text = Localized<string>;
+
+/** A text in a locale, or in English when it has no translation. */
+export function mcpText(text: Text, locale: McpLocale): string {
+  return text[locale] ?? text.en;
+}
 
 export interface McpSnippet {
   label: Text;
@@ -261,7 +262,7 @@ export const MCP_CLIENTS: McpClient[] = [
   },
 ];
 
-const MD_TEXT: Record<McpLocale, { install: string; unverified: string; source: string; checked: string }> = {
+const MD_TEXT: Localized<{ install: string; unverified: string; source: string; checked: string }> = {
   en: {
     checked: "Last checked against each client's docs: {date}.",
     install: "Install with one click",
@@ -280,26 +281,26 @@ const MD_TEXT: Record<McpLocale, { install: string; unverified: string; source: 
 
 /** One client's setup steps as Markdown, without a heading. */
 export function mcpClientMarkdown(client: McpClient, locale: McpLocale): string {
-  const t = MD_TEXT[locale];
+  const t = MD_TEXT[locale] ?? MD_TEXT.en;
   const parts: string[] = [];
   if (!client.verified) parts.push(`> [!WARNING]\n> ${t.unverified}`);
-  parts.push(client.steps.map((step, i) => `${i + 1}. ${step[locale]}`).join("\n"));
+  parts.push(client.steps.map((step, i) => `${i + 1}. ${mcpText(step, locale)}`).join("\n"));
   if (client.installUrl) parts.push(`[${t.install}](${client.installUrl})`);
   for (const snippet of client.snippets) {
-    parts.push(`**${snippet.label[locale]}**\n\n\`\`\`${snippet.language}\n${snippet.code}\n\`\`\``);
+    parts.push(`**${mcpText(snippet.label, locale)}**\n\n\`\`\`${snippet.language}\n${snippet.code}\n\`\`\``);
   }
-  if (client.note) parts.push(`> [!NOTE]\n> ${client.note[locale]}`);
+  if (client.note) parts.push(`> [!NOTE]\n> ${mcpText(client.note, locale)}`);
   if (client.source) parts.push(`[${t.source}](${client.source})`);
   return parts.join("\n\n");
 }
 
 /** The "last checked" line shown above the client steps. */
 export function mcpClientsCheckedLine(locale: McpLocale): string {
-  return MD_TEXT[locale].checked.replace("{date}", MCP_CLIENTS_LAST_CHECKED);
+  return (MD_TEXT[locale] ?? MD_TEXT.en).checked.replace("{date}", MCP_CLIENTS_LAST_CHECKED);
 }
 
 /** Every client's setup steps as Markdown, one level-3 section per client. */
 export function mcpClientsMarkdown(locale: McpLocale): string {
-  const sections = MCP_CLIENTS.map((client) => `### ${client.name[locale]}\n\n${mcpClientMarkdown(client, locale)}`);
+  const sections = MCP_CLIENTS.map((client) => `### ${mcpText(client.name, locale)}\n\n${mcpClientMarkdown(client, locale)}`);
   return [`_${mcpClientsCheckedLine(locale)}_`, ...sections].join("\n\n");
 }
