@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -26,7 +27,13 @@ from core.api.routers import submissions
 from core.api.routers.execution_budgets import create_execution_budgets_router
 from core.api.routers.optimizations_meta import create_optimizations_meta_router
 from core.api.routers.wizard_preflight import create_wizard_preflight_router
-from core.billing.budgets import BudgetConflictError, BudgetFencedError, BudgetService
+from core.billing.budgets import (
+    AccountFundsError,
+    BudgetConflictError,
+    BudgetFencedError,
+    BudgetInsufficientError,
+    BudgetService,
+)
 from core.billing.operation_pricing import ChargePolicy, operation_quote
 from core.billing.protected_credentials import scrub_execution_credentials
 from core.billing.runtime import BudgetRuntime, PaidResult
@@ -412,6 +419,36 @@ def test_failed_or_uncertain_paid_setup_never_queues(harness: _Harness, pending_
     assert budget.job_id is None
     assert budget.reserved_cents == (2 if pending_usage else 0)
     assert budget.setup_spent_cents == (0 if pending_usage else 1)
+
+
+@pytest.mark.parametrize(
+    ("stop", "detail"),
+    [
+        (BudgetInsufficientError, "The spending limit is below the minimum this run needs."),
+        (AccountFundsError, "Payload validation failed."),
+    ],
+)
+def test_a_check_stopped_by_the_limit_says_the_limit_is_too_low(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, stop: type[Exception], detail: str
+) -> None:
+    """Name a too-low limit, not the payload, when the limit stopped the setup check.
+
+    Args:
+        harness: Real legacy submission routes and spending authority.
+        monkeypatch: Make the setup check stop on the budget.
+        stop: The budget stop the check raises.
+        detail: Start of the expected refusal text.
+    """
+
+    def stopped(gateway: Any, payload: dict[str, Any], *, scope: str, identity: str) -> dict:
+        """Stop like a limit or a wallet that cannot cover one model call."""
+        raise stop("The next operation needs more than the limit allows.")
+
+    monkeypatch.setattr(preflight_execution, "_verify_unified", stopped)
+    response = harness.client.post(ROUTE, json=_payload(total=1))
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"].startswith(detail)
+    assert harness.count(JobModel) == 0
 
 
 def test_attachment_rolls_back_job_when_budget_already_attached(harness: _Harness) -> None:
@@ -868,3 +905,16 @@ def test_unusable_model_credentials_fail_the_check_instead_of_leaving_it_running
     assert status == "failed"
     assert any("saved provider connection" in (check.get("message") or "") for check in body["checks"]), body
     assert harness.calls == []
+
+
+def test_guest_funds_refusal_keeps_the_account_funds_type() -> None:
+    """Report the balance, not the limit, when the guest relays a funds refusal as a budget stop."""
+    events = preflight_execution._Events()
+    events.put({"type": "error", "error_type": "BudgetInsufficientError", "error": "budget_insufficient"})
+    refusal = AccountFundsError("The balance cannot fund this call.")
+    gateway = SimpleNamespace(budget_refusal=refusal)
+
+    with pytest.raises(AccountFundsError) as raised:
+        events.evidence(gateway)
+
+    assert raised.value is refusal

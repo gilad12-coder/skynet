@@ -56,6 +56,9 @@ from ..storage.models import (
     JobEmbeddingModel,
     JobModel,
     LogEntryModel,
+    McpAuthCodeModel,
+    McpGrantModel,
+    McpTokenModel,
     ModelPrivacyPreferenceModel,
     NotificationModel,
     NotificationPreferenceModel,
@@ -561,6 +564,17 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     deleted += len(desktop_link_ids)
     if desktop_link_ids:
         _run_delete(delete(DesktopTokenModel).where(DesktopTokenModel.link_id.in_(desktop_link_ids)))
+    # Same order as the desktop rows: an MCP refresh locks the grant, then the token.
+    _run_delete(delete(McpAuthCodeModel).where(McpAuthCodeModel.username == username))
+    mcp_grant_ids = list(
+        session.scalars(
+            delete(McpGrantModel).where(McpGrantModel.username == username).returning(McpGrantModel.id),
+            execution_options={"synchronize_session": False},
+        )
+    )
+    deleted += len(mcp_grant_ids)
+    if mcp_grant_ids:
+        _run_delete(delete(McpTokenModel).where(McpTokenModel.grant_id.in_(mcp_grant_ids)))
     _run_delete(delete(BillingProviderKeyModel).where(BillingProviderKeyModel.username == username))
     _run_delete(delete(BillingOpenRouterKeyModel).where(BillingOpenRouterKeyModel.username == username))
     _run_delete(delete(UserQuotaOverrideModel).where(UserQuotaOverrideModel.username == username))

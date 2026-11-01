@@ -44,8 +44,16 @@ const nextConfig: NextConfig = {
     // `immutable` long-lived caching; setting our own Cache-Control there is
     // redundant and trips a build-time warning, so it's intentionally omitted.
   ],
+  // The public docs ship a Markdown twin of every page (/docs/<page>.md), for
+  // readers that are agents. The route handler serves the same source file.
+  rewrites: async () => [
+    { source: "/docs.md", destination: "/docs-md" },
+    { source: "/docs/:path(.+)\\.md", destination: "/docs-md/:path" },
+  ],
   turbopack: {
     rules: {
+      // The docs content loader imports its Markdown pages as strings.
+      "*.md": { condition: { query: "?raw" }, type: "text" },
       // The submit IDE's monaco-vscode packages import stylesheets as
       // namespaces, which Next 16.4 rejects. See monaco-css-import-loader.cjs.
       "*.js": {

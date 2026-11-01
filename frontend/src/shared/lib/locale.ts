@@ -189,6 +189,18 @@ export function fallbackChain(locale: Locale): Locale[] {
 }
 
 /**
+ * The public docs URL for a UI locale. The docs exist in each
+ * full-translation locale; a regional locale uses its fallback (de-AT reads
+ * /docs/de). English pages have no locale prefix.
+ */
+export function docsPathForLocale(locale: Locale, slug = ""): string {
+  const docs: readonly Locale[] = FULL_TRANSLATION_LOCALES;
+  const target = fallbackChain(locale).find((l) => docs.includes(l)) ?? "en";
+  const base = target === "en" ? "/docs" : `/docs/${target}`;
+  return slug ? `${base}/${slug}` : base;
+}
+
+/**
  * Pick the best supported locale from an `Accept-Language` header.
  *
  * Parses the comma-separated, q-weighted list, sorts by descending quality, and
