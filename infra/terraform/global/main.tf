@@ -50,10 +50,13 @@ variable "region" {
   }
 }
 
-variable "github_repository" {
-  description = "GitHub repository (owner/name) that may assume the GitHub roles."
+variable "github_oidc_subject_prefix" {
+  # The repository uses GitHub's immutable OIDC subject (owner@id/name@id), so
+  # tokens carry the IDs, not the plain owner/name. Read the current value with
+  # gh api repos/<owner>/<name>/actions/oidc/customization/sub.
+  description = "OIDC sub claim prefix of the GitHub repository that may assume the GitHub roles."
   type        = string
-  default     = "Skynet-ml/skynet"
+  default     = "repo:Skynet-ml@350892321/skynet@1279192708"
 }
 
 variable "enable_github_oidc" {
@@ -246,7 +249,7 @@ data "aws_iam_policy_document" "github_deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:aws-${each.key}"]
+      values   = ["${var.github_oidc_subject_prefix}:environment:aws-${each.key}"]
     }
   }
 }
@@ -438,7 +441,7 @@ data "aws_iam_policy_document" "github_preview_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:aws-preview"]
+      values   = ["${var.github_oidc_subject_prefix}:environment:aws-preview"]
     }
   }
 }
@@ -647,7 +650,7 @@ data "aws_iam_policy_document" "github_preview_cleanup_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = ["${var.github_oidc_subject_prefix}:ref:refs/heads/main"]
     }
   }
 }
@@ -720,7 +723,7 @@ data "aws_iam_policy_document" "github_plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:pull_request"]
+      values   = ["${var.github_oidc_subject_prefix}:pull_request"]
     }
   }
 }
@@ -805,8 +808,8 @@ data "aws_iam_policy_document" "github_apply_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${var.github_repository}:ref:refs/heads/staging",
-        "repo:${var.github_repository}:ref:refs/heads/main",
+        "${var.github_oidc_subject_prefix}:ref:refs/heads/staging",
+        "${var.github_oidc_subject_prefix}:ref:refs/heads/main",
       ]
     }
   }
