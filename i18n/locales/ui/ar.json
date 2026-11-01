@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "عمل لمدة {duration}",
   "shared.agent.working_for": "يعمل منذ {duration}",
   "shared.agent.pasted_text": "نص ملصق",
-  "shared.agent.pasted_text_lines": "{n} أسطر",
   "shared.agent.pasted_text_remove": "إزالة النص الملصق",
   "shared.agent.pasted_text_restore": "إظهار في حقل النص",
   "shared.agent.pasted_text_open": "فتح النص الملصق",

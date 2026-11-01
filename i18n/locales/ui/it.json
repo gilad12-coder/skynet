@@ -4154,7 +4154,6 @@
   "shared.agent.worked_for": "Ha lavorato per {duration}",
   "shared.agent.working_for": "Al lavoro da {duration}",
   "shared.agent.pasted_text": "Testo incollato",
-  "shared.agent.pasted_text_lines": "{n} righe",
   "shared.agent.pasted_text_remove": "Rimuovi testo incollato",
   "shared.agent.pasted_text_restore": "Mostra nel campo di testo",
   "shared.agent.pasted_text_open": "Apri testo incollato",
