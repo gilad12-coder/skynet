@@ -324,6 +324,24 @@ void describe("loadLinkedAccount", () => {
     assert.equal(reloads.length, 1);
   });
 
+  void it("announces a link once when storage is off", async () => {
+    await loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable });
+    const w = (globalThis as unknown as { window: { localStorage: unknown } }).window;
+    const storage = w.localStorage;
+    const off = () => {
+      throw new Error("storage off");
+    };
+    w.localStorage = { getItem: off, setItem: off, removeItem: off };
+    events.length = 0;
+    try {
+      const whoami = async () => ({ name: "Ada", email: "ada@example.com" });
+      for (let i = 0; i < 3; i++) await loadLinkedAccount({ status: linked, whoami });
+      assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    } finally {
+      w.localStorage = storage;
+    }
+  });
+
   void it("reports not linked without asking hosted", async () => {
     const account = await loadLinkedAccount({
       status: async () => ({ linked: false }),

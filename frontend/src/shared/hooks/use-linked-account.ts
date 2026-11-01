@@ -42,6 +42,9 @@ const CACHE_KEY = "skynet.local.hosted-identity";
 // Each whoami call goes out to hosted; the menu reads the link on every open.
 const WHOAMI_TTL_MS = 5 * 60_000;
 let whoamiAt = 0;
+// Whether the Mac was last known to be linked: null until the first write, then
+// kept in memory, because storage can be off and then always reads empty.
+let knownLinked: boolean | null = null;
 
 function readCache(): Identity | null {
   try {
@@ -56,10 +59,15 @@ function announceLinkChange(): void {
   window.dispatchEvent(new Event(HOSTED_LINK_CHANGED_EVENT));
 }
 
-// The cache holds an identity exactly while the Mac is known to be linked, so a
-// change in its presence is a link that finished or ended.
+function wasLinked(): boolean {
+  return knownLinked ?? readCache() !== null;
+}
+
+// Only a change in the known link state announces, so a reload of the same
+// state is silent and a listener that reloads on the event cannot loop.
 function writeCache(identity: Identity | null): void {
-  const wasLinked = readCache() !== null;
+  const before = wasLinked();
+  knownLinked = identity !== null;
   try {
     if (identity) window.localStorage.setItem(CACHE_KEY, JSON.stringify(identity));
     else window.localStorage.removeItem(CACHE_KEY);
@@ -67,7 +75,7 @@ function writeCache(identity: Identity | null): void {
     // Storage can be off; the identity is then read from hosted each time.
   }
   whoamiAt = identity ? Date.now() : 0;
-  if (wasLinked !== (identity !== null)) announceLinkChange();
+  if (before !== knownLinked) announceLinkChange();
 }
 
 /**
@@ -123,10 +131,10 @@ export function linkedUsername(account: LinkedAccount | undefined): string {
 /** Unlink the Mac app from hosted and forget the cached identity. */
 export async function unlinkHostedAccount(unlink = unlinkLocalHostedLink): Promise<void> {
   await unlink();
-  const hadIdentity = readCache() !== null;
+  const linkedBefore = wasLinked();
   writeCache(null);
-  // An offline link may have no cached identity, so announce the log out anyway.
-  if (!hadIdentity) announceLinkChange();
+  // An offline link may never have been known as linked, so announce the log out anyway.
+  if (!linkedBefore) announceLinkChange();
 }
 
 /** Start the hosted sign-in and open its consent page in the browser. */
@@ -162,8 +170,8 @@ export function useLinkedAccount(refreshKey: unknown = 0): LinkedAccount | undef
   const [account, setAccount] = React.useState<LinkedAccount | undefined>(undefined);
   const [changes, setChanges] = React.useState(0);
 
-  // A reload cannot loop: writeCache announces only when the cached identity
-  // appears or goes away, so a second read of the same state is silent.
+  // A reload cannot loop: writeCache announces only when the known link state
+  // changes, so a second read of the same state is silent.
   React.useEffect(() => {
     if (!local) return;
     return onLinkChange(() => setChanges((n) => n + 1));

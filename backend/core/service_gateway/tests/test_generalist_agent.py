@@ -600,6 +600,15 @@ def test_read_only_reach_tools_always_available() -> None:
         assert _needs_approval(name, "ask") is False
 
 
+def test_mac_app_agent_never_reads_the_local_credit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Mac app's wallet holds a local run credit, so its agent never reads it as a balance."""
+    monkeypatch.setattr(settings, "local_mode", True)
+    assert "get_wallet_for_agent" not in tools_for(WizardState())
+    assert "get_wallet_for_agent" not in screen_tools(
+        tools_for(WizardState(wizard_screen="budget")), WizardState(wizard_screen="budget")
+    )
+
+
 def test_dataset_library_tools_always_available() -> None:
     """The saved-dataset library read + by-reference picker are always exposed."""
     allowed = tools_for(WizardState())
