@@ -29,6 +29,7 @@ from ..api.errors import DomainError
 from ..config import settings
 from ..connectors.vault import ConnectorVault, ConnectorView, vault_cipher
 from ..storage.models import UserConnectorModel
+from . import hosted_dns
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ _TIMEOUT = httpx.Timeout(15.0)
 # needs a TCP connect (5 s), a TLS handshake (httpcore applies the connect
 # timeout again, 5 s) and a write (5 s), so it reaches hosted at most 27 s after
 # the first send, plus network transit. The resend's read time does not count.
+# After a system DNS failure, hosted_dns caches its answer, so the resend spends
+# no time on DNS; a working system resolver answers from the OS cache.
 _REFRESH_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _RESEND_TIMEOUT = httpx.Timeout(5.0)
 REFRESH_RESEND_DEADLINE = 12.0
@@ -100,7 +103,12 @@ def _client(timeout: httpx.Timeout = _TIMEOUT) -> httpx.Client:
     """
     if not settings.hosted_api_url:
         raise DomainError("hosted_link.not_configured", status=503)
-    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=_TRANSPORT)
+    transport = _TRANSPORT
+    # An explicit transport turns off httpx's proxy lookup, so a proxied Mac keeps
+    # the default. Each client gets its own transport: closing a client closes it.
+    if transport is None and not hosted_dns.proxy_configured():
+        transport = hosted_dns.FallbackDnsTransport()
+    return httpx.Client(base_url=settings.hosted_api_url, timeout=timeout, transport=transport)
 
 
 def callback_uri() -> str:
