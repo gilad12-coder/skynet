@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "このアカウントにはすでに {limit} 台の Mac がリンクされており、上限に達しています。使わなくなった Mac のリンクを解除してから、もう一度お試しください。",
   "desktop_link.error.rate_limit": "リンクの試行回数が多すぎます。しばらくしてからもう一度お試しください。",
   "desktop_link.error.generic": "リンクできませんでした。もう一度お試しください。",
-  "desktop_link.use_without_account": "サインインせずに使用"
+  "desktop_link.use_without_account": "サインインせずに使用",
+  "local_identity.title": "この Mac",
+  "local_identity.linked": "この Mac にリンク済み",
+  "local_identity.sign_in": "サインインして同期",
+  "local_identity.sign_in_failed": "サインインを開始できませんでした。もう一度お試しください。"
 }

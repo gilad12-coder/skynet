@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "يحتوي حسابك بالفعل على {limit} من أجهزة Mac المرتبطة، وهو الحد الأقصى. ألغِ ربط جهاز Mac لم تعد تستخدمه ثم حاول مرة أخرى.",
   "desktop_link.error.rate_limit": "محاولات ربط كثيرة جدًا. حاول مرة أخرى لاحقًا.",
   "desktop_link.error.generic": "لم يتم الربط. حاول مرة أخرى.",
-  "desktop_link.use_without_account": "الاستخدام دون تسجيل الدخول"
+  "desktop_link.use_without_account": "الاستخدام دون تسجيل الدخول",
+  "local_identity.title": "جهاز Mac هذا",
+  "local_identity.linked": "مرتبط بجهاز Mac هذا",
+  "local_identity.sign_in": "سجّل الدخول للمزامنة",
+  "local_identity.sign_in_failed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى."
 }

@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "З вашим обліковим записом уже пов’язано {limit} Mac — це максимум. Скасуйте зв’язок із Mac, яким ви більше не користуєтеся, і спробуйте ще раз.",
   "desktop_link.error.rate_limit": "Забагато спроб зв’язування. Спробуйте пізніше.",
   "desktop_link.error.generic": "Не вдалося пов’язати. Спробуйте ще раз.",
-  "desktop_link.use_without_account": "Користуватися без входу"
+  "desktop_link.use_without_account": "Користуватися без входу",
+  "local_identity.title": "Цей Mac",
+  "local_identity.linked": "Пов’язано з цим Mac",
+  "local_identity.sign_in": "Увійти для синхронізації",
+  "local_identity.sign_in_failed": "Не вдалося почати вхід. Спробуйте ще раз."
 }

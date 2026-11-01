@@ -2,10 +2,22 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Code, DotsThree, FileText, Gear, ShieldCheck, SignOut } from "@/shared/ui/icons";
+import {
+  Code,
+  Desktop,
+  DotsThree,
+  FileText,
+  Gear,
+  ShieldCheck,
+  SignIn,
+  SignOut,
+} from "@/shared/ui/icons";
 import { signOut, useSession } from "next-auth/react";
+import { toast } from "react-toastify";
 import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
+import { startLocalHostedLink } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { isLocalMode } from "@/shared/lib/runtime-env";
 import { cn } from "@/shared/lib/utils";
 import {
   COMPACT_POPOVER_ICON_CLASS,
@@ -17,6 +29,7 @@ import { dirForLocale } from "@/shared/lib/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { useSettingsModal } from "@/features/settings";
+import { useLinkedAccount } from "@/shared/hooks/use-linked-account";
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */
 function initials(name: string): string {
@@ -29,7 +42,28 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function Avatar({ image, label, size }: { image?: string | null; label: string; size: number }) {
+function Avatar({
+  image,
+  label,
+  size,
+  device = false,
+}: {
+  image?: string | null;
+  label: string;
+  size: number;
+  device?: boolean;
+}) {
+  if (device) {
+    return (
+      <span
+        aria-hidden="true"
+        className="grid shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+        style={{ width: size, height: size }}
+      >
+        <Desktop style={{ width: size * 0.55, height: size * 0.55 }} />
+      </span>
+    );
+  }
   if (image) {
     return (
       // Avatars come from arbitrary OAuth providers (Google, GitHub, Auth0); a
@@ -88,13 +122,23 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
+  const local = isLocalMode();
+  // Read the link again on each open: the sign-in finishes in the browser.
+  const linkedAccount = useLinkedAccount(open);
 
   if (!session?.user) return null;
 
-  const name = session.user.name ?? session.user.email ?? "";
-  const email = session.user.email ?? "";
+  // The Mac app's session user is an internal placeholder, never a real
+  // account, so local mode shows the linked account or "This Mac" instead.
+  const name = local
+    ? (linkedAccount ?? msg("local_identity.title"))
+    : (session.user.name ?? session.user.email ?? "");
+  const email = local
+    ? msg(linkedAccount ? "local_identity.linked" : "settings.account.signed_out")
+    : (session.user.email ?? "");
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
+  const deviceAvatar = local && !linkedAccount;
 
   const close = () => setOpen(false);
 
@@ -106,7 +150,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} />
+      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
     </button>
   ) : (
     <button
@@ -114,7 +158,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} />
+      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
       {/* Physical edge from the UI dir, not logical `text-start`: the name keeps
           dir="auto" so it shapes and truncates by its own script, which would make
           `start` resolve to the name's direction and split it from the email line
@@ -127,7 +171,10 @@ export function AccountMenu({
           {name}
         </span>
         {showEmail && (
-          <span dir="ltr" className="truncate text-xs leading-tight text-muted-foreground">
+          <span
+            dir={local ? undefined : "ltr"}
+            className="truncate text-xs leading-tight text-muted-foreground"
+          >
             {email}
           </span>
         )}
@@ -164,7 +211,7 @@ export function AccountMenu({
             target here would just duplicate the Settings row. Surfaces the email,
             the way ChatGPT's account menu does. */}
         <div className="flex items-center gap-2.5 px-3 py-2">
-          <Avatar image={session.user.image} label={name} size={32} />
+          <Avatar image={session.user.image} label={name} size={32} device={deviceAvatar} />
           {/* Physical edge from the UI dir — see the trigger above for why `text-start`
               can't be used while the name carries dir="auto". */}
           <span className={cn("flex min-w-0 flex-1 flex-col", isRtl ? "text-right" : "text-left")}>
@@ -172,7 +219,10 @@ export function AccountMenu({
               {name}
             </span>
             {showEmail && (
-              <span dir="ltr" className="truncate text-xs text-muted-foreground">
+              <span
+                dir={local ? undefined : "ltr"}
+                className="truncate text-xs text-muted-foreground"
+              >
                 {email}
               </span>
             )}
@@ -180,6 +230,25 @@ export function AccountMenu({
         </div>
 
         <div role="separator" className="my-1 h-px bg-border/60" />
+
+        {local && linkedAccount === null && (
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              startLocalHostedLink()
+                .then(({ authorize_url }) => {
+                  // The Mac app opens new windows in the default browser.
+                  window.open(authorize_url, "_blank", "noopener");
+                })
+                .catch(() => toast.error(msg("local_identity.sign_in_failed")));
+            }}
+            className={COMPACT_POPOVER_ITEM_CLASS}
+          >
+            <SignIn className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+            {msg("local_identity.sign_in")}
+          </button>
+        )}
 
         <button
           type="button"

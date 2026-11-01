@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "С вашим аккаунтом уже связано {limit} Mac — это максимум. Отмените связь с Mac, которым вы больше не пользуетесь, и повторите попытку.",
   "desktop_link.error.rate_limit": "Слишком много попыток связывания. Повторите попытку позже.",
   "desktop_link.error.generic": "Связать не удалось. Повторите попытку.",
-  "desktop_link.use_without_account": "Использовать без входа"
+  "desktop_link.use_without_account": "Использовать без входа",
+  "local_identity.title": "Этот Mac",
+  "local_identity.linked": "Связан с этим Mac",
+  "local_identity.sign_in": "Войти для синхронизации",
+  "local_identity.sign_in_failed": "Не удалось начать вход. Повторите попытку."
 }

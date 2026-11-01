@@ -1101,6 +1101,27 @@ export function updateLocalMacosHeld(held: boolean) {
   });
 }
 
+export interface LocalHostedLinkStatus {
+  linked: boolean;
+  account_email?: string | null;
+}
+
+/** Read whether the Mac app is linked to a hosted account. Local-only route. */
+export function getLocalHostedLinkStatus() {
+  return request<LocalHostedLinkStatus>("/local/hosted-link/status");
+}
+
+/**
+ * Start linking the Mac app to a hosted account. The returned consent URL
+ * redirects back to this API's loopback callback, which finishes the link.
+ */
+export function startLocalHostedLink() {
+  return request<{ authorize_url: string }>("/local/hosted-link/start", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 /**
  * Lease the queued macOS notifications in the UI locale. A lease that is not
  * confirmed runs out, and the server hands those notifications out again.

@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "Il tuo account ha già {limit} Mac collegati, il massimo consentito. Scollega un Mac che non usi più e riprova.",
   "desktop_link.error.rate_limit": "Troppi tentativi di collegamento. Riprova più tardi.",
   "desktop_link.error.generic": "Il collegamento non è riuscito. Riprova.",
-  "desktop_link.use_without_account": "Usa senza accedere"
+  "desktop_link.use_without_account": "Usa senza accedere",
+  "local_identity.title": "Questo Mac",
+  "local_identity.linked": "Collegato a questo Mac",
+  "local_identity.sign_in": "Accedi per sincronizzare",
+  "local_identity.sign_in_failed": "Impossibile avviare l’accesso. Riprova."
 }

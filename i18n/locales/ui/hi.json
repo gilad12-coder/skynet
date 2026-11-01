@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "आपके खाते में पहले से {limit} लिंक किए गए Mac हैं, जो अधिकतम सीमा है। किसी ऐसे Mac का लिंक हटाएँ जिसे आप अब इस्तेमाल नहीं करते, फिर दोबारा कोशिश करें।",
   "desktop_link.error.rate_limit": "लिंक करने की बहुत ज़्यादा कोशिशें। बाद में दोबारा कोशिश करें।",
   "desktop_link.error.generic": "लिंक नहीं हो पाया। दोबारा कोशिश करें।",
-  "desktop_link.use_without_account": "साइन इन किए बिना उपयोग करें"
+  "desktop_link.use_without_account": "साइन इन किए बिना उपयोग करें",
+  "local_identity.title": "यह Mac",
+  "local_identity.linked": "इस Mac से लिंक है",
+  "local_identity.sign_in": "सिंक करने के लिए साइन इन करें",
+  "local_identity.sign_in_failed": "साइन इन शुरू नहीं हो पाया। दोबारा कोशिश करें।"
 }

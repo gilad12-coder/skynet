@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "حساب شما از قبل {limit} Mac پیوندشده دارد که حداکثر مجاز است. پیوند یک Mac را که دیگر استفاده نمی‌کنید لغو کنید و دوباره امتحان کنید.",
   "desktop_link.error.rate_limit": "تلاش‌های پیوند بیش از حد. بعداً دوباره امتحان کنید.",
   "desktop_link.error.generic": "پیوند انجام نشد. دوباره امتحان کنید.",
-  "desktop_link.use_without_account": "استفاده بدون ورود"
+  "desktop_link.use_without_account": "استفاده بدون ورود",
+  "local_identity.title": "این Mac",
+  "local_identity.linked": "پیوندشده با این Mac",
+  "local_identity.sign_in": "ورود برای همگام‌سازی",
+  "local_identity.sign_in_failed": "ورود شروع نشد. دوباره امتحان کنید."
 }

@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "Votre compte a déjà {limit} Mac associés, le maximum autorisé. Dissociez un Mac que vous n’utilisez plus, puis réessayez.",
   "desktop_link.error.rate_limit": "Trop de tentatives d’association. Réessayez plus tard.",
   "desktop_link.error.generic": "L’association a échoué. Réessayez.",
-  "desktop_link.use_without_account": "Utiliser sans se connecter"
+  "desktop_link.use_without_account": "Utiliser sans se connecter",
+  "local_identity.title": "Ce Mac",
+  "local_identity.linked": "Associé à ce Mac",
+  "local_identity.sign_in": "Se connecter pour synchroniser",
+  "local_identity.sign_in_failed": "Impossible de lancer la connexion. Réessayez."
 }

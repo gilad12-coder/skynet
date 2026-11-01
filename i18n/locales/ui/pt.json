@@ -4364,5 +4364,9 @@
   "desktop_link.error.too_many_links": "Sua conta já tem {limit} Macs vinculados, o máximo permitido. Desvincule um Mac que você não usa mais e tente de novo.",
   "desktop_link.error.rate_limit": "Tentativas de vínculo demais. Tente de novo mais tarde.",
   "desktop_link.error.generic": "O vínculo não deu certo. Tente de novo.",
-  "desktop_link.use_without_account": "Usar sem entrar"
+  "desktop_link.use_without_account": "Usar sem entrar",
+  "local_identity.title": "Este Mac",
+  "local_identity.linked": "Vinculado a este Mac",
+  "local_identity.sign_in": "Entre para sincronizar",
+  "local_identity.sign_in_failed": "Não foi possível iniciar o login. Tente de novo."
 }
