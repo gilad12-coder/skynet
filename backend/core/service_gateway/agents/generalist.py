@@ -1121,10 +1121,6 @@ def tools_for(state: WizardState) -> set[str]:
     task_ready = _task_ready(state)
     if name_set and task_ready and _inputs_ready(state) and _code_ready(state) and _model_ready(state):
         allowed |= _SUBMIT_TOOLS
-    if settings.local_mode:
-        # The Mac app's wallet is a local run credit, not money; the agent must
-        # never quote it to the user as their balance.
-        allowed.discard("get_wallet_for_agent")
     return allowed
 
 
