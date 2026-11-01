@@ -85,6 +85,19 @@ void describe("AccountMenu link states in local mode", () => {
     assert.doesNotMatch(html, /Sign in to sync|Not signed in|skynet\.local/);
   });
 
+  void it("shows the linked account's profile picture", () => {
+    const html = render({ ...ada, image: "https://lh3.googleusercontent.com/a/ada" });
+    // The trigger and the menu header each show the avatar.
+    assert.equal(
+      html.match(/<img[^>]+src="https:\/\/lh3\.googleusercontent\.com\/a\/ada"/g)?.length,
+      2,
+    );
+  });
+
+  void it("shows the initials while the linked account has no picture", () => {
+    assert.doesNotMatch(render(ada), /<img/);
+  });
+
   void it("falls back to the account label with no name or email", () => {
     const html = render({ linked: true, name: null, email: null, offline: false });
     assert.match(html, /Skynet account/);

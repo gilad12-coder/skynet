@@ -9,7 +9,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionProvider } from "next-auth/react";
 
-import { ApiError } from "@/shared/lib/api";
+import { ApiError, HOSTED_LINK_CHANGED_EVENT } from "@/shared/lib/api";
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { setServerMessages } from "@/shared/lib/runtime-messages";
 
@@ -18,7 +18,9 @@ import { setServerMessages } from "@/shared/lib/runtime-messages";
 const { SettingsModalProvider } = await import("@/features/settings");
 const { LocaleProvider } = await import("@/shared/providers/locale-provider");
 const { AccountMenu, localIdentity, startHostedSignIn } = await import("./account-menu");
-const { linkedUsername, loadLinkedAccount } = await import("@/shared/hooks/use-linked-account");
+const { linkedUsername, loadLinkedAccount, onLinkChange, unlinkHostedAccount } = await import(
+  "@/shared/hooks/use-linked-account"
+);
 const { TooltipProvider } = await import("@/shared/ui/primitives/tooltip");
 const { PrivacyTab } = await import("@/features/settings/components/PrivacyTab");
 
@@ -137,7 +139,7 @@ void describe("settings in local mode", () => {
     assert.equal(linkedUsername(undefined), "Local mode");
   });
 
-  void it("hides the placeholder username and email from the privacy tab", () => {
+  void it("never shows the placeholder username and email in the privacy tab", () => {
     assert.match(
       render(
         <TooltipProvider>
@@ -160,9 +162,17 @@ void describe("settings in local mode", () => {
 
 void describe("loadLinkedAccount", () => {
   const store = new Map<string, string>();
+  const events: string[] = [];
+  const target = new EventTarget();
   // The menu tests above need `window` unset: runtime-env reads the server env then.
   before(() => {
     (globalThis as { window?: unknown }).window = {
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      dispatchEvent: (e: Event) => {
+        events.push(e.type);
+        return target.dispatchEvent(e);
+      },
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
         setItem: (k: string, v: string) => store.set(k, v),
@@ -188,8 +198,35 @@ void describe("loadLinkedAccount", () => {
       linked: true,
       name: "Ada",
       email: "ada@example.com",
+      image: null,
       offline: false,
     });
+  });
+
+  void it("keeps an https profile picture and drops any other", async () => {
+    store.clear();
+    const picture = "https://lh3.googleusercontent.com/a/ada";
+    const withImage = await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com", image: picture }),
+    });
+    assert.equal(withImage.linked && withImage.image, picture);
+    store.clear();
+    const realNow = Date.now;
+    Date.now = () => realNow() + 10 * 60_000;
+    try {
+      const insecure = await loadLinkedAccount({
+        status: linked,
+        whoami: async () => ({
+          name: "Ada",
+          email: "ada@example.com",
+          image: "javascript:alert(1)",
+        }),
+      });
+      assert.equal(insecure.linked && insecure.image, null);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   void it("keeps the last known identity, marked offline, when hosted is down", async () => {
@@ -207,6 +244,7 @@ void describe("loadLinkedAccount", () => {
         linked: true,
         name: "Ada",
         email: "ada@example.com",
+        image: null,
         offline: true,
       });
     } finally {
@@ -235,6 +273,73 @@ void describe("loadLinkedAccount", () => {
     });
     assert.deepEqual(account, { linked: false });
     assert.equal(store.size, 0);
+  });
+
+  void it("announces a new link once, and a revoked link", async () => {
+    store.clear();
+    events.length = 0;
+    const whoami = async () => ({ name: "Ada", email: "ada@example.com" });
+    await loadLinkedAccount({ status: linked, whoami });
+    await loadLinkedAccount({ status: linked, whoami });
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    await loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable });
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT, HOSTED_LINK_CHANGED_EVENT]);
+  });
+
+  void it("announces a log out and forgets the identity", async () => {
+    store.clear();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    events.length = 0;
+    await unlinkHostedAccount(async () => ({ hosted_revoked: true }));
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    assert.equal(store.size, 0);
+  });
+
+  void it("reloads a listener on a log out without a reload loop", async () => {
+    store.clear();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    events.length = 0;
+    const reloads: Array<Promise<unknown>> = [];
+    // The hook reloads on each event; an unlinked reload must not announce again.
+    const stop = onLinkChange(() => {
+      reloads.push(
+        loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable }),
+      );
+    });
+    await unlinkHostedAccount(async () => ({ hosted_revoked: true }));
+    await Promise.all(reloads);
+    assert.equal(reloads.length, 1);
+    assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    stop();
+    await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com" }),
+    });
+    assert.equal(reloads.length, 1);
+  });
+
+  void it("announces a link once when storage is off", async () => {
+    await loadLinkedAccount({ status: async () => ({ linked: false }), whoami: unreachable });
+    const w = (globalThis as unknown as { window: { localStorage: unknown } }).window;
+    const storage = w.localStorage;
+    const off = () => {
+      throw new Error("storage off");
+    };
+    w.localStorage = { getItem: off, setItem: off, removeItem: off };
+    events.length = 0;
+    try {
+      const whoami = async () => ({ name: "Ada", email: "ada@example.com" });
+      for (let i = 0; i < 3; i++) await loadLinkedAccount({ status: linked, whoami });
+      assert.deepEqual(events, [HOSTED_LINK_CHANGED_EVENT]);
+    } finally {
+      w.localStorage = storage;
+    }
   });
 
   void it("reports not linked without asking hosted", async () => {

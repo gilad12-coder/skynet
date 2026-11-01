@@ -61,6 +61,7 @@ import {
 import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { SETUP_SETTING_EVENT, type SetupSettingDetail } from "@/features/experience";
 import { isLocalMode } from "@/shared/lib/runtime-env";
+import { useLinkedAccount } from "@/shared/hooks/use-linked-account";
 
 /** Localize a data-action failure: semantic backend codes when present. */
 function describeError(err: unknown, fallback: string): string {
@@ -143,6 +144,13 @@ export function PrivacyTab() {
 
   const signedOut = !session?.user;
   const email = session?.user?.email ?? "";
+  // The Mac app's local user is a placeholder, so the copy rows show the linked hosted account.
+  const local = isLocalMode();
+  const linkedAccount = useLinkedAccount();
+  const linked = linkedAccount?.linked ? linkedAccount : null;
+  const copyName = local ? (linked?.name ?? linked?.email ?? "") : (session?.user?.name ?? "");
+  const copyEmail = local ? (linked?.email ?? "") : email;
+  const copySignedOut = local ? !linked : signedOut;
 
   React.useEffect(() => {
     if (signedOut) return;
@@ -332,24 +340,19 @@ export function PrivacyTab() {
           </Button>
         </SettingsRow>
 
-        {/* The Mac app's local user has a placeholder name and email; there is nothing real to copy. */}
-        {!isLocalMode() && (
-          <>
-            <CopyValueRow
-              icon={User}
-              label={msg("settings.privacy.copy_username.label")}
-              value={session?.user?.name ?? ""}
-              signedOut={signedOut}
-            />
+        <CopyValueRow
+          icon={User}
+          label={msg("settings.privacy.copy_username.label")}
+          value={copyName}
+          signedOut={copySignedOut}
+        />
 
-            <CopyValueRow
-              icon={At}
-              label={msg("settings.privacy.copy_email.label")}
-              value={email}
-              signedOut={signedOut}
-            />
-          </>
-        )}
+        <CopyValueRow
+          icon={At}
+          label={msg("settings.privacy.copy_email.label")}
+          value={copyEmail}
+          signedOut={copySignedOut}
+        />
       </div>
 
       <Separator />

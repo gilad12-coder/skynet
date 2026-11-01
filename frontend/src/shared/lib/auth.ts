@@ -157,11 +157,18 @@ async function resolveLocalAccount(): Promise<BackendAccount | null> {
  * sign-in itself — the provider has already authenticated the user.
  */
 async function provisionBackendAccount(
-  user: { email?: string | null; name?: string | null; otherEmails?: string[] },
+  user: {
+    email?: string | null;
+    name?: string | null;
+    image?: string | null;
+    otherEmails?: string[];
+  },
   provider: string,
   providerAccountId: string,
 ): Promise<BackendAccount | null> {
   if (!backendAuthSecret || !user.email) return null;
+  // The backend keeps only an https picture that fits its 2048-character column.
+  const image = user.image?.startsWith("https://") && user.image.length <= 2048 ? user.image : "";
   try {
     const res = await fetch(`${backendBaseUrl}/auth/oauth/provision`, {
       method: "POST",
@@ -172,6 +179,7 @@ async function provisionBackendAccount(
         other_emails: user.otherEmails ?? [],
         provider,
         provider_account_id: providerAccountId,
+        image,
       }),
     });
     if (!res.ok) return null;

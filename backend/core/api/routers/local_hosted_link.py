@@ -182,10 +182,10 @@ def create_local_hosted_link_router(*, job_store: Any) -> APIRouter:
             user: The signed-in local user.
 
         Returns:
-            ``{"email", "name", "link_id", "scopes", "device_name"}``.
+            ``{"email", "name", "image", "link_id", "scopes", "device_name"}``.
         """
         who = hosted_link.hosted_get(engine, user.username, "/desktop/v1/whoami")
-        return {key: who.get(key) for key in ("email", "name", "link_id", "scopes", "device_name")}
+        return {key: who.get(key) for key in ("email", "name", "image", "link_id", "scopes", "device_name")}
 
     @router.get("/local/hosted-link/balance", include_in_schema=False, dependencies=_LOCAL_ONLY)
     def balance(user: AuthenticatedUserDep) -> dict[str, Any]:

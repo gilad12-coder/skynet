@@ -4,7 +4,8 @@ import { Kbd } from "@/shared/ui/kbd";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { ArrowUpRight, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
+import { toast } from "react-toastify";
+import { ArrowUpRight, MagnifyingGlass, Robot, SignIn, SignOut } from "@/shared/ui/icons";
 import type { Icon } from "@/shared/ui/icons";
 
 import { useGeneralistPanelStateOptional } from "@/features/agent-panel";
@@ -15,6 +16,8 @@ import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
 import { isLocalMode } from "@/shared/lib/runtime-env";
+import { unlinkHostedAccount, useLinkedAccount } from "@/shared/hooks/use-linked-account";
+import { startHostedSignIn } from "@/shared/layout/account-menu";
 import { cn } from "@/shared/lib/utils";
 import {
   Dialog,
@@ -51,6 +54,9 @@ export function GlobalSearch() {
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  // Read the Mac app's link again each time the palette opens.
+  const account = useLinkedAccount(open);
+  const linkState = account === undefined ? undefined : account.linked;
 
   // Built from the same registries the sidebar and Settings rail render from,
   // so new pages and settings tabs become searchable without touching this file.
@@ -77,19 +83,38 @@ export function GlobalSearch() {
             },
           ]
         : []),
-      // The Mac app logs out from the account menu, which unlinks the hosted account.
-      ...(isLocalMode()
-        ? []
-        : [
+      // The Mac app keeps its local session: Log out unlinks the hosted
+      // account, and an unlinked Mac offers the hosted sign-in, as its account menu does.
+      ...(isLocalMode() && linkState === false
+        ? [
+            {
+              id: "action-sign-in",
+              group: "actions" as const,
+              label: msg("local_identity.sign_in"),
+              // The label is searched too; the sign-out words would match it wrongly.
+              keywords: [],
+              icon: SignIn,
+              run: () => void startHostedSignIn(),
+            },
+          ]
+        : []),
+      ...(!isLocalMode() || linkState === true
+        ? [
             {
               id: "action-sign-out",
               group: "actions" as const,
               label: msg("app.shell.logout"),
               keywords: splitKeywords(msg("app.shell.search.kw.sign_out")),
               icon: SignOut,
-              run: () => void signOut({ callbackUrl: "/login" }),
+              run: () =>
+                isLocalMode()
+                  ? void unlinkHostedAccount().catch(() =>
+                      toast.error(msg("local_identity.sign_out_failed")),
+                    )
+                  : void signOut({ callbackUrl: "/login" }),
             },
-          ]),
+          ]
+        : []),
     ];
     const settings: SearchItem[] = visibleSettingsTabs(isAdmin).map((tab) => ({
       id: `settings-${tab}`,
@@ -101,7 +126,7 @@ export function GlobalSearch() {
       run: () => openTo(tab),
     }));
     return [...pages, ...actions, ...settings];
-  }, [agentPanel, isAdmin, openTo, router, locale]);
+  }, [agentPanel, isAdmin, openTo, router, locale, linkState]);
 
   const filteredItems = React.useMemo(() => {
     if (!query.trim()) return items.filter((item) => item.group !== "settings");

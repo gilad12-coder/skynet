@@ -10,41 +10,10 @@ import type { AgentToolCall } from "@/shared/ui/agent/types";
 
 import { ToolCallRow } from "./ToolCallRow";
 import { StatTile } from "./result-card-atoms";
+import { walletView, type WalletView } from "../lib/wallet-view";
 
 interface WalletCardProps {
   call: AgentToolCall;
-}
-
-interface FreeGrant {
-  cents_remaining?: number;
-  cents_total?: number;
-}
-
-interface UsageEntry {
-  id?: string;
-  label?: string;
-  model?: string | null;
-  cents?: number;
-  kind?: string;
-}
-
-interface WalletResult {
-  paid_balance_cents?: number;
-  free_grant?: FreeGrant;
-  usage?: UsageEntry[];
-}
-
-function extractWallet(call: AgentToolCall): WalletResult | null {
-  const payload = (call.payload ?? {}) as Record<string, unknown>;
-  const result = payload.result;
-  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
-  const r = result as WalletResult;
-  if (typeof r.paid_balance_cents !== "number" || typeof r.free_grant !== "object") return null;
-  return r;
-}
-
-function totalCents(w: WalletResult): number {
-  return (w.free_grant?.cents_remaining ?? 0) + (w.paid_balance_cents ?? 0);
 }
 
 /** A cent amount as its dollar value. */
@@ -52,40 +21,68 @@ function fmtUsd(cents: number): string {
   return formatCentsUsd(cents, getActiveIntlLocale());
 }
 
-function buildSummary(w: WalletResult | null, isRunning: boolean): string | null {
-  if (isRunning || !w) return null;
+function buildSummary(view: WalletView | null, isRunning: boolean): string | null {
+  if (isRunning || !view) return null;
+  if (view.kind === "not_linked") return msg("billing.local.link_prompt");
+  if (view.kind === "unavailable") return msg("billing.popover.unavailable");
   return formatMsg("auto.features.agent.panel.components.walletcard.summary", {
-    p1: fmtUsd(totalCents(w)),
+    p1: fmtUsd(view.totalCents),
   });
 }
 
 /**
  * Result card for ``get_wallet_for_agent`` — the caller's spendable balance in
  * dollars (free grant + paid balance) as a headline, a free-grant / paid-balance
- * split, and the most recent ledger entries.
+ * split, and the most recent ledger entries. In the Mac app it shows the linked
+ * account's hosted balance, or a sign-in prompt when no account is linked.
  */
 export function WalletCard({ call }: WalletCardProps) {
-  const wallet = extractWallet(call);
-  const summary = buildSummary(wallet, call.status === "running");
+  const payload = (call.payload ?? {}) as Record<string, unknown>;
+  const view = walletView(payload.result);
+  const summary = buildSummary(view, call.status === "running");
 
-  if (!wallet) {
+  if (!view) {
     return <ToolCallRow call={call} summary={summary} />;
   }
 
-  const total = totalCents(wallet);
-  const grant = wallet.free_grant ?? {};
-  const usage = wallet.usage ?? [];
+  if (view.kind === "not_linked" || view.kind === "unavailable") {
+    const note =
+      view.kind === "not_linked" ? "billing.local.link_prompt" : "billing.popover.unavailable";
+    const customBody = <p className="text-[0.75rem] text-muted-foreground">{msg(note)}</p>;
+    return <ToolCallRow call={call} summary={summary} customBody={customBody} />;
+  }
+
+  const headline = (
+    <div dir="ltr" className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className="text-[1.25rem] font-semibold tabular-nums text-foreground">
+        {fmtUsd(view.totalCents)}
+      </span>
+      <span className="text-[0.6875rem] text-muted-foreground/70">
+        {msg("auto.features.agent.panel.components.walletcard.title")}
+      </span>
+    </div>
+  );
+
+  if (view.kind === "hosted") {
+    const customBody = (
+      <div className="space-y-1.5">
+        {headline}
+        <p className="text-[0.6875rem] text-muted-foreground/70">
+          {msg("billing.local.hosted_note")}
+        </p>
+        {view.low && (
+          <p className="text-[0.6875rem] text-muted-foreground">{msg("billing.chip.low_note")}</p>
+        )}
+      </div>
+    );
+    return <ToolCallRow call={call} summary={summary} customBody={customBody} />;
+  }
+
+  const { grant, usage } = view;
 
   const customBody = (
     <div className="space-y-3">
-      <div dir="ltr" className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[1.25rem] font-semibold tabular-nums text-foreground">
-          {fmtUsd(total)}
-        </span>
-        <span className="text-[0.6875rem] text-muted-foreground/70">
-          {msg("auto.features.agent.panel.components.walletcard.title")}
-        </span>
-      </div>
+      {headline}
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         {/* Only legacy accounts still hold a grant — hide the tile when the
@@ -103,7 +100,7 @@ export function WalletCard({ call }: WalletCardProps) {
         )}
         <StatTile
           label={msg("auto.features.agent.panel.components.walletcard.paid_balance")}
-          value={fmtUsd(wallet.paid_balance_cents ?? 0)}
+          value={fmtUsd(view.paidCents)}
           valueDir="ltr"
         />
       </dl>
