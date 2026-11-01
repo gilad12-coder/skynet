@@ -31,6 +31,9 @@ htmlcov/
 !.claude/settings.json
 !.claude/commands/
 !.claude/skills/
+.claude/skills/*
+!.claude/skills/skynet-pr-workflow
+!.claude/skills/skynet-test-accounts
 CLAUDE.md
 !/CLAUDE.md
 !/frontend/CLAUDE.md
