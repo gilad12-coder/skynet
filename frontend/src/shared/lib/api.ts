@@ -1113,7 +1113,16 @@ export function getLocalHostedLinkStatus() {
 
 /** Read the linked hosted account's name and email. Calls hosted through the local API. */
 export function getLocalHostedWhoami() {
-  return request<{ email?: string | null; name?: string | null }>("/local/hosted-link/whoami");
+  return request<{ email?: string | null; name?: string | null; image?: string | null }>(
+    "/local/hosted-link/whoami",
+  );
+}
+
+/** Read the linked hosted account's balance. Calls hosted through the local API. */
+export function getLocalHostedBalance() {
+  return request<{ available_cents: number; currency: string; low_balance: boolean }>(
+    "/local/hosted-link/balance",
+  );
 }
 
 /** Unlink the Mac app from its hosted account. Local runs and settings stay. */

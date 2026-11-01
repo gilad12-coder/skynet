@@ -157,7 +157,12 @@ async function resolveLocalAccount(): Promise<BackendAccount | null> {
  * sign-in itself — the provider has already authenticated the user.
  */
 async function provisionBackendAccount(
-  user: { email?: string | null; name?: string | null; otherEmails?: string[] },
+  user: {
+    email?: string | null;
+    name?: string | null;
+    image?: string | null;
+    otherEmails?: string[];
+  },
   provider: string,
   providerAccountId: string,
 ): Promise<BackendAccount | null> {
@@ -172,6 +177,7 @@ async function provisionBackendAccount(
         other_emails: user.otherEmails ?? [],
         provider,
         provider_account_id: providerAccountId,
+        image: user.image ?? "",
       }),
     });
     if (!res.ok) return null;

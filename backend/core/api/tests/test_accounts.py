@@ -402,6 +402,37 @@ def test_oauth_provision_creates_passwordless_account(accounts_client: TestClien
     assert register.status_code == 409
 
 
+def test_oauth_provision_keeps_only_an_https_picture(accounts_client: TestClient) -> None:
+    """Each provider sign-in refreshes an https picture; other values leave it as is."""
+    engine = accounts_client.app.state.job_store.engine
+
+    def picture() -> str | None:
+        """Return the saved picture of the test account."""
+        with Session(engine) as session:
+            row = session.get(UserModel, "pia@example.com")
+            assert row is not None
+            return row.image_url
+
+    def sign_in(image: str) -> None:
+        """Provision the test account with ``image`` as its provider picture."""
+        response = accounts_client.post(
+            "/auth/oauth/provision",
+            json={"email": "pia@example.com", "name": "Pia", "image": image},
+            headers=_AUTH_HEADER,
+        )
+        assert response.status_code == 200
+
+    sign_in("")
+    assert picture() is None
+    sign_in("https://lh3.googleusercontent.com/a/pia")
+    assert picture() == "https://lh3.googleusercontent.com/a/pia"
+    sign_in("javascript:alert(1)")
+    sign_in("")
+    assert picture() == "https://lh3.googleusercontent.com/a/pia"
+    sign_in("https://avatars.githubusercontent.com/u/1")
+    assert picture() == "https://avatars.githubusercontent.com/u/1"
+
+
 def test_oauth_provision_reuses_local_account(accounts_client: TestClient) -> None:
     """A provider sign-in with a registered email reuses that row, name intact."""
     accounts_client.post(

@@ -4,7 +4,20 @@ import * as React from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { msg } from "@/shared/lib/messages";
-import { getWallet, WALLET_CHANGED_EVENT, type BillingWalletResponse } from "@/shared/lib/api";
+import {
+  getLocalHostedBalance,
+  getLocalHostedLinkStatus,
+  getWallet,
+  WALLET_CHANGED_EVENT,
+  type BillingWalletResponse,
+} from "@/shared/lib/api";
+import { isLocalMode } from "@/shared/lib/runtime-env";
+import {
+  loadHostedBalance,
+  shownBalance,
+  type HostedBalance,
+  type ShownBalance,
+} from "../lib/hosted-balance";
 import {
   DEFAULT_PRICING_TERMS,
   EMPTY_WALLET,
@@ -32,6 +45,13 @@ interface BalanceContextValue {
   loadError: boolean;
   status: WalletStatus;
   totalCents: number;
+  /**
+   * What balance surfaces show. On the web it is the wallet. In the Mac app it
+   * is the linked account's balance, because the local wallet holds a credit
+   * that only keeps budget checks out of the way. Budget checks keep reading
+   * `totalCents`.
+   */
+  shown: ShownBalance;
   /** Re-fetch the wallet from the backend — call after a checkout/portal return. */
   refresh: () => void;
   /**
@@ -116,8 +136,27 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   const [syncing, setSyncing] = React.useState(false);
   const [available, setAvailable] = React.useState(false);
   const [loadError, setLoadError] = React.useState(false);
+  const local = isLocalMode();
+  const [hosted, setHosted] = React.useState<HostedBalance>({ kind: "loading" });
+
+  const readHosted = React.useCallback(() => {
+    void loadHostedBalance({
+      linked: () => getLocalHostedLinkStatus().then((s) => s.linked),
+      balance: getLocalHostedBalance,
+    }).then(setHosted);
+  }, []);
+
+  // A sign-in finishes in the browser, so the app reads the link again when
+  // its window comes back into focus.
+  React.useEffect(() => {
+    if (!local) return;
+    readHosted();
+    window.addEventListener("focus", readHosted);
+    return () => window.removeEventListener("focus", readHosted);
+  }, [local, readHosted]);
 
   const refresh = React.useCallback(() => {
+    if (local) readHosted();
     setLoading(true);
     setLoadError(false);
     getWallet()
@@ -129,7 +168,7 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
         setLoadError(true);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [local, readHosted]);
 
   React.useEffect(() => {
     if (sessionStatus === "authenticated") {
@@ -216,20 +255,28 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
     window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
   }, [beginSync]);
 
-  const value = React.useMemo<BalanceContextValue>(
-    () => ({
+  const value = React.useMemo<BalanceContextValue>(() => {
+    const status = walletStatus(wallet);
+    const total = totalCents(wallet);
+    const shown = shownBalance(local ? hosted : null, {
+      loading,
+      available,
+      totalCents: total,
+      status,
+    });
+    return {
       wallet,
       loading,
       syncing,
       available,
       loadError,
-      status: walletStatus(wallet),
-      totalCents: totalCents(wallet),
+      status,
+      totalCents: total,
+      shown,
       refresh,
       beginSync,
-    }),
-    [wallet, loading, syncing, available, loadError, refresh, beginSync],
-  );
+    };
+  }, [wallet, loading, syncing, available, loadError, local, hosted, refresh, beginSync]);
 
   return <BalanceContext.Provider value={value}>{children}</BalanceContext.Provider>;
 }

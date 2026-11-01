@@ -4,7 +4,7 @@ import { StorageUsageBar } from "@/shared/ui/progress-bar";
 import { Fragment, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import { CaretRight, Coins, Database, Tag } from "@/shared/ui/icons";
-import { formatCentsUsd, useBalance } from "@/features/billing";
+import { formatCentsUsd, LinkAccountPrompt, useBalance } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -178,7 +178,8 @@ export function WorkspaceStripSkeleton() {
  */
 export function WorkspaceStrip() {
   const { tagging, datasets, loading } = useWorkspaceSummary();
-  const { wallet, loading: walletLoading } = useBalance();
+  const { wallet, shown } = useBalance();
+  const walletLoading = shown.loading;
   const { openTo } = useSettingsModal();
   const locale = getActiveIntlLocale();
 
@@ -191,7 +192,6 @@ export function WorkspaceStrip() {
         Math.round((datasets.usage.used_bytes / Math.max(1, datasets.usage.quota_bytes)) * 100),
       )
     : 0;
-  const walletTotal = wallet.paidBalanceCents + wallet.freeGrant.centsRemaining;
 
   const sections: ReactElement[] = [];
   if (tagging) {
@@ -265,14 +265,18 @@ export function WorkspaceStrip() {
         title={msg("dashboard.workspace.balance.title")}
         onOpen={() => openTo("billing")}
       >
-        <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
-          <span
-            dir="ltr"
-            className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums"
-          >
-            {formatCentsUsd(walletTotal, locale)}
-          </span>
-        </div>
+        {shown.linkNeeded ? (
+          <LinkAccountPrompt />
+        ) : (
+          <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+            <span
+              dir="ltr"
+              className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums"
+            >
+              {shown.hosted && !shown.available ? "—" : formatCentsUsd(shown.totalCents, locale)}
+            </span>
+          </div>
+        )}
         {wallet.usage.length === 0 ? (
           <>{showFundHint && <EmptyHint text={msg("dashboard.workspace.balance.cta")} />}</>
         ) : (

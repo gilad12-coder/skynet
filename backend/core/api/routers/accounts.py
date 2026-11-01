@@ -109,6 +109,7 @@ class OAuthProvisionRequest(BaseModel):
         max_length=255,
         description="The provider's stable account id; a linked one decides the account before any email does.",
     )
+    image: str = Field(default="", max_length=2048, description="Profile picture URL from the provider profile.")
 
 
 # Links a provider account to the signed-in account from Settings.
@@ -474,7 +475,8 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
         loses its password, since the provider is the first proof of ownership.
 
         Args:
-            body: Provider-asserted email, display name, and other verified emails.
+            body: Provider-asserted email, display name, other verified emails
+                and profile picture URL (kept only when it is ``https``).
             x_internal_auth: Shared-secret header proving the caller is the
                 trusted frontend.
 
@@ -526,6 +528,8 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                         created_at=now,
                     )
                 )
+            if body.image.startswith("https://"):
+                row.image_url = body.image
             first_login = row.last_login_at is None
             row.last_login_at = now
             email = str(row.email)

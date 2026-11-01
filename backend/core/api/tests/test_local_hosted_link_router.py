@@ -142,6 +142,7 @@ def test_link_status_whoami_balance_unlink(client: TestClient, hosted: FakeHoste
     assert status.json()["account_email"] == "dana@example.test"
     who = client.get("/local/hosted-link/whoami")
     assert who.json()["email"] == "dana@example.test"
+    assert who.json()["image"] == "https://lh3.googleusercontent.com/a/dana"
     balance = client.get("/local/hosted-link/balance")
     assert balance.json() == {"available_cents": 1234, "currency": "usd", "low_balance": False}
     for body in (status.text, who.text, balance.text):

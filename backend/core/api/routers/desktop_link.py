@@ -118,6 +118,7 @@ class LinkRevokeRequest(BaseModel):
 class DesktopWhoami(BaseModel):
     email: str
     name: str
+    image: str | None = None
     link_id: str
     scopes: list[str]
     device_name: str
@@ -659,13 +660,16 @@ def create_desktop_link_router(*, job_store) -> APIRouter:
             principal: Desktop principal with the ``identity`` scope.
 
         Returns:
-            The account email, name, link id, scopes and Mac name.
+            The account email, name, profile picture, link id, scopes and Mac name.
         """
         with Session(job_store.engine) as session:
             account = _account(session, principal.username)
+            user = session.get(UserModel, principal.username)
+            image = user.image_url if user is not None else None
         return DesktopWhoami(
             email=account.email,
             name=account.name,
+            image=image,
             link_id=principal.link_id,
             scopes=[scope for scope in DESKTOP_SCOPES if scope in principal.scopes],
             device_name=principal.device_name,

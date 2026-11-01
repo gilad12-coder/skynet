@@ -137,7 +137,7 @@ void describe("settings in local mode", () => {
     assert.equal(linkedUsername(undefined), "Local mode");
   });
 
-  void it("hides the placeholder username and email from the privacy tab", () => {
+  void it("never shows the placeholder username and email in the privacy tab", () => {
     assert.match(
       render(
         <TooltipProvider>
@@ -188,8 +188,35 @@ void describe("loadLinkedAccount", () => {
       linked: true,
       name: "Ada",
       email: "ada@example.com",
+      image: null,
       offline: false,
     });
+  });
+
+  void it("keeps an https profile picture and drops any other", async () => {
+    store.clear();
+    const picture = "https://lh3.googleusercontent.com/a/ada";
+    const withImage = await loadLinkedAccount({
+      status: linked,
+      whoami: async () => ({ name: "Ada", email: "ada@example.com", image: picture }),
+    });
+    assert.equal(withImage.linked && withImage.image, picture);
+    store.clear();
+    const realNow = Date.now;
+    Date.now = () => realNow() + 10 * 60_000;
+    try {
+      const insecure = await loadLinkedAccount({
+        status: linked,
+        whoami: async () => ({
+          name: "Ada",
+          email: "ada@example.com",
+          image: "javascript:alert(1)",
+        }),
+      });
+      assert.equal(insecure.linked && insecure.image, null);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   void it("keeps the last known identity, marked offline, when hosted is down", async () => {
@@ -207,6 +234,7 @@ void describe("loadLinkedAccount", () => {
         linked: true,
         name: "Ada",
         email: "ada@example.com",
+        image: null,
         offline: true,
       });
     } finally {

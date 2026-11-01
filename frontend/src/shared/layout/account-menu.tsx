@@ -177,6 +177,8 @@ export function AccountMenu({
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
   const deviceAvatar = local && !linked;
+  // The local session user has no provider picture; the linked account has one.
+  const image = local ? (linked?.image ?? null) : session.user.image;
 
   const close = () => setOpen(false);
 
@@ -188,7 +190,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="flex items-center justify-center rounded-full transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
+      <Avatar image={image} label={name} size={28} device={deviceAvatar} />
     </button>
   ) : (
     <button
@@ -196,7 +198,7 @@ export function AccountMenu({
       aria-label={msg("app.shell.account.aria")}
       className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start transition-colors duration-200 hover:bg-sidebar-accent/40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
     >
-      <Avatar image={session.user.image} label={name} size={28} device={deviceAvatar} />
+      <Avatar image={image} label={name} size={28} device={deviceAvatar} />
       {/* Physical edge from the UI dir, not logical `text-start`: the name keeps
           dir="auto" so it shapes and truncates by its own script, which would make
           `start` resolve to the name's direction and split it from the email line
@@ -249,7 +251,7 @@ export function AccountMenu({
             target here would just duplicate the Settings row. Surfaces the email,
             the way ChatGPT's account menu does. */}
         <div className="flex items-center gap-2.5 px-3 py-2">
-          <Avatar image={session.user.image} label={name} size={32} device={deviceAvatar} />
+          <Avatar image={image} label={name} size={32} device={deviceAvatar} />
           {/* Physical edge from the UI dir — see the trigger above for why `text-start`
               can't be used while the name carries dir="auto". */}
           <span className={cn("flex min-w-0 flex-1 flex-col", isRtl ? "text-right" : "text-left")}>

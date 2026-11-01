@@ -12,15 +12,27 @@ import { isLocalMode } from "@/shared/lib/runtime-env";
 
 /**
  * The hosted account the Mac app is linked to. `offline` means hosted did not
- * answer, so `name` and `email` come from the last known identity.
+ * answer, so `name`, `email` and `image` come from the last known identity.
  */
 export type LinkedAccount =
   | { linked: false }
-  | { linked: true; name: string | null; email: string | null; offline: boolean };
+  | {
+      linked: true;
+      name: string | null;
+      email: string | null;
+      image?: string | null;
+      offline: boolean;
+    };
 
 interface Identity {
   name: string | null;
   email: string | null;
+  image?: string | null;
+}
+
+// Hosted stores only https provider pictures; anything else is not rendered.
+function safeImage(url: string | null | undefined): string | null {
+  return url && url.startsWith("https://") ? url : null;
 }
 
 const CACHE_KEY = "skynet.local.hosted-identity";
@@ -70,7 +82,11 @@ export async function loadLinkedAccount(
     return { linked: true, ...cached, offline: false };
   try {
     const who = await api.whoami();
-    const identity = { name: who.name || null, email: who.email || savedEmail };
+    const identity = {
+      name: who.name || null,
+      email: who.email || savedEmail,
+      image: safeImage(who.image),
+    };
     writeCache(identity);
     return { linked: true, ...identity, offline: false };
   } catch (err) {
