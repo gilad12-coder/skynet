@@ -62,7 +62,9 @@ The tools:
    `start_run` again with the same arguments and the same
    `idempotency_key`. If the error code is `budget.pending`, wait 30 to
    60 seconds, then call `start_run` again with the same arguments and the
-   same `idempotency_key`. Do not ask the user to agree again. If Skynet
+   same `idempotency_key`. Do not ask the user to agree again. Retry at
+   most 3 times, then show the `code` and `detail` to the user and stop.
+   If Skynet
    returns a spec or limit error with a `code`, do not retry unchanged.
    Show the `code` and `detail`, fix the spec, call `check_run` again, get
    the user's agreement to a limit again, and call `start_run` with a new
@@ -139,4 +141,5 @@ Notes on the spec:
   without the user's agreement.
 - `budget.pending` is a short wait, not a refusal. Wait 30 to 60 seconds,
   then call `start_run` again with the same arguments and the same
-  `idempotency_key`. Do not ask the user to agree again.
+  `idempotency_key`. Do not ask the user to agree again. Retry at most 3
+  times, then show the `code` and `detail` to the user and stop.

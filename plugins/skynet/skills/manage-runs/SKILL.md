@@ -41,8 +41,9 @@ the signed-in account.
 `stop_run` works only on `pending`, `validating` or `running` runs. For a
 `paused` run, send the user to the run page to resume or delete it.
 
-For those three statuses, `stop_run` cannot be undone. The run gets the
-status `cancelled` and does not continue.
+For those three statuses, the run gets the status `cancelled`. The MCP
+tools cannot resume a stopped run. Some GEPA runs show Resume on the run
+page.
 
 1. Find the run and show its name, status and spend.
 2. Ask the user to confirm that run. If more than one run matches, ask
