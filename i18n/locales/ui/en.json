@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "Too many link attempts. Try again later.",
   "desktop_link.error.generic": "The link did not go through. Try again.",
   "desktop_link.use_without_account": "Use without signing in",
-  "local_identity.title": "This Mac",
+  "local_identity.title": "Local mode",
   "local_identity.linked": "Linked to this Mac",
   "local_identity.sign_in": "Sign in to sync",
-  "local_identity.sign_in_failed": "Could not start the sign-in. Try again."
+  "local_identity.sign_in_failed": "Could not start the sign-in. Try again.",
+  "local_identity.linked_offline": "Linked (offline)",
+  "local_identity.sign_out": "Sign out of sync",
+  "local_identity.sign_out_failed": "Could not sign out of sync. Try again."
 }

@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "Çok fazla bağlantı denemesi. Daha sonra tekrar deneyin.",
   "desktop_link.error.generic": "Bağlantı kurulamadı. Tekrar deneyin.",
   "desktop_link.use_without_account": "Oturum açmadan kullan",
-  "local_identity.title": "Bu Mac",
+  "local_identity.title": "Yerel mod",
   "local_identity.linked": "Bu Mac’e bağlı",
   "local_identity.sign_in": "Eşitlemek için giriş yapın",
-  "local_identity.sign_in_failed": "Giriş başlatılamadı. Tekrar deneyin."
+  "local_identity.sign_in_failed": "Giriş başlatılamadı. Tekrar deneyin.",
+  "local_identity.linked_offline": "Bağlı (çevrimdışı)",
+  "local_identity.sign_out": "Eşitlemeden çıkış yap",
+  "local_identity.sign_out_failed": "Eşitlemeden çıkış yapılamadı. Tekrar deneyin."
 }

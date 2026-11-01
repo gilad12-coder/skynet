@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "リンクの試行回数が多すぎます。しばらくしてからもう一度お試しください。",
   "desktop_link.error.generic": "リンクできませんでした。もう一度お試しください。",
   "desktop_link.use_without_account": "サインインせずに使用",
-  "local_identity.title": "この Mac",
+  "local_identity.title": "ローカルモード",
   "local_identity.linked": "この Mac にリンク済み",
   "local_identity.sign_in": "サインインして同期",
-  "local_identity.sign_in_failed": "サインインを開始できませんでした。もう一度お試しください。"
+  "local_identity.sign_in_failed": "サインインを開始できませんでした。もう一度お試しください。",
+  "local_identity.linked_offline": "リンク済み(オフライン)",
+  "local_identity.sign_out": "同期からサインアウト",
+  "local_identity.sign_out_failed": "同期からサインアウトできませんでした。もう一度お試しください。"
 }

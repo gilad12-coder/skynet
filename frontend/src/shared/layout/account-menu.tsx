@@ -29,7 +29,7 @@ import { dirForLocale } from "@/shared/lib/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { useSettingsModal } from "@/features/settings";
-import { useLinkedAccount } from "@/shared/hooks/use-linked-account";
+import { unlinkHostedAccount, useLinkedAccount } from "@/shared/hooks/use-linked-account";
 
 /** Two-letter monogram from a display name or email — the avatar fallback when there's no image. */
 function initials(name: string): string {
@@ -122,23 +122,33 @@ export function AccountMenu({
   const tooltipSide = isRtl ? "left" : "right";
   const { setOpen: setSettingsOpen } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
+  const [unlinks, setUnlinks] = React.useState(0);
   const local = isLocalMode();
   // Read the link again on each open: the sign-in finishes in the browser.
-  const linkedAccount = useLinkedAccount(open);
+  const account = useLinkedAccount(`${open}-${unlinks}`);
+  const linked = account?.linked ? account : null;
 
   if (!session?.user) return null;
 
   // The Mac app's session user is an internal placeholder, never a real
-  // account, so local mode shows the linked account or "This Mac" instead.
-  const name = local
-    ? (linkedAccount ?? msg("local_identity.title"))
-    : (session.user.name ?? session.user.email ?? "");
-  const email = local
-    ? msg(linkedAccount ? "local_identity.linked" : "settings.account.signed_out")
-    : (session.user.email ?? "");
+  // account, so local mode shows the linked hosted account or "Local mode".
+  const name = !local
+    ? (session.user.name ?? session.user.email ?? "")
+    : linked
+      ? (linked.name ?? linked.email ?? msg("desktop_link.account_label"))
+      : msg("local_identity.title");
+  const email = !local
+    ? (session.user.email ?? "")
+    : !linked
+      ? msg("settings.account.signed_out")
+      : linked.offline
+        ? msg("local_identity.linked_offline")
+        : linked.email && linked.email !== name
+          ? linked.email
+          : msg("local_identity.linked");
   // Skip the email line when there's no display name — `name` already falls back to it.
   const showEmail = Boolean(email) && email !== name;
-  const deviceAvatar = local && !linkedAccount;
+  const deviceAvatar = local && !linked;
 
   const close = () => setOpen(false);
 
@@ -172,7 +182,7 @@ export function AccountMenu({
         </span>
         {showEmail && (
           <span
-            dir={local ? undefined : "ltr"}
+            dir={local ? "auto" : "ltr"}
             className="truncate text-xs leading-tight text-muted-foreground"
           >
             {email}
@@ -219,10 +229,7 @@ export function AccountMenu({
               {name}
             </span>
             {showEmail && (
-              <span
-                dir={local ? undefined : "ltr"}
-                className="truncate text-xs text-muted-foreground"
-              >
+              <span dir={local ? "auto" : "ltr"} className="truncate text-xs text-muted-foreground">
                 {email}
               </span>
             )}
@@ -231,7 +238,7 @@ export function AccountMenu({
 
         <div role="separator" className="my-1 h-px bg-border/60" />
 
-        {local && linkedAccount === null && (
+        {local && account?.linked === false && (
           <button
             type="button"
             onClick={() => {
@@ -247,6 +254,25 @@ export function AccountMenu({
           >
             <SignIn className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
             {msg("local_identity.sign_in")}
+          </button>
+        )}
+
+        {local && linked && (
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              unlinkHostedAccount()
+                .then(() => setUnlinks((n) => n + 1))
+                .catch(() => toast.error(msg("local_identity.sign_out_failed")));
+            }}
+            className={COMPACT_POPOVER_ITEM_CLASS}
+          >
+            <SignOut
+              className={cn(COMPACT_POPOVER_ICON_CLASS, !isRtl && "-scale-x-100")}
+              aria-hidden="true"
+            />
+            {msg("local_identity.sign_out")}
           </button>
         )}
 

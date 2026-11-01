@@ -1111,6 +1111,16 @@ export function getLocalHostedLinkStatus() {
   return request<LocalHostedLinkStatus>("/local/hosted-link/status");
 }
 
+/** Read the linked hosted account's name and email. Calls hosted through the local API. */
+export function getLocalHostedWhoami() {
+  return request<{ email?: string | null; name?: string | null }>("/local/hosted-link/whoami");
+}
+
+/** Unlink the Mac app from its hosted account. Local runs and settings stay. */
+export function unlinkLocalHostedLink() {
+  return request<{ hosted_revoked: boolean }>("/local/hosted-link/unlink", { method: "POST" });
+}
+
 /**
  * Start linking the Mac app to a hosted account. The returned consent URL
  * redirects back to this API's loopback callback, which finishes the link.

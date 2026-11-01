@@ -312,9 +312,13 @@ function AgentTab() {
 function AccountTab() {
   const { data: session } = useSession();
   const { setOpen } = useSettingsModal();
-  const linkedAccount = useLinkedAccount();
-  // The Mac app's session user is an internal placeholder; show the linked account instead.
-  const username = isLocalMode() ? (linkedAccount ?? "") : (session?.user?.name ?? "");
+  const account = useLinkedAccount();
+  // The Mac app's session user is an internal placeholder; show the linked hosted account instead.
+  const username = isLocalMode()
+    ? account?.linked
+      ? (account.email ?? account.name ?? msg("desktop_link.account_label"))
+      : ""
+    : (session?.user?.name ?? "");
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
   const isAdmin = role === "admin";
 

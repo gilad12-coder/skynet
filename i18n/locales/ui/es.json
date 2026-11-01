@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "Demasiados intentos de vinculación. Vuelve a intentarlo más tarde.",
   "desktop_link.error.generic": "No se pudo vincular. Vuelve a intentarlo.",
   "desktop_link.use_without_account": "Usar sin iniciar sesión",
-  "local_identity.title": "Este Mac",
+  "local_identity.title": "Modo local",
   "local_identity.linked": "Vinculado a este Mac",
   "local_identity.sign_in": "Inicia sesión para sincronizar",
-  "local_identity.sign_in_failed": "No se pudo iniciar la sesión. Vuelve a intentarlo."
+  "local_identity.sign_in_failed": "No se pudo iniciar la sesión. Vuelve a intentarlo.",
+  "local_identity.linked_offline": "Vinculado (sin conexión)",
+  "local_identity.sign_out": "Cerrar sesión de sincronización",
+  "local_identity.sign_out_failed": "No se pudo cerrar la sesión de sincronización. Inténtalo de nuevo."
 }

@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "연결 시도가 너무 많습니다. 나중에 다시 시도하세요.",
   "desktop_link.error.generic": "연결하지 못했습니다. 다시 시도하세요.",
   "desktop_link.use_without_account": "로그인하지 않고 사용",
-  "local_identity.title": "이 Mac",
+  "local_identity.title": "로컬 모드",
   "local_identity.linked": "이 Mac에 연결됨",
   "local_identity.sign_in": "로그인하여 동기화",
-  "local_identity.sign_in_failed": "로그인을 시작하지 못했습니다. 다시 시도하세요."
+  "local_identity.sign_in_failed": "로그인을 시작하지 못했습니다. 다시 시도하세요.",
+  "local_identity.linked_offline": "연결됨(오프라인)",
+  "local_identity.sign_out": "동기화에서 로그아웃",
+  "local_identity.sign_out_failed": "동기화에서 로그아웃하지 못했습니다. 다시 시도하세요."
 }

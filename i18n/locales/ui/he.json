@@ -4365,8 +4365,11 @@
   "desktop_link.error.rate_limit": "יותר מדי ניסיונות קישור. נסו שוב מאוחר יותר.",
   "desktop_link.error.generic": "הקישור לא הצליח. נסו שוב.",
   "desktop_link.use_without_account": "שימוש בלי להתחבר",
-  "local_identity.title": "ה-Mac הזה",
+  "local_identity.title": "מצב מקומי",
   "local_identity.linked": "מקושר ל-Mac הזה",
   "local_identity.sign_in": "התחברות לסנכרון",
-  "local_identity.sign_in_failed": "לא הצלחנו להתחיל את ההתחברות. נסו שוב."
+  "local_identity.sign_in_failed": "לא הצלחנו להתחיל את ההתחברות. נסו שוב.",
+  "local_identity.linked_offline": "מקושר (לא מקוון)",
+  "local_identity.sign_out": "התנתקות מסנכרון",
+  "local_identity.sign_out_failed": "לא הצלחנו להתנתק מהסנכרון. נסו שוב."
 }
