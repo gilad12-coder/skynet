@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "skynet": {
+      "type": "http",
+      "url": "https://mcp.skynetml.com/mcp"
+    }
+  }
+}

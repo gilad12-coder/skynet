@@ -49,6 +49,7 @@ CLAUDE.md
 !frontend/public/favicon-dark.png
 !frontend/public/apple-icon.png
 !backend/core/api/static/scalar/favicon.png
+!plugins/*/assets/*.png
 
 # Environment variables (NEVER commit secrets)
 .env
@@ -67,6 +68,7 @@ node_modules/
 # skynet-* skills in .agents/skills/ are tracked.
 .agents/*
 !.agents/skills/
+!.agents/plugins/
 .agents/skills/*
 !.agents/skills/skynet-*/
 /*/**/.agents/
