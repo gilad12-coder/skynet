@@ -3103,7 +3103,7 @@
   "shared.code_editor.find.replace_all": "सभी बदलें",
   "shared.code_editor.format": "फ़ॉर्मेट करें",
   "shared.code_editor.lines_count": "{count, plural, one {# पंक्ति} other {# पंक्तियाँ}}",
-  "shared.code_editor.lines_hidden": "{count, plural, one {1 पंक्ति छिपी} other {# पंक्तियाँ छिपी}}",
+  "shared.code_editor.lines_hidden": "{count, plural, one {# पंक्ति छिपी} other {# पंक्तियाँ छिपी}}",
   "shared.code_editor.run": "चलाएँ",
   "shared.code_editor.running": "चल रहा है…",
   "shared.dialog.close": "बंद करें",
