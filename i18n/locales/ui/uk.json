@@ -3102,7 +3102,7 @@
   "shared.code_editor.find.replace": "Замінити",
   "shared.code_editor.find.replace_all": "Замінити все",
   "shared.code_editor.format": "Форматувати",
-  "shared.code_editor.lines_count": "{count, plural, one {1 рядок} few {# рядки} many {# рядків} other {# рядка}}",
+  "shared.code_editor.lines_count": "{count, plural, one {# рядок} few {# рядки} many {# рядків} other {# рядка}}",
   "shared.code_editor.lines_hidden": "{count, plural, one {1 рядок приховано} few {# рядки приховано} many {# рядків приховано} other {# рядка приховано}}",
   "shared.code_editor.run": "Запустити",
   "shared.code_editor.running": "Виконується…",

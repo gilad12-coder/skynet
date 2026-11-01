@@ -3102,7 +3102,7 @@
   "shared.code_editor.find.replace": "Remplacer",
   "shared.code_editor.find.replace_all": "Tout remplacer",
   "shared.code_editor.format": "Formater",
-  "shared.code_editor.lines_count": "{count, plural, one {1 ligne} other {# lignes}}",
+  "shared.code_editor.lines_count": "{count, plural, one {# ligne} other {# lignes}}",
   "shared.code_editor.lines_hidden": "{count, plural, one {1 ligne masquée} other {# lignes masquées}}",
   "shared.code_editor.run": "Exécuter",
   "shared.code_editor.running": "Exécution en cours…",

@@ -9,13 +9,19 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildActiveCatalog } from "@/shared/lib/messages.server";
+import { setClientLocale } from "@/shared/lib/runtime-locale";
 import { setServerMessages } from "@/shared/lib/runtime-messages";
 
 // The classic JSX transform the test loader applies reads a global React.
 (globalThis as { React?: typeof React }).React = React;
 const { PastedTextCard } = await import("./pasted-text-card");
 
-setServerMessages(buildActiveCatalog("en"), "en");
+function activateLocale(locale: "en" | "ru"): void {
+  setServerMessages(buildActiveCatalog(locale), locale);
+  setClientLocale(locale);
+}
+
+activateLocale("en");
 
 void describe("PastedTextCard", () => {
   void it("says 1 line for a one-line file", () => {
@@ -26,5 +32,15 @@ void describe("PastedTextCard", () => {
   void it("says the plural for more lines", () => {
     const html = renderToStaticMarkup(<PastedTextCard text={"a\nb\nc"} name="b.txt" />);
     assert.match(html, />3 lines</);
+  });
+
+  void it("shows the real count when a plural form is not only 1", () => {
+    activateLocale("ru");
+    try {
+      const html = renderToStaticMarkup(<PastedTextCard text={`${"x\n".repeat(20)}x`} name="c.txt" />);
+      assert.match(html, />21 строка</);
+    } finally {
+      activateLocale("en");
+    }
   });
 });
