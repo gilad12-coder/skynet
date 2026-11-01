@@ -3103,7 +3103,7 @@
   "shared.code_editor.find.replace_all": "جایگزینی همه",
   "shared.code_editor.format": "قالب‌بندی",
   "shared.code_editor.lines_count": "{count, plural, one {# خط} other {# خط}}",
-  "shared.code_editor.lines_hidden": "{count, plural, one {۱ خط پنهان شد} other {# خط پنهان شد}}",
+  "shared.code_editor.lines_hidden": "{count, plural, one {# خط پنهان شد} other {# خط پنهان شد}}",
   "shared.code_editor.run": "اجرا",
   "shared.code_editor.running": "در حال اجرا…",
   "shared.dialog.close": "بستن",

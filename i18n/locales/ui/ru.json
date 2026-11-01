@@ -3103,7 +3103,7 @@
   "shared.code_editor.find.replace_all": "Заменить все",
   "shared.code_editor.format": "Форматировать",
   "shared.code_editor.lines_count": "{count, plural, one {# строка} few {# строки} many {# строк} other {# строк}}",
-  "shared.code_editor.lines_hidden": "{count, plural, one {1 строка скрыта} few {# строки скрыто} many {# строк скрыто} other {# строк скрыто}}",
+  "shared.code_editor.lines_hidden": "{count, plural, one {# строка скрыта} few {# строки скрыто} many {# строк скрыто} other {# строк скрыто}}",
   "shared.code_editor.run": "Запустить",
   "shared.code_editor.running": "Выполняется…",
   "shared.dialog.close": "Закрыть",
