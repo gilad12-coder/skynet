@@ -127,11 +127,49 @@ image_is_fresh() {
   return 1
 }
 
+# Builds and pushes the backend image unless a fresh one exists. Args: uri tag
+build_backend() {
+  if image_is_fresh skynet/preview-backend "$2"; then
+    echo "skip: $1:$2 exists"
+    return 0
+  fi
+  docker buildx build --platform linux/arm64 --provenance=false --progress=plain \
+    -t "$1:$2" --push --build-arg "GIT_SHA=$sha" "$repo_root/backend"
+}
+
+# Next.js bakes NEXT_PUBLIC_* into the bundle, so each PR gets its own build.
+# In GitHub Actions the layers go to the Actions cache, so a later push reuses
+# the npm ci layer. Only the frontend uses it: the backend builds faster than
+# the frontend at the same time, and the repository cache is near its limit.
+# Args: uri tag domain
+build_frontend() {
+  local cache=()
+  if image_is_fresh skynet/preview-frontend "$2"; then
+    echo "skip: $1:$2 exists"
+    return 0
+  fi
+  if [[ -n "${ACTIONS_RUNTIME_TOKEN:-}" && -n "${ACTIONS_RESULTS_URL:-}" ]]; then
+    # mode=max: the npm ci layer is in the deps stage, not in the final image.
+    cache=(--cache-from "type=gha,scope=preview-frontend"
+      --cache-to "type=gha,mode=max,scope=preview-frontend,ignore-error=true")
+  fi
+  docker buildx build --platform linux/arm64 --provenance=false --progress=plain \
+    -t "$1:$2" --push ${cache[@]+"${cache[@]}"} \
+    --build-arg "NEXT_PUBLIC_SITE_URL=https://pr-$pr.$3" \
+    --build-arg "NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}" \
+    --build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=skynet-pr-$pr" \
+    --build-arg "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}" \
+    --build-arg "NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=${NEXT_PUBLIC_FEATURE_GENERALIST_AGENT:-}" \
+    --build-arg "APP_GIT_SHA=$sha" \
+    --build-arg "APP_ENVIRONMENT=skynet-pr-$pr" \
+    "$repo_root/frontend"
+}
+
 build() {
   check_pr
   check_sha
   need docker
-  local cfg domain tag backend frontend
+  local cfg domain tag backend frontend backend_pid frontend_pid failed=""
   cfg="$(preview_config)"
   domain="$(jq -r .domain <<<"$cfg")"
   tag="$sha-pr-$pr"
@@ -139,28 +177,14 @@ build() {
   frontend="$(ecr_uri frontend)"
   aws ecr get-login-password | docker login --username AWS --password-stdin "${backend%%/*}" >/dev/null
 
-  if image_is_fresh skynet/preview-backend "$tag"; then
-    echo "skip: $backend:$tag exists"
-  else
-    docker buildx build --platform linux/arm64 --provenance=false \
-      -t "$backend:$tag" --push --build-arg "GIT_SHA=$sha" "$repo_root/backend"
-  fi
-
-  # Next.js bakes NEXT_PUBLIC_* into the bundle, so each PR gets its own build.
-  if image_is_fresh skynet/preview-frontend "$tag"; then
-    echo "skip: $frontend:$tag exists"
-  else
-    docker buildx build --platform linux/arm64 --provenance=false \
-      -t "$frontend:$tag" --push \
-      --build-arg "NEXT_PUBLIC_SITE_URL=https://pr-$pr.$domain" \
-      --build-arg "NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}" \
-      --build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=skynet-pr-$pr" \
-      --build-arg "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}" \
-      --build-arg "NEXT_PUBLIC_FEATURE_GENERALIST_AGENT=${NEXT_PUBLIC_FEATURE_GENERALIST_AGENT:-}" \
-      --build-arg "APP_GIT_SHA=$sha" \
-      --build-arg "APP_ENVIRONMENT=skynet-pr-$pr" \
-      "$repo_root/frontend"
-  fi
+  # Both images build at the same time. Each output line starts with its image.
+  build_backend "$backend" "$tag" 2>&1 | sed -u 's/^/[backend] /' &
+  backend_pid=$!
+  build_frontend "$frontend" "$tag" "$domain" 2>&1 | sed -u 's/^/[frontend] /' &
+  frontend_pid=$!
+  wait "$backend_pid" || failed+=" backend"
+  wait "$frontend_pid" || failed+=" frontend"
+  [[ -z "$failed" ]] || die "image build failed:$failed"
   echo "pushed: preview-backend:$tag preview-frontend:$tag"
 }
 
