@@ -31,3 +31,25 @@ void it("AccountMenu render tests pass", () => {
   );
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
+
+void it("AccountMenu link state tests pass", () => {
+  const fixtures = path.join(frontend, "src/shared/layout/__fixtures__");
+  const result = spawnSync(
+    path.join(frontend, "node_modules/.bin/jiti"),
+    ["src/shared/layout/account-menu.states.test.tsx"],
+    {
+      cwd: frontend,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        JITI_JSX: "1",
+        JITI_ALIAS: JSON.stringify({
+          "@/shared/hooks/use-linked-account": path.join(fixtures, "linked-account-mock.ts"),
+          "@/shared/ui/primitives/popover": path.join(fixtures, "popover-inline.tsx"),
+          "@/": `${path.join(frontend, "src")}/`,
+        }),
+      },
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
