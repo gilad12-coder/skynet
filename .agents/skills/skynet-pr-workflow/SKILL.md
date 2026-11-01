@@ -5,7 +5,7 @@ description: Use this skill whenever you create, update, describe, review, verif
 
 # Skynet PR workflow
 
-These rules apply to every PR in `gilad12-coder/skynet`, also for work that
+These rules apply to every PR in `Skynet-ml/skynet`, also for work that
 starts outside the dispatcher. `AGENTS.md` holds the always-on rules (merge
 gates, fix locally and push once, git and authorship). This skill adds the
 full PR and review policy.

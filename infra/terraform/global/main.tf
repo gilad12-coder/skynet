@@ -53,7 +53,7 @@ variable "region" {
 variable "github_repository" {
   description = "GitHub repository (owner/name) that may assume the GitHub roles."
   type        = string
-  default     = "gilad12-coder/skynet"
+  default     = "Skynet-ml/skynet"
 }
 
 variable "enable_github_oidc" {
