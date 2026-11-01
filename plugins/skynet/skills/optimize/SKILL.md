@@ -61,7 +61,10 @@ The tools:
    agree again. The setup check can take several minutes. If the result
    is still `in_progress` 15 minutes after the first call, stop and show
    the `detail` to the user. Keep the key. Before any later `start_run`
-   for this spec, call `list_runs` and use the run if it exists. If a
+   for this spec, call `list_runs` and use the run if it exists. If no
+   run exists, call `start_run` with the same arguments and the same key,
+   never a new key: a run still in its setup check does not show in
+   `list_runs`. If a
    call times out or the result is unclear, call `list_runs` first. If no
    run exists, call `start_run` again with the same arguments and the same
    `idempotency_key`. If Skynet
@@ -139,6 +142,6 @@ Notes on the spec:
 - A tool error with a `code` and `detail` comes from Skynet. Show the
   detail to the user. Do not retry a refused run with a higher limit
   without the user's agreement.
-- `status: in_progress` from `start_run` is a short wait, not a refusal or
+- `status: in_progress` from `start_run` is a wait, not a refusal or
   an error. Follow step 6 of "Workflow": retry with the same key,
   for at most 15 minutes.
