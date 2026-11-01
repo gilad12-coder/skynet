@@ -78,6 +78,7 @@ _PRINCIPAL_STATE_KEY = "mcp_principal"
 # default limit is at least five dollars.
 _MIN_CALL_HOLD_CENTS = 100
 _MIN_SUGGESTED_LIMIT_CENTS = 500
+_PENDING_RETRY_SECONDS = 5
 _TERMINAL_STATUSES = frozenset({"success", "failed", "cancelled", "stopped"})
 _STORED_REASON_TERMS = ("cancellationReason", "pauseReason")
 
@@ -137,6 +138,7 @@ def _run_summary(job_data: dict[str, Any], locale: str) -> dict[str, Any]:
         The summary as JSON data.
     """
     summary = build_summary(job_data).model_dump(mode="json")
+    summary["stop_reason"] = job_data.get("stop_reason")
     for key in _STORED_REASON_TERMS:
         if summary.get("message") == term(key):
             summary["message"] = t_locale(locale, f"{{term.{key}}}")
@@ -288,7 +290,8 @@ def start_run(
         job_store: Store that persists the run.
 
     Returns:
-        The submission, or ``status: in_progress`` while its setup check runs.
+        The submission, or ``status: in_progress`` while its setup check runs or
+        earlier usage settles.
 
     Raises:
         ToolError: When ``idempotency_key`` first ran with a higher limit.
@@ -305,13 +308,24 @@ def start_run(
     if idempotency_key and replay_keys.budget is not None:
         _refuse_lower_limit(job_store, user.username, replay_keys.budget, max_cost_cents)
     replay_key = replay_keys.job
-    result = _submit_within_proxy_timeout(
-        user.username,
-        replay_key,
-        lambda: submit_unified_payload(
-            spec, service=service, job_store=job_store, current_user=user, idempotency_key=idempotency_key
-        ),
-    )
+    try:
+        result = _submit_within_proxy_timeout(
+            user.username,
+            replay_key,
+            lambda: submit_unified_payload(
+                spec, service=service, job_store=job_store, current_user=user, idempotency_key=idempotency_key
+            ),
+        )
+    except DomainError as error:
+        # budget.pending is transient: earlier usage settles in seconds, and the
+        # same call then goes through. Report it like a running setup check.
+        if error.code != "budget.pending":
+            raise
+        return {
+            "status": "in_progress",
+            "retry_after_seconds": _PENDING_RETRY_SECONDS,
+            "detail": "Earlier usage is still being settled. Call start_run again with the same arguments.",
+        }
     if isinstance(result, JSONResponse):
         return {
             "status": "in_progress",
@@ -521,7 +535,7 @@ def build_remote_mcp(
         limit: Annotated[int, Field(ge=1, le=AGENT_MAX_LIST)] = AGENT_DEFAULT_LIST,
         offset: Annotated[int, Field(ge=0)] = 0,
         status: Annotated[
-            str | None, Field(description="pending, validating, running, success, failed or cancelled")
+            str | None, Field(description="pending, validating, running, success, failed, cancelled, paused or stopped")
         ] = None,
     ) -> dict[str, Any]:
         """List the account's runs, newest first."""

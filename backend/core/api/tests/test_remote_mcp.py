@@ -382,6 +382,22 @@ def test_start_run_reports_a_slow_setup_check(harness: Any, monkeypatch: pytest.
     assert body["retry_after_seconds"] == 7
 
 
+def test_start_run_reports_unsettled_usage_as_in_progress(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tell the agent to retry while earlier usage settles, not to give up."""
+    client, _store, _calls = harness
+
+    def pending(username: str, key: str, work: Any) -> Any:
+        """Refuse like a preflight that waits for usage reconciliation."""
+        raise DomainError("budget.pending", status=409)
+
+    monkeypatch.setattr(remote_mcp, "_submit_within_proxy_timeout", pending)
+    result = _call(client, "start_run", {"spec": unified_payload(), "max_cost_cents": 500})
+    assert result.get("isError") is not True
+    body = _payload(result)
+    assert body["status"] == "in_progress"
+    assert body["retry_after_seconds"] == 5
+
+
 def test_start_run_refuses_a_zero_budget(harness: Any) -> None:
     """Require a positive spending limit."""
     client, _store, _calls = harness
@@ -462,7 +478,7 @@ def test_list_runs_lists_only_the_callers_runs(harness: Any, monkeypatch: pytest
     body = _payload(_call(client, "list_runs", {"limit": 5, "status": "running"}, token=READ_TOKEN))
     assert calls["count"]["username"] == USER
     assert calls["list"] == {"status": "running", "username": USER, "limit": 5, "offset": 0}
-    assert body["runs"] == [{"id": "opt-1"}]
+    assert body["runs"] == [{"id": "opt-1", "stop_reason": None}]
     assert "Unknown status" in _error_text(_call(client, "list_runs", {"status": "bogus"}, token=READ_TOKEN))
 
 
@@ -489,6 +505,23 @@ def test_stored_stop_reason_is_english_unless_accept_language_asks(
     assert listed["message"] == "Cancelled by the user"
     asked = _call(client, "get_run", {"optimization_id": "opt-1"}, READ_TOKEN, {"Accept-Language": "he"})
     assert _payload(asked)["run"]["message"] == hebrew
+
+
+def test_get_run_returns_the_stop_reason(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return why a stopped run stopped, so the agent can tell a spent budget apart."""
+    client, _store, _calls = harness
+    job = {
+        "optimization_id": "opt-1",
+        "status": "stopped",
+        "stop_reason": "budget_reached",
+        "created_at": "2026-11-01T00:00:00+00:00",
+        "payload": {"username": USER},
+    }
+    monkeypatch.setattr(remote_mcp, "load_job_for_user", lambda store, oid, user: job)
+    monkeypatch.setattr(remote_mcp, "execution_budget_view", lambda store, job: None)
+    run = _payload(_call(client, "get_run", {"optimization_id": "opt-1"}, token=READ_TOKEN))["run"]
+    assert run["status"] == "stopped"
+    assert run["stop_reason"] == "budget_reached"
 
 
 def test_stop_run_cancels_through_the_service_layer(harness: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -552,7 +585,7 @@ def test_viewer_grant_can_read_but_not_stop(harness: Any, monkeypatch: pytest.Mo
     )
     monkeypatch.setattr(remote_mcp, "execution_budget_view", lambda store, job: {})
     body = _payload(_call(client, "get_run", {"optimization_id": "opt-bob"}))
-    assert body["run"] == {"status": "running"}
+    assert body["run"] == {"status": "running", "stop_reason": None}
     error = json.loads(_error_text(_call(client, "stop_run", {"optimization_id": "opt-bob"})))
     assert error["code"] == "optimization.insufficient_role"
     assert "cancel" not in calls

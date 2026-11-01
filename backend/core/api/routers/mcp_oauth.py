@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urlsplit
 
-import idna
+import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -147,9 +147,9 @@ def _display_host(url: str) -> str:
     """Return the host and port of ``url`` in the ASCII form the browser connects to.
 
     A Unicode host shows as punycode, so a look-alike letter cannot pass as a
-    well-known domain on the consent page. It uses UTS 46 non-transitional
-    rules like browsers: Python's IDNA 2003 codec maps "ß" to "ss" and would
-    name a different domain than the one the browser opens.
+    well-known domain on the consent page. httpx encodes the host with UTS 46
+    non-transitional rules like browsers: Python's IDNA 2003 codec maps "ß"
+    to "ss" and would name a different domain than the one the browser opens.
 
     Args:
         url: A validated client ID or redirect URI.
@@ -164,8 +164,8 @@ def _display_host(url: str) -> str:
     if not sep or not port.isdigit():
         host, sep, port = netloc, "", ""
     try:
-        host = idna.encode(host, uts46=True, transitional=False).decode("ascii")
-    except UnicodeError:
+        host = httpx.URL(f"https://{host}/").raw_host.decode("ascii")
+    except httpx.InvalidURL:
         host = host.encode("ascii", "backslashreplace").decode("ascii")
     return host + sep + port
 
