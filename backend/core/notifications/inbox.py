@@ -39,6 +39,26 @@ def _tab_filter(username: str, tab: InboxTab) -> list[ColumnElement[bool]]:
     return clauses
 
 
+def _owned_visible(session: Session, username: str, notification_id: str) -> NotificationModel | None:
+    """Load one of the user's items, unless it is withdrawn product news.
+
+    Args:
+        session: Open session.
+        username: Inbox owner.
+        notification_id: The item.
+
+    Returns:
+        The row, or ``None`` when it is missing, belongs to someone else, or is
+        product news whose file is gone or expired (the list never shows it).
+    """
+    row = session.get(NotificationModel, notification_id)
+    if row is None or row.username != username:
+        return None
+    if row.event_type == PRODUCT_NEWS and row.dedupe_key not in live_news_keys():
+        return None
+    return row
+
+
 def encode_cursor(row: NotificationModel) -> str:
     """Encode a row's position as an opaque pagination cursor.
 
@@ -139,10 +159,10 @@ def mark_read(session: Session, username: str, notification_id: str, now: dateti
         now: Clock override for tests.
 
     Returns:
-        Whether the item exists and belongs to ``username``.
+        Whether the item exists, belongs to ``username`` and is visible.
     """
-    row = session.get(NotificationModel, notification_id)
-    if row is None or row.username != username:
+    row = _owned_visible(session, username, notification_id)
+    if row is None:
         return False
     if row.read_at is None:
         row.read_at = now or datetime.now(UTC)
@@ -185,10 +205,10 @@ def remove(session: Session, username: str, notification_id: str) -> bool:
         notification_id: The item.
 
     Returns:
-        Whether the item exists and belongs to ``username``.
+        Whether the item exists, belongs to ``username`` and is visible.
     """
-    row = session.get(NotificationModel, notification_id)
-    if row is None or row.username != username:
+    row = _owned_visible(session, username, notification_id)
+    if row is None:
         return False
     if row.in_inbox:
         row.in_inbox = False
