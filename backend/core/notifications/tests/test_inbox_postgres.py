@@ -115,5 +115,5 @@ def test_withdrawn_news_is_hidden_when_no_news_is_shipped(session: Session, monk
             NotificationModel.username == user, NotificationModel.event_type == "product_news"
         )
     ).one()
-    assert mark_read(session, user, news_row.id) is False
+    assert mark_read(session, user, news_row.id) is True
     assert news_row.read_at is None

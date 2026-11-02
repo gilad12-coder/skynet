@@ -246,13 +246,13 @@ def test_news_whose_file_is_gone_is_hidden(session: Session, shipped_news: list[
 
 
 def test_withdrawn_news_ignores_single_item_read_and_remove(session: Session, shipped_news: list[NewsEntry]) -> None:
-    """Read and remove by id treat news whose file is gone as missing, and leave the row as it is."""
+    """Read and remove by id succeed on news whose file is gone, and leave the row as it is."""
     ensure_news(session, _USER)
     news_row = session.scalars(select(NotificationModel).where(NotificationModel.event_type == "product_news")).one()
     shipped_news.clear()
 
-    assert mark_read(session, _USER, news_row.id) is False
-    assert remove(session, _USER, news_row.id) is False
+    assert mark_read(session, _USER, news_row.id) is True
+    assert remove(session, _USER, news_row.id) is True
     session.refresh(news_row)
     assert news_row.read_at is None
     assert news_row.in_inbox is True
