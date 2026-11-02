@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "אחרי החיבור, הסוכן יוכל:",
   "mcp_consent.scope.runs_read": "לראות את הרצות האופטימיזציה שלכם ואת התוצאות שלהן",
   "mcp_consent.scope.runs_write": "להתחיל ולעצור הרצות אופטימיזציה, בתשלום מהיתרה שלכם",
-  "mcp_consent.budget_note": "הסוכן קובע מגבלת הוצאה לכל הרצה. הוא לא יכול להוסיף כסף.",
   "mcp_consent.approve": "אישור",
   "mcp_consent.deny": "דחייה",
   "mcp_consent.loading": "בודקים את הבקשה…",

@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "Bağlandıktan sonra bu ajan şunları yapabilir:",
   "mcp_consent.scope.runs_read": "Optimizasyon çalıştırmalarınızı ve sonuçlarını görmek",
   "mcp_consent.scope.runs_write": "Bakiyenizden ödenen optimizasyon çalıştırmalarını başlatmak ve durdurmak",
-  "mcp_consent.budget_note": "Ajan her çalıştırma için bir harcama sınırı belirler. Bakiye ekleyemez.",
   "mcp_consent.approve": "İzin ver",
   "mcp_consent.deny": "Reddet",
   "mcp_consent.loading": "İstek kontrol ediliyor…",

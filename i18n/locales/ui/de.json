@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "Nach der Verbindung kann dieser Agent:",
   "mcp_consent.scope.runs_read": "Ihre Optimierungsläufe und deren Ergebnisse sehen",
   "mcp_consent.scope.runs_write": "Optimierungsläufe starten und stoppen, bezahlt aus Ihrem Guthaben",
-  "mcp_consent.budget_note": "Der Agent legt für jeden Lauf ein Ausgabenlimit fest. Er kann kein Guthaben aufladen.",
   "mcp_consent.approve": "Zulassen",
   "mcp_consent.deny": "Ablehnen",
   "mcp_consent.loading": "Anfrage wird geprüft…",

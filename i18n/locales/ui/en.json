@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "When connected, this agent can:",
   "mcp_consent.scope.runs_read": "See your optimization runs and their results",
   "mcp_consent.scope.runs_write": "Start and stop optimization runs, paid from your balance",
-  "mcp_consent.budget_note": "The agent sets a spending limit for each run. It cannot add funds.",
   "mcp_consent.approve": "Allow",
   "mcp_consent.deny": "Deny",
   "mcp_consent.loading": "Checking the request…",

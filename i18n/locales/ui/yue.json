@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "連接之後，呢個代理可以：",
   "mcp_consent.scope.runs_read": "睇到你嘅優化運行同結果",
   "mcp_consent.scope.runs_write": "開始同停止優化運行，費用由你嘅餘額支付",
-  "mcp_consent.budget_note": "代理會為每次運行設定開支上限。佢唔可以增值。",
   "mcp_consent.approve": "允許",
   "mcp_consent.deny": "拒絕",
   "mcp_consent.loading": "檢查緊個請求…",

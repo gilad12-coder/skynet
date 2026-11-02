@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "接続すると、このエージェントは次のことができます：",
   "mcp_consent.scope.runs_read": "最適化の実行とその結果を表示する",
   "mcp_consent.scope.runs_write": "最適化の実行を開始・停止する（残高から支払い）",
-  "mcp_consent.budget_note": "エージェントは実行ごとに支出上限を設定します。入金はできません。",
   "mcp_consent.approve": "許可",
   "mcp_consent.deny": "拒否",
   "mcp_consent.loading": "リクエストを確認しています…",

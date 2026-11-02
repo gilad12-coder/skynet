@@ -11,7 +11,6 @@ import {
   type McpConsentDescription,
 } from "@/shared/lib/api";
 import { msg, type MessageKey } from "@/shared/lib/messages";
-import { AppMark } from "@/shared/ui/app-mark";
 import { Check, CircleNotch, Robot, UserCircle } from "@/shared/ui/icons";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { Button } from "@/shared/ui/primitives/button";
@@ -21,7 +20,6 @@ import {
   returnHost,
   safeRedirect,
   scopeMessageKey,
-  showsBudgetNote,
   type McpScope,
 } from "../lib/consent";
 
@@ -130,7 +128,10 @@ export function McpConsent({ query }: { query: string }) {
 
   return (
     <ConsentFrame>
-      <h1 className="text-center text-xl font-semibold text-balance text-foreground">
+      <h1
+        className="text-center text-lg font-semibold text-foreground sm:truncate"
+        title={msg("mcp_consent.title", { client: client.client_name })}
+      >
         {msg("mcp_consent.title", { client: client.client_name })}
       </h1>
 
@@ -175,9 +176,6 @@ export function McpConsent({ query }: { query: string }) {
             </li>
           ))}
         </ul>
-        {showsBudgetNote(request.scopes) && (
-          <p className="text-xs text-muted-foreground">{msg("mcp_consent.budget_note")}</p>
-        )}
       </section>
 
       {error && <InlineErrorRow message={msg(error as MessageKey)} />}
@@ -191,17 +189,17 @@ export function McpConsent({ query }: { query: string }) {
           {msg("mcp_consent.returning")}
         </p>
       ) : (
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full sm:min-h-0"
             disabled={busy}
             onClick={() => void decide("deny")}
           >
             {msg("mcp_consent.deny")}
           </Button>
           <Button
-            className="min-h-[44px] sm:min-h-0"
+            className="min-h-[44px] w-full sm:min-h-0"
             disabled={busy}
             aria-busy={phase === "sending"}
             onClick={() => void decide("approve")}
@@ -218,8 +216,7 @@ export function McpConsent({ query }: { query: string }) {
 function ConsentFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <div className="flex w-full max-w-md flex-col gap-5 rounded-2xl border border-border/50 bg-card p-6 text-card-foreground shadow-sm">
-        <AppMark className="mx-auto size-12 text-foreground" aria-hidden />
+      <div className="flex w-full max-w-lg flex-col gap-5 rounded-2xl border border-border/50 bg-card p-6 text-card-foreground shadow-sm">
         {children}
       </div>
     </div>

@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "پس از اتصال، این عامل می‌تواند:",
   "mcp_consent.scope.runs_read": "اجراهای بهینه‌سازی و نتایج آن‌ها را ببیند",
   "mcp_consent.scope.runs_write": "اجراهای بهینه‌سازی را شروع و متوقف کند، با پرداخت از موجودی شما",
-  "mcp_consent.budget_note": "عامل برای هر اجرا سقف هزینه تعیین می‌کند. نمی‌تواند وجه اضافه کند.",
   "mcp_consent.approve": "اجازه دادن",
   "mcp_consent.deny": "رد کردن",
   "mcp_consent.loading": "در حال بررسی درخواست…",

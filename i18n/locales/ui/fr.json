@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "Une fois connecté, cet agent peut :",
   "mcp_consent.scope.runs_read": "Voir vos exécutions d’optimisation et leurs résultats",
   "mcp_consent.scope.runs_write": "Lancer et arrêter des exécutions d’optimisation, payées depuis votre solde",
-  "mcp_consent.budget_note": "L’agent fixe une limite de dépense pour chaque exécution. Il ne peut pas ajouter de fonds.",
   "mcp_consent.approve": "Autoriser",
   "mcp_consent.deny": "Refuser",
   "mcp_consent.loading": "Vérification de la demande…",

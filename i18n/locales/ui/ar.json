@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "بعد الربط، يمكن لهذا الوكيل:",
   "mcp_consent.scope.runs_read": "رؤية عمليات التحسين ونتائجها",
   "mcp_consent.scope.runs_write": "بدء عمليات التحسين وإيقافها، مع الدفع من رصيدك",
-  "mcp_consent.budget_note": "يحدد الوكيل حدًا للإنفاق لكل عملية. لا يمكنه إضافة أموال.",
   "mcp_consent.approve": "السماح",
   "mcp_consent.deny": "رفض",
   "mcp_consent.loading": "جارٍ التحقق من الطلب…",

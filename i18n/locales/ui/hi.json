@@ -4383,7 +4383,6 @@
   "mcp_consent.allows_heading": "कनेक्ट होने के बाद, यह एजेंट:",
   "mcp_consent.scope.runs_read": "आपके ऑप्टिमाइज़ेशन रन और उनके परिणाम देख सकता है",
   "mcp_consent.scope.runs_write": "ऑप्टिमाइज़ेशन रन शुरू और बंद कर सकता है, जिनका भुगतान आपके बैलेंस से होगा",
-  "mcp_consent.budget_note": "एजेंट हर रन के लिए खर्च की सीमा तय करता है। यह पैसे नहीं जोड़ सकता।",
   "mcp_consent.approve": "अनुमति दें",
   "mcp_consent.deny": "अस्वीकार करें",
   "mcp_consent.loading": "अनुरोध की जाँच हो रही है…",
