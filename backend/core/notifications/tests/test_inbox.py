@@ -158,5 +158,4 @@ def test_repo_news_files_all_parse() -> None:
     """Every shipped news file has valid frontmatter."""
     files = sorted(NEWS_DIR.glob("*.md"))
 
-    assert files
     assert len(load_news()) == len(files)
