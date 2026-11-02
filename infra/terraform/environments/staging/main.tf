@@ -17,6 +17,7 @@ module "env" {
 
   frontend_domains = ["staging.skynetml.com"]
   api_domain       = "api-staging.skynetml.com"
+  mcp_domain       = "mcp.staging.skynetml.com"
   enable_https     = var.enable_https
 
   # PR previews (SKY-164): pr-<n>.staging.skynetml.com and

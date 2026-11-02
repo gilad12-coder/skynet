@@ -35,7 +35,7 @@ export const LEGAL_CONFIG = {
   venue: "New York County, New York",
 
   // Public repository the hosted Service is built from (AGPL-3.0 section 13).
-  sourceRepoUrl: "https://github.com/gilad12-coder/skynet",
+  sourceRepoUrl: "https://github.com/Skynet-ml/skynet",
 } as const;
 
 // The Docker build bakes in the deployed commit, so the link names the

@@ -444,6 +444,10 @@ class _Events:
         # call the limit refused only reaches the guest as a 402, which its
         # client raises under its own type, so the gateway's record of the
         # refusal decides that case.
+        # The guest sees an account-funds refusal as a plain budget stop, so
+        # the gateway's record keeps the balance from reading as the limit.
+        if self.error and isinstance(gateway.budget_refusal, AccountFundsError):
+            raise gateway.budget_refusal
         stop = _BUDGET_STOPS.get(self.error_type or "")
         if stop is not None:
             raise stop(self.error or "The spending limit cannot cover setup.")

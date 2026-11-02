@@ -30,8 +30,13 @@ htmlcov/
 .claude/*
 !.claude/settings.json
 !.claude/commands/
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/skynet-pr-workflow
+!.claude/skills/skynet-test-accounts
 CLAUDE.md
 !/CLAUDE.md
+!/frontend/CLAUDE.md
 
 # Jupyter
 .ipynb_checkpoints/
@@ -49,6 +54,7 @@ CLAUDE.md
 !frontend/public/favicon-dark.png
 !frontend/public/apple-icon.png
 !backend/core/api/static/scalar/favicon.png
+!plugins/*/assets/*.png
 
 # Environment variables (NEVER commit secrets)
 .env
@@ -67,6 +73,7 @@ node_modules/
 # skynet-* skills in .agents/skills/ are tracked.
 .agents/*
 !.agents/skills/
+!.agents/plugins/
 .agents/skills/*
 !.agents/skills/skynet-*/
 /*/**/.agents/
@@ -89,8 +96,9 @@ logs/
 /migration.sql
 /deploy/helm/skynet/values-airgap.generated.yaml
 
-# Machine-local AI-assistant rules
+# Machine-local AI-assistant rules (Claude Code, Devin)
 CLAUDE.local.md
+AGENTS.local.md
 
 # Generated at frontend build time by scripts/generate-third-party-licenses.mjs
 frontend/public/THIRD_PARTY_LICENSES.txt

@@ -371,6 +371,14 @@ def test_openapi_public_only_exposes_allowlisted_paths(app_client):
     assert not leaked, f"Non-public paths leaked into public spec: {sorted(leaked)}"
 
 
+def test_openapi_public_allowlist_names_live_routes(app_client) -> None:
+    """Every allowlisted path is a live route, so the public reference never silently drops one."""
+    client, _, _ = app_client
+    paths = client.get("/openapi.json").json().get("paths", {})
+    missing = _SCALAR_PUBLIC_PATHS - set(paths)
+    assert not missing, f"Public allowlist names routes that do not exist: {sorted(missing)}"
+
+
 def test_openapi_public_removes_empty_tag_groups(app_client) -> None:
     """Tags with no remaining operations are pruned from the public spec."""
     client, _, _ = app_client

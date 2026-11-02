@@ -1,0 +1,100 @@
+{
+  "name": "skynet",
+  "version": "0.1.0",
+  "description": "Optimize prompts, programs and agents against your own metric with Skynet, and manage the runs.",
+  "author": {
+    "name": "Skynet",
+    "url": "https://skynetml.com"
+  },
+  "homepage": "https://skynetml.com",
+  "repository": "https://github.com/Skynet-ml/skynet",
+  "license": "AGPL-3.0-only",
+  "keywords": ["optimization", "prompts", "dspy", "gepa", "evaluation", "agents"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Skynet",
+    "shortDescription": "Optimize prompts and agents",
+    "longDescription": "Skynet improves a prompt, a program or an agent against a metric that you write. You give a starting version, a few test cases, a run(artifact, input) function and a score(input, output, expected) function. Skynet runs optimizers such as GEPA, DSPy and Best-of-N in a sandbox, scores each new version, and returns the best version with its score next to the starting score.\n\nWith this plugin, your assistant checks a run spec before it runs, suggests a spending limit, starts the run only after you agree to the limit, follows its progress, and shows the result. It can also list your runs and stop a run. A run spends at most the limit you set from your existing Skynet balance. Unused budget is released when the run ends. You need a Skynet account at skynetml.com.",
+    "developerName": "Skynet",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Check a run spec and suggest a spending limit",
+      "Start an optimization run with a limit you approve",
+      "Follow a run and show its result",
+      "List your runs",
+      "Stop a run"
+    ],
+    "websiteURL": "https://skynetml.com",
+    "supportURL": "https://github.com/Skynet-ml/skynet/issues",
+    "privacyPolicyURL": "https://skynetml.com/privacy",
+    "termsOfServiceURL": "https://skynetml.com/terms",
+    "defaultPrompt": [
+      "Optimize this prompt with Skynet against my test cases.",
+      "Show my recent Skynet runs.",
+      "What is the status of my last Skynet run?"
+    ],
+    "brandColor": "#B4521F",
+    "brandColorDark": "#E0935A",
+    "composerIcon": "./assets/logo.png",
+    "composerIconDark": "./assets/logo-dark.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png"
+  },
+  "extensions": {
+    "com.openai": {
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Check a run spec before it runs",
+              "prompt": "Check whether this Skynet run spec is valid and tell me what limit to set: a prompt that classifies support tickets, with 6 labeled cases and an exact-match metric.",
+              "tools_triggered": "check_run",
+              "expected_behavior": "Calls check_run once. Reports the static check results, the minimum and suggested max_cost_cents, and the spendable balance. Does not start a run."
+            },
+            {
+              "description": "Start a run after the user agrees to a limit",
+              "prompt": "Optimize the ticket classifier prompt with Skynet. I agree to a limit of 5 dollars.",
+              "tools_triggered": "check_run, start_run",
+              "expected_behavior": "Calls check_run first, then start_run with max_cost_cents 500. Returns the optimization_id and the run status."
+            },
+            {
+              "description": "Follow a run and show its result",
+              "prompt": "How is my last Skynet run doing? Show the result if it is done.",
+              "tools_triggered": "list_runs, get_run",
+              "expected_behavior": "Finds the newest run with list_runs, calls get_run, and reports the status and spend. For a finished run, shows the baseline score, the best score and the best version."
+            },
+            {
+              "description": "List runs by status",
+              "prompt": "List my Skynet runs that failed.",
+              "tools_triggered": "list_runs",
+              "expected_behavior": "Calls list_runs with status failed and lists each run's name, status and creation time."
+            },
+            {
+              "description": "Stop a run the user names",
+              "prompt": "Stop my running Skynet optimization.",
+              "tools_triggered": "list_runs, stop_run",
+              "expected_behavior": "Finds the running run with list_runs, confirms which run to stop, then calls stop_run and reports that spend stopped."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Add funds",
+              "prompt": "Add 50 dollars of credit to my Skynet account."
+            },
+            {
+              "description": "Unrelated question",
+              "prompt": "What is the weather in Paris tomorrow?"
+            },
+            {
+              "description": "Delete a run",
+              "prompt": "Delete all my Skynet runs."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "The plugin does not sell products or credits and does not process payments. A run spends at most a limit the user approves from the balance of an existing Skynet account."
+      }
+    }
+  }
+}

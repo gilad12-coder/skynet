@@ -136,6 +136,57 @@ def _require_executable_type(optimization_type: str) -> None:
         raise DomainError("optimization.grid_search_retired", status=409)
 
 
+def cancel_optimization(
+    job_store, optimization_id: str, current_user: AuthenticatedUser, worker: Any
+) -> JobCancelResponse:
+    """Cooperatively cancel an active optimization for a caller with editor access.
+
+    The cancel route and the remote MCP ``stop_run`` tool share this path.
+
+    Args:
+        job_store: The active job store.
+        optimization_id: Optimization id to cancel.
+        current_user: Caller whose share role is checked.
+        worker: The active in-process worker, or ``None`` when none is bound.
+
+    Returns:
+        A ``JobCancelResponse`` confirming the cancellation.
+
+    Raises:
+        DomainError: 404 if unknown or inaccessible, 403 if the caller's
+            share role is below ``editor``, 409 if already terminal.
+    """
+    job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
+
+    status = status_to_job_status(job_data.get("status", "pending"))
+    if status in TERMINAL_STATUSES:
+        raise DomainError(
+            "optimization.already_terminal",
+            status=409,
+            params={"status": status.value},
+        )
+
+    _stop_budget_admission(job_store, job_data, "user_cancelled")
+    if worker:
+        worker.cancel_job(optimization_id)
+
+    now = datetime.now(UTC).isoformat()
+    if not _set_terminal_if_active(
+        job_store,
+        optimization_id,
+        ("pending", "validating", "running"),
+        status="cancelled",
+        message=CANCELLATION_REASON,
+        completed_at=now,
+    ):
+        # The worker reached a terminal status in the window after the
+        # pre-check above; reflect the row's actual status.
+        current = status_to_job_status(job_store.get_job(optimization_id).get("status", "pending"))
+        raise DomainError("optimization.already_terminal", status=409, params={"status": current.value})
+    logger.info("Optimization %s (%s) cancelled", optimization_id, status.value)
+    return JobCancelResponse(optimization_id=optimization_id, status="cancelled")
+
+
 def register_lifecycle_routes(
     router: APIRouter,
     *,
@@ -175,36 +226,7 @@ def register_lifecycle_routes(
             DomainError: 404 if unknown or inaccessible, 403 if the caller's
                 share role is below ``editor``, 409 if already terminal.
         """
-        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
-
-        status = status_to_job_status(job_data.get("status", "pending"))
-        if status in TERMINAL_STATUSES:
-            raise DomainError(
-                "optimization.already_terminal",
-                status=409,
-                params={"status": status.value},
-            )
-
-        _stop_budget_admission(job_store, job_data, "user_cancelled")
-        worker = get_worker_ref()
-        if worker:
-            worker.cancel_job(optimization_id)
-
-        now = datetime.now(UTC).isoformat()
-        if not _set_terminal_if_active(
-            job_store,
-            optimization_id,
-            ("pending", "validating", "running"),
-            status="cancelled",
-            message=CANCELLATION_REASON,
-            completed_at=now,
-        ):
-            # The worker reached a terminal status in the window after the
-            # pre-check above; reflect the row's actual status.
-            current = status_to_job_status(job_store.get_job(optimization_id).get("status", "pending"))
-            raise DomainError("optimization.already_terminal", status=409, params={"status": current.value})
-        logger.info("Optimization %s (%s) cancelled", optimization_id, status.value)
-        return JobCancelResponse(optimization_id=optimization_id, status="cancelled")
+        return cancel_optimization(job_store, optimization_id, current_user, get_worker_ref())
 
     @router.post(
         "/optimizations/{optimization_id}/pause",
