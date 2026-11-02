@@ -81,7 +81,7 @@ export function McpConsent({ query }: { query: string }) {
     const key = request ? error : errorMessageKey(parsed.ok ? undefined : parsed.problem);
     return (
       <ConsentFrame>
-        <h1 className="text-center text-lg font-semibold text-foreground">
+        <h1 className="text-center text-xl! leading-tight! font-semibold text-balance text-foreground sm:text-2xl!">
           {msg("mcp_consent.error_title")}
         </h1>
         <InlineErrorRow message={msg((key ?? "mcp_consent.error.generic") as MessageKey)} />
@@ -136,7 +136,7 @@ export function McpConsent({ query }: { query: string }) {
 
   return (
     <ConsentFrame>
-      <h1 className="text-center text-lg font-semibold text-balance text-foreground">
+      <h1 className="text-center text-xl! leading-tight! font-semibold text-balance text-foreground sm:text-2xl!">
         {msg("mcp_consent.title", { client: client.client_name })}
       </h1>
 
@@ -188,14 +188,14 @@ export function McpConsent({ query }: { query: string }) {
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
-            className="h-11 w-full"
+            className="h-11 min-h-[44px] w-full"
             disabled={busy}
             onClick={() => void decide("deny")}
           >
             {msg("mcp_consent.deny")}
           </Button>
           <Button
-            className="h-11 w-full"
+            className="h-11 min-h-[44px] w-full"
             disabled={busy}
             aria-busy={phase === "sending"}
             onClick={() => void decide("approve")}
