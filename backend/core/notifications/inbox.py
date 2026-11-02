@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..storage.models import NotificationModel
-from .catalog import FOCUSED_EVENTS
+from .catalog import FOCUSED_EVENTS, PRODUCT_NEWS
+from .news import live_news_keys
 
 InboxTab = Literal["focused", "everything"]
 
@@ -25,11 +26,13 @@ def _tab_filter(username: str, tab: InboxTab) -> list[ColumnElement[bool]]:
         tab: ``focused`` or ``everything``.
 
     Returns:
-        SQL conditions to AND together.
+        SQL conditions to AND together. Product news shows only while its
+        file is shipped and not expired.
     """
     clauses: list[ColumnElement[bool]] = [
         NotificationModel.username == username,
         NotificationModel.in_inbox.is_(True),
+        or_(NotificationModel.event_type != PRODUCT_NEWS, NotificationModel.dedupe_key.in_(live_news_keys())),
     ]
     if tab == "focused":
         clauses.append(NotificationModel.event_type.in_(sorted(FOCUSED_EVENTS)))
