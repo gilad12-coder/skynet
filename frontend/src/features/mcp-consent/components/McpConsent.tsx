@@ -188,14 +188,14 @@ export function McpConsent({ query }: { query: string }) {
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
-            className="h-11 min-h-[44px] w-full"
+            className="h-11 min-h-[44px]! w-full"
             disabled={busy}
             onClick={() => void decide("deny")}
           >
             {msg("mcp_consent.deny")}
           </Button>
           <Button
-            className="h-11 min-h-[44px] w-full"
+            className="h-11 min-h-[44px]! w-full"
             disabled={busy}
             aria-busy={phase === "sending"}
             onClick={() => void decide("approve")}
